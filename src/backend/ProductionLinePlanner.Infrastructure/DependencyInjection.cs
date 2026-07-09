@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -15,10 +16,8 @@ public static class DependencyInjection
     {
         var appConnectionString = configuration.GetConnectionString("AppDatabase")
             ?? throw new InvalidOperationException("Connection string 'ConnectionStrings:AppDatabase' is required.");
+        var attendanceConnectionString = ResolveAndValidateAttendanceConnectionString(configuration);
         var attendanceSourceSection = configuration.GetSection(AttendanceSourceOptions.SectionName);
-        var attendanceConnectionString = attendanceSourceSection["ConnectionString"]
-            ?? configuration.GetConnectionString("AttendanceDatabase")
-            ?? string.Empty;
 
         var sourceName = attendanceSourceSection["SourceName"]?.Trim();
         var dayStartTime = attendanceSourceSection["DayStartTime"];
@@ -47,11 +46,7 @@ public static class DependencyInjection
 
         services.AddDbContext<AttendanceDbContext>(options =>
         {
-            if (!string.IsNullOrWhiteSpace(attendanceConnectionString))
-            {
-                options.UseSqlServer(attendanceConnectionString);
-            }
-
+            options.UseSqlServer(attendanceConnectionString);
             options.UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking);
         });
 
@@ -59,5 +54,44 @@ public static class DependencyInjection
         services.AddScoped<IAttendanceSyncService, AttendanceSyncService>();
 
         return services;
+    }
+
+    private static string ResolveAndValidateAttendanceConnectionString(IConfiguration configuration)
+    {
+        var connectionString = configuration.GetConnectionString("AttendanceDatabase");
+
+        if (string.IsNullOrWhiteSpace(connectionString) || IsPlaceholderValue(connectionString))
+        {
+            throw new InvalidOperationException(
+                "Missing or placeholder value for 'ConnectionStrings:AttendanceDatabase'."
+                + " Set a valid SQL Server connection string in user secrets or other configuration provider.");
+        }
+
+        try
+        {
+            _ = new SqlConnectionStringBuilder(connectionString);
+        }
+        catch (Exception ex) when (ex is ArgumentException || ex is FormatException)
+        {
+            throw new InvalidOperationException(
+                "Invalid value for 'ConnectionStrings:AttendanceDatabase'."
+                + " Ensure it is a valid SQL Server connection string.",
+                ex);
+        }
+
+        return connectionString;
+    }
+
+    private static bool IsPlaceholderValue(string value)
+    {
+        var trimmed = value.Trim();
+        return trimmed.Contains("{{", StringComparison.Ordinal) ||
+               trimmed.Contains("}}", StringComparison.Ordinal) ||
+               trimmed.Contains("...", StringComparison.Ordinal) ||
+               trimmed.Contains("TODO", StringComparison.OrdinalIgnoreCase) ||
+               trimmed.Contains("REPLACE", StringComparison.OrdinalIgnoreCase) ||
+               trimmed.Contains("<", StringComparison.Ordinal) ||
+               trimmed.Contains(">", StringComparison.Ordinal) ||
+               trimmed.StartsWith("ConnectionStrings:", StringComparison.OrdinalIgnoreCase);
     }
 }
