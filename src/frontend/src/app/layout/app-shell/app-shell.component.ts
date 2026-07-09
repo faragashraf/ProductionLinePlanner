@@ -2,6 +2,7 @@ import { Component, HostListener, OnDestroy, OnInit } from '@angular/core';
 import { ActivatedRoute, ActivationEnd, NavigationEnd, Router } from '@angular/router';
 import { MenuItem } from 'primeng/api';
 import { Subject, filter, takeUntil } from 'rxjs';
+import { AuthService } from '../../core/services/auth.service';
 
 interface AppNavigationItem {
   label: string;
@@ -34,7 +35,8 @@ export class AppShellComponent implements OnInit, OnDestroy {
 
   constructor(
     private readonly router: Router,
-    private readonly activatedRoute: ActivatedRoute
+    private readonly activatedRoute: ActivatedRoute,
+    private readonly authService: AuthService
   ) {}
 
   ngOnInit(): void {
@@ -76,6 +78,7 @@ export class AppShellComponent implements OnInit, OnDestroy {
   }
 
   logout(): void {
+    this.authService.logout();
     this.router.navigateByUrl('/login');
   }
 

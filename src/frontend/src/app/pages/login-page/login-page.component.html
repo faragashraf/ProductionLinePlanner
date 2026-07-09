@@ -1,16 +1,32 @@
 <section class="page-frame auth-page">
   <h1>تسجيل الدخول</h1>
-  <p>واجهة placeholder للمصادقة - لا يوجد auth حقيقي في هذه المرحلة.</p>
+  <p>استخدم حساب النظام للوصول إلى لوحة تخطيط خطوط الإنتاج.</p>
 
   <form class="auth-card" (submit)="onLogin($event)">
     <label>
       <span>البريد الإلكتروني</span>
-      <input type="email" [value]="email" (input)="email = $any($event.target).value" />
+      <input
+        type="email"
+        autocomplete="username"
+        [value]="email"
+        [disabled]="isLoading"
+        (input)="email = $any($event.target).value"
+      />
     </label>
     <label>
       <span>كلمة المرور</span>
-      <input type="password" [value]="password" (input)="password = $any($event.target).value" />
+      <input
+        type="password"
+        autocomplete="current-password"
+        [value]="password"
+        [disabled]="isLoading"
+        (input)="password = $any($event.target).value"
+      />
     </label>
-    <button type="submit" class="primary-button" aria-label="تسجيل الدخول">دخول</button>
+    <p *ngIf="errorMessage" class="auth-message auth-message--error" role="alert">{{ errorMessage }}</p>
+    <p *ngIf="warningMessage" class="auth-message auth-message--warning">{{ warningMessage }}</p>
+    <button type="submit" class="primary-button" aria-label="تسجيل الدخول" [disabled]="isLoading">
+      {{ isLoading ? 'جار تسجيل الدخول...' : 'دخول' }}
+    </button>
   </form>
 </section>
