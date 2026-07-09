@@ -1,4 +1,6 @@
 .page-frame {
+  width: min(100%, 100%);
+  overflow-x: hidden;
   display: grid;
   gap: 0.85rem;
 }
@@ -13,13 +15,82 @@
   opacity: 0.7;
 }
 
+.readiness-summary,
 .kpi-grid {
   display: grid;
   gap: 0.75rem;
+  grid-template-columns: repeat(1, minmax(0, 1fr));
 }
 
+.summary-card,
 .metric-card {
   border: 1px solid #dbe4fc;
+  overflow: hidden;
+}
+
+.summary-card {
+  border-radius: 0.9rem;
+  padding-bottom: 0.2rem;
+}
+
+.summary-label {
+  font-size: 0.84rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  opacity: 0.75;
+}
+
+.summary-value {
+  font-size: 2rem;
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.summary-rows,
+.status-strip {
+  display: grid;
+  gap: 0.3rem;
+  margin-top: 0.6rem;
+  font-size: 0.84rem;
+}
+
+.summary-note {
+  font-size: 0.82rem;
+  opacity: 0.75;
+  margin-top: 0.45rem;
+}
+
+.status-dot {
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 50%;
+  display: inline-block;
+  margin-right: 0.35rem;
+  background: #6b7280;
+}
+
+.status-dot.green {
+  background: #22c55e;
+}
+
+.status-dot.yellow {
+  background: #f59e0b;
+}
+
+.status-dot.red {
+  background: #ef4444;
+}
+
+.summary-value.green {
+  color: #15803d;
+}
+
+.summary-value.yellow {
+  color: #b45309;
+}
+
+.summary-value.red {
+  color: #b91c1c;
 }
 
 .metric-title {
@@ -32,12 +103,80 @@
   font-weight: 800;
 }
 
+.metric-card.trend-up {
+  border-top: 3px solid #22c55e;
+}
+
+.metric-card.trend-down {
+  border-top: 3px solid #ef4444;
+}
+
+.metric-card.trend-stable {
+  border-top: 3px solid #f59e0b;
+}
+
 .metric-footer {
   display: flex;
   gap: 0.35rem;
   font-size: 0.85rem;
   opacity: 0.8;
   margin-top: 0.5rem;
+}
+
+.metric-card.trend-up .metric-footer {
+  color: #15803d;
+}
+
+.metric-card.trend-down .metric-footer {
+  color: #b91c1c;
+}
+
+.metric-card.trend-stable .metric-footer {
+  color: #92400e;
+}
+
+.attendance-row {
+  width: 100%;
+  overflow: hidden;
+}
+
+.attendance-title {
+  font-weight: 700;
+  margin-bottom: 0.45rem;
+}
+
+.attendance-items {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.attendance-pill {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 0.55rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.75rem;
+  padding: 0.45rem 0.6rem;
+  font-size: 0.9rem;
+}
+
+.attendance-pill.green {
+  border-left: 4px solid #22c55e;
+  background: #f0fdf4;
+  color: #14532d;
+}
+
+.attendance-pill.yellow {
+  border-left: 4px solid #f59e0b;
+  background: #fffbeb;
+  color: #92400e;
+}
+
+.attendance-pill.red {
+  border-left: 4px solid #ef4444;
+  background: #fef2f2;
+  color: #991b1b;
 }
 
 .insight-title {
@@ -50,14 +189,36 @@
   background: #f8fbff;
 }
 
+::ng-deep .attendance-card .p-card-content {
+  padding-top: 0.6rem;
+}
+
+.production-line-note p {
+  margin: 0;
+}
+
 @media (min-width: 768px) {
+  .readiness-summary,
   .kpi-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .attendance-items {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
 @media (min-width: 1024px) {
+  .page-frame {
+    gap: 1rem;
+  }
+
+  .readiness-summary,
   .kpi-grid {
     grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .metric-card {
+    min-height: 150px;
   }
 }

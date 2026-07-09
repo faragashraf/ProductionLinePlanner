@@ -1,28 +1,138 @@
 .line-grid {
   display: grid;
   gap: 0.75rem;
+  grid-template-columns: 1fr;
+  overflow-x: hidden;
+}
+
+.factory-map-banner {
+  width: 100%;
+  overflow: hidden;
+}
+
+.banner-row {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.banner-label {
+  font-size: 0.8rem;
+  opacity: 0.75;
+}
+
+.banner-value {
+  font-size: 1.3rem;
+  font-weight: 800;
 }
 
 .line-title {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 0.5rem;
+}
+
+.line-title span {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .line-title span {
   font-weight: 700;
+  font-size: 1rem;
 }
 
-.stages-scroll {
+.readiness-label {
+  margin: 0.35rem 0 0.45rem;
+  font-size: 0.86rem;
+  opacity: 0.75;
+}
+
+.line-meter {
+  width: 100%;
+  border-radius: 999px;
+  height: 0.5rem;
+  background: #eef2ff;
+  overflow: hidden;
+  margin-bottom: 0.7rem;
+}
+
+.line-meter-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #4ade80, #22c55e);
+}
+
+.line-card {
+  border: 1px solid #dbe4fc;
+  overflow: hidden;
+}
+
+.stages-grid {
   display: grid;
   gap: 0.45rem;
-  overflow-x: auto;
+}
+
+.line-green .line-meter-fill {
+  background: linear-gradient(90deg, #86efac, #22c55e);
+}
+
+.line-yellow .line-meter-fill {
+  background: linear-gradient(90deg, #fde68a, #f59e0b);
+}
+
+.line-red .line-meter-fill {
+  background: linear-gradient(90deg, #fca5a5, #ef4444);
+}
+
+.line-green {
+  border-left: 3px solid #22c55e;
+}
+
+.line-yellow {
+  border-left: 3px solid #f59e0b;
+}
+
+.line-red {
+  border-left: 3px solid #ef4444;
+}
+
+::ng-deep .line-green .p-badge {
+  background: #dcfce7 !important;
+  color: #15803d !important;
+}
+
+::ng-deep .line-yellow .p-badge {
+  background: #fef3c7 !important;
+  color: #92400e !important;
+}
+
+::ng-deep .line-red .p-badge {
+  background: #fee2e2 !important;
+  color: #b91c1c !important;
 }
 
 .stage-block {
-  border: 1px dashed #d1dcff;
+  border: 1px solid #d1dcff;
   border-radius: 0.75rem;
   padding: 0.55rem;
+}
+
+.stage-block.stage-green {
+  background: #f0fdf4;
+}
+
+.stage-block.stage-yellow {
+  background: #fffbeb;
+}
+
+.stage-block.stage-red {
+  background: #fef2f2;
+}
+
+.stage-block {
+  border-left-width: 4px;
 }
 
 .stage-name {
@@ -34,8 +144,66 @@
   opacity: 0.75;
 }
 
+.stage-name-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.3rem;
+}
+
+.stage-badge {
+  font-size: 0.72rem;
+  border-radius: 999px;
+  padding: 0.2rem 0.45rem;
+  white-space: nowrap;
+}
+
+.stage-green .stage-badge {
+  color: #166534;
+  background: #dcfce7;
+}
+
+.stage-yellow .stage-badge {
+  color: #92400e;
+  background: #fef3c7;
+}
+
+.stage-red .stage-badge {
+  color: #991b1b;
+  background: #fee2e2;
+}
+
+.stage-meter {
+  width: 100%;
+  border-radius: 999px;
+  height: 0.45rem;
+  background: #eef2ff;
+  overflow: hidden;
+  margin-top: 0.45rem;
+}
+
+.stage-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #6ee7b7, #22c55e);
+}
+
+.stage-block.stage-yellow .stage-fill {
+  background: linear-gradient(90deg, #fcd34d, #f59e0b);
+}
+
+.stage-block.stage-red .stage-fill {
+  background: linear-gradient(90deg, #fca5a5, #ef4444);
+}
+
 @media (min-width: 768px) {
   .line-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .banner-row {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    max-width: 520px;
   }
 }

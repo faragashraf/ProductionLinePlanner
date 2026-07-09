@@ -1,25 +1,48 @@
 <section class="page-frame">
   <header class="page-header">
     <h1>Factory Map</h1>
-    <p>خريطة مصغرة تعتمد على mock data كبداية.</p>
+    <p>خريطة مصغرة تعتمد على mock data كبداية مع حالة مرئية لكل خط ومرحلة.</p>
   </header>
+
+  <section class="factory-map-banner">
+    <p-card>
+      <div class="banner-row">
+        <div>
+          <div class="banner-label">إجمالي العاملين المتوقع</div>
+          <div class="banner-value">{{ totalWorkers }}</div>
+        </div>
+        <div>
+          <div class="banner-label">عدد الخطوط</div>
+          <div class="banner-value">{{ lines.length }}</div>
+        </div>
+      </div>
+    </p-card>
+  </section>
 
   <div class="line-grid">
     <p-card *ngFor="let line of lines" styleClass="line-card">
       <ng-template pTemplate="title">
         <div class="line-title">
           <span>{{ line.name }}</span>
-          <p-badge [value]="line.readinessLabel"></p-badge>
+          <p-badge [value]="getReadinessText(line.statusPercent)" [styleClass]="getReadinessClass(line.statusPercent)"></p-badge>
         </div>
       </ng-template>
-      <p>
-        readiness:
-        <strong>{{ line.statusPercent }}%</strong>
-      </p>
-      <div class="stages-scroll">
-        <article class="stage-block" *ngFor="let stage of line.stages">
-          <div class="stage-name">{{ stage.name }}</div>
-          <div class="stage-meta">عدد العاملين: {{ stage.workersCurrent }} / {{ stage.workersRequired }}</div>
+
+      <p class="readiness-label">جاهزية الخط: <strong>{{ line.statusPercent }}%</strong></p>
+      <div class="line-meter">
+        <div class="line-meter-fill" [style.width.%]="line.statusPercent"></div>
+      </div>
+
+      <div class="stages-grid">
+        <article class="stage-block" *ngFor="let stage of line.stages" [ngClass]="getStageClass(stage)">
+          <div class="stage-name-row">
+            <div class="stage-name">{{ stage.name }}</div>
+            <span class="stage-badge">{{ getStageStatus(stage) }}</span>
+          </div>
+          <div class="stage-meta">العاملون: {{ stage.workersCurrent }} / {{ stage.workersRequired }}</div>
+          <div class="stage-meter">
+            <div class="stage-fill" [style.width.%]="getStageRatio(stage)"></div>
+          </div>
         </article>
       </div>
     </p-card>
