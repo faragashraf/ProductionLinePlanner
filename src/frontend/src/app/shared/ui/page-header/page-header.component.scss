@@ -1,0 +1,30 @@
+.plp-page-header {
+  display: flex;
+  gap: var(--plp-spacing-3);
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  margin-bottom: var(--plp-spacing-4);
+}
+
+.plp-page-header h1 {
+  margin: 0;
+  font-size: var(--plp-font-size-xl);
+  line-height: var(--plp-line-height-tight);
+}
+
+.plp-page-header p {
+  margin: 0.3rem 0 0;
+  color: var(--plp-color-text-subtle);
+  font-size: var(--plp-font-size-sm);
+}
+
+.plp-page-header__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--plp-spacing-2);
+}
+
+.plp-page-header--compact h1 {
+  font-size: var(--plp-font-size-lg);
+}

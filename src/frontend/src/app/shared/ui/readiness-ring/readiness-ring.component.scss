@@ -1,0 +1,98 @@
+.plp-readiness-ring {
+  --plp-readiness-size: 86;
+  --plp-readiness-value: 0;
+  width: calc(var(--plp-readiness-size) * 1px);
+  aspect-ratio: 1 / 1;
+  border-radius: var(--plp-radius-pill);
+  position: relative;
+  display: grid;
+  place-items: center;
+  background:
+    conic-gradient(
+      var(--plp-status-ready) calc(var(--plp-readiness-value) * 1%),
+      var(--plp-color-muted-soft) 0
+    );
+  box-sizing: border-box;
+}
+
+.plp-readiness-ring::before {
+  content: '';
+  position: absolute;
+  width: calc(100% - 12px);
+  aspect-ratio: 1 / 1;
+  border-radius: var(--plp-radius-pill);
+  background: var(--plp-color-surface);
+}
+
+.plp-readiness-ring__dial {
+  position: absolute;
+  width: calc(100% - 30px);
+  aspect-ratio: 1 / 1;
+  border-radius: var(--plp-radius-pill);
+  background: var(--plp-color-surface-soft);
+  border: 1px solid var(--plp-color-border);
+  display: grid;
+  place-items: center;
+  gap: 0.2rem;
+  text-align: center;
+  padding: var(--plp-spacing-2);
+}
+
+.plp-readiness-ring__value {
+  font-size: var(--plp-font-size-sm);
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.plp-readiness-ring__status {
+  color: var(--plp-color-text-subtle);
+  font-size: var(--plp-font-size-xxs);
+}
+
+.plp-readiness-ring i {
+  font-size: 0.8rem;
+  color: inherit;
+}
+
+.plp-readiness-ring--present {
+  background:
+    conic-gradient(
+      var(--plp-status-present) calc(var(--plp-readiness-value) * 1%),
+      var(--plp-color-muted-soft) 0
+    );
+}
+
+.plp-readiness-ring--ready {
+  background:
+    conic-gradient(
+      var(--plp-status-ready) calc(var(--plp-readiness-value) * 1%),
+      var(--plp-color-muted-soft) 0
+    );
+}
+
+.plp-readiness-ring--late,
+.plp-readiness-ring--warning {
+  background:
+    conic-gradient(
+      var(--plp-status-warning) calc(var(--plp-readiness-value) * 1%),
+      var(--plp-color-muted-soft) 0
+    );
+}
+
+.plp-readiness-ring--critical,
+.plp-readiness-ring--absent {
+  background:
+    conic-gradient(
+      var(--plp-status-critical) calc(var(--plp-readiness-value) * 1%),
+      var(--plp-color-muted-soft) 0
+    );
+}
+
+.plp-readiness-ring--info,
+.plp-readiness-ring--unassigned {
+  background:
+    conic-gradient(
+      var(--plp-status-info) calc(var(--plp-readiness-value) * 1%),
+      var(--plp-color-muted-soft) 0
+    );
+}

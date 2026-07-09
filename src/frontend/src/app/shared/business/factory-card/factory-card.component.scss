@@ -1,0 +1,33 @@
+.plp-factory-card {
+  border: 1px solid var(--plp-color-border);
+  border-radius: var(--plp-radius-lg);
+  padding: var(--plp-spacing-4);
+  background: var(--plp-color-surface);
+  box-shadow: var(--plp-elevation-1);
+  display: grid;
+  gap: var(--plp-spacing-3);
+}
+
+.plp-factory-card__head {
+  display: flex;
+  gap: var(--plp-spacing-3);
+  align-items: center;
+  justify-content: space-between;
+}
+
+.plp-factory-card__head h3 {
+  margin: 0 0 0.25rem;
+  font-size: var(--plp-font-size-lg);
+}
+
+.plp-factory-card__head p {
+  margin: 0;
+  color: var(--plp-color-text-subtle);
+  font-size: var(--plp-font-size-xs);
+}
+
+.plp-factory-card__meta {
+  margin: 0;
+  color: var(--plp-color-text-subtle);
+  font-size: var(--plp-font-size-sm);
+}

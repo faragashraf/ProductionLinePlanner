@@ -1,0 +1,9 @@
+<header class="plp-page-header" [class.plp-page-header--compact]="compact">
+  <div>
+    <h1>{{ title }}</h1>
+    <p *ngIf="description">{{ description }}</p>
+  </div>
+  <div class="plp-page-header__actions">
+    <ng-content select="[header-actions]" />
+  </div>
+</header>

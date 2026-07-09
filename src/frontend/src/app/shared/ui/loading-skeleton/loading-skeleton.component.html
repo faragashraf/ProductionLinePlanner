@@ -1,0 +1,10 @@
+<section class="plp-loading-skeleton" [class.plp-loading-skeleton--card]="cardLike">
+  <article *ngFor="let _ of items" class="plp-loading-skeleton__row">
+    <span *ngIf="showAvatar" class="plp-loading-skeleton__avatar"></span>
+    <span class="plp-loading-skeleton__body">
+      <span class="plp-loading-skeleton__line short"></span>
+      <span class="plp-loading-skeleton__line medium"></span>
+      <span class="plp-loading-skeleton__line long"></span>
+    </span>
+  </article>
+</section>

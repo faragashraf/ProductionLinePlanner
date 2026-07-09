@@ -1,0 +1,126 @@
+:root {
+  --plp-color-background: #f4f7ff;
+  --plp-color-surface: #ffffff;
+  --plp-color-surface-soft: #f8fbff;
+  --plp-color-surface-raised: #ffffff;
+  --plp-color-border: #dce5ff;
+  --plp-color-border-muted: #e6ecff;
+  --plp-color-text: #0f172a;
+  --plp-color-text-soft: #475569;
+  --plp-color-text-subtle: #64748b;
+
+  --plp-color-success: #16a34a;
+  --plp-color-success-soft: #dcfce7;
+  --plp-color-success-strong: #15803d;
+  --plp-color-warning: #d97706;
+  --plp-color-warning-soft: #fef3c7;
+  --plp-color-warning-strong: #92400e;
+  --plp-color-danger: #dc2626;
+  --plp-color-danger-soft: #fee2e2;
+  --plp-color-danger-strong: #991b1b;
+  --plp-color-muted: #334155;
+  --plp-color-muted-soft: #e2e8f0;
+  --plp-color-info: #2563eb;
+  --plp-color-info-soft: #dbeafe;
+  --plp-color-info-strong: #1d4ed8;
+  --plp-color-info-2: #0ea5e9;
+  --plp-color-ready: #0891b2;
+  --plp-color-ready-soft: #cffafe;
+  --plp-color-ready-strong: #0e7490;
+
+  --plp-status-present: var(--plp-color-success);
+  --plp-status-present-bg: var(--plp-color-success-soft);
+  --plp-status-late: var(--plp-color-warning);
+  --plp-status-late-bg: var(--plp-color-warning-soft);
+  --plp-status-absent: var(--plp-color-danger);
+  --plp-status-absent-bg: var(--plp-color-danger-soft);
+  --plp-status-unassigned: var(--plp-color-muted);
+  --plp-status-unassigned-bg: #f1f5f9;
+  --plp-status-ready: var(--plp-color-ready);
+  --plp-status-ready-bg: var(--plp-color-ready-soft);
+  --plp-status-warning: var(--plp-color-warning);
+  --plp-status-warning-bg: var(--plp-color-warning-soft);
+  --plp-status-critical: var(--plp-color-danger);
+  --plp-status-critical-bg: var(--plp-color-danger-soft);
+  --plp-status-info: var(--plp-color-info);
+  --plp-status-info-bg: var(--plp-color-info-soft);
+
+  --plp-spacing-1: 0.25rem;
+  --plp-spacing-2: 0.5rem;
+  --plp-spacing-3: 0.75rem;
+  --plp-spacing-4: 1rem;
+  --plp-spacing-5: 1.25rem;
+  --plp-spacing-6: 1.5rem;
+  --plp-spacing-8: 2rem;
+  --plp-spacing-10: 2.5rem;
+  --plp-spacing-12: 3rem;
+
+  --plp-radius-sm: 0.5rem;
+  --plp-radius-md: 0.75rem;
+  --plp-radius-lg: 1rem;
+  --plp-radius-xl: 1.25rem;
+  --plp-radius-pill: 999px;
+
+  --plp-font-size-xxs: 0.75rem;
+  --plp-font-size-xs: 0.85rem;
+  --plp-font-size-sm: 0.95rem;
+  --plp-font-size-base: 1rem;
+  --plp-font-size-md: 1.05rem;
+  --plp-font-size-lg: 1.2rem;
+  --plp-font-size-xl: 1.45rem;
+  --plp-font-size-2xl: 1.75rem;
+
+  --plp-line-height-tight: 1.15;
+  --plp-line-height-base: 1.5;
+
+  --plp-elevation-1: 0 1px 3px rgba(15, 23, 42, 0.12);
+  --plp-elevation-2: 0 4px 12px rgba(15, 23, 42, 0.14);
+  --plp-elevation-3: 0 10px 22px rgba(15, 23, 42, 0.16);
+
+  --plp-font-family:
+    'Cairo',
+    'Inter',
+    'Segoe UI',
+    -apple-system,
+    BlinkMacSystemFont,
+    system-ui,
+    sans-serif;
+
+  --plp-bp-sm: 640px;
+  --plp-bp-md: 768px;
+  --plp-bp-lg: 1024px;
+  --plp-bp-xl: 1280px;
+}
+
+.plp-shell-bg {
+  min-height: 100dvh;
+  background:
+    linear-gradient(
+      180deg,
+      #f4f8ff 0%,
+      #eef3ff 35%,
+      #f7f8fd 100%
+    );
+}
+
+.plp-card {
+  background: var(--plp-color-surface);
+  border: 1px solid var(--plp-color-border);
+  border-radius: var(--plp-radius-md);
+  box-shadow: var(--plp-elevation-1);
+  color: var(--plp-color-text);
+}
+
+.plp-title-1 {
+  font-size: var(--plp-font-size-xl);
+  font-weight: 700;
+  line-height: var(--plp-line-height-tight);
+  margin: 0;
+}
+
+.plp-title-2 {
+  font-size: var(--plp-font-size-lg);
+  font-weight: 700;
+  line-height: var(--plp-line-height-tight);
+  margin: 0;
+}

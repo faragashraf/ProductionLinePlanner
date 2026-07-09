@@ -1,0 +1,6 @@
+<div class="plp-completion-bar" [class]="toneClass">
+  <label *ngIf="label" class="plp-completion-bar__label">{{ label }}</label>
+  <div class="plp-completion-bar__track" role="img" [attr.aria-label]="'اكتمال ' + percent + ' بالمئة'">
+    <span class="plp-completion-bar__fill" [style.width.%]="percent"></span>
+  </div>
+</div>

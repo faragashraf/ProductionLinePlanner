@@ -1,0 +1,39 @@
+.plp-notification-card {
+  border: 1px solid var(--plp-color-border);
+  border-radius: var(--plp-radius-lg);
+  background: var(--plp-color-surface);
+  padding: var(--plp-spacing-4);
+  display: grid;
+  gap: 0.5rem;
+}
+
+.plp-notification-card__head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.6rem;
+  align-items: center;
+}
+
+.plp-notification-card__state {
+  color: var(--plp-color-text-subtle);
+  font-size: var(--plp-font-size-xxs);
+}
+
+.plp-notification-card h3 {
+  margin: 0;
+  font-size: var(--plp-font-size-sm);
+}
+
+.plp-notification-card p {
+  margin: 0;
+  color: var(--plp-color-text-subtle);
+  font-size: var(--plp-font-size-xs);
+}
+
+.plp-notification-card--read {
+  opacity: 0.78;
+}
+
+.plp-notification-card--unread {
+  border-left: 3px solid var(--plp-status-warning);
+}

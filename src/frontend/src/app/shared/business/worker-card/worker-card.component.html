@@ -1,0 +1,10 @@
+<article class="plp-worker-card">
+  <plp-worker-avatar [fullName]="fullName" [code]="code" [status]="status"></plp-worker-avatar>
+  <div class="plp-worker-card__details">
+    <h3>{{ fullName }}</h3>
+    <p>كود: {{ code }}</p>
+    <p>{{ assignmentType }}</p>
+    <p *ngIf="lastActivity">{{ lastActivity }}</p>
+  </div>
+  <plp-status-badge [status]="status"></plp-status-badge>
+</article>
