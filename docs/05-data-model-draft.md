@@ -1,101 +1,196 @@
-# 05 - مسودة نموذج البيانات
+# 05 - مسودة نموذج البيانات (محدثة)
 
-> ملاحظة: هذا نموذج مفاهيمي أولي لمرحلة التوثيق فقط.
+> الغرض من هذا الملف: توثيق بنية البيانات من جهة **الدومين** (بدون أكواد تنفيذية) قبل بدء التطوير.
 
-## الكيانات الأساسية
+## 1) الكيانات والجداول
 
-### User
-- `Id`
-- `FullName`
-- `Email`
-- `PasswordHash`
-- `Role` (`SuperAdmin` / `Admin`)
-- `IsActive`
+### Factory
+- `FactoryId` (PK)
+- `Name` (نص)
+- `Code` (فريد)
+- `Location` (اختياري)
+- `IsActive` (bool)
+- `CreatedAt` , `CreatedByUserId`
+- `UpdatedAt` , `UpdatedByUserId`
 
-### FactoryLine
-- `Id`
-- `Name`
-- `Description`
-- `IsActive`
+### ProductionLine
+- `ProductionLineId` (PK)
+- `FactoryId` (FK → Factory)
+- `Name` (نص)
+- `LineCode` (اختياري، فريد داخل المصنع)
+- `SequenceOrder` (int)
+- `IsActive` (bool)
+- `CreatedAt`, `UpdatedAt`
 
-### StageGroup (المراحل الرئيسية)
-- `Id`
-- `FactoryLineId`
-- `Name`
-- `OrderIndex`
+### MainStage
+- `MainStageId` (PK)
+- `ProductionLineId` (FK → ProductionLine)
+- `Name` (نص)
+- `SequenceOrder` (int)
+- `IsCritical` (bool، افتراضي = false)
+- `IsActive` (bool)
+- `CreatedAt`, `UpdatedAt`
 
-### Stage (المراحل الفرعية)
-- `Id`
-- `StageGroupId`
-- `Name`
-- `Capacity` (اختياري)
-- `OrderIndex`
+### SubStage
+- `SubStageId` (PK)
+- `MainStageId` (FK → MainStage)
+- `Name` (نص)
+- `Capacity` (int, > = 0)  // عدد العمال المستهدف لتشغيلها
+- `SequenceOrder` (int)
+- `IsActive` (bool)
+- `CreatedAt`, `UpdatedAt`
 
 ### Worker
-- `Id`
-- `EmployeeCode`
+- `WorkerId` (PK)
+- `EmployeeCode` (فريد)
 - `FullName`
-- `ZkEmployeeCode` (مطابق ZKTime)
-- `DefaultStageId` (nullable)
-- `IsActive`
+- `ZkEmployeeCode` (اختياري)
+- `Phone` (اختياري)
+- `IsActive` (bool)
+- `CreatedAt`, `UpdatedAt`
 
-### WorkerAttendanceSnapshot
-- `Id`
-- `WorkerId`
-- `AttendanceState` (`Present`, `Absent`, `Late`, `Partial`)
-- `SourceTimestamp`
-- `RawData` (اختياري JSON مختصر)
+### WorkerDefaultAssignment
+- `WorkerDefaultAssignmentId` (PK)
+- `WorkerId` (FK → Worker, فريد)
+- `SubStageId` (FK → SubStage)
+- `AssignedAt` (datetime)
+- `AssignedByUserId` (FK → User)
+- `IsActive` (bool)
+- `Reason` (اختياري: transfer, restructure, init)
+- `CreatedAt`, `UpdatedAt`
 
-### PermanentAssignment
-- `Id`
-- `WorkerId`
-- `StageId`
-- `AssignedByUserId`
-- `AssignedAt`
-- `IsActive`
+### WorkerTemporaryAssignment
+- `WorkerTemporaryAssignmentId` (PK)
+- `WorkerId` (FK → Worker)
+- `FromSubStageId` (FK → SubStage)
+- `ToSubStageId` (FK → SubStage)
+- `StartAtUtc` (datetime)
+- `EndAtUtc` (datetime)
+- `ReplacementForWorkerId` (FK → Worker, nullable)
+- `AssignedByUserId` (FK → User)
+- `Reason` (enum: CoverAbsent, Rebalance, PeakSupport, UrgentDemand)
+- `Status` (enum: Scheduled, Active, Expired, Cancelled, Completed)
+- `CreatedAt`, `UpdatedAt`
 
-### TemporaryAssignment
-- `Id`
-- `WorkerId`
-- `FromStageId`
-- `ToStageId`
-- `StartAt`
-- `EndAt`
-- `AssignedByUserId`
-- `Reason`
-- `IsActive`
+### AttendanceRecord
+- `AttendanceRecordId` (PK)
+- `WorkerId` (FK → Worker)
+- `AttendanceTimeUtc` (datetime)
+- `AttendanceState` (enum: Present, Absent, Late, Unknown)
+- `Source` (enum: ZkTime, Manual)
+- `SourceRawId` (nullable)
+- `SourcePayload` (JSON اختياري)
+
+### StageReadinessSnapshot
+- `StageReadinessSnapshotId` (PK)
+- `ScopeType` (enum: SubStage, MainStage, ProductionLine, Factory)
+- `ScopeEntityId` (guid/int)
+- `CalculatedAtUtc` (datetime)
+- `TotalRequiredWorkers` (int)
+- `PresentWorkers` (int)
+- `LateWorkers` (int)
+- `AbsentWorkers` (int)
+- `UnassignedWorkers` (int)
+- `ReadinessPercent` (decimal(5,2))
 
 ### Notification
-- `Id`
-- `UserId` (المستلم)
+- `NotificationId` (PK)
+- `RecipientUserId` (FK → User)
+- `SenderUserId` (FK → User, nullable)
 - `Title`
-- `Body`
-- `Type` (`Attendance`, `Assignment`, `Alert`, `System`)
-- `IsRead`
+- `Message`
+- `NotificationType` (enum: Attendance, Assignment, Readiness, System, Audit)
+- `Severity` (enum: Info, Warning, Critical)
+- `RelatedWorkerId` (FK → Worker, nullable)
+- `RelatedEntityType` (اختياري)
+- `RelatedEntityId` (optional)
+- `IsRead` (bool)
+- `ReadAt` (nullable)
 - `CreatedAt`
 
-## العلاقات
-- `FactoryLine` 1 -> * `StageGroup`.
-- `StageGroup` 1 -> * `Stage`.
-- `Worker` * -> 1 `DefaultStage` (اختياري).
-- `Worker` * -> * `PermanentAssignment` (منظور التفعيل الأحدث/الفعال).
-- `Worker` * -> * `TemporaryAssignment` ضمن فترات زمنية.
-- `User` ينشئ تعيينات/تنبيهات.
+### User
+- `UserId` (PK)
+- `FullName`
+- `Email` (فريد)
+- `PasswordHash`
+- `IsActive` (bool)
+- `PreferredLanguage` (enum: ar, en)
+- `CreatedAt`, `UpdatedAt`
 
-## منطق الحسابات
-- `ReadyState` الحالي للمرحلة:
-  - يجمع بين `WorkerAttendanceSnapshot` ووجود تعيين فعّال.
-- `ReadinessPercent` للمراحل:
-  - عدد العمال الجاهزين / العدد المطلوب (أو العدد المتاح بحسب السعة).
-- `LineReadinessPercent`:
-  - متوسط مرجح أو معدل بسيط حسب الحاجة الداخلية (أفضل في البداية متوسط بسيط).
+### Role
+- `RoleId` (PK)
+- `Code` (فريد: SuperAdmin, Admin)
+- `Name`
+- `Description`
+- `IsSystemRole` (bool)
 
-## قواعد الاسترجاع بعد تعيين مؤقت
-- عند انتهاء `TemporaryAssignment.EndAt`:
-  - إذا Worker له `DefaultStageId` → يعاد إليه.
-  - إذا لا يوجد → حالة Unassigned.
+### AuditLog
+- `AuditLogId` (PK)
+- `ActorUserId` (FK → User)
+- `Action` (النص/الـverb: Create, Update, Cancel, Resolve...)
+- `EntityType`
+- `EntityId`
+- `EntityBeforeJson` (nullable)
+- `EntityAfterJson` (nullable)
+- `RequestMeta` (JSON اختياري: IP, endpoint, correlationId)
+- `CreatedAt`
 
-## أسئلة مفتوحة
-- هل ستكون السعة في المرحلة إجبارية أو اختيارية؟
-- هل يلزم حفظ سجل تفصيلي لأسباب الغياب في نفس الكيان أو منفصل؟
-- هل نحتاج جدول مستقل لورديات العمل؟
+### UserRole (جدول ربط)
+- `UserId` (FK → User)
+- `RoleId` (FK → Role)
+- `AssignedAt`
+- `AssignedByUserId` (FK → User)
+- **المفتاح الأساسي المركب: (UserId, RoleId)**
+
+## 2) العلاقات (ER)
+- `Factory` 1 → N `ProductionLine`.
+- `ProductionLine` 1 → N `MainStage`.
+- `MainStage` 1 → N `SubStage`.
+- `SubStage` 1 → N `WorkerDefaultAssignment`.
+- `Worker` 1 → 1 `WorkerDefaultAssignment` فعّال (عند حد أقصى `IsActive = true` واحد).
+- `Worker` 1 → N `WorkerTemporaryAssignment`.
+- `Worker` 1 → N `AttendanceRecord`.
+- `User` 1 → N `WorkerDefaultAssignment` (من قام بالتعيين).
+- `User` 1 → N `WorkerTemporaryAssignment`.
+- `User` 1 → N `AuditLog` (كمصدر).
+- `User` N ↔ M `Role` (عبر `UserRole`).
+- `SubStage`/`MainStage`/`ProductionLine`/`Factory` → N `Notification` (عبر حقول `Related*`).
+
+## 3) قواعد التكامل الأساسية
+- `WorkerTemporaryAssignment`:
+  - `StartAtUtc < EndAtUtc`.
+  - لا يسمح بفترتين فعّاليتين متداخلتين للعامل نفسه (`Status` في (Scheduled/Active)).
+  - `ToSubStageId` و`FromSubStageId` لا يلزمهما أن يختلفا، لكن يفضّل اختلافهما لتجنب سجلات بلا أثر.
+- `WorkerDefaultAssignment`:
+  - لكل عامل تعيين ثابت واحد فعّال فقط.
+- `WorkerTemporaryAssignment` لا يلغي سجل التسكين الثابت.
+  - التسكين الثابت يبقى مرجع الرجوع عند انتهاء المؤقت.
+- `SubStage.Capacity` = 0 يسمح بالتعريف التشغيلي للمرحلة دون حد أدنى.
+- `AttendanceRecord` يُرتّب حسب `AttendanceTimeUtc` لاستخراج أحدث حالة.
+
+## 4) قواعد التراجع بعد انتهاء التسكين المؤقت
+- عند انتهاء الفاصل الزمني (`Status` = Expired/Completed أو التاريخ انتهى):
+  - إذا worker لديه `WorkerDefaultAssignment` فعّال: العودة التلقائية إلى المرحلة الثابتة.
+  - إذا لا يوجد تسكين ثابت: تبقى الحالة `Unassigned` إلى أن يُضاف تسكين ثابت جديد.
+
+## 5) قواعد منع التعارض (مبدئية ومفيدة للتنفيذ)
+- عامل واحد لا يمكن أن يكون فعّالًا في أكثر من مرحلة واحدة في نفس الزمن.
+- بدل العامل المؤقت `ReplacementForWorkerId` لا يغيّر توقيت انتهاء/فعالية التسكين الثابت للعامل الأصلي.
+- إذا كان العامل "بديلًا" ضمن فترة مؤقتة، يقيَّد ذلك بفترة `StartAtUtc` إلى `EndAtUtc` فقط.
+- أي تعديل على التسكين خلال فترة حالية يُفحص أولًا ضد حالات وجود تعيين فعال أخرى.
+
+## 6) احتساب نسب الجاهزية (مرجع مفاهيمي)
+- **SubStage**:
+  - `ReadinessPercent = PresentWorkers / Max(RequiredWorkers, 1) * 100`
+  - إذا `Capacity = 0` يمكن حسابها كـ 100% (حسب سياسة الإظهار/التجربة).
+- **MainStage**:
+  - متوسط مرجّح على `SubStage` في المرحلة الرئيسية.
+- **ProductionLine**:
+  - متوسط مرجّح على `MainStage` داخل الخط.
+- **Factory**:
+  - متوسط مرجّح على خطوط المصنع.
+
+## 7) أسئلة مفتوحة (Open Questions)
+- هل نحتاج تخزين `StageReadinessSnapshot` كـ snapshot كل 1..5 دقائق أم بناء لحظي فقط؟
+- هل يظل `AttendanceState=Late` محسوبًا كـ `Present` أم له تأثير جزئي على الجاهزية؟
+- هل نحتاج قيودًا إضافية لتغطية تغييرات الطوارئ (مثلاً حد أقصى للتسكين المؤقت لكل stage)?
