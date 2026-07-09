@@ -1,13 +1,20 @@
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.IdentityModel.Tokens;
 using System.Diagnostics;
+using System.Security.Claims;
+using System.Text;
 using System.Threading.RateLimiting;
+using ProductionLinePlanner.Application.Abstractions;
 using ProductionLinePlanner.Application.DTOs;
 using ProductionLinePlanner.Application.Requests;
+using ProductionLinePlanner.Api.Security;
 using ProductionLinePlanner.Domain.Entities;
+using ProductionLinePlanner.Domain.Enums;
 using ProductionLinePlanner.Infrastructure;
 using ProductionLinePlanner.Infrastructure.Data;
 
@@ -29,6 +36,12 @@ var corsAllowCredentials = builder.Configuration.GetValue("Cors:AllowCredentials
 var rateLimitWindowSeconds = Math.Max(15, builder.Configuration.GetValue("Security:RateLimit:WindowSeconds", 60));
 var rateLimitPermitLimit = Math.Max(1, builder.Configuration.GetValue("Security:RateLimit:PermitLimit", 120));
 const string SecurityCorsPolicy = "ProductionLinePlannerCors";
+var jwtSection = builder.Configuration.GetSection("Authentication:Jwt");
+var jwtIssuer = jwtSection["Issuer"] ?? "ProductionLinePlanner.Api";
+var jwtAudience = jwtSection["Audience"] ?? "ProductionLinePlanner.WebClient";
+var jwtSigningKey = jwtSection["SigningKey"] ?? "REPLACE_WITH_USER_SECRET_MIN_64_CHARS_00000000000000000000000000000000";
+
+var jwtKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSigningKey));
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -100,10 +113,38 @@ builder.Services.AddRateLimiter(options =>
 });
 
 builder.Services.AddInfrastructure(builder.Configuration);
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<ICurrentUserService, CurrentUserService>();
 
-// Authentication placeholder: implementation will be added in a dedicated auth slice later.
-builder.Services.AddAuthentication();
-builder.Services.AddAuthorization();
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = jwtKey,
+            ValidateIssuer = true,
+            ValidIssuer = jwtIssuer,
+            ValidateAudience = true,
+            ValidAudience = jwtAudience,
+            ValidateLifetime = true,
+            ClockSkew = TimeSpan.FromMinutes(1),
+            RoleClaimType = ClaimTypes.Role
+        };
+    });
+
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy("SuperAdmin", policy =>
+    {
+        policy.RequireRole(UserRole.SuperAdmin.ToString());
+    });
+
+    options.AddPolicy("Admin", policy =>
+    {
+        policy.RequireRole(UserRole.Admin.ToString(), UserRole.SuperAdmin.ToString());
+    });
+});
 
 // SignalR placeholder registration, no hub implementation details yet.
 builder.Services.AddSignalR();
@@ -138,6 +179,12 @@ app.Use(async (context, next) =>
 });
 app.UseAuthentication();
 app.UseAuthorization();
+
+var factoriesApi = app.MapGroup("/api/factories").RequireAuthorization("Admin");
+var productionLinesApi = app.MapGroup("/api/production-lines").RequireAuthorization("Admin");
+var mainStagesApi = app.MapGroup("/api/main-stages").RequireAuthorization("Admin");
+var subStagesApi = app.MapGroup("/api/sub-stages").RequireAuthorization("Admin");
+var workersApi = app.MapGroup("/api/workers").RequireAuthorization("Admin");
 
 app.MapGet("/api/error", (HttpContext context) =>
 {
@@ -199,7 +246,7 @@ app.MapGet("/api/identity/placeholder", () => Results.Ok(new
 
 app.MapHub<ProductionHub>("/hubs/production");
 
-app.MapGet("/api/factories", async (
+factoriesApi.MapGet("", async (
     AppDbContext dbContext,
     CancellationToken cancellationToken,
     bool? isActive = true,
@@ -238,7 +285,7 @@ app.MapGet("/api/factories", async (
     .WithTags("Factories")
     .WithName("GetFactories");
 
-app.MapGet("/api/factories/{factoryId:guid}", async (
+factoriesApi.MapGet("/{factoryId:guid}", async (
     Guid factoryId,
     AppDbContext dbContext,
     CancellationToken cancellationToken) =>
@@ -264,7 +311,7 @@ app.MapGet("/api/factories/{factoryId:guid}", async (
     .WithTags("Factories")
     .WithName("GetFactory");
 
-app.MapPost("/api/factories", async (
+factoriesApi.MapPost("", async (
     CreateFactoryRequest request,
     AppDbContext dbContext,
     CancellationToken cancellationToken) =>
@@ -308,10 +355,11 @@ app.MapPost("/api/factories", async (
         IsActive = entity.IsActive
     }));
 })
+    .RequireAuthorization("SuperAdmin")
     .WithTags("Factories")
     .WithName("CreateFactory");
 
-app.MapPatch("/api/factories/{factoryId:guid}", async (
+factoriesApi.MapPatch("/{factoryId:guid}", async (
     Guid factoryId,
     UpdateFactoryRequest request,
     AppDbContext dbContext,
@@ -377,10 +425,11 @@ app.MapPatch("/api/factories/{factoryId:guid}", async (
         IsActive = entity.IsActive
     }));
 })
+    .RequireAuthorization("SuperAdmin")
     .WithTags("Factories")
     .WithName("UpdateFactory");
 
-app.MapDelete("/api/factories/{factoryId:guid}", async (
+factoriesApi.MapDelete("/{factoryId:guid}", async (
     Guid factoryId,
     AppDbContext dbContext,
     CancellationToken cancellationToken) =>
@@ -397,10 +446,11 @@ app.MapDelete("/api/factories/{factoryId:guid}", async (
 
     return Results.NoContent();
 })
+    .RequireAuthorization("SuperAdmin")
     .WithTags("Factories")
     .WithName("DeleteFactory");
 
-app.MapGet("/api/factories/{factoryId:guid}/production-lines", async (
+factoriesApi.MapGet("/{factoryId:guid}/production-lines", async (
     AppDbContext dbContext,
     Guid factoryId,
     CancellationToken cancellationToken,
@@ -450,7 +500,7 @@ app.MapGet("/api/factories/{factoryId:guid}/production-lines", async (
     .WithTags("ProductionLines")
     .WithName("GetProductionLinesByFactory");
 
-app.MapGet("/api/production-lines/{lineId:guid}", async (
+productionLinesApi.MapGet("/{lineId:guid}", async (
     Guid lineId,
     AppDbContext dbContext,
     CancellationToken cancellationToken) =>
@@ -477,7 +527,7 @@ app.MapGet("/api/production-lines/{lineId:guid}", async (
     .WithTags("ProductionLines")
     .WithName("GetProductionLine");
 
-app.MapPost("/api/production-lines", async (
+productionLinesApi.MapPost("", async (
     CreateProductionLineRequest request,
     AppDbContext dbContext,
     CancellationToken cancellationToken) =>
@@ -539,7 +589,7 @@ app.MapPost("/api/production-lines", async (
     .WithTags("ProductionLines")
     .WithName("CreateProductionLine");
 
-app.MapPatch("/api/production-lines/{lineId:guid}", async (
+productionLinesApi.MapPatch("/{lineId:guid}", async (
     Guid lineId,
     UpdateProductionLineRequest request,
     AppDbContext dbContext,
@@ -636,7 +686,7 @@ app.MapPatch("/api/production-lines/{lineId:guid}", async (
     .WithTags("ProductionLines")
     .WithName("UpdateProductionLine");
 
-app.MapDelete("/api/production-lines/{lineId:guid}", async (
+productionLinesApi.MapDelete("/{lineId:guid}", async (
     Guid lineId,
     AppDbContext dbContext,
     CancellationToken cancellationToken) =>
@@ -653,10 +703,11 @@ app.MapDelete("/api/production-lines/{lineId:guid}", async (
 
     return Results.NoContent();
 })
+    .RequireAuthorization("SuperAdmin")
     .WithTags("ProductionLines")
     .WithName("DeleteProductionLine");
 
-app.MapGet("/api/production-lines/{productionLineId:guid}/main-stages", async (
+productionLinesApi.MapGet("/{productionLineId:guid}/main-stages", async (
     AppDbContext dbContext,
     Guid productionLineId,
     CancellationToken cancellationToken,
@@ -703,7 +754,7 @@ app.MapGet("/api/production-lines/{productionLineId:guid}/main-stages", async (
     .WithTags("MainStages")
     .WithName("GetMainStagesByLine");
 
-app.MapGet("/api/main-stages/{mainStageId:guid}", async (
+mainStagesApi.MapGet("/{mainStageId:guid}", async (
     Guid mainStageId,
     AppDbContext dbContext,
     CancellationToken cancellationToken) =>
@@ -727,7 +778,7 @@ app.MapGet("/api/main-stages/{mainStageId:guid}", async (
     .WithTags("MainStages")
     .WithName("GetMainStage");
 
-app.MapPost("/api/main-stages", async (
+mainStagesApi.MapPost("", async (
     CreateMainStageRequest request,
     AppDbContext dbContext,
     CancellationToken cancellationToken) =>
@@ -785,7 +836,7 @@ app.MapPost("/api/main-stages", async (
     .WithTags("MainStages")
     .WithName("CreateMainStage");
 
-app.MapPatch("/api/main-stages/{mainStageId:guid}", async (
+mainStagesApi.MapPatch("/{mainStageId:guid}", async (
     Guid mainStageId,
     UpdateMainStageRequest request,
     AppDbContext dbContext,
@@ -872,7 +923,7 @@ app.MapPatch("/api/main-stages/{mainStageId:guid}", async (
     .WithTags("MainStages")
     .WithName("UpdateMainStage");
 
-app.MapDelete("/api/main-stages/{mainStageId:guid}", async (
+mainStagesApi.MapDelete("/{mainStageId:guid}", async (
     Guid mainStageId,
     AppDbContext dbContext,
     CancellationToken cancellationToken) =>
@@ -889,10 +940,11 @@ app.MapDelete("/api/main-stages/{mainStageId:guid}", async (
 
     return Results.NoContent();
 })
+    .RequireAuthorization("SuperAdmin")
     .WithTags("MainStages")
     .WithName("DeleteMainStage");
 
-app.MapGet("/api/main-stages/{mainStageId:guid}/sub-stages", async (
+mainStagesApi.MapGet("/{mainStageId:guid}/sub-stages", async (
     AppDbContext dbContext,
     Guid mainStageId,
     CancellationToken cancellationToken,
@@ -939,7 +991,7 @@ app.MapGet("/api/main-stages/{mainStageId:guid}/sub-stages", async (
     .WithTags("SubStages")
     .WithName("GetSubStagesByMainStage");
 
-app.MapGet("/api/sub-stages/{subStageId:guid}", async (
+subStagesApi.MapGet("/{subStageId:guid}", async (
     Guid subStageId,
     AppDbContext dbContext,
     CancellationToken cancellationToken) =>
@@ -963,7 +1015,7 @@ app.MapGet("/api/sub-stages/{subStageId:guid}", async (
     .WithTags("SubStages")
     .WithName("GetSubStage");
 
-app.MapPost("/api/sub-stages", async (
+subStagesApi.MapPost("", async (
     CreateSubStageRequest request,
     AppDbContext dbContext,
     CancellationToken cancellationToken) =>
@@ -1026,7 +1078,7 @@ app.MapPost("/api/sub-stages", async (
     .WithTags("SubStages")
     .WithName("CreateSubStage");
 
-app.MapPatch("/api/sub-stages/{subStageId:guid}", async (
+subStagesApi.MapPatch("/{subStageId:guid}", async (
     Guid subStageId,
     UpdateSubStageRequest request,
     AppDbContext dbContext,
@@ -1121,7 +1173,7 @@ app.MapPatch("/api/sub-stages/{subStageId:guid}", async (
     .WithTags("SubStages")
     .WithName("UpdateSubStage");
 
-app.MapDelete("/api/sub-stages/{subStageId:guid}", async (
+subStagesApi.MapDelete("/{subStageId:guid}", async (
     Guid subStageId,
     AppDbContext dbContext,
     CancellationToken cancellationToken) =>
@@ -1138,10 +1190,11 @@ app.MapDelete("/api/sub-stages/{subStageId:guid}", async (
 
     return Results.NoContent();
 })
+    .RequireAuthorization("SuperAdmin")
     .WithTags("SubStages")
     .WithName("DeleteSubStage");
 
-app.MapGet("/api/workers", async (
+workersApi.MapGet("", async (
     AppDbContext dbContext,
     string? search,
     CancellationToken cancellationToken,
@@ -1211,7 +1264,7 @@ app.MapGet("/api/workers", async (
     .WithTags("Workers")
     .WithName("GetWorkers");
 
-app.MapGet("/api/workers/{workerId:guid}", async (
+workersApi.MapGet("/{workerId:guid}", async (
     Guid workerId,
     AppDbContext dbContext,
     CancellationToken cancellationToken) =>
@@ -1247,7 +1300,7 @@ app.MapGet("/api/workers/{workerId:guid}", async (
     .WithTags("Workers")
     .WithName("GetWorker");
 
-app.MapPost("/api/workers", async (
+workersApi.MapPost("", async (
     CreateWorkerRequest request,
     AppDbContext dbContext,
     CancellationToken cancellationToken) =>
@@ -1304,7 +1357,7 @@ app.MapPost("/api/workers", async (
     .WithTags("Workers")
     .WithName("CreateWorker");
 
-app.MapPatch("/api/workers/{workerId:guid}", async (
+workersApi.MapPatch("/{workerId:guid}", async (
     Guid workerId,
     UpdateWorkerRequest request,
     AppDbContext dbContext,
@@ -1420,7 +1473,7 @@ app.MapPatch("/api/workers/{workerId:guid}", async (
     .WithTags("Workers")
     .WithName("UpdateWorker");
 
-app.MapDelete("/api/workers/{workerId:guid}", async (
+workersApi.MapDelete("/{workerId:guid}", async (
     Guid workerId,
     AppDbContext dbContext,
     CancellationToken cancellationToken) =>
@@ -1437,6 +1490,7 @@ app.MapDelete("/api/workers/{workerId:guid}", async (
 
     return Results.NoContent();
 })
+    .RequireAuthorization("SuperAdmin")
     .WithTags("Workers")
     .WithName("DeleteWorker");
 
