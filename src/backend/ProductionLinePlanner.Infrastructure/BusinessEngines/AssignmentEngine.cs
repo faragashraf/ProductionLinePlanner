@@ -19,6 +19,7 @@ public sealed class AssignmentEngine : IAssignmentEngine
     private const string TempStatusScheduled = "Scheduled";
     private const string TempStatusCancelled = "Cancelled";
     private const string TempStatusCompleted = "Completed";
+    private const int MaxReasonLength = 500;
 
     private readonly AppDbContext _dbContext;
     private readonly IAuditEngine _auditEngine;
@@ -188,35 +189,35 @@ public sealed class AssignmentEngine : IAssignmentEngine
         string? requestMeta = null,
         CancellationToken cancellationToken = default)
     {
-        if (actorUserId == Guid.Empty)
+        var actorValidationResult = ValidateActor(actorUserId);
+        if (actorValidationResult.IsFailure)
         {
-            return Result<AssignmentActionResultDto>.Failure(new Error("Unauthorized", "User context is required."));
+            return Result<AssignmentActionResultDto>.Failure(actorValidationResult.Error!);
         }
 
-        if (request.WorkerId == Guid.Empty)
+        var workerIdValidationResult = ValidateRequiredGuid(request.WorkerId, nameof(request.WorkerId));
+        if (workerIdValidationResult.IsFailure)
         {
-            return Result<AssignmentActionResultDto>.Failure(new Error("ValidationError", "WorkerId is required."));
+            return Result<AssignmentActionResultDto>.Failure(workerIdValidationResult.Error!);
         }
 
-        if (request.SubStageId == Guid.Empty)
+        var subStageIdValidationResult = ValidateRequiredGuid(request.SubStageId, nameof(request.SubStageId));
+        if (subStageIdValidationResult.IsFailure)
         {
-            return Result<AssignmentActionResultDto>.Failure(new Error("ValidationError", "SubStageId is required."));
+            return Result<AssignmentActionResultDto>.Failure(subStageIdValidationResult.Error!);
         }
 
-        var worker = await _dbContext.Workers
-            .AsNoTracking()
-            .FirstOrDefaultAsync(x => x.Id == request.WorkerId && x.IsActive, cancellationToken);
+        if (!string.IsNullOrWhiteSpace(request.Reason) && request.Reason.Length > MaxReasonLength)
+        {
+            return Result<AssignmentActionResultDto>.Failure(new Error("ValidationError", $"Reason must be at most {MaxReasonLength} characters."));
+        }
 
-        if (worker is null)
+        if ((await ResolveActiveWorkerAsync(request.WorkerId, cancellationToken)).IsFailure)
         {
             return Result<AssignmentActionResultDto>.Failure(new Error("NotFound", "Worker not found or inactive."));
         }
 
-        var subStage = await _dbContext.SubStages
-            .AsNoTracking()
-            .FirstOrDefaultAsync(x => x.Id == request.SubStageId && x.IsActive, cancellationToken);
-
-        if (subStage is null)
+        if ((await ResolveActiveSubStageAsync(request.SubStageId, cancellationToken)).IsFailure)
         {
             return Result<AssignmentActionResultDto>.Failure(new Error("NotFound", "SubStage not found or inactive."));
         }
@@ -325,69 +326,67 @@ public sealed class AssignmentEngine : IAssignmentEngine
         string? requestMeta = null,
         CancellationToken cancellationToken = default)
     {
-        if (actorUserId == Guid.Empty)
+        var actorValidationResult = ValidateActor(actorUserId);
+        if (actorValidationResult.IsFailure)
         {
-            return Result<AssignmentActionResultDto>.Failure(new Error("Unauthorized", "User context is required."));
+            return Result<AssignmentActionResultDto>.Failure(actorValidationResult.Error!);
         }
 
-        if (request.WorkerId == Guid.Empty)
+        var workerIdValidationResult = ValidateRequiredGuid(request.WorkerId, nameof(request.WorkerId));
+        if (workerIdValidationResult.IsFailure)
         {
-            return Result<AssignmentActionResultDto>.Failure(new Error("ValidationError", "WorkerId is required."));
+            return Result<AssignmentActionResultDto>.Failure(workerIdValidationResult.Error!);
         }
 
-        if (request.FromSubStageId == Guid.Empty || request.ToSubStageId == Guid.Empty)
+        var fromSubStageValidationResult = ValidateRequiredGuid(request.FromSubStageId, nameof(request.FromSubStageId));
+        if (fromSubStageValidationResult.IsFailure)
         {
-            return Result<AssignmentActionResultDto>.Failure(new Error("ValidationError", "FromSubStageId and ToSubStageId are required."));
+            return Result<AssignmentActionResultDto>.Failure(fromSubStageValidationResult.Error!);
         }
 
-        if (string.IsNullOrWhiteSpace(request.Reason))
+        var toSubStageValidationResult = ValidateRequiredGuid(request.ToSubStageId, nameof(request.ToSubStageId));
+        if (toSubStageValidationResult.IsFailure)
         {
-            return Result<AssignmentActionResultDto>.Failure(new Error("ValidationError", "Reason is required."));
+            return Result<AssignmentActionResultDto>.Failure(toSubStageValidationResult.Error!);
         }
 
-        if (request.StartAtUtc >= request.EndAtUtc)
+        if (request.FromSubStageId == request.ToSubStageId)
         {
-            return Result<AssignmentActionResultDto>.Failure(new Error("ValidationError", "EndAtUtc must be after StartAtUtc."));
+            return Result<AssignmentActionResultDto>.Failure(new Error("ValidationError", "FromSubStageId must differ from ToSubStageId."));
+        }
+
+        var reasonValidationResult = ValidateReason(request.Reason, nameof(request.Reason));
+        if (reasonValidationResult.IsFailure)
+        {
+            return Result<AssignmentActionResultDto>.Failure(reasonValidationResult.Error!);
+        }
+
+        var requestWindowValidationResult = ValidateTemporaryWindow(request.StartAtUtc, request.EndAtUtc);
+        if (requestWindowValidationResult.IsFailure)
+        {
+            return Result<AssignmentActionResultDto>.Failure(requestWindowValidationResult.Error!);
         }
 
         var now = DateTime.UtcNow;
-        var worker = await _dbContext.Workers
-            .AsNoTracking()
-            .FirstOrDefaultAsync(x => x.Id == request.WorkerId && x.IsActive, cancellationToken);
-
-        if (worker is null)
+        if ((await ResolveActiveWorkerAsync(request.WorkerId, cancellationToken)).IsFailure)
         {
             return Result<AssignmentActionResultDto>.Failure(new Error("NotFound", "Worker not found or inactive."));
         }
 
-        var validFromSubStage = await _dbContext.SubStages
-            .AsNoTracking()
-            .AnyAsync(x => x.Id == request.FromSubStageId && x.IsActive, cancellationToken);
-
-        if (!validFromSubStage)
+        if ((await ResolveActiveSubStageAsync(request.FromSubStageId, cancellationToken)).IsFailure)
         {
             return Result<AssignmentActionResultDto>.Failure(new Error("ValidationError", "FromSubStage is invalid or inactive."));
         }
 
-        var validToSubStage = await _dbContext.SubStages
-            .AsNoTracking()
-            .AnyAsync(x => x.Id == request.ToSubStageId && x.IsActive, cancellationToken);
-
-        if (!validToSubStage)
+        if ((await ResolveActiveSubStageAsync(request.ToSubStageId, cancellationToken)).IsFailure)
         {
             return Result<AssignmentActionResultDto>.Failure(new Error("ValidationError", "ToSubStage is invalid or inactive."));
         }
 
-        var hasConflict = await _dbContext.WorkerTemporaryAssignments.AnyAsync(x =>
-            x.WorkerId == request.WorkerId &&
-            (x.Status == TempStatusScheduled || x.Status == TempStatusActive) &&
-            x.StartAtUtc < request.EndAtUtc &&
-            x.EndAtUtc > request.StartAtUtc,
-            cancellationToken);
-
-        if (hasConflict)
+        var overlapValidationResult = await ValidateTemporaryOverlapAsync(request.WorkerId, request.StartAtUtc, request.EndAtUtc, cancellationToken);
+        if (overlapValidationResult.IsFailure)
         {
-            return Result<AssignmentActionResultDto>.Failure(new Error("Conflict", "Worker has overlapping temporary assignment."));
+            return Result<AssignmentActionResultDto>.Failure(overlapValidationResult.Error!);
         }
 
         var status = request.StartAtUtc <= now
@@ -454,14 +453,22 @@ public sealed class AssignmentEngine : IAssignmentEngine
         string? requestMeta = null,
         CancellationToken cancellationToken = default)
     {
-        if (actorUserId == Guid.Empty)
+        var actorValidationResult = ValidateActor(actorUserId);
+        if (actorValidationResult.IsFailure)
         {
-            return Result<AssignmentActionResultDto>.Failure(new Error("Unauthorized", "User context is required."));
+            return Result<AssignmentActionResultDto>.Failure(actorValidationResult.Error!);
         }
 
-        if (request.ReplacementWorkerId == Guid.Empty || request.ReplacedWorkerId == Guid.Empty || request.SubStageId == Guid.Empty)
+        var replacementWorkerIdValidationResult = ValidateRequiredGuid(request.ReplacementWorkerId, nameof(request.ReplacementWorkerId));
+        if (replacementWorkerIdValidationResult.IsFailure)
         {
-            return Result<AssignmentActionResultDto>.Failure(new Error("ValidationError", "ReplacementWorkerId, ReplacedWorkerId and SubStageId are required."));
+            return Result<AssignmentActionResultDto>.Failure(replacementWorkerIdValidationResult.Error!);
+        }
+
+        var replacedWorkerIdValidationResult = ValidateRequiredGuid(request.ReplacedWorkerId, nameof(request.ReplacedWorkerId));
+        if (replacedWorkerIdValidationResult.IsFailure)
+        {
+            return Result<AssignmentActionResultDto>.Failure(replacedWorkerIdValidationResult.Error!);
         }
 
         if (request.ReplacementWorkerId == request.ReplacedWorkerId)
@@ -469,41 +476,37 @@ public sealed class AssignmentEngine : IAssignmentEngine
             return Result<AssignmentActionResultDto>.Failure(new Error("ValidationError", "Replacement worker must differ from replaced worker."));
         }
 
-        if (string.IsNullOrWhiteSpace(request.Reason))
+        var subStageIdValidationResult = ValidateRequiredGuid(request.SubStageId, nameof(request.SubStageId));
+        if (subStageIdValidationResult.IsFailure)
         {
-            return Result<AssignmentActionResultDto>.Failure(new Error("ValidationError", "Reason is required."));
+            return Result<AssignmentActionResultDto>.Failure(subStageIdValidationResult.Error!);
         }
 
-        if (request.StartAtUtc >= request.EndAtUtc)
+        var reasonValidationResult = ValidateReason(request.Reason, nameof(request.Reason));
+        if (reasonValidationResult.IsFailure)
         {
-            return Result<AssignmentActionResultDto>.Failure(new Error("ValidationError", "EndAtUtc must be after StartAtUtc."));
+            return Result<AssignmentActionResultDto>.Failure(reasonValidationResult.Error!);
+        }
+
+        var requestWindowValidationResult = ValidateTemporaryWindow(request.StartAtUtc, request.EndAtUtc);
+        if (requestWindowValidationResult.IsFailure)
+        {
+            return Result<AssignmentActionResultDto>.Failure(requestWindowValidationResult.Error!);
         }
 
         var now = DateTime.UtcNow;
 
-        var replacementWorker = await _dbContext.Workers
-            .AsNoTracking()
-            .FirstOrDefaultAsync(x => x.Id == request.ReplacementWorkerId && x.IsActive, cancellationToken);
-
-        if (replacementWorker is null)
+        if ((await ResolveActiveWorkerAsync(request.ReplacementWorkerId, cancellationToken)).IsFailure)
         {
             return Result<AssignmentActionResultDto>.Failure(new Error("NotFound", "Replacement worker not found or inactive."));
         }
 
-        var replacedWorker = await _dbContext.Workers
-            .AsNoTracking()
-            .FirstOrDefaultAsync(x => x.Id == request.ReplacedWorkerId && x.IsActive, cancellationToken);
-
-        if (replacedWorker is null)
+        if ((await ResolveActiveWorkerAsync(request.ReplacedWorkerId, cancellationToken)).IsFailure)
         {
             return Result<AssignmentActionResultDto>.Failure(new Error("NotFound", "Replaced worker not found or inactive."));
         }
 
-        var subStage = await _dbContext.SubStages
-            .AsNoTracking()
-            .FirstOrDefaultAsync(x => x.Id == request.SubStageId && x.IsActive, cancellationToken);
-
-        if (subStage is null)
+        if ((await ResolveActiveSubStageAsync(request.SubStageId, cancellationToken)).IsFailure)
         {
             return Result<AssignmentActionResultDto>.Failure(new Error("ValidationError", "SubStage not found or inactive."));
         }
@@ -515,21 +518,20 @@ public sealed class AssignmentEngine : IAssignmentEngine
             .ThenByDescending(x => x.Id)
             .FirstOrDefaultAsync(cancellationToken);
 
-        if (replacedWorkerDefault is not null && replacedWorkerDefault.SubStageId != request.SubStageId)
+        if (replacedWorkerDefault is null)
+        {
+            return Result<AssignmentActionResultDto>.Failure(new Error("ValidationError", "Replaced worker default assignment is required."));
+        }
+
+        if (replacedWorkerDefault.SubStageId != request.SubStageId)
         {
             return Result<AssignmentActionResultDto>.Failure(new Error("ValidationError", "Replaced worker default assignment is in a different sub-stage."));
         }
 
-        var conflict = await _dbContext.WorkerTemporaryAssignments.AnyAsync(x =>
-            x.WorkerId == request.ReplacementWorkerId &&
-            (x.Status == TempStatusScheduled || x.Status == TempStatusActive) &&
-            x.StartAtUtc < request.EndAtUtc &&
-            x.EndAtUtc > request.StartAtUtc,
-            cancellationToken);
-
-        if (conflict)
+        var overlapValidationResult = await ValidateTemporaryOverlapAsync(request.ReplacementWorkerId, request.StartAtUtc, request.EndAtUtc, cancellationToken);
+        if (overlapValidationResult.IsFailure)
         {
-            return Result<AssignmentActionResultDto>.Failure(new Error("Conflict", "Replacement worker already has overlapping temporary assignment."));
+            return Result<AssignmentActionResultDto>.Failure(overlapValidationResult.Error!);
         }
 
         var status = request.StartAtUtc <= now
@@ -599,10 +601,20 @@ public sealed class AssignmentEngine : IAssignmentEngine
         string? requestMeta = null,
         CancellationToken cancellationToken = default)
     {
-        if (actorUserId == Guid.Empty)
+        var actorValidationResult = ValidateActor(actorUserId);
+        if (actorValidationResult.IsFailure)
         {
-            return Result<CancelTemporaryAssignmentResultDto>.Failure(new Error("Unauthorized", "User context is required."));
+            return Result<CancelTemporaryAssignmentResultDto>.Failure(actorValidationResult.Error!);
         }
+
+        var assignmentIdValidationResult = ValidateRequiredGuid(assignmentId, nameof(assignmentId));
+        if (assignmentIdValidationResult.IsFailure)
+        {
+            return Result<CancelTemporaryAssignmentResultDto>.Failure(assignmentIdValidationResult.Error!);
+        }
+
+        var now = DateTime.UtcNow;
+        await FinalizeCompletedTemporaryAssignmentsAsync(now, cancellationToken);
 
         var assignment = await _dbContext.WorkerTemporaryAssignments
             .FirstOrDefaultAsync(
@@ -615,7 +627,6 @@ public sealed class AssignmentEngine : IAssignmentEngine
             return Result<CancelTemporaryAssignmentResultDto>.Failure(new Error("NotFound", "Temporary assignment not found."));
         }
 
-        var now = DateTime.UtcNow;
         _dbContext.Entry(assignment).Property(nameof(WorkerTemporaryAssignment.Status)).CurrentValue = TempStatusCancelled;
         _dbContext.Entry(assignment).Property(nameof(WorkerTemporaryAssignment.EndAtUtc)).CurrentValue = now;
         _dbContext.Entry(assignment).Property(nameof(WorkerTemporaryAssignment.UpdatedAtUtc)).CurrentValue = now;
@@ -772,6 +783,105 @@ public sealed class AssignmentEngine : IAssignmentEngine
             WorkersCount = items.Length,
             Items = items
         });
+    }
+
+    private static Result ValidateActor(Guid actorUserId)
+    {
+        if (actorUserId == Guid.Empty)
+        {
+            return Result.Failure(new Error("Unauthorized", "User context is required."));
+        }
+
+        return Result.Success();
+    }
+
+    private static Result ValidateRequiredGuid(Guid value, string fieldName)
+    {
+        if (value == Guid.Empty)
+        {
+            return Result.Failure(new Error("ValidationError", $"{fieldName} is required."));
+        }
+
+        return Result.Success();
+    }
+
+    private static Result ValidateReason(string? reason, string fieldName)
+    {
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            return Result.Failure(new Error("ValidationError", $"{fieldName} is required."));
+        }
+
+        if (reason.Length > MaxReasonLength)
+        {
+            return Result.Failure(new Error("ValidationError", $"{fieldName} must be at most {MaxReasonLength} characters."));
+        }
+
+        return Result.Success();
+    }
+
+    private static Result ValidateTemporaryWindow(DateTime startAtUtc, DateTime endAtUtc)
+    {
+        if (startAtUtc == default || endAtUtc == default)
+        {
+            return Result.Failure(new Error("ValidationError", "StartAtUtc and EndAtUtc are required."));
+        }
+
+        if (startAtUtc >= endAtUtc)
+        {
+            return Result.Failure(new Error("ValidationError", "EndAtUtc must be after StartAtUtc."));
+        }
+
+        return Result.Success();
+    }
+
+    private async Task<Result> ValidateTemporaryOverlapAsync(
+        Guid workerId,
+        DateTime startAtUtc,
+        DateTime endAtUtc,
+        CancellationToken cancellationToken)
+    {
+        var hasConflict = await _dbContext.WorkerTemporaryAssignments.AnyAsync(x =>
+            x.WorkerId == workerId &&
+            (x.Status == TempStatusScheduled || x.Status == TempStatusActive) &&
+            x.StartAtUtc < endAtUtc &&
+            x.EndAtUtc > startAtUtc,
+            cancellationToken);
+
+        if (hasConflict)
+        {
+            return Result.Failure(new Error("Conflict", "Worker has overlapping temporary assignment."));
+        }
+
+        return Result.Success();
+    }
+
+    private async Task<Result<Worker>> ResolveActiveWorkerAsync(Guid workerId, CancellationToken cancellationToken)
+    {
+        var worker = await _dbContext.Workers
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == workerId && x.IsActive, cancellationToken);
+
+        if (worker is null)
+        {
+            return Result<Worker>.Failure(new Error("NotFound", "Worker not found or inactive."));
+        }
+
+        return Result<Worker>.Success(worker);
+    }
+
+    private async Task<Result<SubStage>> ResolveActiveSubStageAsync(Guid subStageId, CancellationToken cancellationToken)
+    {
+        var subStage = await _dbContext.SubStages
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == subStageId && x.IsActive, cancellationToken);
+
+        if (subStage is null)
+        {
+            return Result<SubStage>.Failure(new Error("NotFound", "SubStage not found or inactive."));
+        }
+
+        return Result<SubStage>.Success(subStage);
     }
 
     private async Task<Result> FinalizeCompletedTemporaryAssignmentsAsync(
