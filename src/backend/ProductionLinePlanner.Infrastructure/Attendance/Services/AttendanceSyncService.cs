@@ -319,53 +319,74 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
             return Result<AttendanceSyncResultDto>.Failure(new Error("AttendanceSourceError", "Unable to connect to attendance source or read required tables."));
         }
 
+        var sourceUsersCount = sourceUserInfos.Count;
+        var sourceCheckInsCount = sourceCheckIns.Count;
+        _logger.LogInformation(
+            "Attendance sync started. sourceUsers={SourceUsersCount}, sourceCheckIns={SourceCheckInsCount}, date={SyncDate}",
+            sourceUsersCount,
+            sourceCheckInsCount,
+            syncDate);
+
         var mappedWorkers = workers
             .Where(x => !string.IsNullOrWhiteSpace(x.AttendanceUserId) || !string.IsNullOrWhiteSpace(x.BadgeNumber))
             .ToArray();
 
         if (mappedWorkers.Length == 0)
         {
+            _logger.LogWarning(
+                "Attendance sync completed with no mapped workers. sourceUsers={SourceUsersCount}, sourceCheckIns={SourceCheckInsCount}, date={SyncDate}",
+                sourceUsersCount,
+                sourceCheckInsCount,
+                syncDate);
+
+            var emptyUnmatchedSourceUsersCount = sourceCheckIns
+                .Select(x => NormalizeSourceIdentity(x.UserId))
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Count();
+
             return Result<AttendanceSyncResultDto>.Success(new AttendanceSyncResultDto
             {
                 SyncDateUtc = syncDate,
-                EvaluatedWorkers = 0,
-                SyncedWorkers = 0,
+                SourceUsersCount = sourceUsersCount,
+                SourceCheckInsCount = sourceCheckInsCount,
+                MatchedWorkersCount = 0,
+                UnmatchedSourceUsersCount = emptyUnmatchedSourceUsersCount,
+                WorkersWithoutAttendanceCount = 0,
                 InsertedRecords = 0,
                 UpdatedRecords = 0,
-                UnchangedRecords = 0,
-                UnmatchedSourceRows = 0,
-                WorkersWithMissingMapping = 0
+                SkippedRecords = 0
             });
         }
 
         var attendanceUserMap = BuildIdentityLookup(mappedWorkers, x => x.AttendanceUserId);
         var badgeMap = BuildIdentityLookup(mappedWorkers, x => x.BadgeNumber);
         var badgeBySourceUserId = sourceUserInfos
-            .Where(x => x.UserId.HasValue)
+            .Where(x => x.UserId is not null)
             .GroupBy(x => NormalizeIdentity(x.UserId!.ToString()))
             .Where(g => g.Key is not null)
             .ToDictionary(g => g.Key!, g => NormalizeIdentity(g.First().BadgeNumber), StringComparer.OrdinalIgnoreCase);
 
         var validCheckIns = sourceCheckIns
-            .Where(x => x.UserId.HasValue && x.CheckTime != default)
+            .Where(x => x.UserId is not null && x.CheckTime != default)
             .Select(x => new
             {
-                WorkerUserId = NormalizeIdentity(x.UserId!.ToString())!,
+                WorkerUserId = NormalizeSourceIdentity(x.UserId)!,
                 x.CheckTime,
-                RawSourceIdentifier = $"{NormalizeIdentity(x.UserId!.ToString())}:{x.CheckTime:O}:{NormalizeIdentity(x.CheckType)}"
+                RawSourceIdentifier = $"{NormalizeSourceIdentity(x.UserId)!}:{x.CheckTime:O}:{NormalizeIdentity(x.CheckType)}"
             })
-            .Where(x => x.WorkerUserId.Length > 0)
+            .Where(x => !string.IsNullOrWhiteSpace(x.WorkerUserId))
             .ToList();
 
         var matchedByWorker = new Dictionary<Guid, (DateTime CheckTime, string SourceRawId)>();
-        var unmatchedSourceRows = 0;
+        var unmatchedSourceUsers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var item in validCheckIns.OrderBy(x => x.CheckTime))
         {
             var sourceUserId = item.WorkerUserId;
             if (!TryResolveWorkerId(sourceUserId, attendanceUserMap, badgeMap, badgeBySourceUserId, out var workerId))
             {
-                unmatchedSourceRows++;
+                unmatchedSourceUsers.Add(sourceUserId);
                 continue;
             }
 
@@ -374,6 +395,9 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
                 matchedByWorker[workerId] = (item.CheckTime, item.RawSourceIdentifier);
             }
         }
+
+        var matchedWorkersCount = matchedByWorker.Count;
+        var unmatchedSourceUsersCount = unmatchedSourceUsers.Count;
 
         var workerIds = mappedWorkers.Select(x => x.Id).ToArray();
         var existingRecords = await _appDbContext.AttendanceRecords
@@ -389,7 +413,6 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
         var insertCount = 0;
         var updateCount = 0;
         var unchangedCount = 0;
-        var syncEntries = 0;
         var syncRunAt = DateTime.UtcNow;
 
         foreach (var worker in mappedWorkers)
@@ -421,7 +444,6 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
 
                 _appDbContext.AttendanceRecords.Add(record);
                 insertCount++;
-                syncEntries++;
                 continue;
             }
 
@@ -441,37 +463,70 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
                 worker.BadgeNumber,
                 syncRunAt);
             updateCount++;
-            syncEntries++;
         }
 
         await _appDbContext.SaveChangesAsync(cancellationToken);
 
-        var missingWorkerMappings = sourceCheckIns.Select(x => NormalizeIdentity(x.UserId?.ToString())).Distinct(StringComparer.OrdinalIgnoreCase)
-            .Count(sourceUserId =>
+        var workersWithoutAttendanceCount = mappedWorkers.Count(worker => !matchedByWorker.ContainsKey(worker.Id));
+
+        if (insertCount == 0)
+        {
+            if (sourceCheckInsCount == 0)
             {
-                if (string.IsNullOrWhiteSpace(sourceUserId))
-                {
-                    return false;
-                }
+                _logger.LogWarning(
+                    "Attendance sync returned zero inserted records because no valid source check-ins were found. date={SyncDate}, sourceUsers={SourceUsersCount}, sourceCheckIns={SourceCheckInsCount}",
+                    syncDate,
+                    sourceUsersCount,
+                    sourceCheckInsCount);
+            }
+            else if (matchedWorkersCount == 0)
+            {
+                _logger.LogWarning(
+                    "Attendance sync returned zero inserted records because no source users could be matched to active workers. date={SyncDate}, unmatchedSourceUsers={UnmatchedSourceUsersCount}",
+                    syncDate,
+                    unmatchedSourceUsersCount);
+            }
+            else if (updateCount > 0)
+            {
+                _logger.LogInformation(
+                    "Attendance sync returned zero inserted records because matched workers were updated rather than inserted. date={SyncDate}, updatedRecords={UpdatedRecords}, skippedRecords={SkippedRecords}",
+                    syncDate,
+                    updateCount,
+                    unchangedCount);
+            }
+            else if (sourceCheckInsCount > 0 && updateCount == 0 && unchangedCount > 0)
+            {
+                _logger.LogInformation(
+                    "Attendance sync returned zero inserted records because all matched source users resolved only to unchanged existing attendance rows. date={SyncDate}, skippedRecords={SkippedRecords}, workersWithoutAttendance={WorkersWithoutAttendanceCount}",
+                    syncDate,
+                    unchangedCount,
+                    workersWithoutAttendanceCount);
+            }
+        }
 
-                if (TryResolveWorkerId(sourceUserId, attendanceUserMap, badgeMap, badgeBySourceUserId, out _))
-                {
-                    return false;
-                }
-
-                return true;
-            });
+        _logger.LogInformation(
+            "Attendance sync completed. sourceUsers={SourceUsersCount}, sourceCheckIns={SourceCheckInsCount}, matchedWorkers={MatchedWorkersCount}, unmatchedSourceUsers={UnmatchedSourceUsersCount}, workersWithoutAttendance={WorkersWithoutAttendanceCount}, inserted={InsertedRecords}, updated={UpdatedRecords}, skipped={SkippedRecords}, date={SyncDate}",
+            sourceUsersCount,
+            sourceCheckInsCount,
+            matchedWorkersCount,
+            unmatchedSourceUsersCount,
+            workersWithoutAttendanceCount,
+            insertCount,
+            updateCount,
+            unchangedCount,
+            syncDate);
 
         return Result<AttendanceSyncResultDto>.Success(new AttendanceSyncResultDto
         {
             SyncDateUtc = syncDate,
-            EvaluatedWorkers = mappedWorkers.Length,
-            SyncedWorkers = syncEntries,
+            SourceUsersCount = sourceUsersCount,
+            SourceCheckInsCount = sourceCheckInsCount,
+            MatchedWorkersCount = matchedWorkersCount,
+            UnmatchedSourceUsersCount = unmatchedSourceUsersCount,
+            WorkersWithoutAttendanceCount = workersWithoutAttendanceCount,
             InsertedRecords = insertCount,
             UpdatedRecords = updateCount,
-            UnchangedRecords = unchangedCount,
-            UnmatchedSourceRows = unmatchedSourceRows,
-            WorkersWithMissingMapping = missingWorkerMappings
+            SkippedRecords = unchangedCount
         });
     }
 
@@ -483,6 +538,11 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
         }
 
         return value.Trim();
+    }
+
+    private static string? NormalizeSourceIdentity(int? value)
+    {
+        return NormalizeIdentity(value?.ToString());
     }
 
     private static DateTime GetDateOnly(DateTime? dateUtc)
