@@ -62,7 +62,7 @@
           <h2>Drop Zones للمراحل الفرعية (Mock)</h2>
           <p>اسحب/أفلت (واجهة mock) لمعاينة سلوك التوزيع — لا يوجد اتصال API حقيقي.</p>
         </div>
-        <plp-responsive-grid [minItemWidth]="220" gap="var(--plp-spacing-2)">
+        <plp-responsive-grid [minItemWidth]="285" gap="var(--plp-spacing-2)">
           <article
             *ngFor="let zone of subStageZones; trackBy: trackById"
             class="dz-card"
@@ -127,7 +127,7 @@
           <h2>العاملون الحاليون</h2>
           <p>كل بطاقة تتضمن الحالة والمرحلة الحالية والعلاقة الحالية بالتعيين.</p>
         </div>
-        <plp-responsive-grid [minItemWidth]="235" gap="var(--plp-spacing-3)">
+        <plp-responsive-grid [minItemWidth]="300" gap="var(--plp-spacing-2)">
           <article *ngFor="let worker of workers; trackBy: trackById" class="w-card">
             <plp-worker-card
               [fullName]="worker.fullName"

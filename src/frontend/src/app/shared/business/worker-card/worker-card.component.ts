@@ -8,9 +8,35 @@ import { FactoryStatus } from '../../models/factory-status.model';
   changeDetection: ChangeDetectionStrategy.OnPush
 })
 export class WorkerCardComponent {
-  @Input() fullName = '';
-  @Input() code = '';
+  @Input() fullName: unknown = '';
+  @Input() code: unknown = '';
   @Input() status: FactoryStatus | string = 'info';
-  @Input() assignmentType = 'غير محدد';
-  @Input() lastActivity = '';
+  @Input() assignmentType: unknown = 'غير محدد';
+  @Input() lastActivity: unknown = '';
+
+  get safeFullName(): string {
+    return this.coerceLabel(this.fullName);
+  }
+
+  get safeCode(): string {
+    return this.coerceLabel(this.code);
+  }
+
+  get safeAssignmentType(): string {
+    return this.coerceLabel(this.assignmentType);
+  }
+
+  get safeLastActivity(): string {
+    return this.coerceLabel(this.lastActivity);
+  }
+
+  private coerceLabel(value: unknown): string {
+    if (typeof value === 'string') {
+      return value;
+    }
+    if (typeof value === 'number') {
+      return String(value);
+    }
+    return '';
+  }
 }

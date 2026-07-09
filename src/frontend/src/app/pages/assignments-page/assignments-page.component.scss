@@ -45,7 +45,6 @@
   display: grid;
   grid-template-columns: 1fr;
   gap: var(--s4);
-  overflow-x: hidden;
   min-width: 0;
 }
 
@@ -68,6 +67,7 @@
   display: grid;
   gap: var(--s3);
   min-width: 0;
+  overflow: visible;
 }
 
 .panel__header {
@@ -118,6 +118,7 @@
   display: grid;
   gap: var(--s3);
   min-width: 0;
+  overflow: visible;
 }
 
 .dz-card {
@@ -143,9 +144,21 @@
 }
 
 .dz-status-badges {
-  display: grid;
+  display: flex;
+  flex-wrap: wrap;
   gap: var(--s2);
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  min-width: 0;
+}
+
+.amp-journey-badges,
+.rec-header {
+  min-width: 0;
+}
+
+.amp-journey-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
 }
 
 .dz-actions,
@@ -155,6 +168,7 @@
   gap: var(--s2);
   grid-template-columns: 1fr;
   align-items: stretch;
+  min-width: 0;
 }
 
 .rec-card {
@@ -174,7 +188,21 @@
 }
 
 .rec-header {
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.rec-header > div {
+  min-width: 0;
+}
+
+.rec-header h3,
+.rec-path {
+  overflow-wrap: anywhere;
+}
+
+.rec-header plp-status-badge {
+  grid-column: 1 / -1;
+  justify-self: start;
 }
 
 .rec-header h3,
@@ -223,13 +251,14 @@
   transform: translateX(-50%);
   z-index: 35;
   width: min(100% - var(--s4), 38rem);
-  max-height: calc(100vh - 2rem);
+  max-height: calc(100dvh - 2rem);
   overflow: auto;
   background: var(--surf);
   border: 1px solid var(--brd);
   border-radius: var(--r-lg);
   box-shadow: var(--e3);
   padding: var(--s4);
+  padding-bottom: calc(var(--s4) + env(safe-area-inset-bottom, 0px));
 }
 
 .md-header {
@@ -270,6 +299,19 @@
   text-align: start;
   color: var(--txt);
   width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.dz-card plp-worker-card,
+.w-card plp-worker-card {
+  min-width: 0;
+}
+
+.dz-actions button,
+.w-actions button,
+.md-actions button {
+  min-width: 0;
 }
 
 .md-chip--selected {

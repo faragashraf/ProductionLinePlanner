@@ -1,12 +1,13 @@
 .plp-stage-renderer {
   display: grid;
-  gap: var(--plp-spacing-1);
+  gap: var(--plp-spacing-2);
   min-width: 0;
+  width: min(100%, 1060px);
 }
 
 .plp-stage-renderer__header {
   display: grid;
-  gap: var(--plp-spacing-1);
+  gap: 0.35rem;
 }
 
 .plp-stage-renderer__back {
@@ -24,13 +25,13 @@
 
 .plp-stage-renderer__title {
   margin: 0;
-  font-size: var(--plp-font-size-lg);
+  font-size: var(--plp-font-size-md);
 }
 
 .plp-stage-renderer__context {
   margin: 0;
   color: var(--plp-color-text-subtle);
-  font-size: var(--plp-font-size-sm);
+  font-size: var(--plp-font-size-xs);
 }
 
 .plp-stage-renderer__subtitle,
@@ -50,7 +51,7 @@
 .plp-stage-renderer__substages-grid {
   align-items: start;
   width: 100%;
-  --plp-grid-min-width: 138px;
+  --plp-grid-min-width: 240px;
 }
 
 .plp-stage-renderer__substage-button {
@@ -58,7 +59,7 @@
   width: 100%;
   text-align: start;
   display: grid;
-  gap: 0.4rem;
+  gap: 0.25rem;
   border-radius: var(--plp-radius-md);
   overflow: visible;
 }
@@ -76,12 +77,37 @@
 .plp-stage-renderer__workers {
   display: grid;
   gap: var(--plp-spacing-2);
-  grid-template-columns: repeat(auto-fill, minmax(176px, 1fr));
-  margin-top: 0.1rem;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 17.5rem), 1fr));
+  margin-top: 0;
 }
 
 .plp-stage-renderer__empty {
   margin: 0;
   color: var(--plp-color-text-subtle);
   font-size: var(--plp-font-size-sm);
+}
+
+:host ::ng-deep .plp-stage-renderer .plp-main-stage-card,
+:host ::ng-deep .plp-stage-renderer .plp-sub-stage-card {
+  padding: var(--plp-spacing-2);
+  gap: var(--plp-spacing-1);
+}
+
+:host ::ng-deep .plp-stage-renderer .plp-main-stage-card header,
+:host ::ng-deep .plp-stage-renderer .plp-sub-stage-card header {
+  gap: 0.45rem;
+}
+
+:host ::ng-deep .plp-stage-renderer .plp-completion-bar {
+  max-width: 8.5rem;
+  gap: 0.25rem;
+}
+
+:host ::ng-deep .plp-stage-renderer .plp-completion-bar__track {
+  min-height: 0.36rem;
+  border-radius: var(--plp-radius-md);
+}
+
+:host ::ng-deep .plp-stage-renderer .plp-status-badge {
+  max-width: 100%;
 }
