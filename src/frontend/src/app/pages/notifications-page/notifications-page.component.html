@@ -1,0 +1,18 @@
+<section class="page-frame">
+  <header class="page-header">
+    <h1>Notifications</h1>
+  </header>
+  <div class="notification-list">
+    <article
+      class="notification-item"
+      *ngFor="let item of notifications"
+      [class.read]="item.isRead"
+      [class.warning]="item.severity === 'warning'"
+      [class.critical]="item.severity === 'critical'"
+    >
+      <h2>{{ item.title }}</h2>
+      <p>{{ item.message }}</p>
+      <span>{{ item.severity }}</span>
+    </article>
+  </div>
+</section>

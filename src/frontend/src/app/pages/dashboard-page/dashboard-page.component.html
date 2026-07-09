@@ -1,0 +1,26 @@
+<section class="page-frame">
+  <header class="page-header">
+    <h1>Dashboard</h1>
+    <p>لوحة مرجعية أولية للمؤشرات.</p>
+  </header>
+
+  <div class="kpi-grid">
+    <p-card *ngFor="let card of cards" styleClass="metric-card">
+      <ng-template pTemplate="title">
+        <div class="metric-title">{{ card.title }}</div>
+      </ng-template>
+      <ng-template pTemplate="subtitle">
+        <div class="metric-value">{{ card.value }}</div>
+      </ng-template>
+      <div class="metric-footer">
+        <i class="pi pi-arrow-up-left"></i>
+        <span>{{ getTrendLabel(card.trend) }}: {{ card.trendLabel }}</span>
+      </div>
+    </p-card>
+  </div>
+
+  <p-card class="insight-card">
+    <div class="insight-title">الخطوات التالية</div>
+    <p>بدون API حاليًا: سيتم ربط مؤشرات التحديث، التنبيهات، والخرائط بواجهات backend لاحقًا.</p>
+  </p-card>
+</section>

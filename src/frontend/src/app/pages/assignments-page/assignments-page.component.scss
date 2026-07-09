@@ -1,0 +1,27 @@
+.assignment-list {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.assignment-card {
+  border: 1px solid #dbe4fc;
+  border-radius: 0.85rem;
+  padding: 0.8rem;
+  background: #fff;
+}
+
+.assignment-card h2 {
+  margin: 0;
+}
+
+.assignment-card p {
+  margin: 0.3rem 0 0;
+}
+
+.ghost-pill {
+  margin-top: 0.45rem;
+  border: 1px solid #9caeff;
+  border-radius: 999px;
+  padding: 0.3rem 0.6rem;
+  display: inline-block;
+}
