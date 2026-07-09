@@ -47,12 +47,14 @@ const string TempStatusCancelled = "Cancelled";
 const string TimelineActionCreate = "Create";
 const string TimelineActionUpdate = "Update";
 const string TimelineActionCancel = "Cancel";
+const string SecurityBootstrapEndpoint = "/api/admin/bootstrap";
 var jwtSection = builder.Configuration.GetSection("Authentication:Jwt");
 var jwtIssuer = jwtSection["Issuer"] ?? "ProductionLinePlanner.Api";
 var jwtAudience = jwtSection["Audience"] ?? "ProductionLinePlanner.WebClient";
 var jwtAccessTokenMinutes = Math.Max(15, builder.Configuration.GetValue("Authentication:Jwt:AccessTokenMinutes", 45));
 var jwtRefreshTokenDays = Math.Max(1, builder.Configuration.GetValue("Authentication:Jwt:RefreshTokenDays", 14));
 var jwtSigningKey = jwtSection["SigningKey"];
+var bootstrapSecret = builder.Configuration["Bootstrap:Secret"];
 if (string.IsNullOrWhiteSpace(jwtSigningKey) ||
     jwtSigningKey.Contains("REPLACE_WITH_", StringComparison.OrdinalIgnoreCase) ||
     jwtSigningKey.Contains("USER_SECRET", StringComparison.OrdinalIgnoreCase))
@@ -394,6 +396,110 @@ authApi.MapGet("/me", async (
     .RequireAuthorization()
     .WithTags("Auth")
     .WithName("AuthMe");
+
+if (app.Environment.IsDevelopment())
+{
+    var bootstrapApi = app.MapGroup(SecurityBootstrapEndpoint);
+
+    bootstrapApi.MapPost("/super-admin", async (
+        BootstrapSuperAdminRequest request,
+        AppDbContext dbContext,
+        IPasswordHasher<AppUser> passwordHasher,
+        CancellationToken cancellationToken) =>
+    {
+        if (string.IsNullOrWhiteSpace(request.FullName?.Trim()) ||
+            string.IsNullOrWhiteSpace(request.Email?.Trim()) ||
+            string.IsNullOrWhiteSpace(request.Password))
+        {
+            return ApiResponse.Failure("ValidationError", "FullName, Email, and Password are required.");
+        }
+
+        var incomingSecret = request.BootstrapSecret?.Trim();
+        if (string.IsNullOrWhiteSpace(incomingSecret))
+        {
+            return ApiResponse.Failure("ValidationError", "BootstrapSecret is required.");
+        }
+
+        var configuredBootstrapSecret = bootstrapSecret?.Trim();
+        if (string.IsNullOrWhiteSpace(configuredBootstrapSecret) ||
+            configuredBootstrapSecret.Contains("REPLACE_WITH", StringComparison.OrdinalIgnoreCase) ||
+            configuredBootstrapSecret.Contains("USER_SECRET", StringComparison.OrdinalIgnoreCase))
+        {
+            return ApiResponse.Failure("ConfigurationError", "Bootstrap secret is not configured.");
+        }
+
+        var incomingSecretBytes = Encoding.UTF8.GetBytes(incomingSecret);
+        var configuredSecretBytes = Encoding.UTF8.GetBytes(configuredBootstrapSecret);
+        if (incomingSecretBytes.Length != configuredSecretBytes.Length ||
+            !CryptographicOperations.FixedTimeEquals(incomingSecretBytes, configuredSecretBytes))
+        {
+            return ApiResponse.Failure("Unauthorized", "Invalid bootstrap secret.", 401);
+        }
+
+        if (await dbContext.AppUsers.AnyAsync(cancellationToken))
+        {
+            return ApiResponse.Failure("BootstrapNotAllowed", "Bootstrap is only allowed when no AppUser exists.", 409);
+        }
+
+        var fullName = request.FullName.Trim();
+        var email = request.Email.Trim();
+        if (!email.Contains("@", StringComparison.Ordinal))
+        {
+            return ApiResponse.Failure("ValidationError", "Email is invalid.");
+        }
+
+        if (await dbContext.AppRoles.AnyAsync(role => role.Role == UserRole.SuperAdmin, cancellationToken) is false)
+        {
+            dbContext.AppRoles.Add(new AppRole(
+                id: Guid.NewGuid(),
+                role: UserRole.SuperAdmin,
+                name: UserRole.SuperAdmin.ToString(),
+                description: "System bootstrap role.",
+                isSystemRole: true,
+                createdAtUtc: DateTime.UtcNow));
+        }
+
+        var userId = Guid.NewGuid();
+        var passwordHash = passwordHasher.HashPassword(
+            new AppUser(
+                id: userId,
+                fullName: fullName,
+                email: email,
+                passwordHash: "temporary-hash",
+                createdAtUtc: DateTime.UtcNow),
+            request.Password);
+
+        var superAdminUser = new AppUser(
+            id: userId,
+            fullName: fullName,
+            email: email,
+            passwordHash: passwordHash,
+            isActive: true,
+            preferredLanguage: "en",
+            createdAtUtc: DateTime.UtcNow);
+
+        var superAdminRole = await dbContext.AppRoles
+            .FirstOrDefaultAsync(role => role.Role == UserRole.SuperAdmin, cancellationToken);
+        if (superAdminRole is null)
+        {
+            return ApiResponse.Failure("BootstrapRoleNotCreated", "Failed to create SuperAdmin role.");
+        }
+
+        superAdminUser.AssignRole(superAdminRole);
+        dbContext.AppUsers.Add(superAdminUser);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return Results.Created($"{SecurityBootstrapEndpoint}/super-admin", ApiResponse.Success(new
+        {
+            id = superAdminUser.Id,
+            fullName = superAdminUser.FullName,
+            email = superAdminUser.Email,
+            roles = new[] { UserRole.SuperAdmin.ToString() }
+        }, "SuperAdmin bootstrap complete."));
+    })
+        .WithTags("Bootstrap")
+        .WithName("BootstrapSuperAdmin");
+}
 
 authApi.MapPost("/refresh", async (
     RefreshTokenRequest request,
