@@ -1,0 +1,9 @@
+<article class="plp-assignment-card">
+  <div>
+    <h3>{{ worker }}</h3>
+    <p>من: {{ fromStage || '—' }}</p>
+    <p>إلى: {{ toStage || '—' }}</p>
+    <p>النوع: {{ assignmentType }}</p>
+  </div>
+  <plp-status-badge [status]="status"></plp-status-badge>
+</article>

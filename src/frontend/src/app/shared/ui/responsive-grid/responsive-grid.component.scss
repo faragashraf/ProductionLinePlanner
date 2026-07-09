@@ -1,0 +1,6 @@
+.plp-responsive-grid {
+  display: grid;
+  gap: var(--plp-grid-gap);
+  grid-template-columns: repeat(auto-fill, minmax(minmax(220px, var(--plp-grid-min-width)), 1fr));
+  width: 100%;
+}

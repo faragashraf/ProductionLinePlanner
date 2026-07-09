@@ -1,0 +1,9 @@
+.plp-production-line-card__footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--plp-spacing-3);
+  align-items: center;
+  justify-content: space-between;
+  color: var(--plp-color-text-subtle);
+  font-size: var(--plp-font-size-xs);
+}

@@ -18,6 +18,7 @@ import { BreadcrumbModule } from 'primeng/breadcrumb';
 import { CardModule } from 'primeng/card';
 import { BadgeModule } from 'primeng/badge';
 import { ButtonModule } from 'primeng/button';
+import { SharedModule } from './shared/shared.module';
 
 @NgModule({
   declarations: [
@@ -40,7 +41,8 @@ import { ButtonModule } from 'primeng/button';
     BreadcrumbModule,
     CardModule,
     BadgeModule,
-    ButtonModule
+    ButtonModule,
+    SharedModule
   ],
   providers: [],
   bootstrap: [AppComponent]

@@ -1,0 +1,13 @@
+<section class="plp-empty-state">
+  <i class="pi" [class]="icon" aria-hidden="true"></i>
+  <h3>{{ title }}</h3>
+  <p>{{ description }}</p>
+  <button
+    *ngIf="actionText"
+    type="button"
+    class="plp-empty-state__button"
+    (click)="emitAction()"
+  >
+    {{ actionText }}
+  </button>
+</section>

@@ -1,0 +1,6 @@
+<div class="plp-worker-avatar" [class]="statusTone" [class]="'plp-worker-avatar--' + size">
+  <img *ngIf="imageUrl; else initials" [src]="imageUrl" [alt]="fullName" />
+  <ng-template #initials>
+    <span>{{ initials }}</span>
+  </ng-template>
+</div>

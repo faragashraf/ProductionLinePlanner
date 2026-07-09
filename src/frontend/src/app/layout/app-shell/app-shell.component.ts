@@ -21,13 +21,13 @@ export class AppShellComponent implements OnInit, OnDestroy {
   notificationCount = 3;
 
   navigationItems: AppNavigationItem[] = [
-    { label: 'Dashboard', path: '/dashboard', icon: 'pi-home' },
-    { label: 'Factory Map', path: '/factory-map', icon: 'pi-map' },
-    { label: 'Production Lines', path: '/production-lines', icon: 'pi-sitemap' },
-    { label: 'Stages', path: '/stages', icon: 'pi-list' },
-    { label: 'Workers', path: '/workers', icon: 'pi-users' },
-    { label: 'Assignments', path: '/assignments', icon: 'pi-file-check' },
-    { label: 'Notifications', path: '/notifications', icon: 'pi-bell' },
+    { label: 'لوحة التحكم', path: '/dashboard', icon: 'pi-home' },
+    { label: 'خريطة المصنع', path: '/factory-map', icon: 'pi-map' },
+    { label: 'خطوط الإنتاج', path: '/production-lines', icon: 'pi-sitemap' },
+    { label: 'المراحل', path: '/stages', icon: 'pi-list' },
+    { label: 'العاملون', path: '/workers', icon: 'pi-users' },
+    { label: 'التعيينات', path: '/assignments', icon: 'pi-file-check' },
+    { label: 'الإشعارات', path: '/notifications', icon: 'pi-bell' },
   ];
 
   private destroy$ = new Subject<void>();

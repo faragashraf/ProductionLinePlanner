@@ -1,0 +1,14 @@
+<div
+  class="plp-readiness-ring"
+  [class]="toneClass"
+  [style.--plp-readiness-size.px]="size"
+  [style.--plp-readiness-value]="normalized"
+  role="img"
+  [attr.aria-label]="'جاهزية: ' + normalized + ' بالمئة'"
+>
+  <div class="plp-readiness-ring__dial">
+    <span class="plp-readiness-ring__value">{{ normalized }}%</span>
+    <i *ngIf="showIcon" class="pi" [class]="statusMeta.icon" aria-hidden="true"></i>
+    <small *ngIf="!showIcon" class="plp-readiness-ring__status">{{ statusMeta.labelAr }}</small>
+  </div>
+</div>

@@ -1,0 +1,46 @@
+.plp-completion-bar {
+  display: grid;
+  gap: var(--plp-spacing-2);
+}
+
+.plp-completion-bar__label {
+  font-size: var(--plp-font-size-xxs);
+  color: var(--plp-color-text-subtle);
+  font-weight: 600;
+}
+
+.plp-completion-bar__track {
+  width: 100%;
+  min-height: 0.65rem;
+  border-radius: var(--plp-radius-pill);
+  overflow: hidden;
+  background: var(--plp-color-muted-soft);
+}
+
+.plp-completion-bar__fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  width: 0;
+  transition: width 220ms ease;
+}
+
+.plp-completion-bar--present .plp-completion-bar__fill,
+.plp-completion-bar--ready .plp-completion-bar__fill {
+  background: linear-gradient(90deg, #86efac, var(--plp-status-ready));
+}
+
+.plp-completion-bar--late .plp-completion-bar__fill,
+.plp-completion-bar--warning .plp-completion-bar__fill {
+  background: linear-gradient(90deg, #fde68a, var(--plp-status-warning));
+}
+
+.plp-completion-bar--critical .plp-completion-bar__fill,
+.plp-completion-bar--absent .plp-completion-bar__fill {
+  background: linear-gradient(90deg, #fecaca, var(--plp-status-critical));
+}
+
+.plp-completion-bar--info .plp-completion-bar__fill,
+.plp-completion-bar--unassigned .plp-completion-bar__fill {
+  background: linear-gradient(90deg, #bfdbfe, var(--plp-status-info));
+}

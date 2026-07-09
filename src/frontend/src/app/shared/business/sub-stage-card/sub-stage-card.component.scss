@@ -1,0 +1,26 @@
+.plp-sub-stage-card {
+  border: 1px solid var(--plp-color-border-muted);
+  border-radius: var(--plp-radius-md);
+  background: var(--plp-color-surface);
+  padding: var(--plp-spacing-3);
+  display: grid;
+  gap: var(--plp-spacing-2);
+}
+
+.plp-sub-stage-card header {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  gap: 0.7rem;
+}
+
+.plp-sub-stage-card h4 {
+  margin: 0;
+  font-size: var(--plp-font-size-sm);
+}
+
+.plp-sub-stage-card p {
+  margin: 0;
+  color: var(--plp-color-text-subtle);
+  font-size: var(--plp-font-size-xs);
+}

@@ -1,0 +1,76 @@
+.plp-status-badge {
+  --badge-padding-x: 0.65rem;
+  --badge-padding-y: 0.22rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--plp-spacing-2);
+  width: fit-content;
+  border-radius: var(--plp-radius-pill);
+  border: 1px solid transparent;
+  padding: var(--badge-padding-y) var(--badge-padding-x);
+  font-size: var(--plp-font-size-xxs);
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+  color: var(--plp-color-text);
+}
+
+.plp-status-badge--present {
+  background: var(--plp-status-present-bg);
+  color: var(--plp-status-present);
+  border-color: color-mix(in oklab, var(--plp-status-present) 35%, #fff);
+}
+
+.plp-status-badge--late {
+  background: var(--plp-status-late-bg);
+  color: var(--plp-status-late);
+  border-color: color-mix(in oklab, var(--plp-status-late) 35%, #fff);
+}
+
+.plp-status-badge--absent {
+  background: var(--plp-status-absent-bg);
+  color: var(--plp-status-absent);
+  border-color: color-mix(in oklab, var(--plp-status-absent) 35%, #fff);
+}
+
+.plp-status-badge--unassigned {
+  background: var(--plp-status-unassigned-bg);
+  color: var(--plp-status-unassigned);
+  border-color: color-mix(in oklab, var(--plp-status-unassigned) 35%, #fff);
+}
+
+.plp-status-badge--ready {
+  background: var(--plp-status-ready-bg);
+  color: var(--plp-status-ready);
+  border-color: color-mix(in oklab, var(--plp-status-ready) 35%, #fff);
+}
+
+.plp-status-badge--warning {
+  background: var(--plp-status-warning-bg);
+  color: var(--plp-status-warning);
+  border-color: color-mix(in oklab, var(--plp-status-warning) 35%, #fff);
+}
+
+.plp-status-badge--critical {
+  background: var(--plp-status-critical-bg);
+  color: var(--plp-status-critical);
+  border-color: color-mix(in oklab, var(--plp-status-critical) 35%, #fff);
+}
+
+.plp-status-badge--info {
+  background: var(--plp-status-info-bg);
+  color: var(--plp-status-info);
+  border-color: color-mix(in oklab, var(--plp-status-info) 35%, #fff);
+}
+
+.plp-status-badge--compact {
+  --badge-padding-x: 0.45rem;
+  --badge-padding-y: 0.15rem;
+  font-size: 0.72rem;
+}
+
+.plp-status-badge i {
+  font-size: 0.8rem;
+  margin-inline-start: 0;
+}
