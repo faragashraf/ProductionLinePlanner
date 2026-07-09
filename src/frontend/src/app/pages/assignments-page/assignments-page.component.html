@@ -62,7 +62,7 @@
           <h2>Drop Zones للمراحل الفرعية (Mock)</h2>
           <p>اسحب/أفلت (واجهة mock) لمعاينة سلوك التوزيع — لا يوجد اتصال API حقيقي.</p>
         </div>
-        <plp-responsive-grid [minItemWidth]="250" gap="var(--plp-spacing-3)">
+        <plp-responsive-grid [minItemWidth]="220" gap="var(--plp-spacing-2)">
           <article
             *ngFor="let zone of subStageZones; trackBy: trackById"
             class="dz-card"
@@ -127,7 +127,7 @@
           <h2>العاملون الحاليون</h2>
           <p>كل بطاقة تتضمن الحالة والمرحلة الحالية والعلاقة الحالية بالتعيين.</p>
         </div>
-        <plp-responsive-grid [minItemWidth]="260" gap="var(--plp-spacing-4)">
+        <plp-responsive-grid [minItemWidth]="235" gap="var(--plp-spacing-3)">
           <article *ngFor="let worker of workers; trackBy: trackById" class="w-card">
             <plp-worker-card
               [fullName]="worker.fullName"
@@ -184,13 +184,13 @@
 
     <aside class="amp-side">
       <section class="panel">
-        <plp-timeline-card title="الجدول الزمني للتغييرات (Mock)" [items]="timelineEntries"></plp-timeline-card>
+        <plp-timeline-card class="amp-timeline" title="الجدول الزمني للتغييرات (Mock)" [items]="timelineEntries"></plp-timeline-card>
       </section>
 
-      <section class="panel">
+      <section class="panel rec-panel">
         <div class="panel__header">
           <h2>التوصيات المرتبطة بالمرحلة</h2>
-          <p *ngIf="hasContextSelection">مؤشر البداية: {{ selectedShortageLabel }}</p>
+          <p class="rec-context" *ngIf="hasContextSelection">مؤشر البداية: {{ selectedShortageLabel }}</p>
           <p *ngIf="!hasContextSelection">يمكن تفعيل التوصية من صفحة خريطة المصنع لتظهر مرتبطة تلقائيًا بالمرحلة.</p>
         </div>
 

@@ -22,6 +22,11 @@ body {
   font-family: 'Cairo', 'Inter', 'Segoe UI', sans-serif;
 }
 
+app-root {
+  display: block;
+  min-height: 100%;
+}
+
 body {
   background: var(--plp-color-background);
   color: var(--plp-color-text);

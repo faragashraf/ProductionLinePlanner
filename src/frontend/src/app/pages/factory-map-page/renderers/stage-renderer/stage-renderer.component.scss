@@ -1,11 +1,12 @@
 .plp-stage-renderer {
   display: grid;
-  gap: var(--plp-spacing-3);
+  gap: var(--plp-spacing-1);
+  min-width: 0;
 }
 
 .plp-stage-renderer__header {
   display: grid;
-  gap: var(--plp-spacing-2);
+  gap: var(--plp-spacing-1);
 }
 
 .plp-stage-renderer__back {
@@ -14,10 +15,11 @@
   background: var(--plp-color-surface-soft);
   border-radius: var(--plp-radius-md);
   color: var(--plp-color-text);
-  padding: 0.45rem 0.65rem;
+  padding: 0.42rem 0.65rem;
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
+  min-height: 2.1rem;
 }
 
 .plp-stage-renderer__title {
@@ -35,7 +37,7 @@
 .plp-stage-renderer__workers-title {
   margin: 0;
   color: var(--plp-color-text-subtle);
-  font-size: var(--plp-font-size-sm);
+  font-size: var(--plp-font-size-xxs);
 }
 
 .plp-stage-renderer__journey-link {
@@ -45,12 +47,20 @@
   gap: 0.4rem;
 }
 
+.plp-stage-renderer__substages-grid {
+  align-items: start;
+  width: 100%;
+  --plp-grid-min-width: 138px;
+}
+
 .plp-stage-renderer__substage-button {
   all: unset;
   width: 100%;
   text-align: start;
   display: grid;
   gap: 0.4rem;
+  border-radius: var(--plp-radius-md);
+  overflow: visible;
 }
 
 .plp-stage-renderer__substage-button:focus-visible {
@@ -65,8 +75,9 @@
 
 .plp-stage-renderer__workers {
   display: grid;
-  gap: var(--plp-spacing-3);
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--plp-spacing-2);
+  grid-template-columns: repeat(auto-fill, minmax(176px, 1fr));
+  margin-top: 0.1rem;
 }
 
 .plp-stage-renderer__empty {

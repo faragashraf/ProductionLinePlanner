@@ -108,4 +108,12 @@ export class FactoryMapPageComponent {
 
     this.showStage();
   }
+
+  trackByLine(_: number, line: ProductionLineLayout): string {
+    return line.id;
+  }
+
+  trackByStage(_: number, stage: MainStageLayout): string {
+    return stage.id;
+  }
 }

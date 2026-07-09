@@ -49,6 +49,10 @@
   min-width: 0;
 }
 
+.amp-timeline {
+  display: grid;
+}
+
 .amp-main,
 .amp-side {
   display: grid;
@@ -60,14 +64,21 @@
   border: 1px solid var(--brd);
   border-radius: var(--r-lg);
   background: var(--surf);
-  padding: var(--s4);
+  padding: var(--s3);
   display: grid;
   gap: var(--s3);
+  min-width: 0;
+}
+
+.panel__header {
+  display: grid;
+  gap: 0.2rem;
 }
 
 .panel__header h2 {
   margin: 0 0 var(--s2);
   font-size: var(--fz-md);
+  line-height: 1.25;
 }
 
 .panel__header p {
@@ -76,13 +87,37 @@
   font-size: var(--fz-sm);
 }
 
+.rec-panel {
+  background: color-mix(in oklab, var(--info) 9%, var(--surf));
+  border-inline-start: 0.25rem solid var(--info);
+}
+
+.rec-context {
+  color: var(--plp-color-info-strong);
+  font-weight: 700;
+}
+
+.rec-legend {
+  margin-top: var(--s2);
+  padding: var(--s2);
+  border: 1px solid var(--brd);
+  border-radius: var(--r-md);
+  background: var(--surf-soft);
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3);
+  flex-wrap: wrap;
+}
+
 .dz-card,
 .rec-card {
   border: 1px solid var(--brd-muted);
   border-radius: var(--r-md);
-  padding: var(--s3);
+  padding: var(--s2) var(--s3);
   display: grid;
   gap: var(--s3);
+  min-width: 0;
 }
 
 .dz-card {
@@ -94,11 +129,23 @@
   box-shadow: var(--e2);
 }
 
+.dz-card,
+.rec-card,
+.w-card {
+  box-shadow: 0 1px 0 color-mix(in oklab, var(--plp-color-surface-soft) 18%, transparent);
+}
+
 .dz-status,
 .dz-list,
 .w-card {
   display: grid;
   gap: var(--s2);
+}
+
+.dz-status-badges {
+  display: grid;
+  gap: var(--s2);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .dz-actions,
@@ -107,10 +154,16 @@
   display: grid;
   gap: var(--s2);
   grid-template-columns: 1fr;
+  align-items: stretch;
 }
 
 .rec-card {
   background: var(--surf-soft);
+}
+
+.rec-card.rec-hero {
+  border-color: color-mix(in oklab, var(--info) 36%, var(--brd-muted));
+  box-shadow: 0 1px 0 color-mix(in oklab, var(--plp-color-info-2) 28%, transparent), var(--e2);
 }
 
 .rec-header,
@@ -249,6 +302,12 @@
 
 @media (min-width: 900px) {
   .amp-layout {
-    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1.35fr) minmax(240px, 1fr);
+  }
+}
+
+@media (min-width: 1200px) {
+  .amp-layout {
+    grid-template-columns: minmax(0, 1.45fr) minmax(290px, 0.9fr);
   }
 }
