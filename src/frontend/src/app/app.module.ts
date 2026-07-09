@@ -1,4 +1,5 @@
 import { NgModule } from '@angular/core';
+import { HTTP_INTERCEPTORS, HttpClientModule } from '@angular/common/http';
 import { BrowserModule } from '@angular/platform-browser';
 import { BrowserAnimationsModule } from '@angular/platform-browser/animations';
 
@@ -22,6 +23,7 @@ import { SharedModule } from './shared/shared.module';
 import { FactoryRendererComponent } from './pages/factory-map-page/renderers/factory-renderer/factory-renderer.component';
 import { LineRendererComponent } from './pages/factory-map-page/renderers/line-renderer/line-renderer.component';
 import { StageRendererComponent } from './pages/factory-map-page/renderers/stage-renderer/stage-renderer.component';
+import { AuthTokenInterceptor } from './core/interceptors/auth-token.interceptor';
 
 @NgModule({
   declarations: [
@@ -42,6 +44,7 @@ import { StageRendererComponent } from './pages/factory-map-page/renderers/stage
   imports: [
     BrowserModule,
     BrowserAnimationsModule,
+    HttpClientModule,
     AppRoutingModule,
     SidebarModule,
     BreadcrumbModule,
@@ -50,7 +53,13 @@ import { StageRendererComponent } from './pages/factory-map-page/renderers/stage
     ButtonModule,
     SharedModule
   ],
-  providers: [],
+  providers: [
+    {
+      provide: HTTP_INTERCEPTORS,
+      useClass: AuthTokenInterceptor,
+      multi: true
+    }
+  ],
   bootstrap: [AppComponent]
 })
 export class AppModule { }
