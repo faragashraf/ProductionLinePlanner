@@ -4,6 +4,8 @@ namespace ProductionLinePlanner.Domain.Entities;
 
 public class Notification
 {
+    private Notification() { }
+
     public Notification(
         Guid id,
         Guid recipientUserId,

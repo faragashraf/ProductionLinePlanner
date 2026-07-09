@@ -5,6 +5,8 @@ namespace ProductionLinePlanner.Domain.Entities;
 
 public class Factory
 {
+    private Factory() { }
+
     public Factory(
         Guid id,
         string name,

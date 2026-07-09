@@ -4,6 +4,8 @@ namespace ProductionLinePlanner.Domain.Entities;
 
 public class StageReadinessSnapshot
 {
+    private StageReadinessSnapshot() { }
+
     public StageReadinessSnapshot(
         Guid id,
         string scopeType,

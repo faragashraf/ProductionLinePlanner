@@ -4,6 +4,8 @@ namespace ProductionLinePlanner.Domain.Entities;
 
 public class WorkerTemporaryAssignment
 {
+    private WorkerTemporaryAssignment() { }
+
     public WorkerTemporaryAssignment(
         Guid id,
         Guid workerId,

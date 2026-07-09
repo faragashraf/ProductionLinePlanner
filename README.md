@@ -35,8 +35,9 @@ dotnet run --project ProductionLinePlanner.Api
   - `src/backend/ProductionLinePlanner.Api/appsettings.json`
   - `src/backend/ProductionLinePlanner.Api/appsettings.Development.json`
 - القيم المطلوبة في الأساس:
-  - `ConnectionStrings:AppDatabase: REPLACE_WITH_USER_SECRET`
-  - `ConnectionStrings:AttendanceDatabase: REPLACE_WITH_USER_SECRET`
+  - قاعدة بيانات نظام العمل: `FactoryPlannerDB` باستخدام `ConnectionStrings:AppDatabase`
+    (`ConnectionStrings:AppDatabase = REPLACE_WITH_USER_SECRET`)
+  - إعدادات قاعدة بيانات الحضور غير مفعلة بهذا المِلْف في هذه المرحلة
 
 ملاحظات:
 - احتفظ بملفات secrets محليًا فقط (أو عبر Secret Manager / environment variables).

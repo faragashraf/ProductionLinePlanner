@@ -18,7 +18,8 @@ public sealed class AttendanceRecordConfiguration : IEntityTypeConfiguration<Att
         builder.Property(x => x.AttendanceStatus)
             .HasConversion<string>()
             .HasMaxLength(30)
-            .HasDefaultValue(AttendanceStatus.Unassigned);
+            .HasDefaultValue(AttendanceStatus.Unassigned)
+            .HasSentinel(AttendanceStatus.Unassigned);
         builder.Property(x => x.Source).HasMaxLength(60);
         builder.Property(x => x.SourceRawId).HasMaxLength(120);
         builder.Property(x => x.AttendanceUserId).HasMaxLength(120);

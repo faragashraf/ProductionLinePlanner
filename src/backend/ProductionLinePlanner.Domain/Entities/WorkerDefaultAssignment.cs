@@ -4,6 +4,8 @@ namespace ProductionLinePlanner.Domain.Entities;
 
 public class WorkerDefaultAssignment
 {
+    private WorkerDefaultAssignment() { }
+
     public WorkerDefaultAssignment(
         Guid id,
         Guid workerId,

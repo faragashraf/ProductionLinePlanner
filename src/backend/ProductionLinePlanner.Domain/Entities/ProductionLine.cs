@@ -4,6 +4,8 @@ namespace ProductionLinePlanner.Domain.Entities;
 
 public class ProductionLine
 {
+    private ProductionLine() { }
+
     public ProductionLine(
         Guid id,
         Guid factoryId,

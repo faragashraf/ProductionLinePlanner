@@ -4,6 +4,8 @@ namespace ProductionLinePlanner.Domain.Entities;
 
 public class MainStage
 {
+    private MainStage() { }
+
     public MainStage(
         Guid id,
         Guid productionLineId,

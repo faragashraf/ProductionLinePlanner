@@ -4,6 +4,8 @@ namespace ProductionLinePlanner.Domain.Entities;
 
 public class AttendanceRecord
 {
+    private AttendanceRecord() { }
+
     public AttendanceRecord(
         Guid id,
         Guid workerId,
