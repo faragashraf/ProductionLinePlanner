@@ -39,8 +39,8 @@ public class AuditLog
     public Guid ActorUserId { get; private set; }
     public AppUser? ActorUser { get; set; }
     public AuditActionType ActionType { get; private set; }
-    public string EntityType { get; private set; }
-    public string EntityId { get; private set; }
+    public string EntityType { get; private set; } = string.Empty;
+    public string EntityId { get; private set; } = string.Empty;
     public string? EntityBeforeJson { get; private set; }
     public string? EntityAfterJson { get; private set; }
     public string? RequestMeta { get; private set; }
