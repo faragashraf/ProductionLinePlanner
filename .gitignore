@@ -1,0 +1,36 @@
+﻿# General local settings & secrets
+appsettings.*.local.json
+secrets.json
+*.user
+*.suo
+*.userosscache
+*.userprefs
+*.rsuser
+*.sln.docstates
+
+# Build output
+bin/
+obj/
+
+# IDE and editor artifacts
+.vscode/
+.vs/
+.idea/
+*.swp
+*.swo
+
+# Logs / runtime files
+*.log
+*.pid
+*.seed
+coverage/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Certificates and keys
+*.pfx
+*.p12
+*.key
+*.pem
