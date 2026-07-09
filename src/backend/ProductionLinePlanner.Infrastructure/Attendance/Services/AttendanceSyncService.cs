@@ -341,18 +341,18 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
         var attendanceUserMap = BuildIdentityLookup(mappedWorkers, x => x.AttendanceUserId);
         var badgeMap = BuildIdentityLookup(mappedWorkers, x => x.BadgeNumber);
         var badgeBySourceUserId = sourceUserInfos
-            .Where(x => !string.IsNullOrWhiteSpace(x.UserId))
-            .GroupBy(x => NormalizeIdentity(x.UserId))
+            .Where(x => x.UserId.HasValue)
+            .GroupBy(x => NormalizeIdentity(x.UserId!.ToString()))
             .Where(g => g.Key is not null)
             .ToDictionary(g => g.Key!, g => NormalizeIdentity(g.First().BadgeNumber), StringComparer.OrdinalIgnoreCase);
 
         var validCheckIns = sourceCheckIns
-            .Where(x => !string.IsNullOrWhiteSpace(x.UserId) && x.CheckTime != default)
+            .Where(x => x.UserId.HasValue && x.CheckTime != default)
             .Select(x => new
             {
-                WorkerUserId = NormalizeIdentity(x.UserId)!,
+                WorkerUserId = NormalizeIdentity(x.UserId!.ToString())!,
                 x.CheckTime,
-                RawSourceIdentifier = $"{NormalizeIdentity(x.UserId)}:{x.CheckTime:O}:{NormalizeIdentity(x.CheckType)}"
+                RawSourceIdentifier = $"{NormalizeIdentity(x.UserId!.ToString())}:{x.CheckTime:O}:{NormalizeIdentity(x.CheckType)}"
             })
             .Where(x => x.WorkerUserId.Length > 0)
             .ToList();
@@ -446,7 +446,7 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
 
         await _appDbContext.SaveChangesAsync(cancellationToken);
 
-        var missingWorkerMappings = sourceCheckIns.Select(x => NormalizeIdentity(x.UserId)).Distinct(StringComparer.OrdinalIgnoreCase)
+        var missingWorkerMappings = sourceCheckIns.Select(x => NormalizeIdentity(x.UserId?.ToString())).Distinct(StringComparer.OrdinalIgnoreCase)
             .Count(sourceUserId =>
             {
                 if (string.IsNullOrWhiteSpace(sourceUserId))

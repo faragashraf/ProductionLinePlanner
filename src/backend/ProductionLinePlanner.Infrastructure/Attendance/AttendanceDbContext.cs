@@ -34,10 +34,10 @@ public sealed class AttendanceDbContext : DbContext
             entity.HasNoKey();
             entity.ToTable(_options.UserInfoTable);
 
-            entity.Property(x => x.UserId).HasColumnName("USERID").HasMaxLength(120);
+            entity.Property(x => x.UserId).HasColumnName("USERID");
             entity.Property(x => x.BadgeNumber).HasColumnName("BADGENUMBER").HasMaxLength(120);
             entity.Property(x => x.Name).HasColumnName("Name").HasMaxLength(200);
-            entity.Property(x => x.DepartmentId).HasColumnName("DEPTID");
+            entity.Property(x => x.DefaultDeptId).HasColumnName("DEFAULTDEPTID");
         });
     }
 
@@ -48,7 +48,7 @@ public sealed class AttendanceDbContext : DbContext
             entity.HasNoKey();
             entity.ToTable(_options.CheckInOutTable);
 
-            entity.Property(x => x.UserId).HasColumnName("USERID").HasMaxLength(120);
+            entity.Property(x => x.UserId).HasColumnName("USERID");
             entity.Property(x => x.CheckTime).HasColumnName("CHECKTIME");
             entity.Property(x => x.CheckType).HasColumnName("CHECKTYPE").HasMaxLength(20);
         });
