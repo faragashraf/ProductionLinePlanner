@@ -42,6 +42,7 @@ public class AppUser
     public DateTime UpdatedAtUtc { get; private set; }
 
     public List<AppRole> Roles { get; } = [];
+    public List<RefreshToken> RefreshTokens { get; } = [];
 
     public void AssignRole(AppRole role)
     {

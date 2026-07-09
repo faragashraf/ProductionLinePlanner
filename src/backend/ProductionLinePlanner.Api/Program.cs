@@ -43,6 +43,7 @@ var jwtSection = builder.Configuration.GetSection("Authentication:Jwt");
 var jwtIssuer = jwtSection["Issuer"] ?? "ProductionLinePlanner.Api";
 var jwtAudience = jwtSection["Audience"] ?? "ProductionLinePlanner.WebClient";
 var jwtAccessTokenMinutes = Math.Max(15, builder.Configuration.GetValue("Authentication:Jwt:AccessTokenMinutes", 45));
+var jwtRefreshTokenDays = Math.Max(1, builder.Configuration.GetValue("Authentication:Jwt:RefreshTokenDays", 14));
 var jwtSigningKey = jwtSection["SigningKey"] ?? "REPLACE_WITH_USER_SECRET_MIN_64_CHARS_00000000000000000000000000000000";
 if (Encoding.UTF8.GetByteCount(jwtSigningKey) < 64)
 {
@@ -286,7 +287,26 @@ authApi.MapPost("/login", async (
 
     var now = DateTime.UtcNow;
     var expiresAt = now.AddMinutes(jwtAccessTokenMinutes);
+    var refreshToken = AuthTokenService.GenerateRefreshToken();
+    var refreshTokenHash = AuthTokenService.HashRefreshToken(refreshToken);
+    var refreshTokenExpiresAt = now.AddDays(jwtRefreshTokenDays);
+
+    await dbContext.RefreshTokens
+        .Where(rt => rt.AppUserId == user.Id && !rt.IsRevoked && rt.ExpiresAtUtc > now)
+        .ExecuteUpdateAsync(setters => setters
+            .SetProperty(rt => rt.IsRevoked, true)
+            .SetProperty(rt => rt.RevokedAtUtc, now)
+            .SetProperty(rt => rt.RevokedReason, "ReplacedByLogin"), cancellationToken);
+
+    dbContext.RefreshTokens.Add(new RefreshToken(
+        id: Guid.NewGuid(),
+        appUserId: user.Id,
+        tokenHash: refreshTokenHash,
+        expiresAtUtc: refreshTokenExpiresAt,
+        createdAtUtc: now));
+
     var accessToken = AuthTokenService.CreateAccessToken(user, now, expiresAt, jwtIssuer, jwtAudience, jwtKey);
+    await dbContext.SaveChangesAsync(cancellationToken);
     var roles = user.Roles
         .Select(role => role.Role.ToString())
         .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -296,7 +316,7 @@ authApi.MapPost("/login", async (
     var response = new AuthLoginResponse
     {
         AccessToken = accessToken,
-        RefreshToken = null,
+        RefreshToken = refreshToken,
         ExpiresAt = expiresAt,
         UserId = user.Id,
         Roles = roles,
@@ -347,6 +367,114 @@ authApi.MapGet("/me", async (
     .RequireAuthorization()
     .WithTags("Auth")
     .WithName("AuthMe");
+
+authApi.MapPost("/refresh", async (
+    RefreshTokenRequest request,
+    AppDbContext dbContext,
+    CancellationToken cancellationToken) =>
+{
+    var incomingToken = request.RefreshToken?.Trim();
+    if (string.IsNullOrWhiteSpace(incomingToken))
+    {
+        return ApiResponse.Failure("ValidationError", "RefreshToken is required.");
+    }
+
+    var tokenHash = AuthTokenService.HashRefreshToken(incomingToken);
+    var now = DateTime.UtcNow;
+
+    var storedToken = await dbContext.RefreshTokens
+        .Include(rt => rt.AppUser)
+        .ThenInclude(user => user!.Roles)
+        .FirstOrDefaultAsync(rt => rt.TokenHash == tokenHash, cancellationToken);
+
+    if (storedToken is null || storedToken.AppUser is null || !storedToken.AppUser.IsActive)
+    {
+        return ApiResponse.Failure("InvalidToken", "Invalid refresh token.", 401);
+    }
+
+    if (!storedToken.IsUsable(now))
+    {
+        if (!storedToken.IsRevoked)
+        {
+            storedToken.Revoke(now, "Expired");
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+
+        return ApiResponse.Failure("InvalidToken", "Invalid or expired refresh token.", 401);
+    }
+
+    var user = storedToken.AppUser;
+    var roles = user.Roles
+        .Select(role => role.Role.ToString())
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .OrderBy(role => role)
+        .ToArray();
+
+    var accessTokenExpiresAt = now.AddMinutes(jwtAccessTokenMinutes);
+    var accessToken = AuthTokenService.CreateAccessToken(user, now, accessTokenExpiresAt, jwtIssuer, jwtAudience, jwtKey);
+
+    var newRefreshToken = AuthTokenService.GenerateRefreshToken();
+    var newRefreshTokenHash = AuthTokenService.HashRefreshToken(newRefreshToken);
+    var newRefreshTokenExpiresAt = now.AddDays(jwtRefreshTokenDays);
+
+    storedToken.Revoke(now, "Rotated");
+    storedToken.MarkAsUsed(now);
+    dbContext.RefreshTokens.Add(new RefreshToken(
+        id: Guid.NewGuid(),
+        appUserId: user.Id,
+        tokenHash: newRefreshTokenHash,
+        expiresAtUtc: newRefreshTokenExpiresAt,
+        createdAtUtc: now));
+
+    await dbContext.SaveChangesAsync(cancellationToken);
+
+    var response = new AuthLoginResponse
+    {
+        AccessToken = accessToken,
+        RefreshToken = newRefreshToken,
+        ExpiresAt = accessTokenExpiresAt,
+        UserId = user.Id,
+        Roles = roles,
+        Permissions = AuthTokenService.ResolvePermissionsForRoles(roles)
+    };
+
+    return Results.Ok(ApiResponse.Success(response));
+})
+    .WithTags("Auth")
+    .WithName("AuthRefresh");
+
+authApi.MapPost("/logout", async (
+    LogoutRequest request,
+    AppDbContext dbContext,
+    CancellationToken cancellationToken) =>
+{
+    var incomingToken = request.RefreshToken?.Trim();
+    if (string.IsNullOrWhiteSpace(incomingToken))
+    {
+        return ApiResponse.Failure("ValidationError", "RefreshToken is required.");
+    }
+
+    var tokenHash = AuthTokenService.HashRefreshToken(incomingToken);
+    var now = DateTime.UtcNow;
+
+    var storedToken = await dbContext.RefreshTokens
+        .FirstOrDefaultAsync(rt => rt.TokenHash == tokenHash, cancellationToken);
+
+    if (storedToken is null)
+    {
+        return Results.Ok(ApiResponse.Success(new { revoked = false }));
+    }
+
+    if (!storedToken.IsRevoked)
+    {
+        storedToken.Revoke(now, "Logout");
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    return Results.Ok(ApiResponse.Success(new { revoked = true }));
+})
+    .WithTags("Auth")
+    .WithName("AuthLogout");
 
 app.MapHub<ProductionHub>("/hubs/production");
 
@@ -1614,10 +1742,22 @@ public static class ApiResponse
 
 static class AuthTokenService
 {
-    public static string BuildRefreshTokenPlaceholder()
+    public static string GenerateRefreshToken()
     {
         var randomBytes = RandomNumberGenerator.GetBytes(48);
         return Convert.ToBase64String(randomBytes);
+    }
+
+    public static string HashRefreshToken(string token)
+    {
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            throw new ArgumentNullException(nameof(token));
+        }
+
+        var bytes = Encoding.UTF8.GetBytes(token);
+        var hash = SHA256.HashData(bytes);
+        return Convert.ToBase64String(hash);
     }
 
     public static string CreateAccessToken(
