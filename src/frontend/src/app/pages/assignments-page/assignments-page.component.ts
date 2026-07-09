@@ -1,5 +1,6 @@
-import { Component } from '@angular/core';
-import { FactoryStatus } from '../../shared/models/factory-status.model';
+import { Component, OnInit } from '@angular/core';
+import { ActivatedRoute } from '@angular/router';
+import { deriveStatusFromReadiness, FactoryStatus } from '../../shared/models/factory-status.model';
 
 interface AssignmentItem {
   worker: string;
@@ -37,6 +38,8 @@ interface RecommendationCandidate {
   to: string;
   reasons: string[];
   risks: string[];
+  targetLine: string;
+  targetStage: string;
 }
 
 interface TimelineEntry {
@@ -44,6 +47,14 @@ interface TimelineEntry {
   title: string;
   details: string;
   status: FactoryStatus;
+}
+
+interface StageDemoContext {
+  lineId: string;
+  lineName: string;
+  stageId: string;
+  stageName: string;
+  source: 'factory-map' | 'manual';
 }
 
 interface TemporaryDialogState {
@@ -64,7 +75,14 @@ interface ReplacementDialogState {
   templateUrl: './assignments-page.component.html',
   styleUrls: ['./assignments-page.component.scss']
 })
-export class AssignmentsPageComponent {
+export class AssignmentsPageComponent implements OnInit {
+  demoContext: StageDemoContext | null = null;
+
+  constructor(private readonly route: ActivatedRoute) {}
+
+  ngOnInit(): void {
+    this.initializeDemoContext();
+  }
   assignments: AssignmentItem[] = [
     {
       worker: 'أحمد سعيد',
@@ -195,7 +213,9 @@ export class AssignmentsPageComponent {
         'حالة حضور ممتازة اليوم',
         'سرعة مناسبة في تغيير المهام'
       ],
-      risks: ['فترة توقف قصيرة متوقعة قبل بداية الوردية']
+      risks: ['فترة توقف قصيرة متوقعة قبل بداية الوردية'],
+      targetLine: 'الخط الأحمر',
+      targetStage: 'مرحلة التغليف'
     },
     {
       workerName: 'محمود يونس',
@@ -207,7 +227,9 @@ export class AssignmentsPageComponent {
         'يتقن مرحلة الخلط',
         'عدد تغيّب منخفض'
       ],
-      risks: ['إذا تم نقله الآن قد يتأخر التغطية على فحص الجودة']
+      risks: ['إذا تم نقله الآن قد يتأخر التغطية على فحص الجودة'],
+      targetLine: 'الخط الأحمر',
+      targetStage: 'مرحلة الخلط'
     },
     {
       workerName: 'إسماعيل زيد',
@@ -218,7 +240,9 @@ export class AssignmentsPageComponent {
         'معرفة عالية بأجهزة التغذية',
         'يمكن تغطيته في 20 دقيقة'
       ],
-      risks: ['تتطلب عودة العامل بعد 20 دقيقة لتثبيت التغييرات']
+      risks: ['تتطلب عودة العامل بعد 20 دقيقة لتثبيت التغييرات'],
+      targetLine: 'الخط الأزرق',
+      targetStage: 'مرحلة تغذية'
     }
   ];
 
@@ -263,6 +287,123 @@ export class AssignmentsPageComponent {
   };
 
   lastSimulationMessage = '';
+
+  get hasContextSelection(): boolean {
+    return !!this.demoContext;
+  }
+
+  get selectedShortageZone(): SubStageDropZone | undefined {
+    if (!this.demoContext) {
+      return undefined;
+    }
+    return (
+      this.subStageZones.find(
+        (zone) => zone.line === this.demoContext!.lineName && zone.name === this.demoContext!.stageName
+      ) ??
+      this.subStageZones.find((zone) => zone.line === this.demoContext!.lineName)
+    );
+  }
+
+  get selectedShortageLabel(): string {
+    if (!this.demoContext) {
+      return 'يرجى اختيار مرحلة لربط التوصية';
+    }
+    return `${this.demoContext.lineName} - ${this.demoContext.stageName}`;
+  }
+
+  get selectedShortageReadiness(): number {
+    const zone = this.selectedShortageZone;
+    if (!zone || zone.workersRequired <= 0) {
+      return 0;
+    }
+    return Math.round((zone.workersCurrent / zone.workersRequired) * 100);
+  }
+
+  get selectedShortageTone(): FactoryStatus {
+    return this.hasContextSelection ? deriveStatusFromReadiness(this.selectedShortageReadiness) : 'info';
+  }
+
+  get selectedShortageGap(): number {
+    const zone = this.selectedShortageZone;
+    if (!zone) {
+      return 0;
+    }
+    return Math.max(zone.workersRequired - zone.workersCurrent, 0);
+  }
+
+  get attendanceRate(): number {
+    const presentCount = this.workers.filter((worker) => worker.status === 'present').length;
+    return Math.round((presentCount / Math.max(this.workers.length, 1)) * 100);
+  }
+
+  get attendanceTone(): FactoryStatus {
+    if (this.attendanceRate >= 90) {
+      return 'present';
+    }
+    if (this.attendanceRate >= 70) {
+      return 'warning';
+    }
+    return 'absent';
+  }
+
+  get recommendationsForContext(): RecommendationCandidate[] {
+    if (!this.selectedShortageZone) {
+      return this.recommendations;
+    }
+
+    const zoneRecommendations = this.recommendations.filter(
+      (recommendation) =>
+        recommendation.targetLine === this.selectedShortageZone?.line &&
+        recommendation.targetStage === this.selectedShortageZone?.name
+    );
+
+    const fallbackRecommendations = this.recommendations.filter((recommendation) => !zoneRecommendations.includes(recommendation));
+
+    return [...zoneRecommendations, ...fallbackRecommendations];
+  }
+
+  get topRecommendation(): RecommendationCandidate | undefined {
+    return this.recommendationsForContext[0];
+  }
+
+  get additionalRecommendations(): RecommendationCandidate[] {
+    return this.recommendationsForContext.slice(1);
+  }
+
+  getZoneShortage(zone: SubStageDropZone): number {
+    return Math.max(zone.workersRequired - zone.workersCurrent, 0);
+  }
+
+  getZoneReadiness(zone: SubStageDropZone): number {
+    if (zone.workersRequired <= 0) {
+      return 100;
+    }
+    return Math.round((zone.workersCurrent / zone.workersRequired) * 100);
+  }
+
+  getZoneReadinessTone(zone: SubStageDropZone): FactoryStatus {
+    return deriveStatusFromReadiness(this.getZoneReadiness(zone));
+  }
+
+  private initializeDemoContext(): void {
+    const contextLineName = this.route.snapshot.queryParamMap.get('lineName')?.trim();
+    const contextStageName = this.route.snapshot.queryParamMap.get('stageName')?.trim();
+    const lineId = this.route.snapshot.queryParamMap.get('lineId')?.trim() ?? '';
+    const stageId = this.route.snapshot.queryParamMap.get('stageId')?.trim() ?? '';
+    const source = this.route.snapshot.queryParamMap.get('source')?.trim() ?? 'manual';
+
+    if (!contextLineName || !contextStageName) {
+      return;
+    }
+
+    this.demoContext = {
+      lineId,
+      lineName: contextLineName,
+      stageId,
+      stageName: contextStageName,
+      source: source === 'factory-map' ? 'factory-map' : 'manual'
+    };
+  }
 
   getZoneWorkers(zone: SubStageDropZone): AssignmentWorker[] {
     return this.workers.filter((worker) => zone.workerIds.includes(worker.id));
@@ -319,7 +460,7 @@ export class AssignmentsPageComponent {
   }
 
   openDefaultTemporary(): void {
-    const defaultZone = this.subStageZones[0];
+    const defaultZone = this.selectedShortageZone ?? this.subStageZones[0];
     if (!defaultZone) {
       return;
     }

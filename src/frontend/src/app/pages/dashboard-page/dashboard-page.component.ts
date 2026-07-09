@@ -7,6 +7,15 @@ import {
   MockDataService
 } from '../../core/services/mock-data.service';
 import { KpiTrend } from '../../core/services/mock-data.service';
+import { FactoryStatus } from '../../shared/models/factory-status.model';
+
+interface StageReadinessAlert {
+  lineName: string;
+  stageName: string;
+  workersCurrent: number;
+  workersRequired: number;
+  shortageWorkers: number;
+}
 
 @Component({
   selector: 'app-dashboard-page',
@@ -27,6 +36,7 @@ export class DashboardPageComponent {
   };
   attendanceIndicators: AttendanceIndicator[] = [];
   previewLines: FactoryMapLine[] = [];
+  criticalReadinessAlerts: StageReadinessAlert[] = [];
 
   constructor(private readonly dataService: MockDataService) {}
 
@@ -35,6 +45,7 @@ export class DashboardPageComponent {
     this.previewLines = this.dataService.getFactoryMapData();
     this.lineReadinessSummary = this.dataService.getFactoryReadinessSummary(this.previewLines);
     this.attendanceIndicators = this.dataService.getAttendanceIndicators();
+    this.criticalReadinessAlerts = this.extractCriticalStageAlerts(this.previewLines);
   }
 
   getTrendLabel(trend: KpiTrend): string {
@@ -85,6 +96,87 @@ export class DashboardPageComponent {
       return 'yellow';
     }
     return 'red';
+  }
+
+  get totalAttendanceDeficit(): number {
+    return this.lineReadinessSummary.totalWorkers - this.lineReadinessSummary.activeWorkers;
+  }
+
+  get readinessToneStatus(): FactoryStatus {
+    if (this.lineReadinessSummary.overallReadiness >= 85) {
+      return 'ready';
+    }
+    if (this.lineReadinessSummary.overallReadiness >= 60) {
+      return 'warning';
+    }
+    return 'critical';
+  }
+
+  get attendanceToneStatus(): FactoryStatus {
+    if (this.lineReadinessSummary.attendanceRate >= 90) {
+      return 'present';
+    }
+    if (this.lineReadinessSummary.attendanceRate >= 70) {
+      return 'warning';
+    }
+    return 'absent';
+  }
+
+  get shortageToneStatus(): FactoryStatus {
+    if (this.totalAttendanceDeficit <= 2) {
+      return 'ready';
+    }
+    if (this.totalAttendanceDeficit <= 6) {
+      return 'warning';
+    }
+    return 'critical';
+  }
+
+  get recommendationAvailabilityTone(): FactoryStatus {
+    if (this.criticalReadinessAlerts.length > 0) {
+      return 'warning';
+    }
+    return 'ready';
+  }
+
+  get criticalAlertsText(): string {
+    if (this.criticalReadinessAlerts.length === 0) {
+      return 'لا توجد حالات عجز واضحة الآن.';
+    }
+    if (this.criticalReadinessAlerts.length === 1) {
+      return 'يوجد مرحلة واحدة تحتاج تدخل سريع.';
+    }
+    return `يوجد ${this.criticalReadinessAlerts.length} مرحلة تحتاج تدخل سريع.`;
+  }
+
+  get readinessShortageToneStatus(): FactoryStatus {
+    if (this.lineReadinessSummary.overallReadiness >= 80) {
+      return 'ready';
+    }
+    if (this.lineReadinessSummary.overallReadiness >= 65) {
+      return 'warning';
+    }
+    return 'critical';
+  }
+
+  private extractCriticalStageAlerts(lines: FactoryMapLine[]): StageReadinessAlert[] {
+    const alerts = lines.flatMap((line) =>
+      line.stages
+        .map((stage) => {
+          const shortageWorkers = Math.max(stage.workersRequired - stage.workersCurrent, 0);
+          return {
+            lineName: line.name,
+            stageName: stage.name,
+            workersCurrent: stage.workersCurrent,
+            workersRequired: stage.workersRequired,
+            shortageWorkers
+          };
+        })
+        .filter((stage) => stage.shortageWorkers > 0)
+    );
+
+    alerts.sort((a, b) => b.shortageWorkers - a.shortageWorkers);
+    return alerts.slice(0, 3);
   }
 
   getIndicatorClass(tone: AttendanceIndicator['tone']): string {

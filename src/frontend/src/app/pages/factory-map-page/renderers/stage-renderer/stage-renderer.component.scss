@@ -38,6 +38,13 @@
   font-size: var(--plp-font-size-sm);
 }
 
+.plp-stage-renderer__journey-link {
+  width: fit-content;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
 .plp-stage-renderer__substage-button {
   all: unset;
   width: 100%;

@@ -35,7 +35,22 @@
   ></plp-main-stage-card>
 
   <ng-container *ngIf="mode === 'stage'">
-    <p class="plp-stage-renderer__subtitle">اختر مرحلة فرعية لعرض العاملين.</p>
+    <p class="plp-stage-renderer__subtitle">اختر مرحلة فرعية لعرض العاملين، ثم انتقل مباشرة للتعيينات إذا وجدت عجز.</p>
+    <a
+      class="plp-stage-renderer__journey-link p-button p-button-text p-button-sm"
+      [routerLink]="['/assignments']"
+      [queryParams]="{
+        source: 'factory-map',
+        lineId: line.id,
+        lineName: line.name,
+        stageId: mainStage.id,
+        stageName: mainStage.name
+      }"
+      aria-label="بدء توصية لهذه المرحلة"
+    >
+      بدء التوصية من هذه المرحلة
+      <i class="pi pi-arrow-left" aria-hidden="true"></i>
+    </a>
     <plp-responsive-grid [minItemWidth]="240" [gap]="'var(--plp-spacing-3)'">
       <button
         type="button"

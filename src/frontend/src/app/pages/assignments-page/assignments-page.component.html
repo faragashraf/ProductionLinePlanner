@@ -1,4 +1,4 @@
-<section class="page-frame assignment-management-page">
+<section class="assignment-management-page">
   <plp-page-header title="إدارة التعيينات" description="واجهة أولية لعرض التوزيع الحالي واستعراض التعديلات المقترحة باستخدام مكوّنات Factory UI." [compact]="true">
     <div header-actions>
       <button
@@ -10,6 +10,16 @@
         label="تعيين مؤقت"
         (click)="openDefaultTemporary()"
         aria-label="فتح نموذج التعيين المؤقت"
+      ></button>
+      <button
+        pButton
+        pRipple
+        class="p-button-sm p-button-text"
+        type="button"
+        icon="pi pi-map"
+        label="عودة إلى خريطة المصنع"
+        routerLink="/factory-map"
+        aria-label="العودة إلى خريطة المصنع"
       ></button>
     </div>
   </plp-page-header>
@@ -30,6 +40,21 @@
     </div>
   </section>
 
+  <section class="assignment-management-page__journey" *ngIf="hasContextSelection">
+    <article class="panel">
+      <div class="panel__header">
+        <h2>سيناريو Demo المرتبط بالخريطة</h2>
+        <p>تم استدعاء صفحة التعيينات من {{ demoContext?.lineName }} ({{ demoContext?.stageName }}).</p>
+      </div>
+      <div class="assignment-management-page__journey-badges">
+        <plp-status-badge [status]="attendanceTone" [label]="'حضور فعلي: ' + attendanceRate + '%'"></plp-status-badge>
+        <plp-status-badge [status]="selectedShortageTone" [label]="'جاهزية الخط: ' + selectedShortageReadiness + '%'"></plp-status-badge>
+        <plp-status-badge status="warning" [label]="'عجز عمالة: ' + selectedShortageGap + ' عامل'"></plp-status-badge>
+        <plp-status-badge [status]="topRecommendation ? 'ready' : 'warning'" [label]="'توصية متاحة'"></plp-status-badge>
+      </div>
+    </article>
+  </section>
+
   <div class="assignment-management-page__layout">
     <section class="assignment-management-page__primary">
       <section class="panel">
@@ -38,7 +63,11 @@
           <p>اسحب/أفلت (واجهة mock) لمعاينة سلوك التوزيع — لا يوجد اتصال API حقيقي.</p>
         </div>
         <plp-responsive-grid [minItemWidth]="250" gap="var(--plp-spacing-3)">
-          <article *ngFor="let zone of subStageZones; trackBy: trackById" class="drop-zone-card">
+          <article
+            *ngFor="let zone of subStageZones; trackBy: trackById"
+            class="drop-zone-card"
+            [class.recommendation-target-zone]="zone.id === selectedShortageZone?.id"
+          >
             <plp-sub-stage-card
               [name]="zone.line + ' - ' + zone.name"
               [workersCurrent]="zone.workersCurrent"
@@ -48,12 +77,15 @@
 
             <div class="drop-zone-card__status">
               <p>نسبة التغطية الآن</p>
-              <plp-status-badge [status]="zone.status" [compact]="true" [label]="zone.workersCurrent + ' / ' + zone.workersRequired"></plp-status-badge>
+              <div class="drop-zone-card__status-badges">
+                <plp-status-badge [status]="getZoneReadinessTone(zone)" [label]="'جاهزية الخط: ' + getZoneReadiness(zone) + '%'"></plp-status-badge>
+                <plp-status-badge [status]="getZoneShortage(zone) > 0 ? 'warning' : 'ready'" [label]="'عجز عمالة: ' + getZoneShortage(zone) + ' عامل'"></plp-status-badge>
+              </div>
             </div>
 
             <div class="drop-zone-card__list">
               <p class="drop-zone-card__muted" *ngIf="zone.workersCurrent === 0">
-                لا يوجد عمال حتى الآن
+                لا يوجد عامل حتى الآن
               </p>
               <plp-worker-card
                 *ngFor="let worker of getZoneWorkers(zone); trackBy: trackById"
@@ -157,15 +189,47 @@
 
       <section class="panel">
         <div class="panel__header">
-          <h2>التوصيات الأعلى جودة</h2>
-          <p>المرشّح الأعلى نقاط مع أسباب واضحة وتحذير المخاطر قبل تنفيذ أي تعديل.</p>
+          <h2>التوصيات المرتبطة بالمرحلة</h2>
+          <p *ngIf="hasContextSelection">مؤشر البداية: {{ selectedShortageLabel }}</p>
+          <p *ngIf="!hasContextSelection">يمكن تفعيل التوصية من صفحة خريطة المصنع لتظهر مرتبطة تلقائيًا بالمرحلة.</p>
         </div>
+
         <div class="recommendation-card__legend" id="recommendation-panel">
           <span>ترتيب التوصية من الأعلى نقطة</span>
+          <plp-status-badge status="info" [label]="hasContextSelection ? 'توصية متاحة' : 'مرشح عام'"></plp-status-badge>
         </div>
-        <article class="recommendation-card" *ngFor="let recommendation of recommendations; index as rank">
+
+        <article class="recommendation-card recommendation-card--hero" *ngIf="topRecommendation">
+          <p><strong>أفضل بديل مقترح</strong></p>
           <header class="recommendation-card__header">
-            <span class="recommendation-card__rank">{{ rank + 1 }}</span>
+            <span class="recommendation-card__rank">1</span>
+            <div>
+              <h3>{{ topRecommendation.workerName }}</h3>
+              <p class="recommendation-card__path">{{ topRecommendation.from }} -> {{ topRecommendation.to }}</p>
+            </div>
+            <plp-status-badge [status]="scoreTone(topRecommendation.score)" [label]="topRecommendation.score + ' نقطة'"></plp-status-badge>
+          </header>
+
+          <div class="recommendation-card__grid">
+            <section>
+              <h4>الأسباب</h4>
+              <ul>
+                <li *ngFor="let reason of topRecommendation.reasons">{{ reason }}</li>
+              </ul>
+            </section>
+            <section>
+              <h4>مخاطر مرصودة</h4>
+              <ul class="recommendation-card__risk-list" *ngIf="topRecommendation.risks.length > 0">
+                <li *ngFor="let risk of topRecommendation.risks">{{ risk }}</li>
+              </ul>
+              <p *ngIf="topRecommendation.risks.length === 0">لا توجد مخاطر عالية الظاهرة.</p>
+            </section>
+          </div>
+        </article>
+
+        <article class="recommendation-card" *ngFor="let recommendation of additionalRecommendations; index as rank">
+          <header class="recommendation-card__header">
+            <span class="recommendation-card__rank">{{ rank + 2 }}</span>
             <div>
               <h3>{{ recommendation.workerName }}</h3>
               <p class="recommendation-card__path">{{ recommendation.from }} -> {{ recommendation.to }}</p>
