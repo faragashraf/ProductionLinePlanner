@@ -199,16 +199,20 @@ public static class AssignmentHelpers
     public static async Task<Dictionary<Guid, AttendanceStatus>> GetLatestAttendanceStatusByWorkerAsync(
         AppDbContext dbContext,
         Guid[] workerIds,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        DateTime? asOfUtc = null)
     {
         if (workerIds.Length == 0)
         {
             return [];
         }
 
+        var asOf = asOfUtc ?? DateTime.UtcNow;
+        var startOfDate = new DateTime(asOf.Year, asOf.Month, asOf.Day, 0, 0, 0, DateTimeKind.Utc);
+
         var query = dbContext.AttendanceRecords
             .AsNoTracking()
-            .Where(x => workerIds.Contains(x.WorkerId))
+            .Where(x => workerIds.Contains(x.WorkerId) && x.AttendanceTimeUtc >= startOfDate && x.AttendanceTimeUtc <= asOf)
             .GroupBy(x => x.WorkerId)
             .Select(g => new
             {
