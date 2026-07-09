@@ -1,27 +1,34 @@
-.assignment-list {
-  display: grid;
-  gap: 0.65rem;
-}
-
-.assignment-card {
-  border: 1px solid #dbe4fc;
-  border-radius: 0.85rem;
-  padding: 0.8rem;
-  background: #fff;
-}
-
-.assignment-card h2 {
-  margin: 0;
-}
-
-.assignment-card p {
-  margin: 0.3rem 0 0;
-}
-
-.ghost-pill {
-  margin-top: 0.45rem;
-  border: 1px solid #9caeff;
-  border-radius: 999px;
-  padding: 0.3rem 0.6rem;
-  display: inline-block;
-}
+.assignment-management-page{--recommendation-rank-size:2rem}
+.assignment-management-page__message-panel{margin-bottom:var(--plp-spacing-3);border:1px solid var(--plp-color-border);border-radius:var(--plp-radius-lg);background:var(--plp-color-surface-soft);padding:var(--plp-spacing-3)}
+.assignment-management-page__message-row{display:grid;grid-template-columns:1fr auto;gap:var(--plp-spacing-3);align-items:center}
+.assignment-management-page__message{margin:0;color:var(--plp-color-text-subtle);font-size:var(--plp-font-size-sm)}
+.assignment-management-page__layout{display:grid;grid-template-columns:1fr;gap:var(--plp-spacing-4);overflow-x:hidden;min-width:0}
+.assignment-management-page__primary,.assignment-management-page__side{display:grid;gap:var(--plp-spacing-4);min-width:0}
+.panel{border:1px solid var(--plp-color-border);border-radius:var(--plp-radius-lg);background:var(--plp-color-surface);padding:var(--plp-spacing-4);display:grid;gap:var(--plp-spacing-3)}
+.panel__header h2{margin:0 0 var(--plp-spacing-2);font-size:var(--plp-font-size-md)}.panel__header p{margin:0;color:var(--plp-color-text-subtle);font-size:var(--plp-font-size-sm)}
+.drop-zone-card{border:1px solid var(--plp-color-border-muted);border-radius:var(--plp-radius-md);padding:var(--plp-spacing-3);display:grid;gap:var(--plp-spacing-3)}
+.drop-zone-card__status{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:var(--plp-spacing-2);padding:var(--plp-spacing-2);border-radius:var(--plp-radius-md);background:var(--plp-color-surface-soft)}
+.drop-zone-card__status p{margin:0;color:var(--plp-color-text-subtle);font-size:var(--plp-font-size-sm)}
+.drop-zone-card__list{display:grid;gap:var(--plp-spacing-2);padding:var(--plp-spacing-2);min-height:132px;overflow:auto;border:1px dashed var(--plp-color-border-muted);border-radius:var(--plp-radius-md)}
+.drop-zone-card__muted,.mock-dialog__empty,.mock-dialog__subline{margin:0;color:var(--plp-color-text-subtle);font-size:var(--plp-font-size-sm)}
+.drop-zone-card__actions,.worker-actions,.mock-dialog__actions{display:grid;gap:var(--plp-spacing-2);grid-template-columns:1fr}
+.worker-card-shell{display:grid;gap:var(--plp-spacing-2)}
+.recommendation-card{border:1px solid var(--plp-color-border-muted);border-radius:var(--plp-radius-md);background:var(--plp-color-surface-soft);padding:var(--plp-spacing-3);display:grid;gap:var(--plp-spacing-3)}
+.recommendation-card__header{display:grid;gap:var(--plp-spacing-2);align-items:start;grid-template-columns:auto 1fr auto}
+.recommendation-card__rank{width:var(--recommendation-rank-size);height:var(--recommendation-rank-size);border:1px solid var(--plp-color-border);border-radius:999px;display:inline-flex;align-items:center;justify-content:center;font-size:var(--plp-font-size-sm)}
+.recommendation-card__header h3{margin:0}.recommendation-card__path{margin:0;color:var(--plp-color-text-subtle);font-size:var(--plp-font-size-sm)}
+.recommendation-card__grid{display:grid;gap:var(--plp-spacing-3);grid-template-columns:1fr}
+.recommendation-card__grid h4{margin:0 0 var(--plp-spacing-2);font-size:var(--plp-font-size-sm)}
+.recommendation-card__grid ul{margin:0;padding-inline-start:var(--plp-spacing-4);display:grid;gap:.3rem;color:var(--plp-color-text-subtle);font-size:var(--plp-font-size-sm)}
+.mock-overlay{position:fixed;inset:0;background:rgb(15 23 42 / 42%);z-index:30}
+.mock-dialog{position:fixed;left:50%;top:1rem;transform:translateX(-50%);z-index:35;width:min(100% - var(--plp-spacing-4),38rem);max-height:calc(100vh - 2rem);overflow:auto;background:var(--plp-color-surface);border:1px solid var(--plp-color-border);border-radius:var(--plp-radius-lg);box-shadow:var(--plp-elevation-3);padding:var(--plp-spacing-4)}
+.mock-dialog__header{display:flex;align-items:center;justify-content:space-between;gap:var(--plp-spacing-3);margin-bottom:var(--plp-spacing-3)}
+.mock-dialog__header h3{margin:0;font-size:var(--plp-font-size-md)}
+.mock-dialog__close{border:0;background:transparent;font-size:1.25rem;cursor:pointer;color:var(--plp-color-text-subtle)}
+.mock-dialog__section{margin:var(--plp-spacing-4) 0 var(--plp-spacing-3)}
+.mock-dialog__section-title{margin:0 0 var(--plp-spacing-2)}
+.mock-dialog__chips{display:grid;grid-template-columns:1fr;gap:var(--plp-spacing-2)}
+.mock-dialog__chip{border:1px solid var(--plp-color-border);border-radius:var(--plp-radius-md);background:var(--plp-color-surface-soft);padding:.72rem .9rem;text-align:start;color:var(--plp-color-text);width:100%}
+.mock-dialog__chip--selected{border-color:var(--plp-status-ready);background:var(--plp-status-ready-bg);font-weight:700}
+@media (min-width:640px){.mock-dialog__chips{grid-template-columns:repeat(2,minmax(0,1fr))}.drop-zone-card__actions,.worker-actions,.mock-dialog__actions{grid-template-columns:repeat(2,minmax(0,1fr))}.mock-dialog{top:50%;transform:translate(-50%,-50%);width:min(95vw,40rem)}}
+@media (min-width:900px){.assignment-management-page__layout{grid-template-columns:minmax(0,2fr) minmax(0,1fr)}.recommendation-card__grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
