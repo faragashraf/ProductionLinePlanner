@@ -1,0 +1,13 @@
+<article class="plp-kpi-card">
+  <div class="plp-kpi-card__head">
+    <div>
+      <p class="plp-kpi-card__title">{{ title }}</p>
+      <p class="plp-kpi-card__value">{{ value }}</p>
+    </div>
+    <i *ngIf="icon" class="pi" [class]="icon" aria-hidden="true"></i>
+  </div>
+  <div class="plp-kpi-card__footer" *ngIf="trendLabel">
+    <i class="pi" [class]="trendIcon" aria-hidden="true"></i>
+    <span [class]="trendClass">{{ trendLabel }}</span>
+  </div>
+</article>

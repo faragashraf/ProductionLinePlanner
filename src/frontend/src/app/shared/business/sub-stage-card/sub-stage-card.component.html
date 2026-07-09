@@ -1,0 +1,8 @@
+<article class="plp-sub-stage-card">
+  <header>
+    <h4>{{ name }}</h4>
+    <plp-status-badge [status]="status" [compact]="true"></plp-status-badge>
+  </header>
+  <plp-completion-bar [value]="percentage" [status]="status" label="نسبة تغطية"></plp-completion-bar>
+  <p>{{ workersCurrent }} / {{ workersRequired }} عامل</p>
+</article>

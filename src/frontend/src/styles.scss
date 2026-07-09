@@ -2,9 +2,11 @@
 @import 'primeng/resources/themes/lara-light-blue/theme.css';
 @import 'primeicons/primeicons.css';
 @import 'primeflex/primeflex.css';
+@import './app/shared/design-system/tokens/design-tokens.scss';
 
 :root {
   color-scheme: light;
+  direction: rtl;
 }
 
 * {
@@ -21,7 +23,9 @@ body {
 }
 
 body {
-  background: #f5f7fb;
+  background: var(--plp-color-background);
+  color: var(--plp-color-text);
+  font-family: var(--plp-font-family);
 }
 
 a {

@@ -1,0 +1,10 @@
+<article class="plp-statistic-card">
+  <div class="plp-statistic-card__icon" *ngIf="icon">
+    <i class="pi" [class]="icon" aria-hidden="true"></i>
+  </div>
+  <div class="plp-statistic-card__body">
+    <p class="plp-statistic-card__title">{{ title }}</p>
+    <p class="plp-statistic-card__value">{{ value }}</p>
+    <p class="plp-statistic-card__helper" *ngIf="helper">{{ helper }}</p>
+  </div>
+</article>

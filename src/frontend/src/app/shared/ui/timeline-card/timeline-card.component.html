@@ -1,0 +1,11 @@
+<article class="plp-timeline-card">
+  <h3>{{ title }}</h3>
+  <ol class="plp-timeline-card__items">
+    <li *ngFor="let item of items">
+      <span class="plp-timeline-card__time" *ngIf="item.time">{{ item.time }}</span>
+      <h4>{{ item.title }}</h4>
+      <p *ngIf="item.details">{{ item.details }}</p>
+      <plp-status-badge *ngIf="item.status" [status]="item.status" [compact]="true"></plp-status-badge>
+    </li>
+  </ol>
+</article>
