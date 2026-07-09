@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.SignalR;
+using ProductionLinePlanner.Infrastructure;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -18,6 +19,8 @@ builder.Services.AddCors(options =>
                 .AllowCredentials();
         });
 });
+
+builder.Services.AddInfrastructure(builder.Configuration);
 
 // Authentication placeholder: implementation will be added in a dedicated auth slice later.
 builder.Services.AddAuthentication();

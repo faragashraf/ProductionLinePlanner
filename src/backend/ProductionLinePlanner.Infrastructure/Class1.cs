@@ -1,6 +1,3 @@
-﻿namespace ProductionLinePlanner.Infrastructure;
+namespace ProductionLinePlanner.Infrastructure;
 
-public class Class1
-{
-
-}
+// Infrastructure entry point for service registration.
