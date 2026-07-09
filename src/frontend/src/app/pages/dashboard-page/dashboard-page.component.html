@@ -1,8 +1,20 @@
 <section class="page-frame">
   <header class="page-header">
-    <h1>Dashboard</h1>
-    <p>ملخص ذكي لمرور الوردية باستخدام mock data.</p>
+    <h1>لوحة العرض التجريبي</h1>
+    <p>مرشد سريع لمسار الوردية: جاهزية المصنع → نقاط العجز → التوصية.</p>
   </header>
+
+  <section class="demo-callout-strip">
+    <plp-status-badge [status]="attendanceToneStatus" [label]="'حضور فعلي: ' + lineReadinessSummary.attendanceRate + '%'"></plp-status-badge>
+    <plp-status-badge [status]="shortageToneStatus" [label]="'عجز عمالة: ' + totalAttendanceDeficit + ' عامل'"></plp-status-badge>
+    <plp-status-badge [status]="recommendationAvailabilityTone" [label]="'توصية متاحة'"></plp-status-badge>
+    <plp-status-badge [status]="readinessShortageToneStatus" [label]="'جاهزية الخط: ' + lineReadinessSummary.overallReadiness + '%'"></plp-status-badge>
+  </section>
+
+  <section class="journey-actions">
+    <a pButton pRipple type="button" class="p-button-sm p-button-secondary" routerLink="/factory-map" label="الدخول إلى خريطة المصنع"></a>
+    <a pButton pRipple type="button" class="p-button-sm p-button-help" routerLink="/assignments" label="الدخول إلى التعيينات"></a>
+  </section>
 
   <section class="readiness-summary">
     <p-card styleClass="summary-card">
@@ -29,6 +41,27 @@
       <div class="summary-note">نسبة الحضور العامة على كل المراحل.</div>
     </p-card>
   </section>
+
+  <p-card *ngIf="criticalReadinessAlerts.length" styleClass="summary-card summary-card--alert">
+    <div class="summary-label">تنبيه مرحلة حرجة</div>
+    <p class="summary-note summary-note--alert">{{ criticalAlertsText }}</p>
+    <ul class="summary-critical-list">
+      <li *ngFor="let alert of criticalReadinessAlerts">
+        <strong>{{ alert.lineName }} - {{ alert.stageName }}</strong>
+        {{ alert.workersCurrent }}/{{ alert.workersRequired }} عامل
+        <plp-status-badge
+          [status]="lineReadinessSummary.overallReadiness > 70 ? 'warning' : 'critical'"
+          [label]="'عجز ' + alert.shortageWorkers"
+          [compact]="true"
+        ></plp-status-badge>
+      </li>
+    </ul>
+  </p-card>
+
+  <p-card *ngIf="!criticalReadinessAlerts.length" styleClass="summary-card summary-card--success">
+    <div class="summary-label">حالة خريطة المراحل</div>
+    <p class="summary-note">لا توجد مرحلة متأخرة جدًا على مستوى الخطوط المتوفرة الآن.</p>
+  </p-card>
 
   <div class="kpi-grid">
     <p-card *ngFor="let card of cards" [styleClass]="'metric-card ' + getTrendClass(card.trend)">
@@ -59,12 +92,12 @@
   </section>
 
   <p-card class="production-line-note">
-    <div class="insight-title">Production Line Cards</div>
+    <div class="insight-title">بطاقات خط الإنتاج</div>
     <p>تم تحسين تصميم خطوط الإنتاج ضمن صفحة Factory Map ليعرض حالة كل مرحلة وتدرّج جاهزية واضح.</p>
   </p-card>
 
   <p-card class="insight-card">
     <div class="insight-title">الخطوات التالية</div>
-    <p>بدون API حاليًا: سيتم ربط مؤشرات التحديث، التنبيهات، والخرائط بواجهات backend لاحقًا.</p>
+    <p>بدون API حاليًا: سيتم ربط المؤشرات والتوصية والـ backend في إصدار لاحق V1.1.</p>
   </p-card>
 </section>
