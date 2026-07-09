@@ -8,6 +8,7 @@ public sealed class StageReadinessDto
     public string ScopeType { get; init; } = string.Empty;
     public decimal ReadinessPercent { get; init; }
     public int RequiredWorkers { get; init; }
+    public int AssignedWorkers { get; init; }
     public int PresentWorkers { get; init; }
     public int LateWorkers { get; init; }
     public int AbsentWorkers { get; init; }

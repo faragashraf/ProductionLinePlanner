@@ -12,6 +12,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Worker> Workers => Set<Worker>();
     public DbSet<WorkerDefaultAssignment> WorkerDefaultAssignments => Set<WorkerDefaultAssignment>();
     public DbSet<WorkerTemporaryAssignment> WorkerTemporaryAssignments => Set<WorkerTemporaryAssignment>();
+    public DbSet<AssignmentTimelineEntry> AssignmentTimelineEntries => Set<AssignmentTimelineEntry>();
     public DbSet<AttendanceRecord> AttendanceRecords => Set<AttendanceRecord>();
     public DbSet<StageReadinessSnapshot> StageReadinessSnapshots => Set<StageReadinessSnapshot>();
     public DbSet<Notification> Notifications => Set<Notification>();
