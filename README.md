@@ -35,9 +35,15 @@ dotnet run --project ProductionLinePlanner.Api
   - `src/backend/ProductionLinePlanner.Api/appsettings.json`
   - `src/backend/ProductionLinePlanner.Api/appsettings.Development.json`
 - القيم المطلوبة في الأساس:
-  - `AppDatabase: REPLACE_WITH_USER_SECRET`
-  - `AttendanceDatabase: REPLACE_WITH_USER_SECRET`
+  - `ConnectionStrings:AppDatabase: REPLACE_WITH_USER_SECRET`
+  - `ConnectionStrings:AttendanceDatabase: REPLACE_WITH_USER_SECRET`
 
 ملاحظات:
 - احتفظ بملفات secrets محليًا فقط (أو عبر Secret Manager / environment variables).
 - لا ترفع ملفات مثل `appsettings.*.local.json` أو ملفات user-specific إلى المستودع.
+
+لتفعيل الاتصال الفعلي بقاعدة بيانات البرنامج بدون إضافة secrets في Git:
+
+```bash
+dotnet user-secrets set "ConnectionStrings:AppDatabase" "<real-app-db-connection-string>"
+```

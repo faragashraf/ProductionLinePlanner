@@ -1,6 +1,7 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="9.0.0" />
     <ProjectReference Include="..\ProductionLinePlanner.Application\ProductionLinePlanner.Application.csproj" />
     <ProjectReference Include="..\ProductionLinePlanner.Domain\ProductionLinePlanner.Domain.csproj" />
   </ItemGroup>
