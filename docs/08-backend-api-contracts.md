@@ -104,11 +104,10 @@
 
 | الطريقة | المسار | الغرض | الدور المطلوب | Request body مختصر | شكل الاستجابة | ملاحظات / قواعد تحقق |
 |---|---|---|---|---|---|---|
-| `GET` | `/api/attendance/today` | حالة الحضور لليوم الحالي | `SuperAdmin`, `Admin` | `?factoryId=&lineId=` | `{ factoryId, date, items:[{ workerId, employeeCode, state, attendanceTimeUtc, source }] }` | يجلب snapshot لآخر حالة حضور لكل عامل لليوم. |
-| `GET` | `/api/workers/{workerId}/attendance` | حالة حضور عامل | `SuperAdmin`, `Admin` | `?fromDate=&toDate=` | `{ workerId, items:[{ attendanceTimeUtc, state, source }] }` | دعم Pagination إن كانت الفترة طويلة. |
-| `GET` | `/api/sub-stages/{subStageId}/attendance` | حالة حضور عاملّي مرحلة | `SuperAdmin`, `Admin` | `?date=` | `{ subStageId, date, presentCount, lateCount, absentCount, unknownCount, workers:[...] }` | يعتمد على التسكين الفعلي في نفس التاريخ/الوقت. |
-| `GET` | `/api/attendance/sync-status` | حالة مزامنة مصدر ZKTime | `SuperAdmin`, `Admin` | - | `{ source: "ZkTime", lastSyncUtc, lagSeconds, status: "Healthy|Degraded|Down" }` | يستخدم للتنبيه في حال انقطاع القراءة الخارجية. |
-| `GET` | `/api/attendance/calculation-source` | طريقة حساب Late/Absent | `SuperAdmin`, `Admin` | - | `{ source, timezone, lateThresholdMinutes, absentAfterMinutes, includeWeekends }` | مرجع توثيقي ثابت يمكن تحديثه من config. |
+| `POST` | `/api/attendance/sync/today` | تشغيل مزامنة الحضور لليوم الحالي | `Admin` | - | `{ syncDateUtc, evaluatedWorkers, syncedWorkers, insertedRecords, updatedRecords, unchangedRecords, unmatchedSourceRows, workersWithMissingMapping }` | يقرأ من Attendance DB (read-only) ويكتب/يحدث `AttendanceRecord` ضمن FactoryPlannerDB. |
+| `GET` | `/api/attendance/today` | حالة الحضور لليوم الحالي | `Auth` | `?dateUtc=&factoryId=&lineId=` | `{ date, items:[{ workerId, employeeCode, fullName, attendanceStatus, attendanceTimeUtc, source, attendanceUserId, badgeNumber }] }` | يجلب snapshot لآخر حالة حضور لكل عامل بتاريخ اليوم. |
+| `GET` | `/api/attendance/workers/{workerId}` | سجل حضور عامل | `Auth` | `?fromDateUtc=&toDateUtc=` | `{ workerId, items:[{ id, attendanceTimeUtc, attendanceStatus, source, attendanceUserId, badgeNumber, sourceRawId }] }` | يدعم نطاق تاريخ UTC اختياري بدون تقطيع pagination في M3. |
+| `GET` | `/api/attendance/stages/{subStageId}` | حالة حضور مرحلة فرعية | `Auth` | `?dateUtc=` | `{ subStageId, subStageName, dateUtc, capacity, assignedWorkers, presentWorkers, lateWorkers, absentWorkers, unassignedWorkers, workers:[...] }` | يعتمد على التسكين الفعّال لنفس التاريخ/الوقت. |
 
 ## 7) Readiness Dashboard
 
@@ -151,4 +150,3 @@
 - وضع قواعد تمنع تضارب التعيين (`WorkerTemporaryAssignment`) على مستوى الخدمة قبل الحفظ.
 - تدوين جميع تغييرات التسكين والإشعارات والتهيئة في `AuditLog`.
 - الاعتماد على `factoryId` في الـ scope لتفادي تسريب بين المصانع مستقبلاً.
-

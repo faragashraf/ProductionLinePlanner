@@ -15,6 +15,7 @@ using System.Text.Json.Serialization;
 using System.Threading.RateLimiting;
 using ProductionLinePlanner.Application.Abstractions;
 using ProductionLinePlanner.Application.DTOs;
+using ProductionLinePlanner.Application.Services;
 using ProductionLinePlanner.Application.Requests;
 using ProductionLinePlanner.Api.Security;
 using ProductionLinePlanner.Domain.Entities;
@@ -207,6 +208,7 @@ var mainStagesApi = app.MapGroup("/api/main-stages").RequireAuthorization("Admin
 var subStagesApi = app.MapGroup("/api/sub-stages").RequireAuthorization("Admin");
 var workersApi = app.MapGroup("/api/workers").RequireAuthorization("Admin");
 var assignmentsApi = app.MapGroup("/api/assignments").RequireAuthorization("Admin");
+var attendanceApi = app.MapGroup("/api/attendance").RequireAuthorization();
 var notificationsApi = app.MapGroup("/api/notifications").RequireAuthorization("Admin");
 var readinessApi = app.MapGroup("/api/readiness").RequireAuthorization("Admin");
 
@@ -2806,6 +2808,107 @@ notificationsApi.MapPatch("/read-all", async (
     .WithTags("Notifications")
     .WithName("ReadAllNotifications");
 
+attendanceApi.MapPost("/sync/today", async (
+    IAttendanceSyncService attendanceSyncService,
+    CancellationToken cancellationToken) =>
+{
+    var result = await attendanceSyncService.SyncTodayAsync(cancellationToken);
+    if (result.IsFailure)
+    {
+        return ApiResponse.Failure(
+            result.Error?.Code ?? "AttendanceSyncFailed",
+            result.Error?.Message ?? "Unable to sync attendance data.",
+            result.Error?.Code is "NotFound" or "ValidationError" ? 400 : 500);
+    }
+
+    return Results.Ok(ApiResponse.Success(result.Value));
+})
+    .RequireAuthorization("Admin")
+    .WithTags("Attendance")
+    .WithName("SyncAttendanceToday");
+
+attendanceApi.MapGet("/today", async (
+    IAttendanceReadService attendanceReadService,
+    DateTime? dateUtc = null,
+    Guid? factoryId = null,
+    Guid? lineId = null,
+    CancellationToken cancellationToken = default) =>
+{
+    var result = await attendanceReadService.GetTodayAttendanceAsync(
+        factoryId,
+        lineId,
+        dateUtc,
+        cancellationToken);
+
+    if (result.IsFailure)
+    {
+        return ApiResponse.Failure(
+            result.Error?.Code ?? "AttendanceReadFailed",
+            result.Error?.Message ?? "Unable to load today's attendance.",
+            result.Error?.Code is "NotFound" ? 404 : 400);
+    }
+
+    return Results.Ok(ApiResponse.Success(new
+    {
+        date = (dateUtc ?? DateTime.UtcNow).Date,
+        items = result.Value ?? Array.Empty<AttendanceWorkerStateDto>()
+    }));
+})
+    .WithTags("Attendance")
+    .WithName("GetTodayAttendance");
+
+attendanceApi.MapGet("/workers/{workerId:guid}", async (
+    Guid workerId,
+    IAttendanceReadService attendanceReadService,
+    DateTime? fromDateUtc = null,
+    DateTime? toDateUtc = null,
+    CancellationToken cancellationToken = default) =>
+{
+    var result = await attendanceReadService.GetWorkerAttendanceAsync(
+        workerId,
+        fromDateUtc,
+        toDateUtc,
+        cancellationToken);
+
+    if (result.IsFailure)
+    {
+        return ApiResponse.Failure(
+            result.Error?.Code ?? "AttendanceReadFailed",
+            result.Error?.Message ?? "Unable to load worker attendance.",
+            result.Error?.Code is "NotFound" ? 404 : 400);
+    }
+
+    return Results.Ok(ApiResponse.Success(new
+    {
+        workerId,
+        dateFromUtc = fromDateUtc,
+        dateToUtc = toDateUtc,
+        items = result.Value ?? Array.Empty<AttendanceRecordDto>()
+    }));
+})
+    .WithTags("Attendance")
+    .WithName("GetWorkerAttendance");
+
+attendanceApi.MapGet("/stages/{subStageId:guid}", async (
+    Guid subStageId,
+    IAttendanceReadService attendanceReadService,
+    DateTime? dateUtc = null,
+    CancellationToken cancellationToken = default) =>
+{
+    var result = await attendanceReadService.GetSubStageAttendanceAsync(subStageId, dateUtc, cancellationToken);
+    if (result.IsFailure)
+    {
+        return ApiResponse.Failure(
+            result.Error?.Code ?? "AttendanceReadFailed",
+            result.Error?.Message ?? "Unable to load stage attendance.",
+            result.Error?.Code is "NotFound" ? 404 : 400);
+    }
+
+    return Results.Ok(ApiResponse.Success(result.Value));
+})
+    .WithTags("Attendance")
+    .WithName("GetSubStageAttendance");
+
 readinessApi.MapGet("/factory", async (
     AppDbContext dbContext,
     CancellationToken cancellationToken,
@@ -2841,7 +2944,8 @@ readinessApi.MapGet("/factory", async (
     var attendanceByWorker = await AssignmentHelpers.GetLatestAttendanceStatusByWorkerAsync(
         dbContext,
         assignmentsInActiveSubStages.Select(x => x.Key).ToArray(),
-        cancellationToken);
+        cancellationToken,
+        asOf);
 
     var assignedWorkers = assignmentsInActiveSubStages.Count;
     var present = 0;
@@ -2924,7 +3028,8 @@ readinessApi.MapGet("/production-lines", async (
     var attendanceByWorker = await AssignmentHelpers.GetLatestAttendanceStatusByWorkerAsync(
         dbContext,
         assignments.Select(x => x.Key).ToArray(),
-        cancellationToken);
+        cancellationToken,
+        asOf);
 
     var readinessItems = lineItems
         .Select(item =>
@@ -3034,7 +3139,8 @@ readinessApi.MapGet("/sub-stages/{subStageId:guid}", async (
     var attendanceByWorker = await AssignmentHelpers.GetLatestAttendanceStatusByWorkerAsync(
         dbContext,
         matchingAssignments.Select(x => x.Key).ToArray(),
-        cancellationToken);
+        cancellationToken,
+        asOf);
 
     var present = 0;
     var late = 0;

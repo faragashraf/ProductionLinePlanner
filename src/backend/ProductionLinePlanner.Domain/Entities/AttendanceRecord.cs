@@ -48,4 +48,29 @@ public class AttendanceRecord
     public string? BadgeNumber { get; private set; }
     public string? SourcePayload { get; private set; }
     public DateTime CreatedAtUtc { get; private set; }
+
+    public void UpdateAttendanceStatus(
+        DateTime attendanceTimeUtc,
+        AttendanceStatus attendanceStatus,
+        string? source = null,
+        string? sourcePayload = null,
+        string? sourceRawId = null,
+        string? attendanceUserId = null,
+        string? badgeNumber = null,
+        DateTime? updatedAtUtc = null)
+    {
+        if (attendanceTimeUtc == default)
+        {
+            throw new ArgumentException("AttendanceTimeUtc is required.", nameof(attendanceTimeUtc));
+        }
+
+        AttendanceTimeUtc = attendanceTimeUtc;
+        AttendanceStatus = attendanceStatus;
+        Source = string.IsNullOrWhiteSpace(source) ? null : source.Trim();
+        SourceRawId = string.IsNullOrWhiteSpace(sourceRawId) ? null : sourceRawId.Trim();
+        AttendanceUserId = string.IsNullOrWhiteSpace(attendanceUserId) ? AttendanceUserId : attendanceUserId.Trim();
+        BadgeNumber = string.IsNullOrWhiteSpace(badgeNumber) ? BadgeNumber : badgeNumber.Trim();
+        SourcePayload = string.IsNullOrWhiteSpace(sourcePayload) ? SourcePayload : sourcePayload.Trim();
+        CreatedAtUtc = updatedAtUtc ?? DateTime.UtcNow;
+    }
 }

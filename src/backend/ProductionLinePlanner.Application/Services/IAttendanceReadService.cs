@@ -11,9 +11,14 @@ public interface IAttendanceReadService
         DateTime? toDateUtc = null,
         CancellationToken cancellationToken = default);
 
-    Task<Result<AttendanceRecordDto[]>> GetTodayAttendanceAsync(
+    Task<Result<AttendanceWorkerStateDto[]>> GetTodayAttendanceAsync(
         Guid? factoryId = null,
         Guid? lineId = null,
+        DateTime? dateUtc = null,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<AttendanceSubStageAttendanceDto>> GetSubStageAttendanceAsync(
+        Guid subStageId,
         DateTime? dateUtc = null,
         CancellationToken cancellationToken = default);
 }
