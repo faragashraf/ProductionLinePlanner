@@ -1,0 +1,31 @@
+<section class="plp-factory-renderer">
+  <plp-factory-card
+    [title]="layout.name"
+    [subtitle]="getLineStatusText()"
+    [readinessPercent]="layout.readinessPercent ?? 0"
+    [workersCurrent]="layout.workersCurrent ?? 0"
+    [workersRequired]="layout.workersRequired ?? 0"
+    [status]="layout.status ?? 'info'"
+  ></plp-factory-card>
+
+  <p class="plp-factory-renderer__guide">اضغط على أي خط للوصول إلى مستوى المراحل.</p>
+
+  <plp-responsive-grid [minItemWidth]="260" [gap]="'var(--plp-spacing-3)'">
+    <button
+      type="button"
+      class="plp-factory-renderer__line-button"
+      *ngFor="let line of layout.lines; trackBy: trackByLine"
+      (click)="onLineSelected(line.id)"
+      [attr.aria-label]="'فتح ' + line.name"
+    >
+      <plp-production-line-card
+        [lineName]="line.name"
+        [statusText]="line.statusText"
+        [readinessPercent]="line.readinessPercent ?? 0"
+        [totalStages]="line.stages.length"
+        [activeStage]="line.activeStageName"
+        [status]="line.status ?? 'info'"
+      ></plp-production-line-card>
+    </button>
+  </plp-responsive-grid>
+</section>

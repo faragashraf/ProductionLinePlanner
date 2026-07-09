@@ -1,0 +1,22 @@
+.plp-factory-renderer {
+  display: grid;
+  gap: var(--plp-spacing-4);
+  width: 100%;
+}
+
+.plp-factory-renderer__guide {
+  margin: 0;
+  color: var(--plp-color-text-subtle);
+  font-size: var(--plp-font-size-sm);
+}
+
+.plp-factory-renderer__line-button {
+  all: unset;
+  width: 100%;
+  text-align: start;
+}
+
+.plp-factory-renderer__line-button:focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--plp-color-info) 45%, transparent);
+  outline-offset: 2px;
+}

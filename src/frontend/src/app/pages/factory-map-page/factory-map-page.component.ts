@@ -1,69 +1,111 @@
-import { Component } from '@angular/core';
-import { FactoryMapLine, MockDataService, FactorySubStage } from '../../core/services/mock-data.service';
+import { ChangeDetectionStrategy, Component } from '@angular/core';
+import {
+  FactoryLayout,
+  MainStageLayout,
+  ProductionLineLayout,
+  SubStageLayout
+} from '../../shared/models/factory-visualization.model';
+import { MockDataService } from '../../core/services/mock-data.service';
+
+type FactoryZoomLevel = 'factory' | 'line' | 'stage' | 'worker';
 
 @Component({
   selector: 'app-factory-map-page',
   templateUrl: './factory-map-page.component.html',
-  styleUrls: ['./factory-map-page.component.scss']
+  styleUrls: ['./factory-map-page.component.scss'],
+  changeDetection: ChangeDetectionStrategy.OnPush
 })
 export class FactoryMapPageComponent {
-  lines: FactoryMapLine[] = [];
-  readonly totalWorkers: number;
+  readonly layout: FactoryLayout;
+  currentZoom: FactoryZoomLevel = 'factory';
+  private selectedLineId: string | null = null;
+  private selectedMainStageId: string | null = null;
+  private selectedSubStageId: string | null = null;
 
   constructor(private readonly dataService: MockDataService) {
-    this.lines = this.dataService.getFactoryMapData();
-    this.totalWorkers = this.lines.reduce((sum, line) => {
-      return sum + line.stages.reduce((workerSum, stage) => workerSum + stage.workersRequired, 0);
-    }, 0);
+    this.layout = this.dataService.getFactoryLayout();
   }
 
-  getReadinessClass(percent: number): string {
-    if (percent >= 85) {
-      return 'line-green';
+  get selectedLine(): ProductionLineLayout | undefined {
+    if (!this.selectedLineId) {
+      return undefined;
     }
-    if (percent >= 60) {
-      return 'line-yellow';
-    }
-    return 'line-red';
+    return this.layout.lines.find((line) => line.id === this.selectedLineId);
   }
 
-  getReadinessText(percent: number): string {
-    if (percent >= 85) {
-      return 'ممتاز';
+  get selectedMainStage(): MainStageLayout | undefined {
+    if (!this.selectedMainStageId || !this.selectedLine) {
+      return undefined;
     }
-    if (percent >= 60) {
-      return 'متوسط';
-    }
-    return 'يحتاج متابعة';
+    return this.selectedLine.stages.find((stage) => stage.id === this.selectedMainStageId);
   }
 
-  getStageRatio(stage: FactorySubStage): number {
-    if (stage.workersRequired === 0) {
-      return 0;
+  get selectedSubStage(): SubStageLayout | undefined {
+    if (!this.selectedSubStageId || !this.selectedMainStage) {
+      return undefined;
     }
-    const ratio = stage.workersCurrent / stage.workersRequired * 100;
-    return Math.min(100, Math.max(0, Math.round(ratio)));
+    return this.selectedMainStage.subStages.find((stage) => stage.id === this.selectedSubStageId);
   }
 
-  getStageClass(stage: FactorySubStage): string {
-    const ratio = this.getStageRatio(stage);
-    if (ratio >= 100) {
-      return 'stage-green';
-    }
-    if (ratio >= 80) {
-      return 'stage-yellow';
-    }
-    return 'stage-red';
+  onLineSelected(lineId: string): void {
+    this.selectedLineId = lineId;
+    this.selectedMainStageId = null;
+    this.selectedSubStageId = null;
+    this.currentZoom = 'line';
   }
 
-  getStageStatus(stage: FactorySubStage): string {
-    const ratio = this.getStageRatio(stage);
-    if (ratio >= 100) {
-      return 'مكتمل';
+  onMainStageSelected(stageId: string): void {
+    if (!this.selectedLine) {
+      return;
     }
-    if (ratio >= 80) {
-      return 'تغطية جيدة';
+
+    this.selectedMainStageId = stageId;
+    this.selectedSubStageId = null;
+    this.currentZoom = 'stage';
+  }
+
+  onSubStageSelected(subStageId: string): void {
+    if (!this.selectedLine || !this.selectedMainStage) {
+      return;
     }
-    return 'عجز';
+
+    this.selectedSubStageId = subStageId;
+
+    if (this.selectedSubStage) {
+      this.currentZoom = 'worker';
+    } else {
+      this.currentZoom = 'stage';
+    }
+  }
+
+  showFactory(): void {
+    this.currentZoom = 'factory';
+    this.selectedLineId = null;
+    this.selectedMainStageId = null;
+    this.selectedSubStageId = null;
+  }
+
+  showLine(): void {
+    this.currentZoom = 'line';
+    this.selectedMainStageId = null;
+    this.selectedSubStageId = null;
+  }
+
+  showStage(): void {
+    if (!this.selectedMainStage) {
+      return;
+    }
+
+    this.currentZoom = 'stage';
+    this.selectedSubStageId = null;
+  }
+
+  onStageBack(target: 'line' | 'stage'): void {
+    if (target === 'line') {
+      this.showLine();
+      return;
+    }
+
+    this.showStage();
   }
 }
