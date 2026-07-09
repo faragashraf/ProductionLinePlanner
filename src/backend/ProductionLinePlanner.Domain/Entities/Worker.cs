@@ -8,7 +8,8 @@ public class Worker
         Guid id,
         string employeeCode,
         string fullName,
-        string? zkEmployeeCode = null,
+        string? attendanceUserId = null,
+        string? badgeNumber = null,
         string? phone = null,
         bool isActive = true,
         DateTime? createdAtUtc = null)
@@ -21,7 +22,8 @@ public class Worker
         Id = id;
         EmployeeCode = employeeCode.Trim();
         FullName = fullName.Trim();
-        ZkEmployeeCode = string.IsNullOrWhiteSpace(zkEmployeeCode) ? null : zkEmployeeCode.Trim();
+        AttendanceUserId = string.IsNullOrWhiteSpace(attendanceUserId) ? null : attendanceUserId.Trim();
+        BadgeNumber = string.IsNullOrWhiteSpace(badgeNumber) ? null : badgeNumber.Trim();
         Phone = string.IsNullOrWhiteSpace(phone) ? null : phone.Trim();
         IsActive = isActive;
         CreatedAtUtc = createdAtUtc ?? DateTime.UtcNow;
@@ -31,7 +33,10 @@ public class Worker
     public Guid Id { get; init; }
     public string EmployeeCode { get; private set; }
     public string FullName { get; private set; }
-    public string? ZkEmployeeCode { get; private set; }
+    /// <summary>External attendance identifiers from ZKTeco USERINFO.</summary>
+    public string? AttendanceUserId { get; private set; }
+    /// <summary>External attendance identifiers from ZKTeco USERINFO.</summary>
+    public string? BadgeNumber { get; private set; }
     public string? Phone { get; private set; }
     public bool IsActive { get; private set; }
     public DateTime CreatedAtUtc { get; private set; }
@@ -43,7 +48,7 @@ public class Worker
 
     public void UpdateContactInfo(string? zkEmployeeCode, string? phone, DateTime? atUtc = null)
     {
-        ZkEmployeeCode = string.IsNullOrWhiteSpace(zkEmployeeCode) ? null : zkEmployeeCode.Trim();
+        AttendanceUserId = string.IsNullOrWhiteSpace(zkEmployeeCode) ? null : zkEmployeeCode.Trim();
         Phone = string.IsNullOrWhiteSpace(phone) ? null : phone.Trim();
         UpdatedAtUtc = atUtc ?? DateTime.UtcNow;
     }

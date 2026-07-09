@@ -10,8 +10,10 @@ public class AttendanceRecord
         DateTime attendanceTimeUtc,
         AttendanceStatus attendanceStatus,
         string? source = null,
-        string? sourceRawId = null,
         string? sourcePayload = null,
+        string? sourceRawId = null,
+        string? attendanceUserId = null,
+        string? badgeNumber = null,
         DateTime? createdAtUtc = null)
     {
         if (workerId == Guid.Empty)
@@ -25,6 +27,8 @@ public class AttendanceRecord
         AttendanceStatus = attendanceStatus;
         Source = string.IsNullOrWhiteSpace(source) ? null : source.Trim();
         SourceRawId = string.IsNullOrWhiteSpace(sourceRawId) ? null : sourceRawId.Trim();
+        AttendanceUserId = string.IsNullOrWhiteSpace(attendanceUserId) ? null : attendanceUserId.Trim();
+        BadgeNumber = string.IsNullOrWhiteSpace(badgeNumber) ? null : badgeNumber.Trim();
         SourcePayload = string.IsNullOrWhiteSpace(sourcePayload) ? null : sourcePayload.Trim();
         CreatedAtUtc = createdAtUtc ?? DateTime.UtcNow;
     }
@@ -36,6 +40,10 @@ public class AttendanceRecord
     public AttendanceStatus AttendanceStatus { get; private set; }
     public string? Source { get; private set; }
     public string? SourceRawId { get; private set; }
+    /// <summary>External attendance identifiers from ZKTeco USERINFO.</summary>
+    public string? AttendanceUserId { get; private set; }
+    /// <summary>External attendance identifiers from ZKTeco USERINFO.</summary>
+    public string? BadgeNumber { get; private set; }
     public string? SourcePayload { get; private set; }
     public DateTime CreatedAtUtc { get; private set; }
 }
