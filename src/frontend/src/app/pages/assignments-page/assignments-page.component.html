@@ -1,4 +1,4 @@
-<section class="assignment-management-page">
+<section class="amp-page">
   <plp-page-header title="إدارة التعيينات" description="واجهة أولية لعرض التوزيع الحالي واستعراض التعديلات المقترحة باستخدام مكوّنات Factory UI." [compact]="true">
     <div header-actions>
       <button
@@ -24,9 +24,9 @@
     </div>
   </plp-page-header>
 
-  <section class="assignment-management-page__message-panel" *ngIf="lastSimulationMessage">
-    <div class="assignment-management-page__message-row">
-      <p class="assignment-management-page__message">{{ lastSimulationMessage }}</p>
+  <section class="amp-msg-panel" *ngIf="lastSimulationMessage">
+    <div class="amp-msg-row">
+      <p class="amp-msg">{{ lastSimulationMessage }}</p>
       <button
         pButton
         pRipple
@@ -40,13 +40,13 @@
     </div>
   </section>
 
-  <section class="assignment-management-page__journey" *ngIf="hasContextSelection">
+  <section class="amp-journey" *ngIf="hasContextSelection">
     <article class="panel">
       <div class="panel__header">
         <h2>سيناريو Demo المرتبط بالخريطة</h2>
         <p>تم استدعاء صفحة التعيينات من {{ demoContext?.lineName }} ({{ demoContext?.stageName }}).</p>
       </div>
-      <div class="assignment-management-page__journey-badges">
+      <div class="amp-journey-badges">
         <plp-status-badge [status]="attendanceTone" [label]="'حضور فعلي: ' + attendanceRate + '%'"></plp-status-badge>
         <plp-status-badge [status]="selectedShortageTone" [label]="'جاهزية الخط: ' + selectedShortageReadiness + '%'"></plp-status-badge>
         <plp-status-badge status="warning" [label]="'عجز عمالة: ' + selectedShortageGap + ' عامل'"></plp-status-badge>
@@ -55,8 +55,8 @@
     </article>
   </section>
 
-  <div class="assignment-management-page__layout">
-    <section class="assignment-management-page__primary">
+  <div class="amp-layout">
+    <section class="amp-main">
       <section class="panel">
         <div class="panel__header">
           <h2>Drop Zones للمراحل الفرعية (Mock)</h2>
@@ -65,7 +65,7 @@
         <plp-responsive-grid [minItemWidth]="250" gap="var(--plp-spacing-3)">
           <article
             *ngFor="let zone of subStageZones; trackBy: trackById"
-            class="drop-zone-card"
+            class="dz-card"
             [class.recommendation-target-zone]="zone.id === selectedShortageZone?.id"
           >
             <plp-sub-stage-card
@@ -75,16 +75,16 @@
               [status]="zone.status"
             ></plp-sub-stage-card>
 
-            <div class="drop-zone-card__status">
+            <div class="dz-status">
               <p>نسبة التغطية الآن</p>
-              <div class="drop-zone-card__status-badges">
+              <div class="dz-status-badges">
                 <plp-status-badge [status]="getZoneReadinessTone(zone)" [label]="'جاهزية الخط: ' + getZoneReadiness(zone) + '%'"></plp-status-badge>
                 <plp-status-badge [status]="getZoneShortage(zone) > 0 ? 'warning' : 'ready'" [label]="'عجز عمالة: ' + getZoneShortage(zone) + ' عامل'"></plp-status-badge>
               </div>
             </div>
 
-            <div class="drop-zone-card__list">
-              <p class="drop-zone-card__muted" *ngIf="zone.workersCurrent === 0">
+            <div class="dz-list">
+              <p class="dz-card__muted" *ngIf="zone.workersCurrent === 0">
                 لا يوجد عامل حتى الآن
               </p>
               <plp-worker-card
@@ -97,7 +97,7 @@
               ></plp-worker-card>
             </div>
 
-            <div class="drop-zone-card__actions">
+            <div class="dz-actions">
               <button
                 pButton
                 pRipple
@@ -128,7 +128,7 @@
           <p>كل بطاقة تتضمن الحالة والمرحلة الحالية والعلاقة الحالية بالتعيين.</p>
         </div>
         <plp-responsive-grid [minItemWidth]="260" gap="var(--plp-spacing-4)">
-          <article *ngFor="let worker of workers; trackBy: trackById" class="worker-card-shell">
+          <article *ngFor="let worker of workers; trackBy: trackById" class="w-card">
             <plp-worker-card
               [fullName]="worker.fullName"
               [code]="worker.code"
@@ -137,7 +137,7 @@
               [lastActivity]="worker.lastActivity"
             ></plp-worker-card>
 
-            <div class="worker-actions">
+            <div class="w-actions">
               <button
                 pButton
                 pRipple
@@ -169,7 +169,7 @@
           <h2>التعيينات الحالية</h2>
           <p>عرض مختصر للحالات المثبتة في الواجهة الحالية.</p>
         </div>
-        <div class="assignment-management-page__assignments">
+        <div class="amp-assignments">
           <plp-assignment-card
             *ngFor="let assignment of assignments; trackBy: trackByAssignment"
             [worker]="assignment.worker"
@@ -182,7 +182,7 @@
       </section>
     </section>
 
-    <aside class="assignment-management-page__side">
+    <aside class="amp-side">
       <section class="panel">
         <plp-timeline-card title="الجدول الزمني للتغييرات (Mock)" [items]="timelineEntries"></plp-timeline-card>
       </section>
@@ -194,23 +194,23 @@
           <p *ngIf="!hasContextSelection">يمكن تفعيل التوصية من صفحة خريطة المصنع لتظهر مرتبطة تلقائيًا بالمرحلة.</p>
         </div>
 
-        <div class="recommendation-card__legend" id="recommendation-panel">
+        <div class="rec-legend" id="recommendation-panel">
           <span>ترتيب التوصية من الأعلى نقطة</span>
           <plp-status-badge status="info" [label]="hasContextSelection ? 'توصية متاحة' : 'مرشح عام'"></plp-status-badge>
         </div>
 
-        <article class="recommendation-card recommendation-card--hero" *ngIf="topRecommendation">
+        <article class="rec-card rec-hero" *ngIf="topRecommendation">
           <p><strong>أفضل بديل مقترح</strong></p>
-          <header class="recommendation-card__header">
-            <span class="recommendation-card__rank">1</span>
+          <header class="rec-header">
+            <span class="rec-card__rank">1</span>
             <div>
               <h3>{{ topRecommendation.workerName }}</h3>
-              <p class="recommendation-card__path">{{ topRecommendation.from }} -> {{ topRecommendation.to }}</p>
+              <p class="rec-path">{{ topRecommendation.from }} -> {{ topRecommendation.to }}</p>
             </div>
             <plp-status-badge [status]="scoreTone(topRecommendation.score)" [label]="topRecommendation.score + ' نقطة'"></plp-status-badge>
           </header>
 
-          <div class="recommendation-card__grid">
+          <div class="rec-grid">
             <section>
               <h4>الأسباب</h4>
               <ul>
@@ -219,7 +219,7 @@
             </section>
             <section>
               <h4>مخاطر مرصودة</h4>
-              <ul class="recommendation-card__risk-list" *ngIf="topRecommendation.risks.length > 0">
+              <ul class="rec-risk-list" *ngIf="topRecommendation.risks.length > 0">
                 <li *ngFor="let risk of topRecommendation.risks">{{ risk }}</li>
               </ul>
               <p *ngIf="topRecommendation.risks.length === 0">لا توجد مخاطر عالية الظاهرة.</p>
@@ -227,17 +227,17 @@
           </div>
         </article>
 
-        <article class="recommendation-card" *ngFor="let recommendation of additionalRecommendations; index as rank">
-          <header class="recommendation-card__header">
-            <span class="recommendation-card__rank">{{ rank + 2 }}</span>
+        <article class="rec-card" *ngFor="let recommendation of additionalRecommendations; index as rank">
+          <header class="rec-header">
+            <span class="rec-card__rank">{{ rank + 2 }}</span>
             <div>
               <h3>{{ recommendation.workerName }}</h3>
-              <p class="recommendation-card__path">{{ recommendation.from }} -> {{ recommendation.to }}</p>
+              <p class="rec-path">{{ recommendation.from }} -> {{ recommendation.to }}</p>
             </div>
             <plp-status-badge [status]="scoreTone(recommendation.score)" [label]="recommendation.score + ' نقطة'"></plp-status-badge>
           </header>
 
-          <div class="recommendation-card__grid">
+          <div class="rec-grid">
             <section>
               <h4>الأسباب</h4>
               <ul>
@@ -246,7 +246,7 @@
             </section>
             <section>
               <h4>مخاطر مرصودة</h4>
-              <ul class="recommendation-card__risk-list" *ngIf="recommendation.risks.length > 0">
+              <ul class="rec-risk-list" *ngIf="recommendation.risks.length > 0">
                 <li *ngFor="let risk of recommendation.risks">{{ risk }}</li>
               </ul>
               <p *ngIf="recommendation.risks.length === 0">لا توجد مخاطر عالية الظاهرة.</p>
@@ -258,22 +258,22 @@
   </div>
 
   <div
-    class="mock-overlay"
+    class="md-overlay"
     *ngIf="temporaryDialog.isOpen"
     (click)="closeTemporaryDialog()"
     aria-hidden="true"
   ></div>
   <section
-    class="mock-dialog"
+    class="md-dialog"
     *ngIf="temporaryDialog.isOpen"
     role="dialog"
     aria-modal="true"
     aria-label="نموذج التعيين المؤقت"
   >
-    <div class="mock-dialog__header">
+    <div class="md-header">
       <h3>تعيين مؤقت (Mock)</h3>
       <button
-        class="mock-dialog__close"
+        class="md-close"
         type="button"
         (click)="closeTemporaryDialog()"
         aria-label="إغلاق التعيين المؤقت"
@@ -281,30 +281,30 @@
         ×
       </button>
     </div>
-    <p class="mock-dialog__subline">الوجهة: {{ temporaryDialog.targetZoneLabel }}</p>
-    <p class="mock-dialog__subline">
+    <p class="md-subline">الوجهة: {{ temporaryDialog.targetZoneLabel }}</p>
+    <p class="md-subline">
       هذا مجرد محاكاة داخل الواجهة — لا يتم حفظ أي تعديل ولا استدعاء API.
     </p>
 
-    <div class="mock-dialog__section">
-      <p class="mock-dialog__section-title">اختر عاملًا متاحًا</p>
-      <div class="mock-dialog__chips">
+    <div class="md-section">
+      <p class="md-section-title">اختر عاملًا متاحًا</p>
+      <div class="md-chips">
         <button
           *ngFor="let worker of availableWorkersForTemporary; trackBy: trackById"
           type="button"
           [attr.aria-pressed]="worker.id === temporaryDialog.selectedWorkerId"
-          [class]="worker.id === temporaryDialog.selectedWorkerId ? 'mock-dialog__chip mock-dialog__chip--selected' : 'mock-dialog__chip'"
+          [class]="worker.id === temporaryDialog.selectedWorkerId ? 'md-chip md-chip--selected' : 'md-chip'"
           (click)="selectTemporaryWorker(worker.id)"
         >
           {{ worker.fullName }} - {{ worker.code }}
         </button>
       </div>
-      <p *ngIf="availableWorkersForTemporary.length === 0" class="mock-dialog__empty">
+      <p *ngIf="availableWorkersForTemporary.length === 0" class="md-empty">
         لا يوجد عامل متاح للتعيين المؤقت الآن.
       </p>
     </div>
 
-    <div class="mock-dialog__actions">
+    <div class="md-actions">
       <button pButton pRipple class="p-button-sm p-button-text" type="button" label="إغلاق" (click)="closeTemporaryDialog()"></button>
       <button
         pButton
@@ -318,22 +318,22 @@
   </section>
 
   <div
-    class="mock-overlay"
+    class="md-overlay"
     *ngIf="replacementDialog.isOpen"
     (click)="closeReplacementDialog()"
     aria-hidden="true"
   ></div>
   <section
-    class="mock-dialog"
+    class="md-dialog"
     *ngIf="replacementDialog.isOpen"
     role="dialog"
     aria-modal="true"
     aria-label="نموذج استبدال عامل"
   >
-    <div class="mock-dialog__header">
+    <div class="md-header">
       <h3>استبدال عامل (Mock)</h3>
       <button
-        class="mock-dialog__close"
+        class="md-close"
         type="button"
         (click)="closeReplacementDialog()"
         aria-label="إغلاق استبدال العامل"
@@ -341,30 +341,30 @@
         ×
       </button>
     </div>
-    <p class="mock-dialog__subline">المرشح المستهدف: {{ replacementTargetWorker?.fullName ?? 'غير محدد' }}</p>
-    <p class="mock-dialog__subline">
+    <p class="md-subline">المرشح المستهدف: {{ replacementTargetWorker?.fullName ?? 'غير محدد' }}</p>
+    <p class="md-subline">
       المرشح البديل يُعرض فقط من العمال غير المعيّنين حالياً (Mock) لتسهيل الفحص.
     </p>
 
-    <div class="mock-dialog__section">
-      <p class="mock-dialog__section-title">اختر البديل المقترح</p>
-      <div class="mock-dialog__chips">
+    <div class="md-section">
+      <p class="md-section-title">اختر البديل المقترح</p>
+      <div class="md-chips">
         <button
           *ngFor="let worker of replacementCandidates; trackBy: trackById"
           type="button"
           [attr.aria-pressed]="worker.id === replacementDialog.replacementWorkerId"
-          [class]="worker.id === replacementDialog.replacementWorkerId ? 'mock-dialog__chip mock-dialog__chip--selected' : 'mock-dialog__chip'"
+          [class]="worker.id === replacementDialog.replacementWorkerId ? 'md-chip md-chip--selected' : 'md-chip'"
           (click)="selectReplacementWorker(worker.id)"
         >
           {{ worker.fullName }} - {{ worker.code }}
         </button>
       </div>
-      <p *ngIf="replacementCandidates.length === 0" class="mock-dialog__empty">
+      <p *ngIf="replacementCandidates.length === 0" class="md-empty">
         لا يوجد مرشح متاح لهذا الاستبدال الآن.
       </p>
     </div>
 
-    <div class="mock-dialog__actions">
+    <div class="md-actions">
       <button pButton pRipple class="p-button-sm p-button-text" type="button" label="إغلاق" (click)="closeReplacementDialog()"></button>
       <button
         pButton
