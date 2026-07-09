@@ -409,26 +409,10 @@ if (app.Environment.IsDevelopment())
             return ApiResponse.Failure("ValidationError", "FullName, Email, and Password are required.");
         }
 
-        var incomingSecret = request.BootstrapSecret?.Trim();
-        if (string.IsNullOrWhiteSpace(incomingSecret))
+        var bootstrapSecretValidation = ValidateBootstrapSecret(request.BootstrapSecret, bootstrapSecret);
+        if (bootstrapSecretValidation is not null)
         {
-            return ApiResponse.Failure("ValidationError", "BootstrapSecret is required.");
-        }
-
-        var configuredBootstrapSecret = bootstrapSecret?.Trim();
-        if (string.IsNullOrWhiteSpace(configuredBootstrapSecret) ||
-            configuredBootstrapSecret.Contains("REPLACE_WITH", StringComparison.OrdinalIgnoreCase) ||
-            configuredBootstrapSecret.Contains("USER_SECRET", StringComparison.OrdinalIgnoreCase))
-        {
-            return ApiResponse.Failure("ConfigurationError", "Bootstrap secret is not configured.");
-        }
-
-        var incomingSecretBytes = Encoding.UTF8.GetBytes(incomingSecret);
-        var configuredSecretBytes = Encoding.UTF8.GetBytes(configuredBootstrapSecret);
-        if (incomingSecretBytes.Length != configuredSecretBytes.Length ||
-            !CryptographicOperations.FixedTimeEquals(incomingSecretBytes, configuredSecretBytes))
-        {
-            return ApiResponse.Failure("Unauthorized", "Invalid bootstrap secret.", 401);
+            return bootstrapSecretValidation;
         }
 
         if (await dbContext.AppUsers.AnyAsync(cancellationToken))
@@ -494,6 +478,47 @@ if (app.Environment.IsDevelopment())
     })
         .WithTags("Bootstrap")
         .WithName("BootstrapSuperAdmin");
+
+    bootstrapApi.MapPost("/reset-super-admin-password", async (
+        ResetSuperAdminPasswordRequest request,
+        AppDbContext dbContext,
+        IPasswordHasher<AppUser> passwordHasher,
+        CancellationToken cancellationToken) =>
+    {
+        var email = request.Email?.Trim();
+        var newPassword = request.NewPassword?.Trim();
+
+        if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(newPassword))
+        {
+            return ApiResponse.Failure("ValidationError", "Email and NewPassword are required.");
+        }
+
+        var bootstrapSecretValidation = ValidateBootstrapSecret(request.BootstrapSecret, bootstrapSecret);
+        if (bootstrapSecretValidation is not null)
+        {
+            return bootstrapSecretValidation;
+        }
+
+        var user = await dbContext.AppUsers
+            .Include(x => x.Roles)
+            .FirstOrDefaultAsync(x => x.IsActive && x.Email == email, cancellationToken);
+
+        if (user is null || user.Roles.All(role => role.Role != UserRole.SuperAdmin))
+        {
+            return ApiResponse.Failure(
+                "ResetNotAllowed",
+                "Unable to reset password for the requested SuperAdmin user.",
+                404);
+        }
+
+        var passwordHash = passwordHasher.HashPassword(user, newPassword);
+        user.ChangePasswordHash(passwordHash);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return Results.Ok(ApiResponse.Success(null, "SuperAdmin password reset complete."));
+    })
+        .WithTags("Bootstrap")
+        .WithName("ResetSuperAdminPassword");
 }
 
 authApi.MapPost("/refresh", async (
@@ -2766,6 +2791,33 @@ static int MapFailureStatusCode(string? code)
         "Forbidden" => StatusCodes.Status403Forbidden,
         _ => StatusCodes.Status500InternalServerError
     };
+}
+
+static IResult? ValidateBootstrapSecret(string? requestBootstrapSecret, string? configuredBootstrapSecret)
+{
+    var incomingSecret = requestBootstrapSecret?.Trim();
+    if (string.IsNullOrWhiteSpace(incomingSecret))
+    {
+        return ApiResponse.Failure("ValidationError", "BootstrapSecret is required.");
+    }
+
+    var configuredSecret = configuredBootstrapSecret?.Trim();
+    if (string.IsNullOrWhiteSpace(configuredSecret) ||
+        configuredSecret.Contains("REPLACE_WITH", StringComparison.OrdinalIgnoreCase) ||
+        configuredSecret.Contains("USER_SECRET", StringComparison.OrdinalIgnoreCase))
+    {
+        return ApiResponse.Failure("ConfigurationError", "Bootstrap secret is not configured.");
+    }
+
+    var incomingSecretBytes = Encoding.UTF8.GetBytes(incomingSecret);
+    var configuredSecretBytes = Encoding.UTF8.GetBytes(configuredSecret);
+    if (incomingSecretBytes.Length != configuredSecretBytes.Length ||
+        !CryptographicOperations.FixedTimeEquals(incomingSecretBytes, configuredSecretBytes))
+    {
+        return ApiResponse.Failure("Unauthorized", "Invalid bootstrap secret.", 401);
+    }
+
+    return null;
 }
 
 app.Run();

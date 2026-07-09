@@ -52,4 +52,13 @@ public class AppUser
             UpdatedAtUtc = DateTime.UtcNow;
         }
     }
+
+    public void ChangePasswordHash(string passwordHash)
+    {
+        if (string.IsNullOrWhiteSpace(passwordHash))
+            throw new ArgumentException("PasswordHash is required.", nameof(passwordHash));
+
+        PasswordHash = passwordHash;
+        UpdatedAtUtc = DateTime.UtcNow;
+    }
 }
