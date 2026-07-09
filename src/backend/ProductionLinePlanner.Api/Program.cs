@@ -4,8 +4,11 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.IdentityModel.Tokens;
+using System.IdentityModel.Tokens.Jwt;
 using System.Diagnostics;
+using System.Security.Cryptography;
 using System.Security.Claims;
 using System.Text;
 using System.Threading.RateLimiting;
@@ -39,7 +42,12 @@ const string SecurityCorsPolicy = "ProductionLinePlannerCors";
 var jwtSection = builder.Configuration.GetSection("Authentication:Jwt");
 var jwtIssuer = jwtSection["Issuer"] ?? "ProductionLinePlanner.Api";
 var jwtAudience = jwtSection["Audience"] ?? "ProductionLinePlanner.WebClient";
+var jwtAccessTokenMinutes = Math.Max(15, builder.Configuration.GetValue("Authentication:Jwt:AccessTokenMinutes", 45));
 var jwtSigningKey = jwtSection["SigningKey"] ?? "REPLACE_WITH_USER_SECRET_MIN_64_CHARS_00000000000000000000000000000000";
+if (Encoding.UTF8.GetByteCount(jwtSigningKey) < 64)
+{
+    throw new InvalidOperationException("Authentication:Jwt:SigningKey must be at least 64 bytes. Configure it via appsettings or environment variables.");
+}
 
 var jwtKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSigningKey));
 
@@ -115,6 +123,7 @@ builder.Services.AddRateLimiter(options =>
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUserService, CurrentUserService>();
+builder.Services.AddSingleton<IPasswordHasher<AppUser>, PasswordHasher<AppUser>>();
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
@@ -243,6 +252,101 @@ app.MapGet("/api/identity/placeholder", () => Results.Ok(new
 }))
     .WithTags("Identity")
     .WithName("IdentityPlaceholder");
+
+var authApi = app.MapGroup("/api/auth");
+
+authApi.MapPost("/login", async (
+    LoginRequest request,
+    AppDbContext dbContext,
+    IPasswordHasher<AppUser> passwordHasher,
+    CancellationToken cancellationToken) =>
+{
+    var email = request.Email?.Trim();
+    var password = request.Password?.Trim();
+
+    if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password))
+    {
+        return ApiResponse.Failure("ValidationError", "Email and password are required.");
+    }
+
+    var user = await dbContext.AppUsers
+        .Include(x => x.Roles)
+        .AsNoTracking()
+        .FirstOrDefaultAsync(x => x.IsActive && x.Email == email, cancellationToken);
+
+    if (user is null)
+    {
+        return ApiResponse.Failure("InvalidCredentials", "Invalid email or password.", 401);
+    }
+
+    if (passwordHasher.VerifyHashedPassword(user, user.PasswordHash, password) is not (PasswordVerificationResult.Success or PasswordVerificationResult.SuccessRehashNeeded))
+    {
+        return ApiResponse.Failure("InvalidCredentials", "Invalid email or password.", 401);
+    }
+
+    var now = DateTime.UtcNow;
+    var expiresAt = now.AddMinutes(jwtAccessTokenMinutes);
+    var accessToken = AuthTokenService.CreateAccessToken(user, now, expiresAt, jwtIssuer, jwtAudience, jwtKey);
+    var roles = user.Roles
+        .Select(role => role.Role.ToString())
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .OrderBy(role => role)
+        .ToArray();
+
+    var response = new AuthLoginResponse
+    {
+        AccessToken = accessToken,
+        RefreshToken = null,
+        ExpiresAt = expiresAt,
+        UserId = user.Id,
+        Roles = roles,
+        Permissions = Array.Empty<string>()
+    };
+
+    return Results.Ok(ApiResponse.Success(response));
+})
+    .WithTags("Auth")
+    .WithName("AuthLogin");
+
+authApi.MapGet("/me", async (
+    ICurrentUserService currentUserService,
+    AppDbContext dbContext,
+    CancellationToken cancellationToken) =>
+{
+    if (!currentUserService.IsAuthenticated || currentUserService.UserId is null)
+    {
+        return ApiResponse.Failure("Unauthorized", "Unauthorized.", 401);
+    }
+
+    var user = await dbContext.AppUsers
+        .Include(x => x.Roles)
+        .AsNoTracking()
+        .FirstOrDefaultAsync(x => x.Id == currentUserService.UserId.Value, cancellationToken);
+
+    if (user is null || !user.IsActive)
+    {
+        return ApiResponse.Failure("Unauthorized", "Unauthorized.", 401);
+    }
+
+    var roles = user.Roles
+        .Select(role => role.Role.ToString())
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .OrderBy(role => role)
+        .ToArray();
+
+    var permissions = AuthTokenService.ResolvePermissionsForRoles(roles);
+    return Results.Ok(ApiResponse.Success(new CurrentUserResponse
+    {
+        Id = user.Id,
+        FullName = user.FullName,
+        Email = user.Email,
+        Roles = roles,
+        Permissions = permissions
+    }));
+})
+    .RequireAuthorization()
+    .WithTags("Auth")
+    .WithName("AuthMe");
 
 app.MapHub<ProductionHub>("/hubs/production");
 
@@ -1506,6 +1610,63 @@ public static class ApiResponse
     }
 
     public static object Success(object? data, string message = "OK") => new { success = true, message, data };
+}
+
+static class AuthTokenService
+{
+    public static string BuildRefreshTokenPlaceholder()
+    {
+        var randomBytes = RandomNumberGenerator.GetBytes(48);
+        return Convert.ToBase64String(randomBytes);
+    }
+
+    public static string CreateAccessToken(
+        AppUser user,
+        DateTime issuedAtUtc,
+        DateTime expiresAtUtc,
+        string issuer,
+        string audience,
+        SymmetricSecurityKey signingKey)
+    {
+        var tokenId = Guid.NewGuid().ToString("N");
+        var roles = user.Roles.Select(r => new Claim(ClaimTypes.Role, r.Role.ToString())).ToArray();
+        var claims = new List<Claim>
+        {
+            new(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
+            new(JwtRegisteredClaimNames.Jti, tokenId),
+            new(JwtRegisteredClaimNames.Iat, DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString()),
+            new(ClaimTypes.NameIdentifier, user.Id.ToString()),
+            new(ClaimTypes.Name, user.FullName),
+            new(JwtRegisteredClaimNames.Email, user.Email),
+            new(JwtRegisteredClaimNames.Sid, user.Id.ToString()),
+            new("token_version", "1")
+        };
+        claims.AddRange(roles);
+
+        var tokenDescriptor = new SecurityTokenDescriptor
+        {
+            Subject = new ClaimsIdentity(claims),
+            Expires = expiresAtUtc,
+            NotBefore = issuedAtUtc,
+            IssuedAt = issuedAtUtc,
+            Issuer = issuer,
+            Audience = audience,
+            SigningCredentials = new SigningCredentials(signingKey, SecurityAlgorithms.HmacSha256)
+        };
+
+        var handler = new JwtSecurityTokenHandler();
+        var token = handler.CreateToken(tokenDescriptor);
+        return handler.WriteToken(token);
+    }
+
+    public static string[] ResolvePermissionsForRoles(string[] roles)
+    {
+        return roles.Contains(UserRole.SuperAdmin.ToString(), StringComparer.OrdinalIgnoreCase)
+            ? ["users.read", "users.write", "system.read", "system.write"]
+            : roles.Contains(UserRole.Admin.ToString(), StringComparer.OrdinalIgnoreCase)
+                ? ["users.read", "system.read", "dashboard.read", "readiness.read"]
+                : Array.Empty<string>();
+    }
 }
 
 public sealed class ProductionHub : Hub
