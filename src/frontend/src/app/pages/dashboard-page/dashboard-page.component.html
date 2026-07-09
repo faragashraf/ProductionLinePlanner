@@ -4,17 +4,26 @@
     <p>مرشد سريع لمسار الوردية: جاهزية المصنع → نقاط العجز → التوصية.</p>
   </header>
 
-  <section class="dashboard-page__hero">
-    <section class="demo-callout-strip">
+  <section class="dashboard-page__hero" aria-label="ملخص تشغيل المصنع">
+    <div class="hero-copy">
+      <span class="hero-eyebrow">ملخص الوردية الآن</span>
+      <strong>جاهزية المصنع {{ lineReadinessSummary.overallReadiness }}%</strong>
+      <span>الحضور الفعلي {{ lineReadinessSummary.attendanceRate }}% مع عجز {{ totalAttendanceDeficit }} عامل يحتاج متابعة.</span>
+    </div>
+
+    <section class="demo-callout-strip" aria-label="شريط حالة التشغيل">
       <plp-status-badge [status]="attendanceToneStatus" [label]="'حضور فعلي: ' + lineReadinessSummary.attendanceRate + '%'"></plp-status-badge>
       <plp-status-badge [status]="shortageToneStatus" [label]="'عجز عمالة: ' + totalAttendanceDeficit + ' عامل'"></plp-status-badge>
-      <plp-status-badge [status]="recommendationAvailabilityTone" [label]="'توصية متاحة'" ></plp-status-badge>
-      <plp-status-badge [status]="readinessShortageToneStatus" [label]="'جاهزية الخط: ' + lineReadinessSummary.overallReadiness + '%'" ></plp-status-badge>
+      <plp-status-badge [status]="recommendationAvailabilityTone" [label]="'توصية متاحة'"></plp-status-badge>
+      <plp-status-badge [status]="readinessShortageToneStatus" [label]="'جاهزية الخط: ' + lineReadinessSummary.overallReadiness + '%'"></plp-status-badge>
     </section>
 
-    <section class="journey-actions" aria-label="روابط سريعة">
-      <a pButton pRipple type="button" class="p-button-sm p-button-secondary" routerLink="/factory-map" icon="pi pi-sitemap" label="خريطة المصنع"></a>
-      <a pButton pRipple type="button" class="p-button-sm p-button-help" routerLink="/assignments" icon="pi pi-users" label="صفحة التعيينات"></a>
+    <section class="journey-actions" aria-label="روابط سريعة للعرض التجريبي">
+      <span>إجراءات العرض التجريبي</span>
+      <div class="journey-actions__buttons">
+        <a pButton pRipple type="button" class="p-button-sm p-button-secondary" routerLink="/factory-map" icon="pi pi-sitemap" label="الدخول إلى خريطة المصنع"></a>
+        <a pButton pRipple type="button" class="p-button-sm p-button-help" routerLink="/assignments" icon="pi pi-users" label="الدخول إلى التعيينات"></a>
+      </div>
     </section>
   </section>
 
@@ -44,12 +53,19 @@
     </p-card>
 
     <p-card *ngIf="criticalReadinessAlerts.length" styleClass="summary-card summary-card--alert">
-      <div class="summary-label">تنبيه مرحلة حرجة</div>
-      <p class="summary-note summary-note--alert">{{ criticalAlertsText }}</p>
+      <div class="summary-alert-head">
+        <div>
+          <div class="summary-label">تنبيه مرحلة حرجة</div>
+          <p class="summary-note summary-note--alert">{{ criticalAlertsText }}</p>
+        </div>
+        <strong>{{ criticalReadinessAlerts.length }}</strong>
+      </div>
       <ul class="summary-critical-list">
         <li *ngFor="let alert of criticalReadinessAlerts">
-          <strong>{{ alert.lineName }} - {{ alert.stageName }}</strong>
-          {{ alert.workersCurrent }}/{{ alert.workersRequired }} عامل
+          <span>
+            <strong>{{ alert.lineName }} - {{ alert.stageName }}</strong>
+            <em>{{ alert.workersCurrent }}/{{ alert.workersRequired }} عامل</em>
+          </span>
           <plp-status-badge
             [status]="lineReadinessSummary.overallReadiness > 70 ? 'warning' : 'critical'"
             [label]="'عجز ' + alert.shortageWorkers"
@@ -82,7 +98,10 @@
 
   <section class="attendance-row">
     <p-card class="attendance-card">
-      <div class="attendance-title">مؤشرات حضور مختصرة</div>
+      <div class="attendance-title">
+        <span>مؤشرات حضور مختصرة</span>
+        <strong>{{ lineReadinessSummary.activeWorkers }} / {{ lineReadinessSummary.totalWorkers }}</strong>
+      </div>
       <div class="attendance-items">
         <div *ngFor="let item of attendanceIndicators" [class]="getIndicatorClass(item.tone)">
           <i [class]="item.icon"></i>
