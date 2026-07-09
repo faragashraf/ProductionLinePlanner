@@ -1,5 +1,10 @@
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.AspNetCore.Diagnostics;
+using Microsoft.AspNetCore.Mvc;
+using System.Diagnostics;
+using System.Threading.RateLimiting;
 using ProductionLinePlanner.Application.DTOs;
 using ProductionLinePlanner.Application.Requests;
 using ProductionLinePlanner.Domain.Entities;
@@ -7,22 +12,91 @@ using ProductionLinePlanner.Infrastructure;
 using ProductionLinePlanner.Infrastructure.Data;
 
 var builder = WebApplication.CreateBuilder(args);
+var allowedCorsOrigins = builder.Configuration
+    .GetSection("Cors:AllowedOrigins")
+    .Get<string[]>()?
+    .Where(origin => !string.IsNullOrWhiteSpace(origin))
+    .Select(origin => origin.Trim())
+    .Where(origin => builder.Environment.IsDevelopment() || origin.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+    .ToArray() ?? Array.Empty<string>();
+var allowedMethods = builder.Configuration
+    .GetSection("Cors:AllowedMethods")
+    .Get<string[]>() ?? ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"];
+var allowedHeaders = builder.Configuration
+    .GetSection("Cors:AllowedHeaders")
+    .Get<string[]>() ?? ["Accept", "Content-Type", "Authorization", "X-Requested-With"];
+var corsAllowCredentials = builder.Configuration.GetValue("Cors:AllowCredentials", false);
+var rateLimitWindowSeconds = Math.Max(15, builder.Configuration.GetValue("Security:RateLimit:WindowSeconds", 60));
+var rateLimitPermitLimit = Math.Max(1, builder.Configuration.GetValue("Security:RateLimit:PermitLimit", 120));
+const string SecurityCorsPolicy = "ProductionLinePlannerCors";
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+builder.Services.AddProblemDetails();
 
 builder.Services.AddCors(options =>
 {
     options.AddPolicy(
-        "ProductionLinePlannerCors",
+        SecurityCorsPolicy,
         policy =>
         {
-            policy
-                .WithOrigins(builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [])
-                .AllowAnyHeader()
-                .AllowAnyMethod()
-                .AllowCredentials();
+            if (allowedCorsOrigins.Length > 0)
+            {
+                policy.WithOrigins(allowedCorsOrigins);
+            }
+
+            if (allowedMethods.Length > 0)
+            {
+                policy.WithMethods(allowedMethods);
+            }
+
+            if (allowedHeaders.Length > 0)
+            {
+                policy.WithHeaders(allowedHeaders);
+            }
+
+            if (corsAllowCredentials)
+            {
+                policy.AllowCredentials();
+            }
+            else
+            {
+                policy.DisallowCredentials();
+            }
         });
+});
+
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
+    {
+        var partitionKey = context.Connection.RemoteIpAddress?.ToString() ?? "anonymous";
+        return RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey,
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = rateLimitPermitLimit,
+                QueueLimit = 0,
+                Window = TimeSpan.FromSeconds(rateLimitWindowSeconds),
+                QueueProcessingOrder = QueueProcessingOrder.OldestFirst
+            });
+    });
+    options.OnRejected = async (context, _) =>
+    {
+        var problem = new ProblemDetails
+        {
+            Status = StatusCodes.Status429TooManyRequests,
+            Title = "Too Many Requests",
+            Detail = "Rate limit exceeded. Please retry later.",
+            Instance = context.HttpContext.Request.Path,
+            Type = "https://tools.ietf.org/html/rfc6585#section-4"
+        };
+        problem.Extensions["code"] = "RateLimitExceeded";
+        problem.Extensions["retryAfterSeconds"] = rateLimitWindowSeconds;
+        context.HttpContext.Response.Headers["Retry-After"] = rateLimitWindowSeconds.ToString();
+        await context.HttpContext.Response.WriteAsJsonAsync(problem);
+    };
 });
 
 builder.Services.AddInfrastructure(builder.Configuration);
@@ -42,10 +116,65 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
+app.UseExceptionHandler("/api/error");
+
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHsts();
+}
+
 app.UseHttpsRedirection();
-app.UseCors("ProductionLinePlannerCors");
+app.UseRateLimiter();
+app.UseCors(SecurityCorsPolicy);
+app.Use(async (context, next) =>
+{
+    context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+    context.Response.Headers["X-Frame-Options"] = "DENY";
+    context.Response.Headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
+    context.Response.Headers["Permissions-Policy"] =
+        "camera=(), microphone=(), geolocation=(), payment=(), usb=(), magnetometer=(), gyroscope=()";
+    context.Response.Headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload";
+    await next();
+});
 app.UseAuthentication();
 app.UseAuthorization();
+
+app.MapGet("/api/error", (HttpContext context) =>
+{
+    var exception = context.Features.Get<IExceptionHandlerFeature>()?.Error;
+    if (exception is null)
+    {
+        return Results.Problem(
+            title: "An unexpected error occurred.",
+            statusCode: StatusCodes.Status500InternalServerError,
+            instance: context.Request.Path,
+            detail: "Unhandled error path was hit without exception details.");
+    }
+
+    var isDevelopment = app.Environment.IsDevelopment();
+    var traceId = Activity.Current?.Id ?? context.TraceIdentifier;
+    var (statusCode, title, code) = exception switch
+    {
+        UnauthorizedAccessException => (StatusCodes.Status401Unauthorized, "Unauthorized", "UnauthorizedAccess"),
+        System.ComponentModel.DataAnnotations.ValidationException => (StatusCodes.Status400BadRequest, "Validation Failed", "ValidationError"),
+        KeyNotFoundException => (StatusCodes.Status404NotFound, "Not Found", "ResourceNotFound"),
+        DbUpdateConcurrencyException => (StatusCodes.Status409Conflict, "Conflict", "ConcurrencyConflict"),
+        _ => (StatusCodes.Status500InternalServerError, "Internal Server Error", "UnhandledError")
+    };
+
+    var problem = new ProblemDetails
+    {
+        Status = statusCode,
+        Title = title,
+        Detail = isDevelopment ? exception.Message : "An unexpected error occurred.",
+        Instance = context.Request.Path
+    };
+    problem.Extensions["traceId"] = traceId;
+    problem.Extensions["code"] = code;
+    return Results.Problem(problem);
+})
+    .WithTags("System")
+    .WithName("Error");
 
 app.MapGet("/api/health", () => Results.Ok(new
 {
@@ -53,7 +182,8 @@ app.MapGet("/api/health", () => Results.Ok(new
     timestampUtc = DateTime.UtcNow
 }))
     .WithTags("System")
-    .WithName("Health");
+    .WithName("Health")
+    .DisableRateLimiting();
 
 app.MapGet("/", () => Results.Ok("ProductionLinePlanner API is running."))
     .WithTags("System")
