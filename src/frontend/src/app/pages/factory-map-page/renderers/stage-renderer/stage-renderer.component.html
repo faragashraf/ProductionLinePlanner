@@ -1,0 +1,83 @@
+<section class="plp-stage-renderer">
+  <header class="plp-stage-renderer__header">
+    <button
+      *ngIf="mode === 'stage'"
+      type="button"
+      class="plp-stage-renderer__back"
+      (click)="onBackToLine()"
+      aria-label="عودة إلى المراحل الرئيسية"
+    >
+      <i class="pi pi-arrow-right" aria-hidden="true"></i>
+      العودة للخط {{ line.name }}
+    </button>
+
+    <button
+      *ngIf="mode === 'worker'"
+      type="button"
+      class="plp-stage-renderer__back"
+      (click)="onBackToStage()"
+      aria-label="عودة إلى تفاصيل المرحلة"
+    >
+      <i class="pi pi-arrow-right" aria-hidden="true"></i>
+      العودة لمستوى المرحلة
+    </button>
+
+    <h2 class="plp-stage-renderer__title">{{ mainStage.name }}</h2>
+    <p class="plp-stage-renderer__context">خط {{ line.name }}</p>
+  </header>
+
+  <plp-main-stage-card
+    [name]="mainStage.name"
+    [workersCurrent]="mainStage.workersCurrent ?? 0"
+    [workersRequired]="mainStage.workersRequired ?? 0"
+    [status]="mainStage.status ?? 'info'"
+    [note]="mainStage.note ?? ''"
+  ></plp-main-stage-card>
+
+  <ng-container *ngIf="mode === 'stage'">
+    <p class="plp-stage-renderer__subtitle">اختر مرحلة فرعية لعرض العاملين.</p>
+    <plp-responsive-grid [minItemWidth]="240" [gap]="'var(--plp-spacing-3)'">
+      <button
+        type="button"
+        class="plp-stage-renderer__substage-button"
+        *ngFor="let subStage of mainStage.subStages; trackBy: trackBySubStage"
+        (click)="onSubStageSelected(subStage.id)"
+        [attr.aria-label]="'عرض العمال في ' + subStage.name"
+      >
+        <plp-sub-stage-card
+          [name]="subStage.name"
+          [workersCurrent]="subStage.workersCurrent ?? 0"
+          [workersRequired]="subStage.workersRequired ?? 0"
+          [status]="subStage.status ?? 'info'"
+        ></plp-sub-stage-card>
+        <span class="plp-stage-renderer__action">عرض العمال</span>
+      </button>
+    </plp-responsive-grid>
+  </ng-container>
+
+  <ng-container *ngIf="mode === 'worker' && subStage">
+    <plp-sub-stage-card
+      [name]="subStage.name"
+      [workersCurrent]="subStage.workersCurrent ?? 0"
+      [workersRequired]="subStage.workersRequired ?? 0"
+      [status]="subStage.status ?? 'info'"
+    ></plp-sub-stage-card>
+
+    <p class="plp-stage-renderer__workers-title">العاملون في {{ subStage.name }}</p>
+
+    <section class="plp-stage-renderer__workers" *ngIf="subStage.workers.length > 0">
+      <plp-worker-card
+        *ngFor="let worker of subStage.workers; trackBy: trackByWorker"
+        [fullName]="worker.fullName"
+        [code]="worker.code"
+        [status]="worker.status"
+        [assignmentType]="worker.assignmentType"
+        [lastActivity]="worker.lastActivity"
+      ></plp-worker-card>
+    </section>
+
+    <p class="plp-stage-renderer__empty" *ngIf="subStage.workers.length === 0">
+      لا يوجد عاملين مخصصين لهذه المرحلة الفرعية حاليًا.
+    </p>
+  </ng-container>
+</section>

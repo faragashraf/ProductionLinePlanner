@@ -1,0 +1,69 @@
+.plp-stage-renderer {
+  display: grid;
+  gap: var(--plp-spacing-3);
+}
+
+.plp-stage-renderer__header {
+  display: grid;
+  gap: var(--plp-spacing-2);
+}
+
+.plp-stage-renderer__back {
+  justify-self: start;
+  border: 1px solid var(--plp-color-border);
+  background: var(--plp-color-surface-soft);
+  border-radius: var(--plp-radius-md);
+  color: var(--plp-color-text);
+  padding: 0.45rem 0.65rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.plp-stage-renderer__title {
+  margin: 0;
+  font-size: var(--plp-font-size-lg);
+}
+
+.plp-stage-renderer__context {
+  margin: 0;
+  color: var(--plp-color-text-subtle);
+  font-size: var(--plp-font-size-sm);
+}
+
+.plp-stage-renderer__subtitle,
+.plp-stage-renderer__workers-title {
+  margin: 0;
+  color: var(--plp-color-text-subtle);
+  font-size: var(--plp-font-size-sm);
+}
+
+.plp-stage-renderer__substage-button {
+  all: unset;
+  width: 100%;
+  text-align: start;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.plp-stage-renderer__substage-button:focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--plp-color-info) 45%, transparent);
+  outline-offset: 2px;
+}
+
+.plp-stage-renderer__action {
+  color: var(--plp-color-text-subtle);
+  font-size: var(--plp-font-size-xs);
+}
+
+.plp-stage-renderer__workers {
+  display: grid;
+  gap: var(--plp-spacing-3);
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+}
+
+.plp-stage-renderer__empty {
+  margin: 0;
+  color: var(--plp-color-text-subtle);
+  font-size: var(--plp-font-size-sm);
+}

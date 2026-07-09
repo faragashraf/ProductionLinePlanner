@@ -19,6 +19,9 @@ import { CardModule } from 'primeng/card';
 import { BadgeModule } from 'primeng/badge';
 import { ButtonModule } from 'primeng/button';
 import { SharedModule } from './shared/shared.module';
+import { FactoryRendererComponent } from './pages/factory-map-page/renderers/factory-renderer/factory-renderer.component';
+import { LineRendererComponent } from './pages/factory-map-page/renderers/line-renderer/line-renderer.component';
+import { StageRendererComponent } from './pages/factory-map-page/renderers/stage-renderer/stage-renderer.component';
 
 @NgModule({
   declarations: [
@@ -31,7 +34,10 @@ import { SharedModule } from './shared/shared.module';
     AssignmentsPageComponent,
     NotificationsPageComponent,
     LoginPageComponent,
-    AppShellComponent
+    AppShellComponent,
+    FactoryRendererComponent,
+    LineRendererComponent,
+    StageRendererComponent
   ],
   imports: [
     BrowserModule,

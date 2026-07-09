@@ -1,50 +1,94 @@
-<section class="page-frame">
-  <header class="page-header">
-    <h1>Factory Map</h1>
-    <p>خريطة مصغرة تعتمد على mock data كبداية مع حالة مرئية لكل خط ومرحلة.</p>
-  </header>
+<section class="page-frame factory-visualization-page">
+  <plp-page-header title="مؤشر التمثيل البصري للمصنع" description="هيكلية بياناتية تفاعلية تدعم التنقل بين مستويات المصنع دون استدعاء backend." [compact]="true">
+    <div header-actions>
+      <button
+        type="button"
+        class="p-button p-button-sm p-button-text"
+        (click)="showFactory()"
+        *ngIf="currentZoom !== 'factory'"
+      >
+        العودة لمستوى المصنع
+      </button>
+    </div>
+  </plp-page-header>
 
-  <section class="factory-map-banner">
-    <p-card>
-      <div class="banner-row">
-        <div>
-          <div class="banner-label">إجمالي العاملين المتوقع</div>
-          <div class="banner-value">{{ totalWorkers }}</div>
-        </div>
-        <div>
-          <div class="banner-label">عدد الخطوط</div>
-          <div class="banner-value">{{ lines.length }}</div>
-        </div>
-      </div>
-    </p-card>
-  </section>
+  <nav class="factory-visualization-page__path" aria-label="مسار التنقل">
+    <button
+      type="button"
+      class="factory-visualization-page__path-button"
+      (click)="showFactory()"
+      [class.factory-visualization-page__path-button--active]="currentZoom === 'factory'"
+      [attr.aria-current]="currentZoom === 'factory' ? 'page' : null"
+    >
+      مصنع: {{ layout.name }}
+    </button>
 
-  <div class="line-grid">
-    <p-card *ngFor="let line of lines" styleClass="line-card">
-      <ng-template pTemplate="title">
-        <div class="line-title">
-          <span>{{ line.name }}</span>
-          <p-badge [value]="getReadinessText(line.statusPercent)" [styleClass]="getReadinessClass(line.statusPercent)"></p-badge>
-        </div>
-      </ng-template>
+    <span *ngIf="selectedLine" class="factory-visualization-page__path-sep">/</span>
+    <button
+      *ngIf="selectedLine"
+      type="button"
+      class="factory-visualization-page__path-button"
+      [class.factory-visualization-page__path-button--active]="currentZoom === 'line'"
+      [attr.aria-current]="currentZoom === 'line' ? 'page' : null"
+      (click)="showLine()"
+      [disabled]="currentZoom === 'factory'"
+    >
+      {{ selectedLine.name }}
+    </button>
 
-      <p class="readiness-label">جاهزية الخط: <strong>{{ line.statusPercent }}%</strong></p>
-      <div class="line-meter">
-        <div class="line-meter-fill" [style.width.%]="line.statusPercent"></div>
-      </div>
+    <span *ngIf="selectedMainStage" class="factory-visualization-page__path-sep">/</span>
+    <button
+      *ngIf="selectedMainStage"
+      type="button"
+      class="factory-visualization-page__path-button"
+      [class.factory-visualization-page__path-button--active]="currentZoom === 'stage' || currentZoom === 'worker'"
+      [attr.aria-current]="currentZoom === 'stage' ? 'page' : null"
+      [disabled]="currentZoom === 'factory' || currentZoom === 'line'"
+      (click)="showStage()"
+    >
+      {{ selectedMainStage.name }}
+    </button>
 
-      <div class="stages-grid">
-        <article class="stage-block" *ngFor="let stage of line.stages" [ngClass]="getStageClass(stage)">
-          <div class="stage-name-row">
-            <div class="stage-name">{{ stage.name }}</div>
-            <span class="stage-badge">{{ getStageStatus(stage) }}</span>
-          </div>
-          <div class="stage-meta">العاملون: {{ stage.workersCurrent }} / {{ stage.workersRequired }}</div>
-          <div class="stage-meter">
-            <div class="stage-fill" [style.width.%]="getStageRatio(stage)"></div>
-          </div>
-        </article>
-      </div>
-    </p-card>
-  </div>
+    <span *ngIf="selectedSubStage && currentZoom === 'worker'" class="factory-visualization-page__path-sep">/</span>
+    <button
+      *ngIf="selectedSubStage && currentZoom === 'worker'"
+      type="button"
+      class="factory-visualization-page__path-button factory-visualization-page__path-button--active"
+      aria-current="page"
+    >
+      {{ selectedSubStage.name }}
+    </button>
+  </nav>
+
+  <plp-factory-renderer
+    *ngIf="currentZoom === 'factory'"
+    [layout]="layout"
+    (lineSelected)="onLineSelected($event)"
+  ></plp-factory-renderer>
+
+  <plp-line-renderer
+    *ngIf="currentZoom === 'line' && selectedLine"
+    [line]="selectedLine"
+    (backToFactory)="showFactory()"
+    (mainStageSelected)="onMainStageSelected($event)"
+  ></plp-line-renderer>
+
+  <plp-stage-renderer
+    *ngIf="currentZoom === 'stage' && selectedLine && selectedMainStage"
+    [line]="selectedLine"
+    [mainStage]="selectedMainStage"
+    [mode]="'stage'"
+    (back)="onStageBack($event)"
+    (subStageSelected)="onSubStageSelected($event)"
+  ></plp-stage-renderer>
+
+  <plp-stage-renderer
+    *ngIf="currentZoom === 'worker' && selectedLine && selectedMainStage && selectedSubStage"
+    [line]="selectedLine"
+    [mainStage]="selectedMainStage"
+    [subStage]="selectedSubStage"
+    [mode]="'worker'"
+    (back)="onStageBack($event)"
+    (subStageSelected)="onSubStageSelected($event)"
+  ></plp-stage-renderer>
 </section>

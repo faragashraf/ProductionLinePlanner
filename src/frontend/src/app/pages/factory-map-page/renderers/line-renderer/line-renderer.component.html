@@ -1,0 +1,37 @@
+<section class="plp-line-renderer">
+  <header class="plp-line-renderer__header">
+    <button type="button" class="plp-line-renderer__back" (click)="onBackToFactory()" aria-label="عودة إلى المصنع">
+      <i class="pi pi-arrow-right" aria-hidden="true"></i>
+      العودة للمصنع
+    </button>
+    <p class="plp-line-renderer__subtitle">عرض المراحل الرئيسية للخط المختار.</p>
+  </header>
+
+  <plp-production-line-card
+    [lineName]="line.name"
+    [statusText]="line.statusText"
+    [readinessPercent]="line.readinessPercent ?? 0"
+    [totalStages]="line.stages.length"
+    [activeStage]="line.activeStageName"
+    [status]="line.status ?? 'info'"
+  ></plp-production-line-card>
+
+  <plp-responsive-grid [minItemWidth]="260" [gap]="'var(--plp-spacing-3)'">
+    <button
+      type="button"
+      class="plp-line-renderer__stage-button"
+      *ngFor="let stage of line.stages; trackBy: trackByStage"
+      (click)="onMainStageSelected(stage.id)"
+      [attr.aria-label]="'فتح ' + stage.name"
+    >
+      <plp-main-stage-card
+        [name]="stage.name"
+        [workersCurrent]="stage.workersCurrent ?? 0"
+        [workersRequired]="stage.workersRequired ?? 0"
+        [status]="stage.status ?? 'info'"
+        [note]="stage.note ?? ''"
+      ></plp-main-stage-card>
+      <span class="plp-line-renderer__link">فتح تفاصيل المرحلة</span>
+    </button>
+  </plp-responsive-grid>
+</section>
