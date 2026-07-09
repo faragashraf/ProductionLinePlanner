@@ -3,10 +3,12 @@ using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using ProductionLinePlanner.Application.Engines;
 using ProductionLinePlanner.Application.Services;
 using ProductionLinePlanner.Infrastructure.Data;
 using ProductionLinePlanner.Infrastructure.Attendance;
 using ProductionLinePlanner.Infrastructure.Attendance.Services;
+using ProductionLinePlanner.Infrastructure.BusinessEngines;
 
 namespace ProductionLinePlanner.Infrastructure;
 
@@ -52,6 +54,11 @@ public static class DependencyInjection
 
         services.AddScoped<IAttendanceReadService, AttendanceSyncService>();
         services.AddScoped<IAttendanceSyncService, AttendanceSyncService>();
+        services.AddScoped<IAttendanceEngine, AttendanceEngine>();
+        services.AddScoped<IAssignmentEngine, AssignmentEngine>();
+        services.AddScoped<IReadinessEngine, ReadinessEngine>();
+        services.AddScoped<INotificationEngine, NotificationEngine>();
+        services.AddScoped<IAuditEngine, AuditEngine>();
 
         return services;
     }

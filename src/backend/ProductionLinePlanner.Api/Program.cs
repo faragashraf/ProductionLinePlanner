@@ -15,6 +15,7 @@ using System.Text.Json.Serialization;
 using System.Threading.RateLimiting;
 using ProductionLinePlanner.Application.Abstractions;
 using ProductionLinePlanner.Application.DTOs;
+using ProductionLinePlanner.Application.Engines;
 using ProductionLinePlanner.Application.Services;
 using ProductionLinePlanner.Application.Requests;
 using ProductionLinePlanner.Api.Security;
@@ -41,12 +42,6 @@ var corsAllowCredentials = builder.Configuration.GetValue("Cors:AllowCredentials
 var rateLimitWindowSeconds = Math.Max(15, builder.Configuration.GetValue("Security:RateLimit:WindowSeconds", 60));
 var rateLimitPermitLimit = Math.Max(1, builder.Configuration.GetValue("Security:RateLimit:PermitLimit", 120));
 const string SecurityCorsPolicy = "ProductionLinePlannerCors";
-const string TempStatusScheduled = "Scheduled";
-const string TempStatusActive = "Active";
-const string TempStatusCancelled = "Cancelled";
-const string TimelineActionCreate = "Create";
-const string TimelineActionUpdate = "Update";
-const string TimelineActionCancel = "Cancel";
 const string SecurityBootstrapEndpoint = "/api/admin/bootstrap";
 var jwtSection = builder.Configuration.GetSection("Authentication:Jwt");
 var jwtIssuer = jwtSection["Issuer"] ?? "ProductionLinePlanner.Api";
@@ -2147,43 +2142,27 @@ workersApi.MapDelete("/{workerId:guid}", async (
 
 workersApi.MapGet("/{workerId:guid}/current-assignment", async (
     Guid workerId,
-    AppDbContext dbContext,
+    IAssignmentEngine assignmentEngine,
     CancellationToken cancellationToken,
-    DateTime? asOfUtc) =>
+    DateTime? asOfUtc = null) =>
 {
-    var workerExists = await dbContext.Workers
-        .AsNoTracking()
-        .AnyAsync(x => x.Id == workerId && x.IsActive, cancellationToken);
-
-    if (!workerExists)
+    var result = await assignmentEngine.GetCurrentAssignmentAsync(workerId, asOfUtc, cancellationToken);
+    if (result.IsFailure)
     {
-        return ApiResponse.Failure("NotFound", "Worker not found.", 404);
+        return ApiResponse.Failure(
+            result.Error?.Code ?? "ValidationError",
+            result.Error?.Message ?? "Validation failed.",
+            MapFailureStatusCode(result.Error?.Code));
     }
 
-    var asOf = asOfUtc ?? DateTime.UtcNow;
-    var assignments = await AssignmentHelpers.ResolveCurrentAssignmentsAsync(dbContext, [workerId], asOf, cancellationToken);
-    var assignment = assignments.GetValueOrDefault(workerId);
-
-    var dto = new CurrentWorkerAssignmentDto
-    {
-        WorkerId = workerId,
-        EffectiveSubStageId = assignment?.EffectiveSubStageId,
-        AssignmentType = assignment?.AssignmentType,
-        StartedAtUtc = assignment?.StartsAtUtc,
-        EndsAtUtc = assignment?.EndsAtUtc,
-        FromSubStageId = assignment?.FromSubStageId,
-        ToSubStageId = assignment?.ToSubStageId,
-        ReplacementForWorkerId = assignment?.ReplacementForWorkerId
-    };
-
-    return Results.Ok(ApiResponse.Success(dto));
+    return Results.Ok(ApiResponse.Success(result.Value!));
 })
     .WithTags("Workers")
     .WithName("GetWorkerCurrentAssignment");
 
 assignmentsApi.MapPost("/default", async (
     CreateDefaultAssignmentRequest request,
-    AppDbContext dbContext,
+    IAssignmentEngine assignmentEngine,
     ICurrentUserService currentUserService,
     HttpContext httpContext,
     CancellationToken cancellationToken) =>
@@ -2194,129 +2173,47 @@ assignmentsApi.MapPost("/default", async (
         return ApiResponse.Failure("Unauthorized", "User context is required.");
     }
 
-    if (request.WorkerId == Guid.Empty)
+    var requestMeta = $"{httpContext.Request.Method} {httpContext.Request.Path}";
+    var clientIp = httpContext.Connection.RemoteIpAddress?.ToString();
+    if (!string.IsNullOrWhiteSpace(clientIp))
     {
-        return ApiResponse.Failure("ValidationError", "WorkerId is required.");
+        requestMeta = $"{requestMeta} from {clientIp}";
     }
 
-    if (request.SubStageId == Guid.Empty)
+    if (!string.IsNullOrWhiteSpace(currentUserService.UserName))
     {
-        return ApiResponse.Failure("ValidationError", "SubStageId is required.");
+        requestMeta = $"{requestMeta} by {currentUserService.UserName}";
     }
 
-    var now = DateTime.UtcNow;
-
-    var worker = await dbContext.Workers
-        .AsNoTracking()
-        .FirstOrDefaultAsync(x => x.Id == request.WorkerId, cancellationToken);
-
-    if (worker is null || !worker.IsActive)
+    var result = await assignmentEngine.CreateOrUpdateDefaultAssignmentAsync(request, actorUserId.Value, requestMeta, cancellationToken);
+    if (result.IsFailure)
     {
-        return ApiResponse.Failure("NotFound", "Worker not found or inactive.", 404);
+        return ApiResponse.Failure(
+            result.Error?.Code ?? "ValidationError",
+            result.Error?.Message ?? "Validation failed.",
+            MapFailureStatusCode(result.Error?.Code));
     }
 
-    var subStage = await dbContext.SubStages
-        .AsNoTracking()
-        .FirstOrDefaultAsync(x => x.Id == request.SubStageId, cancellationToken);
-
-    if (subStage is null || !subStage.IsActive)
+    var value = result.Value!;
+    var response = new
     {
-        return ApiResponse.Failure("NotFound", "SubStage not found or inactive.", 404);
-    }
+        assignmentId = value.AssignmentId,
+        workerId = value.WorkerId,
+        subStageId = value.SubStageId,
+        assignmentType = value.AssignmentType,
+        startsAt = value.StartsAtUtc
+    };
 
-    var currentDefaults = await dbContext.WorkerDefaultAssignments
-        .Where(x => x.WorkerId == request.WorkerId && x.IsActive)
-        .OrderByDescending(x => x.AssignedAt)
-        .ThenByDescending(x => x.Id)
-        .ToListAsync(cancellationToken);
-
-    var currentDefault = currentDefaults.FirstOrDefault();
-
-    if (currentDefault is not null && currentDefaults.Count > 1)
-    {
-        foreach (var duplicate in currentDefaults.Where(x => x.Id != currentDefault.Id))
-        {
-            dbContext.Entry(duplicate).Property(nameof(WorkerDefaultAssignment.IsActive)).CurrentValue = false;
-            dbContext.Entry(duplicate).Property(nameof(WorkerDefaultAssignment.UpdatedAtUtc)).CurrentValue = now;
-        }
-    }
-
-    if (currentDefault is not null && currentDefault.SubStageId == request.SubStageId)
-    {
-        AssignmentHelpers.AddAuditLog(
-            dbContext,
-            actorUserId.Value,
-            AuditActionType.Update,
-            nameof(WorkerDefaultAssignment),
-            currentDefault.Id.ToString(),
-            before: currentDefault,
-            httpContext);
-
-        await dbContext.SaveChangesAsync(cancellationToken);
-        return Results.Ok(ApiResponse.Success(new
-        {
-            assignmentId = currentDefault.Id,
-            workerId = currentDefault.WorkerId,
-            subStageId = currentDefault.SubStageId,
-            assignmentType = AssignmentType.Default.ToString(),
-            startsAt = currentDefault.AssignedAt
-        }));
-    }
-
-    var currentDefaultForTimeline = currentDefault;
-    var previousSubStageId = currentDefaultForTimeline?.SubStageId;
-    if (currentDefault is not null)
-    {
-        dbContext.Entry(currentDefault).Property(nameof(WorkerDefaultAssignment.IsActive)).CurrentValue = false;
-        dbContext.Entry(currentDefault).Property(nameof(WorkerDefaultAssignment.UpdatedAtUtc)).CurrentValue = now;
-    }
-
-    var assignment = new WorkerDefaultAssignment(
-        id: Guid.NewGuid(),
-        workerId: request.WorkerId,
-        subStageId: request.SubStageId,
-        assignedByUserId: actorUserId.Value,
-        assignedAtUtc: now,
-        reason: request.Reason,
-        isActive: true,
-        createdAtUtc: now);
-
-    dbContext.WorkerDefaultAssignments.Add(assignment);
-    dbContext.AssignmentTimelineEntries.Add(new AssignmentTimelineEntry(
-        id: Guid.NewGuid(),
-        workerId: request.WorkerId,
-        fromSubStageId: previousSubStageId,
-        toSubStageId: request.SubStageId,
-        assignmentType: AssignmentType.Default.ToString(),
-        actionType: currentDefault is null ? TimelineActionCreate : TimelineActionUpdate,
-        reason: request.Reason,
-        startAtUtc: now,
-        endAtUtc: null,
-        performedByUserId: actorUserId.Value,
-        isAutomatic: false,
-        relatedTemporaryAssignmentId: null,
-        replacementForWorkerId: null,
-        createdAtUtc: now));
-
-    AssignmentHelpers.AddAuditLog(dbContext, actorUserId.Value, AuditActionType.Create, nameof(WorkerDefaultAssignment), assignment.Id.ToString(), before: assignment, httpContext: httpContext);
-
-    await dbContext.SaveChangesAsync(cancellationToken);
-
-    return Results.Created($"/api/assignments/default/{assignment.Id}", ApiResponse.Success(new
-    {
-        assignmentId = assignment.Id,
-        workerId = assignment.WorkerId,
-        subStageId = assignment.SubStageId,
-        assignmentType = AssignmentType.Default.ToString(),
-        startsAt = assignment.AssignedAt
-    }));
+    return value.IsCreated
+        ? Results.Created($"/api/assignments/default/{value.AssignmentId}", ApiResponse.Success(response))
+        : Results.Ok(ApiResponse.Success(response));
 })
     .WithTags("Assignments")
     .WithName("CreateOrUpdateDefaultAssignment");
 
 assignmentsApi.MapPost("/temporary", async (
     CreateTemporaryAssignmentRequest request,
-    AppDbContext dbContext,
+    IAssignmentEngine assignmentEngine,
     ICurrentUserService currentUserService,
     HttpContext httpContext,
     CancellationToken cancellationToken) =>
@@ -2327,115 +2224,48 @@ assignmentsApi.MapPost("/temporary", async (
         return ApiResponse.Failure("Unauthorized", "User context is required.");
     }
 
-    if (request.WorkerId == Guid.Empty)
+    var requestMeta = $"{httpContext.Request.Method} {httpContext.Request.Path}";
+    var clientIp = httpContext.Connection.RemoteIpAddress?.ToString();
+    if (!string.IsNullOrWhiteSpace(clientIp))
     {
-        return ApiResponse.Failure("ValidationError", "WorkerId is required.");
+        requestMeta = $"{requestMeta} from {clientIp}";
     }
 
-    if (request.FromSubStageId == Guid.Empty || request.ToSubStageId == Guid.Empty)
+    if (!string.IsNullOrWhiteSpace(currentUserService.UserName))
     {
-        return ApiResponse.Failure("ValidationError", "FromSubStageId and ToSubStageId are required.");
+        requestMeta = $"{requestMeta} by {currentUserService.UserName}";
     }
 
-    if (string.IsNullOrWhiteSpace(request.Reason))
+    var result = await assignmentEngine.CreateTemporaryAssignmentAsync(request, actorUserId.Value, requestMeta, cancellationToken);
+    if (result.IsFailure)
     {
-        return ApiResponse.Failure("ValidationError", "Reason is required.");
+        return ApiResponse.Failure(
+            result.Error?.Code ?? "ValidationError",
+            result.Error?.Message ?? "Validation failed.",
+            MapFailureStatusCode(result.Error?.Code));
     }
 
-    if (request.StartAtUtc >= request.EndAtUtc)
+    var value = result.Value!;
+    var response = new
     {
-        return ApiResponse.Failure("ValidationError", "EndAtUtc must be after StartAtUtc.");
-    }
+        assignmentId = value.AssignmentId,
+        workerId = value.WorkerId,
+        fromSubStageId = value.FromSubStageId,
+        toSubStageId = value.ToSubStageId,
+        assignmentType = value.AssignmentType,
+        status = value.Status,
+        startAtUtc = value.StartsAtUtc,
+        endAtUtc = value.EndsAtUtc
+    };
 
-    var now = DateTime.UtcNow;
-
-    var worker = await dbContext.Workers
-        .AsNoTracking()
-        .FirstOrDefaultAsync(x => x.Id == request.WorkerId, cancellationToken);
-
-    if (worker is null || !worker.IsActive)
-    {
-        return ApiResponse.Failure("NotFound", "Worker not found or inactive.", 404);
-    }
-
-    if (!await dbContext.SubStages.AnyAsync(x => x.Id == request.FromSubStageId && x.IsActive, cancellationToken))
-    {
-        return ApiResponse.Failure("ValidationError", "FromSubStage is invalid or inactive.", 404);
-    }
-
-    if (!await dbContext.SubStages.AnyAsync(x => x.Id == request.ToSubStageId && x.IsActive, cancellationToken))
-    {
-        return ApiResponse.Failure("ValidationError", "ToSubStage is invalid or inactive.", 404);
-    }
-
-    var hasConflict = await dbContext.WorkerTemporaryAssignments.AnyAsync(x =>
-        x.WorkerId == request.WorkerId &&
-        (x.Status == TempStatusScheduled || x.Status == TempStatusActive) &&
-        x.StartAtUtc < request.EndAtUtc &&
-        x.EndAtUtc > request.StartAtUtc,
-        cancellationToken);
-
-    if (hasConflict)
-    {
-        return ApiResponse.Failure("Conflict", "Worker has overlapping temporary assignment.", 409);
-    }
-
-    var status = request.StartAtUtc <= now
-        ? TempStatusActive
-        : TempStatusScheduled;
-
-    var entity = new WorkerTemporaryAssignment(
-        id: Guid.NewGuid(),
-        workerId: request.WorkerId,
-        fromSubStageId: request.FromSubStageId,
-        toSubStageId: request.ToSubStageId,
-        startAtUtc: request.StartAtUtc,
-        endAtUtc: request.EndAtUtc,
-        assignedByUserId: actorUserId.Value,
-        reason: request.Reason,
-        replacementForWorkerId: null,
-        status: status,
-        createdAtUtc: now);
-
-    dbContext.WorkerTemporaryAssignments.Add(entity);
-    dbContext.AssignmentTimelineEntries.Add(new AssignmentTimelineEntry(
-        id: Guid.NewGuid(),
-        workerId: request.WorkerId,
-        fromSubStageId: request.FromSubStageId,
-        toSubStageId: request.ToSubStageId,
-        assignmentType: AssignmentType.Temporary.ToString(),
-        actionType: TimelineActionCreate,
-        reason: request.Reason,
-        startAtUtc: request.StartAtUtc,
-        endAtUtc: request.EndAtUtc,
-        performedByUserId: actorUserId.Value,
-        isAutomatic: false,
-        relatedTemporaryAssignmentId: null,
-        replacementForWorkerId: null,
-        createdAtUtc: now));
-
-    AssignmentHelpers.AddAuditLog(dbContext, actorUserId.Value, AuditActionType.Create, nameof(WorkerTemporaryAssignment), entity.Id.ToString(), before: entity, httpContext: httpContext);
-
-    await dbContext.SaveChangesAsync(cancellationToken);
-
-    return Results.Created($"/api/assignments/temporary/{entity.Id}", ApiResponse.Success(new
-    {
-        assignmentId = entity.Id,
-        workerId = entity.WorkerId,
-        fromSubStageId = entity.FromSubStageId,
-        toSubStageId = entity.ToSubStageId,
-        assignmentType = entity.AssignmentType.ToString(),
-        status = entity.Status,
-        startAtUtc = entity.StartAtUtc,
-        endAtUtc = entity.EndAtUtc
-    }));
+    return Results.Created($"/api/assignments/temporary/{value.AssignmentId}", ApiResponse.Success(response));
 })
     .WithTags("Assignments")
     .WithName("CreateTemporaryAssignment");
 
 assignmentsApi.MapPost("/replacement", async (
     CreateReplacementAssignmentRequest request,
-    AppDbContext dbContext,
+    IAssignmentEngine assignmentEngine,
     ICurrentUserService currentUserService,
     HttpContext httpContext,
     CancellationToken cancellationToken) =>
@@ -2446,135 +2276,49 @@ assignmentsApi.MapPost("/replacement", async (
         return ApiResponse.Failure("Unauthorized", "User context is required.");
     }
 
-    if (request.ReplacementWorkerId == Guid.Empty || request.ReplacedWorkerId == Guid.Empty || request.SubStageId == Guid.Empty)
+    var requestMeta = $"{httpContext.Request.Method} {httpContext.Request.Path}";
+    var clientIp = httpContext.Connection.RemoteIpAddress?.ToString();
+    if (!string.IsNullOrWhiteSpace(clientIp))
     {
-        return ApiResponse.Failure("ValidationError", "ReplacementWorkerId, ReplacedWorkerId and SubStageId are required.");
+        requestMeta = $"{requestMeta} from {clientIp}";
     }
 
-    if (request.ReplacementWorkerId == request.ReplacedWorkerId)
+    if (!string.IsNullOrWhiteSpace(currentUserService.UserName))
     {
-        return ApiResponse.Failure("ValidationError", "Replacement worker must differ from replaced worker.");
+        requestMeta = $"{requestMeta} by {currentUserService.UserName}";
     }
 
-    if (string.IsNullOrWhiteSpace(request.Reason))
+    var result = await assignmentEngine.CreateReplacementAssignmentAsync(request, actorUserId.Value, requestMeta, cancellationToken);
+    if (result.IsFailure)
     {
-        return ApiResponse.Failure("ValidationError", "Reason is required.");
+        return ApiResponse.Failure(
+            result.Error?.Code ?? "ValidationError",
+            result.Error?.Message ?? "Validation failed.",
+            MapFailureStatusCode(result.Error?.Code));
     }
 
-    if (request.StartAtUtc >= request.EndAtUtc)
+    var value = result.Value!;
+    var response = new
     {
-        return ApiResponse.Failure("ValidationError", "EndAtUtc must be after StartAtUtc.");
-    }
+        assignmentId = value.AssignmentId,
+        workerId = value.WorkerId,
+        replacementForWorkerId = value.ReplacementForWorkerId,
+        fromSubStageId = value.FromSubStageId,
+        toSubStageId = value.ToSubStageId,
+        assignmentType = value.AssignmentType,
+        status = value.Status,
+        startAtUtc = value.StartsAtUtc,
+        endAtUtc = value.EndsAtUtc
+    };
 
-    var now = DateTime.UtcNow;
-
-    var replacementWorker = await dbContext.Workers
-        .AsNoTracking()
-        .FirstOrDefaultAsync(x => x.Id == request.ReplacementWorkerId, cancellationToken);
-
-    if (replacementWorker is null || !replacementWorker.IsActive)
-    {
-        return ApiResponse.Failure("NotFound", "Replacement worker not found or inactive.", 404);
-    }
-
-    var replacedWorker = await dbContext.Workers
-        .AsNoTracking()
-        .FirstOrDefaultAsync(x => x.Id == request.ReplacedWorkerId, cancellationToken);
-
-    if (replacedWorker is null || !replacedWorker.IsActive)
-    {
-        return ApiResponse.Failure("NotFound", "Replaced worker not found or inactive.", 404);
-    }
-
-    // TODO Attendance Integration: verify ReplacedWorkerId is truly absent at assignment time using attendance records.
-    if (!await dbContext.SubStages.AnyAsync(x => x.Id == request.SubStageId && x.IsActive, cancellationToken))
-    {
-        return ApiResponse.Failure("ValidationError", "SubStage not found or inactive.", 404);
-    }
-
-    var replacedWorkerDefault = await dbContext.WorkerDefaultAssignments
-        .AsNoTracking()
-        .Where(x => x.WorkerId == request.ReplacedWorkerId && x.IsActive)
-        .OrderByDescending(x => x.AssignedAt)
-        .ThenByDescending(x => x.Id)
-        .FirstOrDefaultAsync(cancellationToken);
-
-    if (replacedWorkerDefault is not null && replacedWorkerDefault.SubStageId != request.SubStageId)
-    {
-        return ApiResponse.Failure("ValidationError", "Replaced worker default assignment is in a different sub-stage.");
-    }
-
-    var conflict = await dbContext.WorkerTemporaryAssignments.AnyAsync(x =>
-        x.WorkerId == request.ReplacementWorkerId &&
-        (x.Status == TempStatusScheduled || x.Status == TempStatusActive) &&
-        x.StartAtUtc < request.EndAtUtc &&
-        x.EndAtUtc > request.StartAtUtc,
-        cancellationToken);
-
-    if (conflict)
-    {
-        return ApiResponse.Failure("Conflict", "Replacement worker already has overlapping temporary assignment.", 409);
-    }
-
-    var status = request.StartAtUtc <= now
-        ? TempStatusActive
-        : TempStatusScheduled;
-
-    var fromSubStageId = replacedWorkerDefault?.SubStageId ?? request.SubStageId;
-
-    var entity = new WorkerTemporaryAssignment(
-        id: Guid.NewGuid(),
-        workerId: request.ReplacementWorkerId,
-        fromSubStageId: fromSubStageId,
-        toSubStageId: request.SubStageId,
-        startAtUtc: request.StartAtUtc,
-        endAtUtc: request.EndAtUtc,
-        assignedByUserId: actorUserId.Value,
-        reason: request.Reason,
-        replacementForWorkerId: request.ReplacedWorkerId,
-        status: status,
-        createdAtUtc: now);
-
-    dbContext.WorkerTemporaryAssignments.Add(entity);
-    dbContext.AssignmentTimelineEntries.Add(new AssignmentTimelineEntry(
-        id: Guid.NewGuid(),
-        workerId: request.ReplacementWorkerId,
-        fromSubStageId: fromSubStageId,
-        toSubStageId: request.SubStageId,
-        assignmentType: AssignmentType.Replacement.ToString(),
-        actionType: TimelineActionCreate,
-        reason: request.Reason,
-        startAtUtc: request.StartAtUtc,
-        endAtUtc: request.EndAtUtc,
-        performedByUserId: actorUserId.Value,
-        isAutomatic: false,
-        relatedTemporaryAssignmentId: null,
-        replacementForWorkerId: request.ReplacedWorkerId,
-        createdAtUtc: now));
-
-    AssignmentHelpers.AddAuditLog(dbContext, actorUserId.Value, AuditActionType.Create, nameof(WorkerTemporaryAssignment), entity.Id.ToString(), before: entity, httpContext: httpContext);
-
-    await dbContext.SaveChangesAsync(cancellationToken);
-
-    return Results.Created($"/api/assignments/temporary/{entity.Id}", ApiResponse.Success(new
-    {
-        assignmentId = entity.Id,
-        workerId = entity.WorkerId,
-        replacementForWorkerId = entity.ReplacementForWorkerId,
-        fromSubStageId = entity.FromSubStageId,
-        toSubStageId = entity.ToSubStageId,
-        assignmentType = entity.AssignmentType.ToString(),
-        status = entity.Status,
-        startAtUtc = entity.StartAtUtc,
-        endAtUtc = entity.EndAtUtc
-    }));
+    return Results.Created($"/api/assignments/temporary/{value.AssignmentId}", ApiResponse.Success(response));
 })
     .WithTags("Assignments")
     .WithName("CreateReplacementAssignment");
 
 assignmentsApi.MapDelete("/temporary/{assignmentId:guid}", async (
     Guid assignmentId,
-    AppDbContext dbContext,
+    IAssignmentEngine assignmentEngine,
     ICurrentUserService currentUserService,
     HttpContext httpContext,
     CancellationToken cancellationToken) =>
@@ -2585,47 +2329,34 @@ assignmentsApi.MapDelete("/temporary/{assignmentId:guid}", async (
         return ApiResponse.Failure("Unauthorized", "User context is required.");
     }
 
-    var assignment = await dbContext.WorkerTemporaryAssignments
-        .FirstOrDefaultAsync(
-            x => x.Id == assignmentId &&
-                 (x.Status == TempStatusScheduled || x.Status == TempStatusActive),
-            cancellationToken);
-
-    if (assignment is null)
+    var requestMeta = $"{httpContext.Request.Method} {httpContext.Request.Path}";
+    var clientIp = httpContext.Connection.RemoteIpAddress?.ToString();
+    if (!string.IsNullOrWhiteSpace(clientIp))
     {
-        return ApiResponse.Failure("NotFound", "Temporary assignment not found.", 404);
+        requestMeta = $"{requestMeta} from {clientIp}";
     }
 
-    var now = DateTime.UtcNow;
-    dbContext.Entry(assignment).Property(nameof(WorkerTemporaryAssignment.Status)).CurrentValue = TempStatusCancelled;
-    dbContext.Entry(assignment).Property(nameof(WorkerTemporaryAssignment.EndAtUtc)).CurrentValue = now;
-    dbContext.Entry(assignment).Property(nameof(WorkerTemporaryAssignment.UpdatedAtUtc)).CurrentValue = now;
+    if (!string.IsNullOrWhiteSpace(currentUserService.UserName))
+    {
+        requestMeta = $"{requestMeta} by {currentUserService.UserName}";
+    }
 
-    dbContext.AssignmentTimelineEntries.Add(new AssignmentTimelineEntry(
-        id: Guid.NewGuid(),
-        workerId: assignment.WorkerId,
-        fromSubStageId: assignment.FromSubStageId,
-        toSubStageId: assignment.ToSubStageId,
-        assignmentType: assignment.AssignmentType.ToString(),
-        actionType: TimelineActionCancel,
-        reason: assignment.Reason,
-        startAtUtc: assignment.StartAtUtc,
-        endAtUtc: now,
-        performedByUserId: actorUserId.Value,
-        isAutomatic: false,
-        relatedTemporaryAssignmentId: assignment.Id,
-        replacementForWorkerId: assignment.ReplacementForWorkerId,
-        createdAtUtc: now));
+    var result = await assignmentEngine.CancelTemporaryAssignmentAsync(assignmentId, actorUserId.Value, requestMeta, cancellationToken);
 
-    AssignmentHelpers.AddAuditLog(dbContext, actorUserId.Value, AuditActionType.Cancel, nameof(WorkerTemporaryAssignment), assignment.Id.ToString(), before: assignment, httpContext: httpContext);
+    if (result.IsFailure)
+    {
+        return ApiResponse.Failure(
+            result.Error?.Code ?? "ValidationError",
+            result.Error?.Message ?? "Validation failed.",
+            MapFailureStatusCode(result.Error?.Code));
+    }
 
-    await dbContext.SaveChangesAsync(cancellationToken);
-
+    var value = result.Value!;
     return Results.Ok(ApiResponse.Success(new
     {
-        assignmentId = assignment.Id,
-        cancelledAt = now,
-        status = TempStatusCancelled
+        assignmentId = value.AssignmentId,
+        cancelledAt = value.CancelledAt,
+        status = value.Status
     }));
 })
     .WithTags("Assignments")
@@ -2633,66 +2364,38 @@ assignmentsApi.MapDelete("/temporary/{assignmentId:guid}", async (
 
 assignmentsApi.MapGet("/{workerId:guid}/timeline", async (
     Guid workerId,
-    AppDbContext dbContext,
+    IAssignmentEngine assignmentEngine,
     CancellationToken cancellationToken,
     int page = 1,
     int pageSize = 50,
     DateTime? fromDate = null,
     DateTime? toDate = null) =>
 {
-    if (page < 1 || pageSize < 1 || pageSize > 200)
+    var result = await assignmentEngine.GetWorkerTimelineAsync(
+        workerId,
+        page,
+        pageSize,
+        fromDate,
+        toDate,
+        cancellationToken);
+
+    if (result.IsFailure)
     {
-        return ApiResponse.Failure("ValidationError", "page and pageSize must be positive, pageSize max 200.");
+        return ApiResponse.Failure(
+            result.Error?.Code ?? "ValidationError",
+            result.Error?.Message ?? "Validation failed.",
+            MapFailureStatusCode(result.Error?.Code));
     }
-
-    var query = dbContext.AssignmentTimelineEntries
-        .AsNoTracking()
-        .Where(x => x.WorkerId == workerId);
-
-    if (fromDate.HasValue)
-    {
-        query = query.Where(x => x.StartAtUtc >= fromDate.Value);
-    }
-
-    if (toDate.HasValue)
-    {
-        query = query.Where(x => x.StartAtUtc <= toDate.Value);
-    }
-
-    var totalCount = await query.CountAsync(cancellationToken);
-
-    var entries = await query
-        .OrderByDescending(x => x.CreatedAtUtc)
-        .Skip((page - 1) * pageSize)
-        .Take(pageSize)
-        .Select(x => new AssignmentTimelineDto
-        {
-            Id = x.Id,
-            WorkerId = x.WorkerId,
-            FromSubStageId = x.FromSubStageId,
-            ToSubStageId = x.ToSubStageId,
-            AssignmentType = x.AssignmentType,
-            ActionType = x.ActionType,
-            Reason = x.Reason,
-            StartAtUtc = x.StartAtUtc,
-            EndAtUtc = x.EndAtUtc,
-            PerformedByUserId = x.PerformedByUserId,
-            IsAutomatic = x.IsAutomatic,
-            RelatedTemporaryAssignmentId = x.RelatedTemporaryAssignmentId,
-            ReplacementForWorkerId = x.ReplacementForWorkerId,
-            CreatedAtUtc = x.CreatedAtUtc
-        })
-        .ToArrayAsync(cancellationToken);
 
     return Results.Ok(new
     {
         success = true,
         data = new
         {
-            items = entries,
-            totalCount,
-            pageNumber = page,
-            pageSize
+            items = result.Value!.Items.ToArray(),
+            totalCount = result.Value.TotalCount,
+            pageNumber = result.Value.PageNumber,
+            pageSize = result.Value.PageSize
         }
     });
 })
@@ -2701,62 +2404,26 @@ assignmentsApi.MapGet("/{workerId:guid}/timeline", async (
 
 assignmentsApi.MapGet("/sub-stages/{subStageId:guid}/workers", async (
     Guid subStageId,
-    AppDbContext dbContext,
+    IAssignmentEngine assignmentEngine,
     CancellationToken cancellationToken,
     DateTime? asOfUtc = null) =>
 {
-    if (!await dbContext.SubStages.AnyAsync(x => x.Id == subStageId, cancellationToken))
+    var result = await assignmentEngine.GetSubStageWorkersAsync(subStageId, asOfUtc, cancellationToken);
+    if (result.IsFailure)
     {
-        return ApiResponse.Failure("NotFound", "SubStage not found.", 404);
+        return ApiResponse.Failure(
+            result.Error?.Code ?? "ValidationError",
+            result.Error?.Message ?? "Validation failed.",
+            MapFailureStatusCode(result.Error?.Code));
     }
 
-    var asOf = asOfUtc ?? DateTime.UtcNow;
-    var workers = await dbContext.Workers.AsNoTracking().Where(x => x.IsActive).Select(x => new { x.Id, x.FullName, x.EmployeeCode }).ToListAsync(cancellationToken);
-    if (workers.Count == 0)
-    {
-        return Results.Ok(ApiResponse.Success(new
-        {
-            subStageId,
-            items = Array.Empty<SubStageCurrentWorkerDto>()
-        }));
-    }
-
-    var assignments = await AssignmentHelpers.ResolveCurrentAssignmentsAsync(
-        dbContext,
-        workers.Select(x => x.Id).ToList(),
-        asOf,
-        cancellationToken);
-
-    var items = workers
-        .Where(x => assignments.TryGetValue(x.Id, out var assignment) && assignment.EffectiveSubStageId == subStageId)
-        .Select(x =>
-        {
-            var assignment = assignments[x.Id];
-            return new SubStageCurrentWorkerDto
-            {
-                WorkerId = x.Id,
-                FullName = x.FullName,
-                EmployeeCode = x.EmployeeCode,
-                AssignmentType = assignment.AssignmentType ?? AssignmentType.Default,
-                FromSubStageId = assignment.FromSubStageId,
-                ReplacementForWorkerId = assignment.ReplacementForWorkerId
-            };
-        })
-        .OrderBy(x => x.FullName)
-        .ToArray();
-
-    return Results.Ok(ApiResponse.Success(new
-    {
-        subStageId,
-        workersCount = items.Length,
-        items
-    }));
+    return Results.Ok(ApiResponse.Success(result.Value!));
 })
     .WithTags("Assignments")
     .WithName("GetWorkersInSubStage");
 
 notificationsApi.MapGet("", async (
-    AppDbContext dbContext,
+    INotificationEngine notificationEngine,
     ICurrentUserService currentUserService,
     CancellationToken cancellationToken,
     bool? isRead = null,
@@ -2769,50 +2436,29 @@ notificationsApi.MapGet("", async (
         return ApiResponse.Failure("Unauthorized", "User context is required.");
     }
 
-    if (page < 1 || pageSize < 1 || pageSize > 200)
+    var result = await notificationEngine.GetNotificationsAsync(
+        recipientUserId.Value,
+        isRead,
+        page,
+        pageSize,
+        cancellationToken);
+
+    if (result.IsFailure)
     {
-        return ApiResponse.Failure("ValidationError", "page and pageSize must be positive, pageSize max 200.");
+        return ApiResponse.Failure(
+            result.Error?.Code ?? "ValidationError",
+            result.Error?.Message ?? "Validation failed.",
+            MapFailureStatusCode(result.Error?.Code));
     }
-
-    var query = dbContext.Notifications
-        .AsNoTracking()
-        .Where(x => x.RecipientUserId == recipientUserId);
-
-    if (isRead.HasValue)
-    {
-        query = query.Where(x => x.IsRead == isRead.Value);
-    }
-
-    var totalCount = await query.CountAsync(cancellationToken);
-    var notifications = await query
-        .OrderByDescending(x => x.CreatedAtUtc)
-        .Skip((page - 1) * pageSize)
-        .Take(pageSize)
-        .Select(x => new NotificationDto
-        {
-            Id = x.Id,
-            RecipientUserId = x.RecipientUserId,
-            SenderUserId = x.SenderUserId,
-            Title = x.Title,
-            Message = x.Message,
-            Status = x.Status,
-            IsRead = x.IsRead,
-            RelatedWorkerId = x.RelatedWorkerId,
-            RelatedEntityType = x.RelatedEntityType,
-            RelatedEntityId = x.RelatedEntityId,
-            CreatedAtUtc = x.CreatedAtUtc,
-            ReadAtUtc = x.ReadAtUtc
-        })
-        .ToArrayAsync(cancellationToken);
 
     return Results.Ok(new
     {
         success = true,
         data = new
         {
-            items = notifications,
-            totalCount,
-            pageNumber = page,
+            items = result.Value!.Items.ToArray(),
+            totalCount = result.Value.TotalCount,
+            pageNumber = result.Value.PageNumber,
             pageSize
         }
     });
@@ -2821,7 +2467,7 @@ notificationsApi.MapGet("", async (
     .WithName("GetNotifications");
 
 notificationsApi.MapGet("/unread-count", async (
-    AppDbContext dbContext,
+    INotificationEngine notificationEngine,
     ICurrentUserService currentUserService,
     CancellationToken cancellationToken) =>
 {
@@ -2831,20 +2477,24 @@ notificationsApi.MapGet("/unread-count", async (
         return ApiResponse.Failure("Unauthorized", "User context is required.");
     }
 
-    var unreadCount = await dbContext.Notifications
-        .AsNoTracking()
-        .CountAsync(x => x.RecipientUserId == recipientUserId && !x.IsRead, cancellationToken);
+    var result = await notificationEngine.GetUnreadCountAsync(recipientUserId.Value, cancellationToken);
+    if (result.IsFailure)
+    {
+        return ApiResponse.Failure(
+            result.Error?.Code ?? "ValidationError",
+            result.Error?.Message ?? "Validation failed.",
+            MapFailureStatusCode(result.Error?.Code));
+    }
 
-    return Results.Ok(ApiResponse.Success(new { unreadCount }));
+    return Results.Ok(ApiResponse.Success(new { unreadCount = result.Value }));
 })
     .WithTags("Notifications")
     .WithName("GetUnreadNotificationCount");
 
 notificationsApi.MapPatch("/{notificationId:guid}/read", async (
     Guid notificationId,
-    AppDbContext dbContext,
+    INotificationEngine notificationEngine,
     ICurrentUserService currentUserService,
-    HttpContext httpContext,
     CancellationToken cancellationToken) =>
 {
     var recipientUserId = currentUserService.UserId;
@@ -2853,36 +2503,29 @@ notificationsApi.MapPatch("/{notificationId:guid}/read", async (
         return ApiResponse.Failure("Unauthorized", "User context is required.");
     }
 
-    var notification = await dbContext.Notifications
-        .FirstOrDefaultAsync(x => x.Id == notificationId && x.RecipientUserId == recipientUserId, cancellationToken);
-
-    if (notification is null)
+    var result = await notificationEngine.MarkNotificationReadAsync(recipientUserId.Value, notificationId, null, cancellationToken);
+    if (result.IsFailure)
     {
-        return ApiResponse.Failure("NotFound", "Notification not found.", 404);
+        return ApiResponse.Failure(
+            result.Error?.Code ?? "ValidationError",
+            result.Error?.Message ?? "Validation failed.",
+            MapFailureStatusCode(result.Error?.Code));
     }
 
-    var now = DateTime.UtcNow;
-    if (!notification.IsRead)
-    {
-        notification.MarkAsRead(now);
-        await dbContext.SaveChangesAsync(cancellationToken);
-        AssignmentHelpers.AddAuditLog(dbContext, recipientUserId.Value, AuditActionType.Update, nameof(Notification), notification.Id.ToString(), before: notification, httpContext: httpContext);
-    }
-
+    var value = result.Value!;
     return Results.Ok(ApiResponse.Success(new
     {
-        notification.Id,
-        notification.IsRead,
-        notification.ReadAtUtc
+        value.Id,
+        value.IsRead,
+        value.ReadAtUtc
     }));
 })
     .WithTags("Notifications")
     .WithName("ReadNotification");
 
 notificationsApi.MapPatch("/read-all", async (
-    AppDbContext dbContext,
+    INotificationEngine notificationEngine,
     ICurrentUserService currentUserService,
-    HttpContext httpContext,
     CancellationToken cancellationToken,
     DateTime? beforeDateUtc = null) =>
 {
@@ -2892,39 +2535,31 @@ notificationsApi.MapPatch("/read-all", async (
         return ApiResponse.Failure("Unauthorized", "User context is required.");
     }
 
-    var query = dbContext.Notifications
-        .Where(x => x.RecipientUserId == recipientUserId.Value && !x.IsRead);
-
-    if (beforeDateUtc.HasValue)
+    var result = await notificationEngine.MarkAllAsReadAsync(recipientUserId.Value, beforeDateUtc, cancellationToken);
+    if (result.IsFailure)
     {
-        query = query.Where(x => x.CreatedAtUtc <= beforeDateUtc.Value);
+        return ApiResponse.Failure(
+            result.Error?.Code ?? "ValidationError",
+            result.Error?.Message ?? "Validation failed.",
+            MapFailureStatusCode(result.Error?.Code));
     }
 
-    var now = DateTime.UtcNow;
-    var updatedCount = await query.ExecuteUpdateAsync(setters => setters
-        .SetProperty(x => x.IsRead, true)
-        .SetProperty(x => x.Status, NotificationStatus.Read)
-        .SetProperty(x => x.ReadAtUtc, now), cancellationToken);
-
-    AssignmentHelpers.AddAuditLog(dbContext, recipientUserId.Value, AuditActionType.Update, nameof(Notification), "read-all", before: new { recipientUserId = recipientUserId.Value }, httpContext: httpContext);
-    await dbContext.SaveChangesAsync(cancellationToken);
-
-    return Results.Ok(ApiResponse.Success(new { updatedCount }));
+    return Results.Ok(ApiResponse.Success(new { updatedCount = result.Value }));
 })
     .WithTags("Notifications")
     .WithName("ReadAllNotifications");
 
 attendanceApi.MapPost("/sync/today", async (
-    IAttendanceSyncService attendanceSyncService,
+    IAttendanceEngine attendanceEngine,
     CancellationToken cancellationToken) =>
 {
-    var result = await attendanceSyncService.SyncTodayAsync(cancellationToken);
+    var result = await attendanceEngine.SyncTodayAsync(cancellationToken);
     if (result.IsFailure)
     {
         return ApiResponse.Failure(
             result.Error?.Code ?? "AttendanceSyncFailed",
             result.Error?.Message ?? "Unable to sync attendance data.",
-            result.Error?.Code is "NotFound" or "ValidationError" ? 400 : 500);
+            MapFailureStatusCode(result.Error?.Code));
     }
 
     return Results.Ok(ApiResponse.Success(result.Value));
@@ -2934,13 +2569,13 @@ attendanceApi.MapPost("/sync/today", async (
     .WithName("SyncAttendanceToday");
 
 attendanceApi.MapGet("/today", async (
-    IAttendanceReadService attendanceReadService,
+    IAttendanceEngine attendanceEngine,
     DateTime? dateUtc = null,
     Guid? factoryId = null,
     Guid? lineId = null,
     CancellationToken cancellationToken = default) =>
 {
-    var result = await attendanceReadService.GetTodayAttendanceAsync(
+    var result = await attendanceEngine.GetTodayAttendanceAsync(
         factoryId,
         lineId,
         dateUtc,
@@ -2951,7 +2586,7 @@ attendanceApi.MapGet("/today", async (
         return ApiResponse.Failure(
             result.Error?.Code ?? "AttendanceReadFailed",
             result.Error?.Message ?? "Unable to load today's attendance.",
-            result.Error?.Code is "NotFound" ? 404 : 400);
+        MapFailureStatusCode(result.Error?.Code));
     }
 
     return Results.Ok(ApiResponse.Success(new
@@ -2965,12 +2600,12 @@ attendanceApi.MapGet("/today", async (
 
 attendanceApi.MapGet("/workers/{workerId:guid}", async (
     Guid workerId,
-    IAttendanceReadService attendanceReadService,
+    IAttendanceEngine attendanceEngine,
     DateTime? fromDateUtc = null,
     DateTime? toDateUtc = null,
     CancellationToken cancellationToken = default) =>
 {
-    var result = await attendanceReadService.GetWorkerAttendanceAsync(
+    var result = await attendanceEngine.GetWorkerAttendanceAsync(
         workerId,
         fromDateUtc,
         toDateUtc,
@@ -2981,7 +2616,7 @@ attendanceApi.MapGet("/workers/{workerId:guid}", async (
         return ApiResponse.Failure(
             result.Error?.Code ?? "AttendanceReadFailed",
             result.Error?.Message ?? "Unable to load worker attendance.",
-            result.Error?.Code is "NotFound" ? 404 : 400);
+        MapFailureStatusCode(result.Error?.Code));
     }
 
     return Results.Ok(ApiResponse.Success(new
@@ -2997,17 +2632,17 @@ attendanceApi.MapGet("/workers/{workerId:guid}", async (
 
 attendanceApi.MapGet("/stages/{subStageId:guid}", async (
     Guid subStageId,
-    IAttendanceReadService attendanceReadService,
+    IAttendanceEngine attendanceEngine,
     DateTime? dateUtc = null,
     CancellationToken cancellationToken = default) =>
 {
-    var result = await attendanceReadService.GetSubStageAttendanceAsync(subStageId, dateUtc, cancellationToken);
+    var result = await attendanceEngine.GetSubStageAttendanceAsync(subStageId, dateUtc, cancellationToken);
     if (result.IsFailure)
     {
         return ApiResponse.Failure(
             result.Error?.Code ?? "AttendanceReadFailed",
             result.Error?.Message ?? "Unable to load stage attendance.",
-            result.Error?.Code is "NotFound" ? 404 : 400);
+            MapFailureStatusCode(result.Error?.Code));
     }
 
     return Results.Ok(ApiResponse.Success(result.Value));
@@ -3016,290 +2651,75 @@ attendanceApi.MapGet("/stages/{subStageId:guid}", async (
     .WithName("GetSubStageAttendance");
 
 readinessApi.MapGet("/factory", async (
-    AppDbContext dbContext,
+    IReadinessEngine readinessEngine,
     CancellationToken cancellationToken,
     DateTime? asOfUtc = null) =>
 {
-    var asOf = asOfUtc ?? DateTime.UtcNow;
-    var now = asOf;
-
-    var activeSubStages = await (from ss in dbContext.SubStages.AsNoTracking()
-                                join ms in dbContext.MainStages.AsNoTracking() on ss.MainStageId equals ms.Id
-                                join pl in dbContext.ProductionLines.AsNoTracking() on ms.ProductionLineId equals pl.Id
-                                where ss.IsActive && ms.IsActive && pl.IsActive
-                                select new
-                                {
-                                    ss.Id,
-                                    ss.Capacity
-                                })
-        .ToListAsync(cancellationToken);
-
-    var requiredWorkers = activeSubStages.Sum(x => x.Capacity);
-
-    var activeWorkerIds = await dbContext.Workers
-        .AsNoTracking()
-        .Where(x => x.IsActive)
-        .Select(x => x.Id)
-        .ToListAsync(cancellationToken);
-
-    var assignments = await AssignmentHelpers.ResolveCurrentAssignmentsAsync(dbContext, activeWorkerIds, now, cancellationToken);
-    var assignmentsInActiveSubStages = assignments
-        .Where(x => x.Value.EffectiveSubStageId.HasValue && activeSubStages.Any(ss => ss.Id == x.Value.EffectiveSubStageId))
-        .ToList();
-
-    var attendanceByWorker = await AssignmentHelpers.GetLatestAttendanceStatusByWorkerAsync(
-        dbContext,
-        assignmentsInActiveSubStages.Select(x => x.Key).ToArray(),
-        cancellationToken,
-        asOf);
-
-    var assignedWorkers = assignmentsInActiveSubStages.Count;
-    var present = 0;
-    var late = 0;
-    var absent = 0;
-    var unassignedFromAttendance = 0;
-
-    foreach (var entry in assignmentsInActiveSubStages)
+    var result = await readinessEngine.GetFactoryReadinessAsync(asOfUtc, cancellationToken);
+    if (result.IsFailure)
     {
-        if (!attendanceByWorker.TryGetValue(entry.Key, out var status))
-        {
-            unassignedFromAttendance++;
-            continue;
-        }
-
-        if (status == AttendanceStatus.Present)
-        {
-            present++;
-        }
-        else if (status == AttendanceStatus.Late)
-        {
-            late++;
-        }
-        else if (status == AttendanceStatus.Absent)
-        {
-            absent++;
-        }
-        else
-        {
-            unassignedFromAttendance++;
-        }
+        return ApiResponse.Failure(
+            result.Error?.Code ?? "ValidationError",
+            result.Error?.Message ?? "Validation failed.",
+            MapFailureStatusCode(result.Error?.Code));
     }
 
-    var unassignedWorkers = Math.Max(0, requiredWorkers - assignedWorkers) + unassignedFromAttendance;
-    var readyCount = attendanceByWorker.Count == 0 ? assignedWorkers : present;
-    var readinessPercent = StageReadinessSnapshot.CalculateReadinessPercent(requiredWorkers, readyCount, late, absent, unassignedWorkers);
-
-    return Results.Ok(ApiResponse.Success(new StageReadinessDto
-    {
-        ScopeType = "Factory",
-        ScopeEntityId = Guid.Empty,
-        RequiredWorkers = requiredWorkers,
-        AssignedWorkers = assignedWorkers,
-        PresentWorkers = present,
-        LateWorkers = late,
-        AbsentWorkers = absent,
-        UnassignedWorkers = unassignedWorkers,
-        ReadinessPercent = readinessPercent,
-        Status = StageReadinessSnapshot.ReadinessFromPercent(readinessPercent),
-        CalculatedAtUtc = now
-    }));
+    return Results.Ok(ApiResponse.Success(result.Value!));
 })
     .WithTags("Readiness")
     .WithName("GetFactoryReadiness");
 
 readinessApi.MapGet("/production-lines", async (
-    AppDbContext dbContext,
+    IReadinessEngine readinessEngine,
     CancellationToken cancellationToken,
     DateTime? asOfUtc = null) =>
 {
-    var asOf = asOfUtc ?? DateTime.UtcNow;
-    var now = asOf;
-
-    var lineItems = await (from line in dbContext.ProductionLines.AsNoTracking()
-                          join mainStage in dbContext.MainStages.AsNoTracking() on line.Id equals mainStage.ProductionLineId
-                          join subStage in dbContext.SubStages.AsNoTracking() on mainStage.Id equals subStage.MainStageId
-                          where line.IsActive && mainStage.IsActive && subStage.IsActive
-                          group subStage by new { line.Id, line.Name } into g
-                          select new
-                          {
-                              ProductionLineId = g.Key.Id,
-                              LineName = g.Key.Name,
-                              RequiredWorkers = g.Sum(x => x.Capacity),
-                              SubStageIds = g.Select(x => x.Id).ToArray()
-                          })
-        .ToListAsync(cancellationToken);
-
-    var activeWorkerIds = await dbContext.Workers.AsNoTracking().Where(x => x.IsActive).Select(x => x.Id).ToListAsync(cancellationToken);
-    var assignments = await AssignmentHelpers.ResolveCurrentAssignmentsAsync(dbContext, activeWorkerIds, now, cancellationToken);
-    var attendanceByWorker = await AssignmentHelpers.GetLatestAttendanceStatusByWorkerAsync(
-        dbContext,
-        assignments.Select(x => x.Key).ToArray(),
-        cancellationToken,
-        asOf);
-
-    var readinessItems = lineItems
-        .Select(item =>
-        {
-            var assignmentsInLine = assignments
-                .Where(x => x.Value.EffectiveSubStageId is not null && item.SubStageIds.Contains(x.Value.EffectiveSubStageId.Value))
-                .ToList();
-
-            var assigned = assignmentsInLine.Count;
-            var present = 0;
-            var late = 0;
-            var absent = 0;
-            var unassignedFromAttendance = 0;
-
-            foreach (var assignment in assignmentsInLine)
-            {
-                if (!attendanceByWorker.TryGetValue(assignment.Key, out var status))
-                {
-                    unassignedFromAttendance++;
-                    continue;
-                }
-
-                if (status == AttendanceStatus.Present)
-                {
-                    present++;
-                }
-                else if (status == AttendanceStatus.Late)
-                {
-                    late++;
-                }
-                else if (status == AttendanceStatus.Absent)
-                {
-                    absent++;
-                }
-                else
-                {
-                    unassignedFromAttendance++;
-                }
-            }
-
-            var unassignedWorkers = Math.Max(0, item.RequiredWorkers - assigned) + unassignedFromAttendance;
-            var readyCount = attendanceByWorker.Count == 0 ? assigned : present;
-            var readinessPercent = StageReadinessSnapshot.CalculateReadinessPercent(item.RequiredWorkers, readyCount, late, absent, unassignedWorkers);
-
-            return new
-            {
-                scopeType = "ProductionLine",
-                scopeEntityId = item.ProductionLineId,
-                lineName = item.LineName,
-                requiredWorkers = item.RequiredWorkers,
-                assignedWorkers = assigned,
-                presentWorkers = present,
-                lateWorkers = late,
-                absentWorkers = absent,
-                unassignedWorkers,
-                readinessPercent,
-                status = StageReadinessSnapshot.ReadinessFromPercent(readinessPercent)
-            };
-        })
-        .ToList();
-
-    var requiredWorkers = lineItems.Sum(x => x.RequiredWorkers);
-    var assignedWorkers = readinessItems.Sum(x => (int)x.assignedWorkers);
-    var presentWorkers = readinessItems.Sum(x => (int)x.presentWorkers);
-    var lateWorkers = readinessItems.Sum(x => (int)x.lateWorkers);
-    var absentWorkers = readinessItems.Sum(x => (int)x.absentWorkers);
-    var unassignedWorkers = readinessItems.Sum(x => (int)x.unassignedWorkers);
-    var readinessPercent = StageReadinessSnapshot.CalculateReadinessPercent(requiredWorkers, presentWorkers, lateWorkers, absentWorkers, unassignedWorkers);
-
-    return Results.Ok(ApiResponse.Success(new
+    var result = await readinessEngine.GetProductionLinesReadinessAsync(asOfUtc, cancellationToken);
+    if (result.IsFailure)
     {
-        scopeType = "ProductionLines",
-        scopeEntityId = Guid.Empty,
-        requiredWorkers,
-        assignedWorkers,
-        presentWorkers,
-        lateWorkers,
-        absentWorkers,
-        unassignedWorkers,
-        readinessPercent,
-        status = StageReadinessSnapshot.ReadinessFromPercent(readinessPercent),
-        calculatedAtUtc = now,
-        items = readinessItems
-    }));
+        return ApiResponse.Failure(
+            result.Error?.Code ?? "ValidationError",
+            result.Error?.Message ?? "Validation failed.",
+            MapFailureStatusCode(result.Error?.Code));
+    }
+
+    return Results.Ok(ApiResponse.Success(result.Value!));
 })
     .WithTags("Readiness")
     .WithName("GetProductionLinesReadiness");
 
 readinessApi.MapGet("/sub-stages/{subStageId:guid}", async (
     Guid subStageId,
-    AppDbContext dbContext,
+    IReadinessEngine readinessEngine,
     CancellationToken cancellationToken,
     DateTime? asOfUtc = null) =>
 {
-    var subStage = await dbContext.SubStages.AsNoTracking().FirstOrDefaultAsync(x => x.Id == subStageId, cancellationToken);
-    if (subStage is null)
+    var result = await readinessEngine.GetSubStageReadinessAsync(subStageId, asOfUtc, cancellationToken);
+    if (result.IsFailure)
     {
-        return ApiResponse.Failure("NotFound", "SubStage not found.", 404);
+        return ApiResponse.Failure(
+            result.Error?.Code ?? "ValidationError",
+            result.Error?.Message ?? "Validation failed.",
+            MapFailureStatusCode(result.Error?.Code));
     }
 
-    var asOf = asOfUtc ?? DateTime.UtcNow;
-    var now = asOf;
-
-    var activeWorkerIds = await dbContext.Workers.AsNoTracking().Where(x => x.IsActive).Select(x => x.Id).ToListAsync(cancellationToken);
-    var assignments = await AssignmentHelpers.ResolveCurrentAssignmentsAsync(dbContext, activeWorkerIds, now, cancellationToken);
-    var matchingAssignments = assignments.Where(x => x.Value.EffectiveSubStageId == subStageId).ToList();
-    var attendanceByWorker = await AssignmentHelpers.GetLatestAttendanceStatusByWorkerAsync(
-        dbContext,
-        matchingAssignments.Select(x => x.Key).ToArray(),
-        cancellationToken,
-        asOf);
-
-    var present = 0;
-    var late = 0;
-    var absent = 0;
-    var unassignedFromAttendance = 0;
-
-    foreach (var assignment in matchingAssignments)
-    {
-        if (!attendanceByWorker.TryGetValue(assignment.Key, out var status))
-        {
-            unassignedFromAttendance++;
-            continue;
-        }
-
-        if (status == AttendanceStatus.Present)
-        {
-            present++;
-        }
-        else if (status == AttendanceStatus.Late)
-        {
-            late++;
-        }
-        else if (status == AttendanceStatus.Absent)
-        {
-            absent++;
-        }
-        else
-        {
-            unassignedFromAttendance++;
-        }
-    }
-
-    var assignedWorkers = matchingAssignments.Count;
-    var requiredWorkers = subStage.Capacity;
-    var unassignedWorkers = Math.Max(0, requiredWorkers - assignedWorkers) + unassignedFromAttendance;
-    var readinessPercent = StageReadinessSnapshot.CalculateReadinessPercent(requiredWorkers, present, late, absent, unassignedWorkers);
-
-    return Results.Ok(ApiResponse.Success(new StageReadinessDto
-    {
-        ScopeType = "SubStage",
-        ScopeEntityId = subStageId,
-        RequiredWorkers = requiredWorkers,
-        AssignedWorkers = assignedWorkers,
-        PresentWorkers = present,
-        LateWorkers = late,
-        AbsentWorkers = absent,
-        UnassignedWorkers = unassignedWorkers,
-        ReadinessPercent = readinessPercent,
-        Status = StageReadinessSnapshot.ReadinessFromPercent(readinessPercent),
-        CalculatedAtUtc = now
-    }));
+    return Results.Ok(ApiResponse.Success(result.Value!));
 })
     .WithTags("Readiness")
     .WithName("GetSubStageReadiness");
+
+static int MapFailureStatusCode(string? code)
+{
+    return code switch
+    {
+        "ValidationError" => StatusCodes.Status400BadRequest,
+        "NotFound" => StatusCodes.Status404NotFound,
+        "Unauthorized" or "InvalidToken" or "InvalidCredentials" => StatusCodes.Status401Unauthorized,
+        "Conflict" => StatusCodes.Status409Conflict,
+        "BootstrapNotAllowed" => StatusCodes.Status409Conflict,
+        "Forbidden" => StatusCodes.Status403Forbidden,
+        _ => StatusCodes.Status500InternalServerError
+    };
+}
 
 app.Run();
