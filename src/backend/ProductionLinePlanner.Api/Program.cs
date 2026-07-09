@@ -1,4 +1,3 @@
-using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.RateLimiting;
@@ -11,6 +10,8 @@ using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Security.Claims;
 using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading.RateLimiting;
 using ProductionLinePlanner.Application.Abstractions;
 using ProductionLinePlanner.Application.DTOs;
@@ -39,12 +40,25 @@ var corsAllowCredentials = builder.Configuration.GetValue("Cors:AllowCredentials
 var rateLimitWindowSeconds = Math.Max(15, builder.Configuration.GetValue("Security:RateLimit:WindowSeconds", 60));
 var rateLimitPermitLimit = Math.Max(1, builder.Configuration.GetValue("Security:RateLimit:PermitLimit", 120));
 const string SecurityCorsPolicy = "ProductionLinePlannerCors";
+const string TempStatusScheduled = "Scheduled";
+const string TempStatusActive = "Active";
+const string TempStatusCancelled = "Cancelled";
+const string TimelineActionCreate = "Create";
+const string TimelineActionUpdate = "Update";
+const string TimelineActionCancel = "Cancel";
 var jwtSection = builder.Configuration.GetSection("Authentication:Jwt");
 var jwtIssuer = jwtSection["Issuer"] ?? "ProductionLinePlanner.Api";
 var jwtAudience = jwtSection["Audience"] ?? "ProductionLinePlanner.WebClient";
 var jwtAccessTokenMinutes = Math.Max(15, builder.Configuration.GetValue("Authentication:Jwt:AccessTokenMinutes", 45));
 var jwtRefreshTokenDays = Math.Max(1, builder.Configuration.GetValue("Authentication:Jwt:RefreshTokenDays", 14));
-var jwtSigningKey = jwtSection["SigningKey"] ?? "REPLACE_WITH_USER_SECRET_MIN_64_CHARS_00000000000000000000000000000000";
+var jwtSigningKey = jwtSection["SigningKey"];
+if (string.IsNullOrWhiteSpace(jwtSigningKey) ||
+    jwtSigningKey.Contains("REPLACE_WITH_", StringComparison.OrdinalIgnoreCase) ||
+    jwtSigningKey.Contains("USER_SECRET", StringComparison.OrdinalIgnoreCase))
+{
+    throw new InvalidOperationException("Authentication:Jwt:SigningKey must be configured via configuration and cannot be a placeholder.");
+}
+
 if (Encoding.UTF8.GetByteCount(jwtSigningKey) < 64)
 {
     throw new InvalidOperationException("Authentication:Jwt:SigningKey must be at least 64 bytes. Configure it via appsettings or environment variables.");
@@ -156,9 +170,6 @@ builder.Services.AddAuthorization(options =>
     });
 });
 
-// SignalR placeholder registration, no hub implementation details yet.
-builder.Services.AddSignalR();
-
 var app = builder.Build();
 
 if (app.Environment.IsDevelopment())
@@ -195,6 +206,9 @@ var productionLinesApi = app.MapGroup("/api/production-lines").RequireAuthorizat
 var mainStagesApi = app.MapGroup("/api/main-stages").RequireAuthorization("Admin");
 var subStagesApi = app.MapGroup("/api/sub-stages").RequireAuthorization("Admin");
 var workersApi = app.MapGroup("/api/workers").RequireAuthorization("Admin");
+var assignmentsApi = app.MapGroup("/api/assignments").RequireAuthorization("Admin");
+var notificationsApi = app.MapGroup("/api/notifications").RequireAuthorization("Admin");
+var readinessApi = app.MapGroup("/api/readiness").RequireAuthorization("Admin");
 
 app.MapGet("/api/error", (HttpContext context) =>
 {
@@ -260,6 +274,7 @@ authApi.MapPost("/login", async (
     LoginRequest request,
     AppDbContext dbContext,
     IPasswordHasher<AppUser> passwordHasher,
+    HttpContext httpContext,
     CancellationToken cancellationToken) =>
 {
     var email = request.Email?.Trim();
@@ -307,6 +322,16 @@ authApi.MapPost("/login", async (
 
     var accessToken = AuthTokenService.CreateAccessToken(user, now, expiresAt, jwtIssuer, jwtAudience, jwtKey);
     await dbContext.SaveChangesAsync(cancellationToken);
+
+    AssignmentHelpers.AddAuditLog(
+        dbContext,
+        user.Id,
+        AuditActionType.Create,
+        nameof(AppUser),
+        user.Id.ToString(),
+        before: null,
+        after: new { Event = "AuthLogin", user.Email },
+        httpContext: httpContext);
     var roles = user.Roles
         .Select(role => role.Role.ToString())
         .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -371,6 +396,7 @@ authApi.MapGet("/me", async (
 authApi.MapPost("/refresh", async (
     RefreshTokenRequest request,
     AppDbContext dbContext,
+    HttpContext httpContext,
     CancellationToken cancellationToken) =>
 {
     var incomingToken = request.RefreshToken?.Trim();
@@ -426,6 +452,16 @@ authApi.MapPost("/refresh", async (
         expiresAtUtc: newRefreshTokenExpiresAt,
         createdAtUtc: now));
 
+    AssignmentHelpers.AddAuditLog(
+        dbContext,
+        user.Id,
+        AuditActionType.Update,
+        nameof(RefreshToken),
+        storedToken.Id.ToString(),
+        before: storedToken,
+        after: new { eventType = "AuthRefresh", storedToken.Id, replacedBy = newRefreshTokenHash[..8] },
+        httpContext);
+
     await dbContext.SaveChangesAsync(cancellationToken);
 
     var response = new AuthLoginResponse
@@ -446,6 +482,7 @@ authApi.MapPost("/refresh", async (
 authApi.MapPost("/logout", async (
     LogoutRequest request,
     AppDbContext dbContext,
+    HttpContext httpContext,
     CancellationToken cancellationToken) =>
 {
     var incomingToken = request.RefreshToken?.Trim();
@@ -458,6 +495,7 @@ authApi.MapPost("/logout", async (
     var now = DateTime.UtcNow;
 
     var storedToken = await dbContext.RefreshTokens
+        .Include(x => x.AppUser)
         .FirstOrDefaultAsync(rt => rt.TokenHash == tokenHash, cancellationToken);
 
     if (storedToken is null)
@@ -469,14 +507,22 @@ authApi.MapPost("/logout", async (
     {
         storedToken.Revoke(now, "Logout");
         await dbContext.SaveChangesAsync(cancellationToken);
+
+        AssignmentHelpers.AddAuditLog(
+            dbContext,
+            storedToken.AppUserId,
+            AuditActionType.Revoke,
+            nameof(RefreshToken),
+            storedToken.Id.ToString(),
+            before: storedToken,
+            after: new { eventType = "AuthLogout" },
+            httpContext);
     }
 
     return Results.Ok(ApiResponse.Success(new { revoked = true }));
 })
     .WithTags("Auth")
     .WithName("AuthLogout");
-
-app.MapHub<ProductionHub>("/hubs/production");
 
 factoriesApi.MapGet("", async (
     AppDbContext dbContext,
@@ -546,8 +592,16 @@ factoriesApi.MapGet("/{factoryId:guid}", async (
 factoriesApi.MapPost("", async (
     CreateFactoryRequest request,
     AppDbContext dbContext,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
     CancellationToken cancellationToken) =>
 {
+    var actorUserId = currentUserService.UserId;
+    if (actorUserId is null)
+    {
+        return ApiResponse.Failure("Unauthorized", "User context is required.");
+    }
+
     if (string.IsNullOrWhiteSpace(request.Name))
     {
         return ApiResponse.Failure("ValidationError", "Name is required.");
@@ -577,6 +631,15 @@ factoriesApi.MapPost("", async (
 
     dbContext.Factories.Add(entity);
     await dbContext.SaveChangesAsync(cancellationToken);
+    AssignmentHelpers.AddAuditLog(
+        dbContext,
+        actorUserId.Value,
+        AuditActionType.Create,
+        nameof(Factory),
+        entity.Id.ToString(),
+        before: null,
+        after: new { entity.Id, entity.Name, entity.Code, entity.Location, entity.IsActive },
+        httpContext);
 
     return Results.Created($"/api/factories/{entity.Id}", ApiResponse.Success(new FactoryDto
     {
@@ -595,8 +658,16 @@ factoriesApi.MapPatch("/{factoryId:guid}", async (
     Guid factoryId,
     UpdateFactoryRequest request,
     AppDbContext dbContext,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
     CancellationToken cancellationToken) =>
 {
+    var actorUserId = currentUserService.UserId;
+    if (actorUserId is null)
+    {
+        return ApiResponse.Failure("Unauthorized", "User context is required.");
+    }
+
     var entity = await dbContext.Factories.FirstOrDefaultAsync(x => x.Id == factoryId && x.IsActive, cancellationToken);
     if (entity is null)
     {
@@ -645,8 +716,18 @@ factoriesApi.MapPatch("/{factoryId:guid}", async (
         return ApiResponse.Failure("ValidationError", "No valid changes detected.");
     }
 
+    var beforeFactory = new { entity.Id, entity.Name, entity.Code, entity.Location, entity.IsActive };
     entry.Property(nameof(Factory.UpdatedAtUtc)).CurrentValue = updatedAt;
     await dbContext.SaveChangesAsync(cancellationToken);
+    AssignmentHelpers.AddAuditLog(
+        dbContext,
+        actorUserId.Value,
+        AuditActionType.Update,
+        nameof(Factory),
+        entity.Id.ToString(),
+        before: beforeFactory,
+        after: new { entity.Id, entity.Name, entity.Code, entity.Location, entity.IsActive },
+        httpContext);
 
     return Results.Ok(ApiResponse.Success(new FactoryDto
     {
@@ -664,17 +745,35 @@ factoriesApi.MapPatch("/{factoryId:guid}", async (
 factoriesApi.MapDelete("/{factoryId:guid}", async (
     Guid factoryId,
     AppDbContext dbContext,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
     CancellationToken cancellationToken) =>
 {
+    var actorUserId = currentUserService.UserId;
+    if (actorUserId is null)
+    {
+        return ApiResponse.Failure("Unauthorized", "User context is required.");
+    }
+
     var entity = await dbContext.Factories.FirstOrDefaultAsync(x => x.Id == factoryId && x.IsActive, cancellationToken);
     if (entity is null)
     {
         return ApiResponse.Failure("NotFound", "Factory not found.", statusCode: 404);
     }
 
+    var beforeFactory = new { entity.Id, entity.Name, entity.Code, entity.Location, entity.IsActive };
     dbContext.Entry(entity).Property(nameof(Factory.IsActive)).CurrentValue = false;
     dbContext.Entry(entity).Property(nameof(Factory.UpdatedAtUtc)).CurrentValue = DateTime.UtcNow;
     await dbContext.SaveChangesAsync(cancellationToken);
+    AssignmentHelpers.AddAuditLog(
+        dbContext,
+        actorUserId.Value,
+        AuditActionType.Delete,
+        nameof(Factory),
+        entity.Id.ToString(),
+        before: beforeFactory,
+        after: new { entity.Id, entity.Name, entity.Code, entity.Location, entity.IsActive },
+        httpContext);
 
     return Results.NoContent();
 })
@@ -762,8 +861,16 @@ productionLinesApi.MapGet("/{lineId:guid}", async (
 productionLinesApi.MapPost("", async (
     CreateProductionLineRequest request,
     AppDbContext dbContext,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
     CancellationToken cancellationToken) =>
 {
+    var actorUserId = currentUserService.UserId;
+    if (actorUserId is null)
+    {
+        return ApiResponse.Failure("Unauthorized", "User context is required.");
+    }
+
     if (request.FactoryId == Guid.Empty)
     {
         return ApiResponse.Failure("ValidationError", "FactoryId is required.");
@@ -807,6 +914,15 @@ productionLinesApi.MapPost("", async (
 
     dbContext.ProductionLines.Add(entity);
     await dbContext.SaveChangesAsync(cancellationToken);
+    AssignmentHelpers.AddAuditLog(
+        dbContext,
+        actorUserId.Value,
+        AuditActionType.Create,
+        nameof(ProductionLine),
+        entity.Id.ToString(),
+        before: null,
+        after: new { entity.Id, entity.FactoryId, entity.Name, entity.LineCode, entity.SequenceOrder, entity.IsActive },
+        httpContext);
 
     return Results.Created($"/api/production-lines/{entity.Id}", ApiResponse.Success(new ProductionLineDto
     {
@@ -825,8 +941,16 @@ productionLinesApi.MapPatch("/{lineId:guid}", async (
     Guid lineId,
     UpdateProductionLineRequest request,
     AppDbContext dbContext,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
     CancellationToken cancellationToken) =>
 {
+    var actorUserId = currentUserService.UserId;
+    if (actorUserId is null)
+    {
+        return ApiResponse.Failure("Unauthorized", "User context is required.");
+    }
+
     var entity = await dbContext.ProductionLines.FirstOrDefaultAsync(x => x.Id == lineId && x.IsActive, cancellationToken);
     if (entity is null)
     {
@@ -902,8 +1026,18 @@ productionLinesApi.MapPatch("/{lineId:guid}", async (
         return ApiResponse.Failure("ValidationError", "No valid changes detected.");
     }
 
+    var beforeProductionLine = new { entity.Id, entity.FactoryId, entity.Name, entity.LineCode, entity.SequenceOrder, entity.IsActive };
     entry.Property(nameof(ProductionLine.UpdatedAtUtc)).CurrentValue = updatedAt;
     await dbContext.SaveChangesAsync(cancellationToken);
+    AssignmentHelpers.AddAuditLog(
+        dbContext,
+        actorUserId.Value,
+        AuditActionType.Update,
+        nameof(ProductionLine),
+        entity.Id.ToString(),
+        before: beforeProductionLine,
+        after: new { entity.Id, entity.FactoryId, entity.Name, entity.LineCode, entity.SequenceOrder, entity.IsActive },
+        httpContext);
 
     return Results.Ok(ApiResponse.Success(new ProductionLineDto
     {
@@ -921,17 +1055,35 @@ productionLinesApi.MapPatch("/{lineId:guid}", async (
 productionLinesApi.MapDelete("/{lineId:guid}", async (
     Guid lineId,
     AppDbContext dbContext,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
     CancellationToken cancellationToken) =>
 {
+    var actorUserId = currentUserService.UserId;
+    if (actorUserId is null)
+    {
+        return ApiResponse.Failure("Unauthorized", "User context is required.");
+    }
+
     var entity = await dbContext.ProductionLines.FirstOrDefaultAsync(x => x.Id == lineId && x.IsActive, cancellationToken);
     if (entity is null)
     {
         return ApiResponse.Failure("NotFound", "Production line not found.", 404);
     }
 
+    var beforeProductionLine = new { entity.Id, entity.FactoryId, entity.Name, entity.LineCode, entity.SequenceOrder, entity.IsActive };
     dbContext.Entry(entity).Property(nameof(ProductionLine.IsActive)).CurrentValue = false;
     dbContext.Entry(entity).Property(nameof(ProductionLine.UpdatedAtUtc)).CurrentValue = DateTime.UtcNow;
     await dbContext.SaveChangesAsync(cancellationToken);
+    AssignmentHelpers.AddAuditLog(
+        dbContext,
+        actorUserId.Value,
+        AuditActionType.Delete,
+        nameof(ProductionLine),
+        entity.Id.ToString(),
+        before: beforeProductionLine,
+        after: new { entity.Id, entity.FactoryId, entity.Name, entity.LineCode, entity.SequenceOrder, entity.IsActive },
+        httpContext);
 
     return Results.NoContent();
 })
@@ -1013,8 +1165,16 @@ mainStagesApi.MapGet("/{mainStageId:guid}", async (
 mainStagesApi.MapPost("", async (
     CreateMainStageRequest request,
     AppDbContext dbContext,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
     CancellationToken cancellationToken) =>
 {
+    var actorUserId = currentUserService.UserId;
+    if (actorUserId is null)
+    {
+        return ApiResponse.Failure("Unauthorized", "User context is required.");
+    }
+
     if (request.ProductionLineId == Guid.Empty)
     {
         return ApiResponse.Failure("ValidationError", "ProductionLineId is required.");
@@ -1054,6 +1214,15 @@ mainStagesApi.MapPost("", async (
 
     dbContext.MainStages.Add(entity);
     await dbContext.SaveChangesAsync(cancellationToken);
+    AssignmentHelpers.AddAuditLog(
+        dbContext,
+        actorUserId.Value,
+        AuditActionType.Create,
+        nameof(MainStage),
+        entity.Id.ToString(),
+        before: null,
+        after: new { entity.Id, entity.ProductionLineId, entity.Name, entity.IsCritical, entity.SequenceOrder, entity.IsActive },
+        httpContext);
 
     return Results.Created($"/api/main-stages/{entity.Id}", ApiResponse.Success(new MainStageDto
     {
@@ -1072,8 +1241,16 @@ mainStagesApi.MapPatch("/{mainStageId:guid}", async (
     Guid mainStageId,
     UpdateMainStageRequest request,
     AppDbContext dbContext,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
     CancellationToken cancellationToken) =>
 {
+    var actorUserId = currentUserService.UserId;
+    if (actorUserId is null)
+    {
+        return ApiResponse.Failure("Unauthorized", "User context is required.");
+    }
+
     var entity = await dbContext.MainStages.FirstOrDefaultAsync(x => x.Id == mainStageId && x.IsActive, cancellationToken);
     if (entity is null)
     {
@@ -1139,8 +1316,18 @@ mainStagesApi.MapPatch("/{mainStageId:guid}", async (
         return ApiResponse.Failure("ValidationError", "No valid changes detected.");
     }
 
+    var beforeMainStage = new { entity.Id, entity.ProductionLineId, entity.Name, entity.IsCritical, entity.SequenceOrder, entity.IsActive };
     dbContext.Entry(entity).Property(nameof(MainStage.UpdatedAtUtc)).CurrentValue = updatedAt;
     await dbContext.SaveChangesAsync(cancellationToken);
+    AssignmentHelpers.AddAuditLog(
+        dbContext,
+        actorUserId.Value,
+        AuditActionType.Update,
+        nameof(MainStage),
+        entity.Id.ToString(),
+        before: beforeMainStage,
+        after: new { entity.Id, entity.ProductionLineId, entity.Name, entity.IsCritical, entity.SequenceOrder, entity.IsActive },
+        httpContext);
 
     return Results.Ok(ApiResponse.Success(new MainStageDto
     {
@@ -1158,17 +1345,35 @@ mainStagesApi.MapPatch("/{mainStageId:guid}", async (
 mainStagesApi.MapDelete("/{mainStageId:guid}", async (
     Guid mainStageId,
     AppDbContext dbContext,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
     CancellationToken cancellationToken) =>
 {
+    var actorUserId = currentUserService.UserId;
+    if (actorUserId is null)
+    {
+        return ApiResponse.Failure("Unauthorized", "User context is required.");
+    }
+
     var entity = await dbContext.MainStages.FirstOrDefaultAsync(x => x.Id == mainStageId && x.IsActive, cancellationToken);
     if (entity is null)
     {
         return ApiResponse.Failure("NotFound", "Main stage not found.", 404);
     }
 
+    var beforeMainStage = new { entity.Id, entity.ProductionLineId, entity.Name, entity.IsCritical, entity.SequenceOrder, entity.IsActive };
     dbContext.Entry(entity).Property(nameof(MainStage.IsActive)).CurrentValue = false;
     dbContext.Entry(entity).Property(nameof(MainStage.UpdatedAtUtc)).CurrentValue = DateTime.UtcNow;
     await dbContext.SaveChangesAsync(cancellationToken);
+    AssignmentHelpers.AddAuditLog(
+        dbContext,
+        actorUserId.Value,
+        AuditActionType.Delete,
+        nameof(MainStage),
+        entity.Id.ToString(),
+        before: beforeMainStage,
+        after: new { entity.Id, entity.ProductionLineId, entity.Name, entity.IsCritical, entity.SequenceOrder, entity.IsActive },
+        httpContext);
 
     return Results.NoContent();
 })
@@ -1250,8 +1455,16 @@ subStagesApi.MapGet("/{subStageId:guid}", async (
 subStagesApi.MapPost("", async (
     CreateSubStageRequest request,
     AppDbContext dbContext,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
     CancellationToken cancellationToken) =>
 {
+    var actorUserId = currentUserService.UserId;
+    if (actorUserId is null)
+    {
+        return ApiResponse.Failure("Unauthorized", "User context is required.");
+    }
+
     if (request.MainStageId == Guid.Empty)
     {
         return ApiResponse.Failure("ValidationError", "MainStageId is required.");
@@ -1296,6 +1509,15 @@ subStagesApi.MapPost("", async (
 
     dbContext.SubStages.Add(entity);
     await dbContext.SaveChangesAsync(cancellationToken);
+    AssignmentHelpers.AddAuditLog(
+        dbContext,
+        actorUserId.Value,
+        AuditActionType.Create,
+        nameof(SubStage),
+        entity.Id.ToString(),
+        before: null,
+        after: new { entity.Id, entity.MainStageId, entity.Name, entity.Capacity, entity.SequenceOrder, entity.IsActive },
+        httpContext);
 
     return Results.Created($"/api/sub-stages/{entity.Id}", ApiResponse.Success(new SubStageDto
     {
@@ -1314,8 +1536,16 @@ subStagesApi.MapPatch("/{subStageId:guid}", async (
     Guid subStageId,
     UpdateSubStageRequest request,
     AppDbContext dbContext,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
     CancellationToken cancellationToken) =>
 {
+    var actorUserId = currentUserService.UserId;
+    if (actorUserId is null)
+    {
+        return ApiResponse.Failure("Unauthorized", "User context is required.");
+    }
+
     var entity = await dbContext.SubStages.FirstOrDefaultAsync(x => x.Id == subStageId && x.IsActive, cancellationToken);
     if (entity is null)
     {
@@ -1389,8 +1619,18 @@ subStagesApi.MapPatch("/{subStageId:guid}", async (
         return ApiResponse.Failure("ValidationError", "No valid changes detected.");
     }
 
+    var beforeSubStage = new { entity.Id, entity.MainStageId, entity.Name, entity.Capacity, entity.SequenceOrder, entity.IsActive };
     dbContext.Entry(entity).Property(nameof(SubStage.UpdatedAtUtc)).CurrentValue = updatedAt;
     await dbContext.SaveChangesAsync(cancellationToken);
+    AssignmentHelpers.AddAuditLog(
+        dbContext,
+        actorUserId.Value,
+        AuditActionType.Update,
+        nameof(SubStage),
+        entity.Id.ToString(),
+        before: beforeSubStage,
+        after: new { entity.Id, entity.MainStageId, entity.Name, entity.Capacity, entity.SequenceOrder, entity.IsActive },
+        httpContext);
 
     return Results.Ok(ApiResponse.Success(new SubStageDto
     {
@@ -1408,17 +1648,35 @@ subStagesApi.MapPatch("/{subStageId:guid}", async (
 subStagesApi.MapDelete("/{subStageId:guid}", async (
     Guid subStageId,
     AppDbContext dbContext,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
     CancellationToken cancellationToken) =>
 {
+    var actorUserId = currentUserService.UserId;
+    if (actorUserId is null)
+    {
+        return ApiResponse.Failure("Unauthorized", "User context is required.");
+    }
+
     var entity = await dbContext.SubStages.FirstOrDefaultAsync(x => x.Id == subStageId && x.IsActive, cancellationToken);
     if (entity is null)
     {
         return ApiResponse.Failure("NotFound", "Sub stage not found.", 404);
     }
 
+    var beforeSubStage = new { entity.Id, entity.MainStageId, entity.Name, entity.Capacity, entity.SequenceOrder, entity.IsActive };
     dbContext.Entry(entity).Property(nameof(SubStage.IsActive)).CurrentValue = false;
     dbContext.Entry(entity).Property(nameof(SubStage.UpdatedAtUtc)).CurrentValue = DateTime.UtcNow;
     await dbContext.SaveChangesAsync(cancellationToken);
+    AssignmentHelpers.AddAuditLog(
+        dbContext,
+        actorUserId.Value,
+        AuditActionType.Delete,
+        nameof(SubStage),
+        entity.Id.ToString(),
+        before: beforeSubStage,
+        after: new { entity.Id, entity.MainStageId, entity.Name, entity.Capacity, entity.SequenceOrder, entity.IsActive },
+        httpContext);
 
     return Results.NoContent();
 })
@@ -1535,8 +1793,16 @@ workersApi.MapGet("/{workerId:guid}", async (
 workersApi.MapPost("", async (
     CreateWorkerRequest request,
     AppDbContext dbContext,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
     CancellationToken cancellationToken) =>
 {
+    var actorUserId = currentUserService.UserId;
+    if (actorUserId is null)
+    {
+        return ApiResponse.Failure("Unauthorized", "User context is required.");
+    }
+
     if (string.IsNullOrWhiteSpace(request.EmployeeCode))
     {
         return ApiResponse.Failure("ValidationError", "EmployeeCode is required.");
@@ -1565,6 +1831,15 @@ workersApi.MapPost("", async (
 
     dbContext.Workers.Add(entity);
     await dbContext.SaveChangesAsync(cancellationToken);
+    AssignmentHelpers.AddAuditLog(
+        dbContext,
+        actorUserId.Value,
+        AuditActionType.Create,
+        nameof(Worker),
+        entity.Id.ToString(),
+        before: null,
+        after: new { entity.Id, entity.EmployeeCode, entity.FullName, entity.AttendanceUserId, entity.BadgeNumber, entity.Phone, entity.IsActive },
+        httpContext);
 
     var defaultSubStageId = await dbContext.WorkerDefaultAssignments
         .AsNoTracking()
@@ -1593,8 +1868,16 @@ workersApi.MapPatch("/{workerId:guid}", async (
     Guid workerId,
     UpdateWorkerRequest request,
     AppDbContext dbContext,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
     CancellationToken cancellationToken) =>
 {
+    var actorUserId = currentUserService.UserId;
+    if (actorUserId is null)
+    {
+        return ApiResponse.Failure("Unauthorized", "User context is required.");
+    }
+
     var entity = await dbContext.Workers.FirstOrDefaultAsync(x => x.Id == workerId && x.IsActive, cancellationToken);
     if (entity is null)
     {
@@ -1679,8 +1962,18 @@ workersApi.MapPatch("/{workerId:guid}", async (
         return ApiResponse.Failure("ValidationError", "No valid changes detected.");
     }
 
+    var beforeWorker = new { entity.Id, entity.EmployeeCode, entity.FullName, entity.AttendanceUserId, entity.BadgeNumber, entity.Phone, entity.IsActive };
     dbContext.Entry(entity).Property(nameof(Worker.UpdatedAtUtc)).CurrentValue = updatedAt;
     await dbContext.SaveChangesAsync(cancellationToken);
+    AssignmentHelpers.AddAuditLog(
+        dbContext,
+        actorUserId.Value,
+        AuditActionType.Update,
+        nameof(Worker),
+        entity.Id.ToString(),
+        before: beforeWorker,
+        after: new { entity.Id, entity.EmployeeCode, entity.FullName, entity.AttendanceUserId, entity.BadgeNumber, entity.Phone, entity.IsActive },
+        httpContext);
 
     var defaultSubStageId = await dbContext.WorkerDefaultAssignments
         .AsNoTracking()
@@ -1708,17 +2001,35 @@ workersApi.MapPatch("/{workerId:guid}", async (
 workersApi.MapDelete("/{workerId:guid}", async (
     Guid workerId,
     AppDbContext dbContext,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
     CancellationToken cancellationToken) =>
 {
+    var actorUserId = currentUserService.UserId;
+    if (actorUserId is null)
+    {
+        return ApiResponse.Failure("Unauthorized", "User context is required.");
+    }
+
     var entity = await dbContext.Workers.FirstOrDefaultAsync(x => x.Id == workerId && x.IsActive, cancellationToken);
     if (entity is null)
     {
         return ApiResponse.Failure("NotFound", "Worker not found.", 404);
     }
 
+    var beforeWorker = new { entity.Id, entity.EmployeeCode, entity.FullName, entity.AttendanceUserId, entity.BadgeNumber, entity.Phone, entity.IsActive };
     dbContext.Entry(entity).Property(nameof(Worker.IsActive)).CurrentValue = false;
     dbContext.Entry(entity).Property(nameof(Worker.UpdatedAtUtc)).CurrentValue = DateTime.UtcNow;
     await dbContext.SaveChangesAsync(cancellationToken);
+    AssignmentHelpers.AddAuditLog(
+        dbContext,
+        actorUserId.Value,
+        AuditActionType.Delete,
+        nameof(Worker),
+        entity.Id.ToString(),
+        before: beforeWorker,
+        after: new { entity.Id, entity.EmployeeCode, entity.FullName, entity.AttendanceUserId, entity.BadgeNumber, entity.Phone, entity.IsActive },
+        httpContext);
 
     return Results.NoContent();
 })
@@ -1726,89 +2037,1057 @@ workersApi.MapDelete("/{workerId:guid}", async (
     .WithTags("Workers")
     .WithName("DeleteWorker");
 
-app.Run();
-
-public static class ApiResponse
+workersApi.MapGet("/{workerId:guid}/current-assignment", async (
+    Guid workerId,
+    AppDbContext dbContext,
+    CancellationToken cancellationToken,
+    DateTime? asOfUtc) =>
 {
-    public static IResult Failure(string code, string message, int statusCode = 400)
+    var workerExists = await dbContext.Workers
+        .AsNoTracking()
+        .AnyAsync(x => x.Id == workerId && x.IsActive, cancellationToken);
+
+    if (!workerExists)
     {
-        return Results.Json(
-            new { success = false, error = new { code, message } },
-            statusCode: statusCode);
+        return ApiResponse.Failure("NotFound", "Worker not found.", 404);
     }
 
-    public static object Success(object? data, string message = "OK") => new { success = true, message, data };
-}
+    var asOf = asOfUtc ?? DateTime.UtcNow;
+    var assignments = await AssignmentHelpers.ResolveCurrentAssignmentsAsync(dbContext, [workerId], asOf, cancellationToken);
+    var assignment = assignments.GetValueOrDefault(workerId);
 
-static class AuthTokenService
-{
-    public static string GenerateRefreshToken()
+    var dto = new CurrentWorkerAssignmentDto
     {
-        var randomBytes = RandomNumberGenerator.GetBytes(48);
-        return Convert.ToBase64String(randomBytes);
+        WorkerId = workerId,
+        EffectiveSubStageId = assignment?.EffectiveSubStageId,
+        AssignmentType = assignment?.AssignmentType,
+        StartedAtUtc = assignment?.StartsAtUtc,
+        EndsAtUtc = assignment?.EndsAtUtc,
+        FromSubStageId = assignment?.FromSubStageId,
+        ToSubStageId = assignment?.ToSubStageId,
+        ReplacementForWorkerId = assignment?.ReplacementForWorkerId
+    };
+
+    return Results.Ok(ApiResponse.Success(dto));
+})
+    .WithTags("Workers")
+    .WithName("GetWorkerCurrentAssignment");
+
+assignmentsApi.MapPost("/default", async (
+    CreateDefaultAssignmentRequest request,
+    AppDbContext dbContext,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
+    CancellationToken cancellationToken) =>
+{
+    var actorUserId = currentUserService.UserId;
+    if (actorUserId is null)
+    {
+        return ApiResponse.Failure("Unauthorized", "User context is required.");
     }
 
-    public static string HashRefreshToken(string token)
+    if (request.WorkerId == Guid.Empty)
     {
-        if (string.IsNullOrWhiteSpace(token))
+        return ApiResponse.Failure("ValidationError", "WorkerId is required.");
+    }
+
+    if (request.SubStageId == Guid.Empty)
+    {
+        return ApiResponse.Failure("ValidationError", "SubStageId is required.");
+    }
+
+    var now = DateTime.UtcNow;
+
+    var worker = await dbContext.Workers
+        .AsNoTracking()
+        .FirstOrDefaultAsync(x => x.Id == request.WorkerId, cancellationToken);
+
+    if (worker is null || !worker.IsActive)
+    {
+        return ApiResponse.Failure("NotFound", "Worker not found or inactive.", 404);
+    }
+
+    var subStage = await dbContext.SubStages
+        .AsNoTracking()
+        .FirstOrDefaultAsync(x => x.Id == request.SubStageId, cancellationToken);
+
+    if (subStage is null || !subStage.IsActive)
+    {
+        return ApiResponse.Failure("NotFound", "SubStage not found or inactive.", 404);
+    }
+
+    var currentDefaults = await dbContext.WorkerDefaultAssignments
+        .Where(x => x.WorkerId == request.WorkerId && x.IsActive)
+        .OrderByDescending(x => x.AssignedAt)
+        .ThenByDescending(x => x.Id)
+        .ToListAsync(cancellationToken);
+
+    var currentDefault = currentDefaults.FirstOrDefault();
+
+    if (currentDefault is not null && currentDefaults.Count > 1)
+    {
+        foreach (var duplicate in currentDefaults.Where(x => x.Id != currentDefault.Id))
         {
-            throw new ArgumentNullException(nameof(token));
+            dbContext.Entry(duplicate).Property(nameof(WorkerDefaultAssignment.IsActive)).CurrentValue = false;
+            dbContext.Entry(duplicate).Property(nameof(WorkerDefaultAssignment.UpdatedAtUtc)).CurrentValue = now;
+        }
+    }
+
+    if (currentDefault is not null && currentDefault.SubStageId == request.SubStageId)
+    {
+        AssignmentHelpers.AddAuditLog(
+            dbContext,
+            actorUserId.Value,
+            AuditActionType.Update,
+            nameof(WorkerDefaultAssignment),
+            currentDefault.Id.ToString(),
+            before: currentDefault,
+            httpContext);
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return Results.Ok(ApiResponse.Success(new
+        {
+            assignmentId = currentDefault.Id,
+            workerId = currentDefault.WorkerId,
+            subStageId = currentDefault.SubStageId,
+            assignmentType = AssignmentType.Default.ToString(),
+            startsAt = currentDefault.AssignedAt
+        }));
+    }
+
+    var currentDefaultForTimeline = currentDefault;
+    var previousSubStageId = currentDefaultForTimeline?.SubStageId;
+    if (currentDefault is not null)
+    {
+        dbContext.Entry(currentDefault).Property(nameof(WorkerDefaultAssignment.IsActive)).CurrentValue = false;
+        dbContext.Entry(currentDefault).Property(nameof(WorkerDefaultAssignment.UpdatedAtUtc)).CurrentValue = now;
+    }
+
+    var assignment = new WorkerDefaultAssignment(
+        id: Guid.NewGuid(),
+        workerId: request.WorkerId,
+        subStageId: request.SubStageId,
+        assignedByUserId: actorUserId.Value,
+        assignedAtUtc: now,
+        reason: request.Reason,
+        isActive: true,
+        createdAtUtc: now);
+
+    dbContext.WorkerDefaultAssignments.Add(assignment);
+    dbContext.AssignmentTimelineEntries.Add(new AssignmentTimelineEntry(
+        id: Guid.NewGuid(),
+        workerId: request.WorkerId,
+        fromSubStageId: previousSubStageId,
+        toSubStageId: request.SubStageId,
+        assignmentType: AssignmentType.Default.ToString(),
+        actionType: currentDefault is null ? TimelineActionCreate : TimelineActionUpdate,
+        reason: request.Reason,
+        startAtUtc: now,
+        endAtUtc: null,
+        performedByUserId: actorUserId.Value,
+        isAutomatic: false,
+        relatedTemporaryAssignmentId: null,
+        replacementForWorkerId: null,
+        createdAtUtc: now));
+
+    AssignmentHelpers.AddAuditLog(dbContext, actorUserId.Value, AuditActionType.Create, nameof(WorkerDefaultAssignment), assignment.Id.ToString(), before: assignment, httpContext: httpContext);
+
+    await dbContext.SaveChangesAsync(cancellationToken);
+
+    return Results.Created($"/api/assignments/default/{assignment.Id}", ApiResponse.Success(new
+    {
+        assignmentId = assignment.Id,
+        workerId = assignment.WorkerId,
+        subStageId = assignment.SubStageId,
+        assignmentType = AssignmentType.Default.ToString(),
+        startsAt = assignment.AssignedAt
+    }));
+})
+    .WithTags("Assignments")
+    .WithName("CreateOrUpdateDefaultAssignment");
+
+assignmentsApi.MapPost("/temporary", async (
+    CreateTemporaryAssignmentRequest request,
+    AppDbContext dbContext,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
+    CancellationToken cancellationToken) =>
+{
+    var actorUserId = currentUserService.UserId;
+    if (actorUserId is null)
+    {
+        return ApiResponse.Failure("Unauthorized", "User context is required.");
+    }
+
+    if (request.WorkerId == Guid.Empty)
+    {
+        return ApiResponse.Failure("ValidationError", "WorkerId is required.");
+    }
+
+    if (request.FromSubStageId == Guid.Empty || request.ToSubStageId == Guid.Empty)
+    {
+        return ApiResponse.Failure("ValidationError", "FromSubStageId and ToSubStageId are required.");
+    }
+
+    if (string.IsNullOrWhiteSpace(request.Reason))
+    {
+        return ApiResponse.Failure("ValidationError", "Reason is required.");
+    }
+
+    if (request.StartAtUtc >= request.EndAtUtc)
+    {
+        return ApiResponse.Failure("ValidationError", "EndAtUtc must be after StartAtUtc.");
+    }
+
+    var now = DateTime.UtcNow;
+
+    var worker = await dbContext.Workers
+        .AsNoTracking()
+        .FirstOrDefaultAsync(x => x.Id == request.WorkerId, cancellationToken);
+
+    if (worker is null || !worker.IsActive)
+    {
+        return ApiResponse.Failure("NotFound", "Worker not found or inactive.", 404);
+    }
+
+    if (!await dbContext.SubStages.AnyAsync(x => x.Id == request.FromSubStageId && x.IsActive, cancellationToken))
+    {
+        return ApiResponse.Failure("ValidationError", "FromSubStage is invalid or inactive.", 404);
+    }
+
+    if (!await dbContext.SubStages.AnyAsync(x => x.Id == request.ToSubStageId && x.IsActive, cancellationToken))
+    {
+        return ApiResponse.Failure("ValidationError", "ToSubStage is invalid or inactive.", 404);
+    }
+
+    var hasConflict = await dbContext.WorkerTemporaryAssignments.AnyAsync(x =>
+        x.WorkerId == request.WorkerId &&
+        (x.Status == TempStatusScheduled || x.Status == TempStatusActive) &&
+        x.StartAtUtc < request.EndAtUtc &&
+        x.EndAtUtc > request.StartAtUtc,
+        cancellationToken);
+
+    if (hasConflict)
+    {
+        return ApiResponse.Failure("Conflict", "Worker has overlapping temporary assignment.", 409);
+    }
+
+    var status = request.StartAtUtc <= now
+        ? TempStatusActive
+        : TempStatusScheduled;
+
+    var entity = new WorkerTemporaryAssignment(
+        id: Guid.NewGuid(),
+        workerId: request.WorkerId,
+        fromSubStageId: request.FromSubStageId,
+        toSubStageId: request.ToSubStageId,
+        startAtUtc: request.StartAtUtc,
+        endAtUtc: request.EndAtUtc,
+        assignedByUserId: actorUserId.Value,
+        reason: request.Reason,
+        replacementForWorkerId: null,
+        status: status,
+        createdAtUtc: now);
+
+    dbContext.WorkerTemporaryAssignments.Add(entity);
+    dbContext.AssignmentTimelineEntries.Add(new AssignmentTimelineEntry(
+        id: Guid.NewGuid(),
+        workerId: request.WorkerId,
+        fromSubStageId: request.FromSubStageId,
+        toSubStageId: request.ToSubStageId,
+        assignmentType: AssignmentType.Temporary.ToString(),
+        actionType: TimelineActionCreate,
+        reason: request.Reason,
+        startAtUtc: request.StartAtUtc,
+        endAtUtc: request.EndAtUtc,
+        performedByUserId: actorUserId.Value,
+        isAutomatic: false,
+        relatedTemporaryAssignmentId: null,
+        replacementForWorkerId: null,
+        createdAtUtc: now));
+
+    AssignmentHelpers.AddAuditLog(dbContext, actorUserId.Value, AuditActionType.Create, nameof(WorkerTemporaryAssignment), entity.Id.ToString(), before: entity, httpContext: httpContext);
+
+    await dbContext.SaveChangesAsync(cancellationToken);
+
+    return Results.Created($"/api/assignments/temporary/{entity.Id}", ApiResponse.Success(new
+    {
+        assignmentId = entity.Id,
+        workerId = entity.WorkerId,
+        fromSubStageId = entity.FromSubStageId,
+        toSubStageId = entity.ToSubStageId,
+        assignmentType = entity.AssignmentType.ToString(),
+        status = entity.Status,
+        startAtUtc = entity.StartAtUtc,
+        endAtUtc = entity.EndAtUtc
+    }));
+})
+    .WithTags("Assignments")
+    .WithName("CreateTemporaryAssignment");
+
+assignmentsApi.MapPost("/replacement", async (
+    CreateReplacementAssignmentRequest request,
+    AppDbContext dbContext,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
+    CancellationToken cancellationToken) =>
+{
+    var actorUserId = currentUserService.UserId;
+    if (actorUserId is null)
+    {
+        return ApiResponse.Failure("Unauthorized", "User context is required.");
+    }
+
+    if (request.ReplacementWorkerId == Guid.Empty || request.ReplacedWorkerId == Guid.Empty || request.SubStageId == Guid.Empty)
+    {
+        return ApiResponse.Failure("ValidationError", "ReplacementWorkerId, ReplacedWorkerId and SubStageId are required.");
+    }
+
+    if (request.ReplacementWorkerId == request.ReplacedWorkerId)
+    {
+        return ApiResponse.Failure("ValidationError", "Replacement worker must differ from replaced worker.");
+    }
+
+    if (string.IsNullOrWhiteSpace(request.Reason))
+    {
+        return ApiResponse.Failure("ValidationError", "Reason is required.");
+    }
+
+    if (request.StartAtUtc >= request.EndAtUtc)
+    {
+        return ApiResponse.Failure("ValidationError", "EndAtUtc must be after StartAtUtc.");
+    }
+
+    var now = DateTime.UtcNow;
+
+    var replacementWorker = await dbContext.Workers
+        .AsNoTracking()
+        .FirstOrDefaultAsync(x => x.Id == request.ReplacementWorkerId, cancellationToken);
+
+    if (replacementWorker is null || !replacementWorker.IsActive)
+    {
+        return ApiResponse.Failure("NotFound", "Replacement worker not found or inactive.", 404);
+    }
+
+    var replacedWorker = await dbContext.Workers
+        .AsNoTracking()
+        .FirstOrDefaultAsync(x => x.Id == request.ReplacedWorkerId, cancellationToken);
+
+    if (replacedWorker is null || !replacedWorker.IsActive)
+    {
+        return ApiResponse.Failure("NotFound", "Replaced worker not found or inactive.", 404);
+    }
+
+    // TODO Attendance Integration: verify ReplacedWorkerId is truly absent at assignment time using attendance records.
+    if (!await dbContext.SubStages.AnyAsync(x => x.Id == request.SubStageId && x.IsActive, cancellationToken))
+    {
+        return ApiResponse.Failure("ValidationError", "SubStage not found or inactive.", 404);
+    }
+
+    var replacedWorkerDefault = await dbContext.WorkerDefaultAssignments
+        .AsNoTracking()
+        .Where(x => x.WorkerId == request.ReplacedWorkerId && x.IsActive)
+        .OrderByDescending(x => x.AssignedAt)
+        .ThenByDescending(x => x.Id)
+        .FirstOrDefaultAsync(cancellationToken);
+
+    if (replacedWorkerDefault is not null && replacedWorkerDefault.SubStageId != request.SubStageId)
+    {
+        return ApiResponse.Failure("ValidationError", "Replaced worker default assignment is in a different sub-stage.");
+    }
+
+    var conflict = await dbContext.WorkerTemporaryAssignments.AnyAsync(x =>
+        x.WorkerId == request.ReplacementWorkerId &&
+        (x.Status == TempStatusScheduled || x.Status == TempStatusActive) &&
+        x.StartAtUtc < request.EndAtUtc &&
+        x.EndAtUtc > request.StartAtUtc,
+        cancellationToken);
+
+    if (conflict)
+    {
+        return ApiResponse.Failure("Conflict", "Replacement worker already has overlapping temporary assignment.", 409);
+    }
+
+    var status = request.StartAtUtc <= now
+        ? TempStatusActive
+        : TempStatusScheduled;
+
+    var fromSubStageId = replacedWorkerDefault?.SubStageId ?? request.SubStageId;
+
+    var entity = new WorkerTemporaryAssignment(
+        id: Guid.NewGuid(),
+        workerId: request.ReplacementWorkerId,
+        fromSubStageId: fromSubStageId,
+        toSubStageId: request.SubStageId,
+        startAtUtc: request.StartAtUtc,
+        endAtUtc: request.EndAtUtc,
+        assignedByUserId: actorUserId.Value,
+        reason: request.Reason,
+        replacementForWorkerId: request.ReplacedWorkerId,
+        status: status,
+        createdAtUtc: now);
+
+    dbContext.WorkerTemporaryAssignments.Add(entity);
+    dbContext.AssignmentTimelineEntries.Add(new AssignmentTimelineEntry(
+        id: Guid.NewGuid(),
+        workerId: request.ReplacementWorkerId,
+        fromSubStageId: fromSubStageId,
+        toSubStageId: request.SubStageId,
+        assignmentType: AssignmentType.Replacement.ToString(),
+        actionType: TimelineActionCreate,
+        reason: request.Reason,
+        startAtUtc: request.StartAtUtc,
+        endAtUtc: request.EndAtUtc,
+        performedByUserId: actorUserId.Value,
+        isAutomatic: false,
+        relatedTemporaryAssignmentId: null,
+        replacementForWorkerId: request.ReplacedWorkerId,
+        createdAtUtc: now));
+
+    AssignmentHelpers.AddAuditLog(dbContext, actorUserId.Value, AuditActionType.Create, nameof(WorkerTemporaryAssignment), entity.Id.ToString(), before: entity, httpContext: httpContext);
+
+    await dbContext.SaveChangesAsync(cancellationToken);
+
+    return Results.Created($"/api/assignments/temporary/{entity.Id}", ApiResponse.Success(new
+    {
+        assignmentId = entity.Id,
+        workerId = entity.WorkerId,
+        replacementForWorkerId = entity.ReplacementForWorkerId,
+        fromSubStageId = entity.FromSubStageId,
+        toSubStageId = entity.ToSubStageId,
+        assignmentType = entity.AssignmentType.ToString(),
+        status = entity.Status,
+        startAtUtc = entity.StartAtUtc,
+        endAtUtc = entity.EndAtUtc
+    }));
+})
+    .WithTags("Assignments")
+    .WithName("CreateReplacementAssignment");
+
+assignmentsApi.MapDelete("/temporary/{assignmentId:guid}", async (
+    Guid assignmentId,
+    AppDbContext dbContext,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
+    CancellationToken cancellationToken) =>
+{
+    var actorUserId = currentUserService.UserId;
+    if (actorUserId is null)
+    {
+        return ApiResponse.Failure("Unauthorized", "User context is required.");
+    }
+
+    var assignment = await dbContext.WorkerTemporaryAssignments
+        .FirstOrDefaultAsync(
+            x => x.Id == assignmentId &&
+                 (x.Status == TempStatusScheduled || x.Status == TempStatusActive),
+            cancellationToken);
+
+    if (assignment is null)
+    {
+        return ApiResponse.Failure("NotFound", "Temporary assignment not found.", 404);
+    }
+
+    var now = DateTime.UtcNow;
+    dbContext.Entry(assignment).Property(nameof(WorkerTemporaryAssignment.Status)).CurrentValue = TempStatusCancelled;
+    dbContext.Entry(assignment).Property(nameof(WorkerTemporaryAssignment.EndAtUtc)).CurrentValue = now;
+    dbContext.Entry(assignment).Property(nameof(WorkerTemporaryAssignment.UpdatedAtUtc)).CurrentValue = now;
+
+    dbContext.AssignmentTimelineEntries.Add(new AssignmentTimelineEntry(
+        id: Guid.NewGuid(),
+        workerId: assignment.WorkerId,
+        fromSubStageId: assignment.FromSubStageId,
+        toSubStageId: assignment.ToSubStageId,
+        assignmentType: assignment.AssignmentType.ToString(),
+        actionType: TimelineActionCancel,
+        reason: assignment.Reason,
+        startAtUtc: assignment.StartAtUtc,
+        endAtUtc: now,
+        performedByUserId: actorUserId.Value,
+        isAutomatic: false,
+        relatedTemporaryAssignmentId: assignment.Id,
+        replacementForWorkerId: assignment.ReplacementForWorkerId,
+        createdAtUtc: now));
+
+    AssignmentHelpers.AddAuditLog(dbContext, actorUserId.Value, AuditActionType.Cancel, nameof(WorkerTemporaryAssignment), assignment.Id.ToString(), before: assignment, httpContext: httpContext);
+
+    await dbContext.SaveChangesAsync(cancellationToken);
+
+    return Results.Ok(ApiResponse.Success(new
+    {
+        assignmentId = assignment.Id,
+        cancelledAt = now,
+        status = TempStatusCancelled
+    }));
+})
+    .WithTags("Assignments")
+    .WithName("CancelTemporaryAssignment");
+
+assignmentsApi.MapGet("/{workerId:guid}/timeline", async (
+    Guid workerId,
+    AppDbContext dbContext,
+    CancellationToken cancellationToken,
+    int page = 1,
+    int pageSize = 50,
+    DateTime? fromDate = null,
+    DateTime? toDate = null) =>
+{
+    if (page < 1 || pageSize < 1 || pageSize > 200)
+    {
+        return ApiResponse.Failure("ValidationError", "page and pageSize must be positive, pageSize max 200.");
+    }
+
+    var query = dbContext.AssignmentTimelineEntries
+        .AsNoTracking()
+        .Where(x => x.WorkerId == workerId);
+
+    if (fromDate.HasValue)
+    {
+        query = query.Where(x => x.StartAtUtc >= fromDate.Value);
+    }
+
+    if (toDate.HasValue)
+    {
+        query = query.Where(x => x.StartAtUtc <= toDate.Value);
+    }
+
+    var totalCount = await query.CountAsync(cancellationToken);
+
+    var entries = await query
+        .OrderByDescending(x => x.CreatedAtUtc)
+        .Skip((page - 1) * pageSize)
+        .Take(pageSize)
+        .Select(x => new AssignmentTimelineDto
+        {
+            Id = x.Id,
+            WorkerId = x.WorkerId,
+            FromSubStageId = x.FromSubStageId,
+            ToSubStageId = x.ToSubStageId,
+            AssignmentType = x.AssignmentType,
+            ActionType = x.ActionType,
+            Reason = x.Reason,
+            StartAtUtc = x.StartAtUtc,
+            EndAtUtc = x.EndAtUtc,
+            PerformedByUserId = x.PerformedByUserId,
+            IsAutomatic = x.IsAutomatic,
+            RelatedTemporaryAssignmentId = x.RelatedTemporaryAssignmentId,
+            ReplacementForWorkerId = x.ReplacementForWorkerId,
+            CreatedAtUtc = x.CreatedAtUtc
+        })
+        .ToArrayAsync(cancellationToken);
+
+    return Results.Ok(new
+    {
+        success = true,
+        data = new
+        {
+            items = entries,
+            totalCount,
+            pageNumber = page,
+            pageSize
+        }
+    });
+})
+    .WithTags("Assignments")
+    .WithName("GetWorkerAssignmentTimeline");
+
+assignmentsApi.MapGet("/sub-stages/{subStageId:guid}/workers", async (
+    Guid subStageId,
+    AppDbContext dbContext,
+    CancellationToken cancellationToken,
+    DateTime? asOfUtc = null) =>
+{
+    if (!await dbContext.SubStages.AnyAsync(x => x.Id == subStageId, cancellationToken))
+    {
+        return ApiResponse.Failure("NotFound", "SubStage not found.", 404);
+    }
+
+    var asOf = asOfUtc ?? DateTime.UtcNow;
+    var workers = await dbContext.Workers.AsNoTracking().Where(x => x.IsActive).Select(x => new { x.Id, x.FullName, x.EmployeeCode }).ToListAsync(cancellationToken);
+    if (workers.Count == 0)
+    {
+        return Results.Ok(ApiResponse.Success(new
+        {
+            subStageId,
+            items = Array.Empty<SubStageCurrentWorkerDto>()
+        }));
+    }
+
+    var assignments = await AssignmentHelpers.ResolveCurrentAssignmentsAsync(
+        dbContext,
+        workers.Select(x => x.Id).ToList(),
+        asOf,
+        cancellationToken);
+
+    var items = workers
+        .Where(x => assignments.TryGetValue(x.Id, out var assignment) && assignment.EffectiveSubStageId == subStageId)
+        .Select(x =>
+        {
+            var assignment = assignments[x.Id];
+            return new SubStageCurrentWorkerDto
+            {
+                WorkerId = x.Id,
+                FullName = x.FullName,
+                EmployeeCode = x.EmployeeCode,
+                AssignmentType = assignment.AssignmentType ?? AssignmentType.Default,
+                FromSubStageId = assignment.FromSubStageId,
+                ReplacementForWorkerId = assignment.ReplacementForWorkerId
+            };
+        })
+        .OrderBy(x => x.FullName)
+        .ToArray();
+
+    return Results.Ok(ApiResponse.Success(new
+    {
+        subStageId,
+        workersCount = items.Length,
+        items
+    }));
+})
+    .WithTags("Assignments")
+    .WithName("GetWorkersInSubStage");
+
+notificationsApi.MapGet("", async (
+    AppDbContext dbContext,
+    ICurrentUserService currentUserService,
+    CancellationToken cancellationToken,
+    bool? isRead = null,
+    int page = 1,
+    int pageSize = 50) =>
+{
+    var recipientUserId = currentUserService.UserId;
+    if (recipientUserId is null)
+    {
+        return ApiResponse.Failure("Unauthorized", "User context is required.");
+    }
+
+    if (page < 1 || pageSize < 1 || pageSize > 200)
+    {
+        return ApiResponse.Failure("ValidationError", "page and pageSize must be positive, pageSize max 200.");
+    }
+
+    var query = dbContext.Notifications
+        .AsNoTracking()
+        .Where(x => x.RecipientUserId == recipientUserId);
+
+    if (isRead.HasValue)
+    {
+        query = query.Where(x => x.IsRead == isRead.Value);
+    }
+
+    var totalCount = await query.CountAsync(cancellationToken);
+    var notifications = await query
+        .OrderByDescending(x => x.CreatedAtUtc)
+        .Skip((page - 1) * pageSize)
+        .Take(pageSize)
+        .Select(x => new NotificationDto
+        {
+            Id = x.Id,
+            RecipientUserId = x.RecipientUserId,
+            SenderUserId = x.SenderUserId,
+            Title = x.Title,
+            Message = x.Message,
+            Status = x.Status,
+            IsRead = x.IsRead,
+            RelatedWorkerId = x.RelatedWorkerId,
+            RelatedEntityType = x.RelatedEntityType,
+            RelatedEntityId = x.RelatedEntityId,
+            CreatedAtUtc = x.CreatedAtUtc,
+            ReadAtUtc = x.ReadAtUtc
+        })
+        .ToArrayAsync(cancellationToken);
+
+    return Results.Ok(new
+    {
+        success = true,
+        data = new
+        {
+            items = notifications,
+            totalCount,
+            pageNumber = page,
+            pageSize
+        }
+    });
+})
+    .WithTags("Notifications")
+    .WithName("GetNotifications");
+
+notificationsApi.MapGet("/unread-count", async (
+    AppDbContext dbContext,
+    ICurrentUserService currentUserService,
+    CancellationToken cancellationToken) =>
+{
+    var recipientUserId = currentUserService.UserId;
+    if (recipientUserId is null)
+    {
+        return ApiResponse.Failure("Unauthorized", "User context is required.");
+    }
+
+    var unreadCount = await dbContext.Notifications
+        .AsNoTracking()
+        .CountAsync(x => x.RecipientUserId == recipientUserId && !x.IsRead, cancellationToken);
+
+    return Results.Ok(ApiResponse.Success(new { unreadCount }));
+})
+    .WithTags("Notifications")
+    .WithName("GetUnreadNotificationCount");
+
+notificationsApi.MapPatch("/{notificationId:guid}/read", async (
+    Guid notificationId,
+    AppDbContext dbContext,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
+    CancellationToken cancellationToken) =>
+{
+    var recipientUserId = currentUserService.UserId;
+    if (recipientUserId is null)
+    {
+        return ApiResponse.Failure("Unauthorized", "User context is required.");
+    }
+
+    var notification = await dbContext.Notifications
+        .FirstOrDefaultAsync(x => x.Id == notificationId && x.RecipientUserId == recipientUserId, cancellationToken);
+
+    if (notification is null)
+    {
+        return ApiResponse.Failure("NotFound", "Notification not found.", 404);
+    }
+
+    var now = DateTime.UtcNow;
+    if (!notification.IsRead)
+    {
+        notification.MarkAsRead(now);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        AssignmentHelpers.AddAuditLog(dbContext, recipientUserId.Value, AuditActionType.Update, nameof(Notification), notification.Id.ToString(), before: notification, httpContext: httpContext);
+    }
+
+    return Results.Ok(ApiResponse.Success(new
+    {
+        notification.Id,
+        notification.IsRead,
+        notification.ReadAtUtc
+    }));
+})
+    .WithTags("Notifications")
+    .WithName("ReadNotification");
+
+notificationsApi.MapPatch("/read-all", async (
+    AppDbContext dbContext,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
+    CancellationToken cancellationToken,
+    DateTime? beforeDateUtc = null) =>
+{
+    var recipientUserId = currentUserService.UserId;
+    if (recipientUserId is null)
+    {
+        return ApiResponse.Failure("Unauthorized", "User context is required.");
+    }
+
+    var query = dbContext.Notifications
+        .Where(x => x.RecipientUserId == recipientUserId.Value && !x.IsRead);
+
+    if (beforeDateUtc.HasValue)
+    {
+        query = query.Where(x => x.CreatedAtUtc <= beforeDateUtc.Value);
+    }
+
+    var now = DateTime.UtcNow;
+    var updatedCount = await query.ExecuteUpdateAsync(setters => setters
+        .SetProperty(x => x.IsRead, true)
+        .SetProperty(x => x.Status, NotificationStatus.Read)
+        .SetProperty(x => x.ReadAtUtc, now), cancellationToken);
+
+    AssignmentHelpers.AddAuditLog(dbContext, recipientUserId.Value, AuditActionType.Update, nameof(Notification), "read-all", before: new { recipientUserId = recipientUserId.Value }, httpContext: httpContext);
+    await dbContext.SaveChangesAsync(cancellationToken);
+
+    return Results.Ok(ApiResponse.Success(new { updatedCount }));
+})
+    .WithTags("Notifications")
+    .WithName("ReadAllNotifications");
+
+readinessApi.MapGet("/factory", async (
+    AppDbContext dbContext,
+    CancellationToken cancellationToken,
+    DateTime? asOfUtc = null) =>
+{
+    var asOf = asOfUtc ?? DateTime.UtcNow;
+    var now = asOf;
+
+    var activeSubStages = await (from ss in dbContext.SubStages.AsNoTracking()
+                                join ms in dbContext.MainStages.AsNoTracking() on ss.MainStageId equals ms.Id
+                                join pl in dbContext.ProductionLines.AsNoTracking() on ms.ProductionLineId equals pl.Id
+                                where ss.IsActive && ms.IsActive && pl.IsActive
+                                select new
+                                {
+                                    ss.Id,
+                                    ss.Capacity
+                                })
+        .ToListAsync(cancellationToken);
+
+    var requiredWorkers = activeSubStages.Sum(x => x.Capacity);
+
+    var activeWorkerIds = await dbContext.Workers
+        .AsNoTracking()
+        .Where(x => x.IsActive)
+        .Select(x => x.Id)
+        .ToListAsync(cancellationToken);
+
+    var assignments = await AssignmentHelpers.ResolveCurrentAssignmentsAsync(dbContext, activeWorkerIds, now, cancellationToken);
+    var assignmentsInActiveSubStages = assignments
+        .Where(x => x.Value.EffectiveSubStageId.HasValue && activeSubStages.Any(ss => ss.Id == x.Value.EffectiveSubStageId))
+        .ToList();
+
+    var attendanceByWorker = await AssignmentHelpers.GetLatestAttendanceStatusByWorkerAsync(
+        dbContext,
+        assignmentsInActiveSubStages.Select(x => x.Key).ToArray(),
+        cancellationToken);
+
+    var assignedWorkers = assignmentsInActiveSubStages.Count;
+    var present = 0;
+    var late = 0;
+    var absent = 0;
+    var unassignedFromAttendance = 0;
+
+    foreach (var entry in assignmentsInActiveSubStages)
+    {
+        if (!attendanceByWorker.TryGetValue(entry.Key, out var status))
+        {
+            unassignedFromAttendance++;
+            continue;
         }
 
-        var bytes = Encoding.UTF8.GetBytes(token);
-        var hash = SHA256.HashData(bytes);
-        return Convert.ToBase64String(hash);
-    }
-
-    public static string CreateAccessToken(
-        AppUser user,
-        DateTime issuedAtUtc,
-        DateTime expiresAtUtc,
-        string issuer,
-        string audience,
-        SymmetricSecurityKey signingKey)
-    {
-        var tokenId = Guid.NewGuid().ToString("N");
-        var roles = user.Roles.Select(r => new Claim(ClaimTypes.Role, r.Role.ToString())).ToArray();
-        var claims = new List<Claim>
+        if (status == AttendanceStatus.Present)
         {
-            new(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
-            new(JwtRegisteredClaimNames.Jti, tokenId),
-            new(JwtRegisteredClaimNames.Iat, DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString()),
-            new(ClaimTypes.NameIdentifier, user.Id.ToString()),
-            new(ClaimTypes.Name, user.FullName),
-            new(JwtRegisteredClaimNames.Email, user.Email),
-            new(JwtRegisteredClaimNames.Sid, user.Id.ToString()),
-            new("token_version", "1")
-        };
-        claims.AddRange(roles);
-
-        var tokenDescriptor = new SecurityTokenDescriptor
+            present++;
+        }
+        else if (status == AttendanceStatus.Late)
         {
-            Subject = new ClaimsIdentity(claims),
-            Expires = expiresAtUtc,
-            NotBefore = issuedAtUtc,
-            IssuedAt = issuedAtUtc,
-            Issuer = issuer,
-            Audience = audience,
-            SigningCredentials = new SigningCredentials(signingKey, SecurityAlgorithms.HmacSha256)
-        };
-
-        var handler = new JwtSecurityTokenHandler();
-        var token = handler.CreateToken(tokenDescriptor);
-        return handler.WriteToken(token);
+            late++;
+        }
+        else if (status == AttendanceStatus.Absent)
+        {
+            absent++;
+        }
+        else
+        {
+            unassignedFromAttendance++;
+        }
     }
 
-    public static string[] ResolvePermissionsForRoles(string[] roles)
+    var unassignedWorkers = Math.Max(0, requiredWorkers - assignedWorkers) + unassignedFromAttendance;
+    var readyCount = attendanceByWorker.Count == 0 ? assignedWorkers : present;
+    var readinessPercent = StageReadinessSnapshot.CalculateReadinessPercent(requiredWorkers, readyCount, late, absent, unassignedWorkers);
+
+    return Results.Ok(ApiResponse.Success(new StageReadinessDto
     {
-        return roles.Contains(UserRole.SuperAdmin.ToString(), StringComparer.OrdinalIgnoreCase)
-            ? ["users.read", "users.write", "system.read", "system.write"]
-            : roles.Contains(UserRole.Admin.ToString(), StringComparer.OrdinalIgnoreCase)
-                ? ["users.read", "system.read", "dashboard.read", "readiness.read"]
-                : Array.Empty<string>();
-    }
-}
+        ScopeType = "Factory",
+        ScopeEntityId = Guid.Empty,
+        RequiredWorkers = requiredWorkers,
+        AssignedWorkers = assignedWorkers,
+        PresentWorkers = present,
+        LateWorkers = late,
+        AbsentWorkers = absent,
+        UnassignedWorkers = unassignedWorkers,
+        ReadinessPercent = readinessPercent,
+        Status = StageReadinessSnapshot.ReadinessFromPercent(readinessPercent),
+        CalculatedAtUtc = now
+    }));
+})
+    .WithTags("Readiness")
+    .WithName("GetFactoryReadiness");
 
-public sealed class ProductionHub : Hub
+readinessApi.MapGet("/production-lines", async (
+    AppDbContext dbContext,
+    CancellationToken cancellationToken,
+    DateTime? asOfUtc = null) =>
 {
-}
+    var asOf = asOfUtc ?? DateTime.UtcNow;
+    var now = asOf;
+
+    var lineItems = await (from line in dbContext.ProductionLines.AsNoTracking()
+                          join mainStage in dbContext.MainStages.AsNoTracking() on line.Id equals mainStage.ProductionLineId
+                          join subStage in dbContext.SubStages.AsNoTracking() on mainStage.Id equals subStage.MainStageId
+                          where line.IsActive && mainStage.IsActive && subStage.IsActive
+                          group subStage by new { line.Id, line.Name } into g
+                          select new
+                          {
+                              ProductionLineId = g.Key.Id,
+                              LineName = g.Key.Name,
+                              RequiredWorkers = g.Sum(x => x.Capacity),
+                              SubStageIds = g.Select(x => x.Id).ToArray()
+                          })
+        .ToListAsync(cancellationToken);
+
+    var activeWorkerIds = await dbContext.Workers.AsNoTracking().Where(x => x.IsActive).Select(x => x.Id).ToListAsync(cancellationToken);
+    var assignments = await AssignmentHelpers.ResolveCurrentAssignmentsAsync(dbContext, activeWorkerIds, now, cancellationToken);
+    var attendanceByWorker = await AssignmentHelpers.GetLatestAttendanceStatusByWorkerAsync(
+        dbContext,
+        assignments.Select(x => x.Key).ToArray(),
+        cancellationToken);
+
+    var readinessItems = lineItems
+        .Select(item =>
+        {
+            var assignmentsInLine = assignments
+                .Where(x => x.Value.EffectiveSubStageId is not null && item.SubStageIds.Contains(x.Value.EffectiveSubStageId.Value))
+                .ToList();
+
+            var assigned = assignmentsInLine.Count;
+            var present = 0;
+            var late = 0;
+            var absent = 0;
+            var unassignedFromAttendance = 0;
+
+            foreach (var assignment in assignmentsInLine)
+            {
+                if (!attendanceByWorker.TryGetValue(assignment.Key, out var status))
+                {
+                    unassignedFromAttendance++;
+                    continue;
+                }
+
+                if (status == AttendanceStatus.Present)
+                {
+                    present++;
+                }
+                else if (status == AttendanceStatus.Late)
+                {
+                    late++;
+                }
+                else if (status == AttendanceStatus.Absent)
+                {
+                    absent++;
+                }
+                else
+                {
+                    unassignedFromAttendance++;
+                }
+            }
+
+            var unassignedWorkers = Math.Max(0, item.RequiredWorkers - assigned) + unassignedFromAttendance;
+            var readyCount = attendanceByWorker.Count == 0 ? assigned : present;
+            var readinessPercent = StageReadinessSnapshot.CalculateReadinessPercent(item.RequiredWorkers, readyCount, late, absent, unassignedWorkers);
+
+            return new
+            {
+                scopeType = "ProductionLine",
+                scopeEntityId = item.ProductionLineId,
+                lineName = item.LineName,
+                requiredWorkers = item.RequiredWorkers,
+                assignedWorkers = assigned,
+                presentWorkers = present,
+                lateWorkers = late,
+                absentWorkers = absent,
+                unassignedWorkers,
+                readinessPercent,
+                status = StageReadinessSnapshot.ReadinessFromPercent(readinessPercent)
+            };
+        })
+        .ToList();
+
+    var requiredWorkers = lineItems.Sum(x => x.RequiredWorkers);
+    var assignedWorkers = readinessItems.Sum(x => (int)x.assignedWorkers);
+    var presentWorkers = readinessItems.Sum(x => (int)x.presentWorkers);
+    var lateWorkers = readinessItems.Sum(x => (int)x.lateWorkers);
+    var absentWorkers = readinessItems.Sum(x => (int)x.absentWorkers);
+    var unassignedWorkers = readinessItems.Sum(x => (int)x.unassignedWorkers);
+    var readinessPercent = StageReadinessSnapshot.CalculateReadinessPercent(requiredWorkers, presentWorkers, lateWorkers, absentWorkers, unassignedWorkers);
+
+    return Results.Ok(ApiResponse.Success(new
+    {
+        scopeType = "ProductionLines",
+        scopeEntityId = Guid.Empty,
+        requiredWorkers,
+        assignedWorkers,
+        presentWorkers,
+        lateWorkers,
+        absentWorkers,
+        unassignedWorkers,
+        readinessPercent,
+        status = StageReadinessSnapshot.ReadinessFromPercent(readinessPercent),
+        calculatedAtUtc = now,
+        items = readinessItems
+    }));
+})
+    .WithTags("Readiness")
+    .WithName("GetProductionLinesReadiness");
+
+readinessApi.MapGet("/sub-stages/{subStageId:guid}", async (
+    Guid subStageId,
+    AppDbContext dbContext,
+    CancellationToken cancellationToken,
+    DateTime? asOfUtc = null) =>
+{
+    var subStage = await dbContext.SubStages.AsNoTracking().FirstOrDefaultAsync(x => x.Id == subStageId, cancellationToken);
+    if (subStage is null)
+    {
+        return ApiResponse.Failure("NotFound", "SubStage not found.", 404);
+    }
+
+    var asOf = asOfUtc ?? DateTime.UtcNow;
+    var now = asOf;
+
+    var activeWorkerIds = await dbContext.Workers.AsNoTracking().Where(x => x.IsActive).Select(x => x.Id).ToListAsync(cancellationToken);
+    var assignments = await AssignmentHelpers.ResolveCurrentAssignmentsAsync(dbContext, activeWorkerIds, now, cancellationToken);
+    var matchingAssignments = assignments.Where(x => x.Value.EffectiveSubStageId == subStageId).ToList();
+    var attendanceByWorker = await AssignmentHelpers.GetLatestAttendanceStatusByWorkerAsync(
+        dbContext,
+        matchingAssignments.Select(x => x.Key).ToArray(),
+        cancellationToken);
+
+    var present = 0;
+    var late = 0;
+    var absent = 0;
+    var unassignedFromAttendance = 0;
+
+    foreach (var assignment in matchingAssignments)
+    {
+        if (!attendanceByWorker.TryGetValue(assignment.Key, out var status))
+        {
+            unassignedFromAttendance++;
+            continue;
+        }
+
+        if (status == AttendanceStatus.Present)
+        {
+            present++;
+        }
+        else if (status == AttendanceStatus.Late)
+        {
+            late++;
+        }
+        else if (status == AttendanceStatus.Absent)
+        {
+            absent++;
+        }
+        else
+        {
+            unassignedFromAttendance++;
+        }
+    }
+
+    var assignedWorkers = matchingAssignments.Count;
+    var requiredWorkers = subStage.Capacity;
+    var unassignedWorkers = Math.Max(0, requiredWorkers - assignedWorkers) + unassignedFromAttendance;
+    var readinessPercent = StageReadinessSnapshot.CalculateReadinessPercent(requiredWorkers, present, late, absent, unassignedWorkers);
+
+    return Results.Ok(ApiResponse.Success(new StageReadinessDto
+    {
+        ScopeType = "SubStage",
+        ScopeEntityId = subStageId,
+        RequiredWorkers = requiredWorkers,
+        AssignedWorkers = assignedWorkers,
+        PresentWorkers = present,
+        LateWorkers = late,
+        AbsentWorkers = absent,
+        UnassignedWorkers = unassignedWorkers,
+        ReadinessPercent = readinessPercent,
+        Status = StageReadinessSnapshot.ReadinessFromPercent(readinessPercent),
+        CalculatedAtUtc = now
+    }));
+})
+    .WithTags("Readiness")
+    .WithName("GetSubStageReadiness");
+
+app.Run();
