@@ -1,11 +1,37 @@
 <section class="page-frame">
   <header class="page-header">
     <h1>Dashboard</h1>
-    <p>لوحة مرجعية أولية للمؤشرات.</p>
+    <p>ملخص ذكي لمرور الوردية باستخدام mock data.</p>
   </header>
 
+  <section class="readiness-summary">
+    <p-card styleClass="summary-card">
+      <div class="summary-label">جاهزية المصنع</div>
+      <div class="summary-value" [ngClass]="getReadinessTone()">{{ lineReadinessSummary.overallReadiness }}%</div>
+      <div class="summary-rows">
+        <span>إجمالي الخطوط: {{ lineReadinessSummary.totalLines }}</span>
+        <span>العاملون الحاضرون: {{ lineReadinessSummary.activeWorkers }} / {{ lineReadinessSummary.totalWorkers }}</span>
+      </div>
+    </p-card>
+
+    <p-card styleClass="summary-card">
+      <div class="summary-label">صحة الخطوط</div>
+      <div class="status-strip">
+        <div><span class="status-dot green"></span> ممتازة {{ lineReadinessSummary.healthyLines }}</div>
+        <div><span class="status-dot yellow"></span> متوسطة {{ lineReadinessSummary.warningLines }}</div>
+        <div><span class="status-dot red"></span> تحتاج متابعة {{ lineReadinessSummary.criticalLines }}</div>
+      </div>
+    </p-card>
+
+    <p-card styleClass="summary-card">
+      <div class="summary-label">مؤشر الحضور</div>
+      <div class="summary-value" [ngClass]="getAttendanceTone()">{{ lineReadinessSummary.attendanceRate }}%</div>
+      <div class="summary-note">نسبة الحضور العامة على كل المراحل.</div>
+    </p-card>
+  </section>
+
   <div class="kpi-grid">
-    <p-card *ngFor="let card of cards" styleClass="metric-card">
+    <p-card *ngFor="let card of cards" [styleClass]="'metric-card ' + getTrendClass(card.trend)">
       <ng-template pTemplate="title">
         <div class="metric-title">{{ card.title }}</div>
       </ng-template>
@@ -13,11 +39,29 @@
         <div class="metric-value">{{ card.value }}</div>
       </ng-template>
       <div class="metric-footer">
-        <i class="pi pi-arrow-up-left"></i>
+        <i [class]="getTrendIcon(card.trend)"></i>
         <span>{{ getTrendLabel(card.trend) }}: {{ card.trendLabel }}</span>
       </div>
     </p-card>
   </div>
+
+  <section class="attendance-row">
+    <p-card class="attendance-card">
+      <div class="attendance-title">مؤشرات حضور مختصرة</div>
+      <div class="attendance-items">
+        <div *ngFor="let item of attendanceIndicators" [class]="getIndicatorClass(item.tone)">
+          <i [class]="item.icon"></i>
+          <span>{{ item.label }}</span>
+          <strong>{{ item.value }}</strong>
+        </div>
+      </div>
+    </p-card>
+  </section>
+
+  <p-card class="production-line-note">
+    <div class="insight-title">Production Line Cards</div>
+    <p>تم تحسين تصميم خطوط الإنتاج ضمن صفحة Factory Map ليعرض حالة كل مرحلة وتدرّج جاهزية واضح.</p>
+  </p-card>
 
   <p-card class="insight-card">
     <div class="insight-title">الخطوات التالية</div>
