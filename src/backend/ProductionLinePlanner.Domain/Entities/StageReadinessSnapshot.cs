@@ -44,7 +44,7 @@ public class StageReadinessSnapshot
     }
 
     public Guid Id { get; init; }
-    public string ScopeType { get; private set; }
+    public string ScopeType { get; private set; } = string.Empty;
     public Guid ScopeEntityId { get; private set; }
     public DateTime CalculatedAtUtc { get; private set; }
     public int RequiredWorkers { get; private set; }

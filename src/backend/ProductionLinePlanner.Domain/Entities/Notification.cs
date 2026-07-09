@@ -45,8 +45,8 @@ public class Notification
     public AppUser? RecipientUser { get; set; }
     public Guid? SenderUserId { get; private set; }
     public AppUser? SenderUser { get; set; }
-    public string Title { get; private set; }
-    public string Message { get; private set; }
+    public string Title { get; private set; } = string.Empty;
+    public string Message { get; private set; } = string.Empty;
     public NotificationStatus Status { get; private set; }
     public Guid? RelatedWorkerId { get; private set; }
     public string? RelatedEntityType { get; private set; }
