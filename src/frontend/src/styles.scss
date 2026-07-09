@@ -7,6 +7,11 @@
 :root {
   color-scheme: light;
   direction: rtl;
+  font-family: var(--plp-font-family);
+  font-feature-settings: normal;
+  font-variation-settings: normal;
+  --font-family: var(--plp-font-family);
+  --font-feature-settings: normal;
 }
 
 * {
@@ -19,7 +24,7 @@ body {
   min-height: 100%;
   width: 100%;
   overflow-x: hidden;
-  font-family: 'Cairo', 'Inter', 'Segoe UI', sans-serif;
+  font-family: 'Cairo', 'Segoe UI', Tahoma, Arial, sans-serif;
 }
 
 app-root {
