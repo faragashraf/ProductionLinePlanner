@@ -56,6 +56,7 @@ public static class DependencyInjection
         services.AddScoped<IAttendanceSyncService, AttendanceSyncService>();
         services.AddScoped<IAttendanceEngine, AttendanceEngine>();
         services.AddScoped<IAssignmentEngine, AssignmentEngine>();
+        services.AddScoped<IAssignmentRecommendationEngine, AssignmentRecommendationEngine>();
         services.AddScoped<IReadinessEngine, ReadinessEngine>();
         services.AddScoped<INotificationEngine, NotificationEngine>();
         services.AddScoped<IAuditEngine, AuditEngine>();

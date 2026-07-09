@@ -2316,6 +2316,52 @@ assignmentsApi.MapPost("/replacement", async (
     .WithTags("Assignments")
     .WithName("CreateReplacementAssignment");
 
+assignmentsApi.MapGet("/recommendations", async (
+    Guid subStageId,
+    IAssignmentRecommendationEngine recommendationEngine,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
+    int topCandidates = 10,
+    CancellationToken cancellationToken = default) =>
+{
+    var actorUserId = currentUserService.UserId;
+    if (actorUserId is null)
+    {
+        return ApiResponse.Failure("Unauthorized", "User context is required.");
+    }
+
+    var requestMeta = $"{httpContext.Request.Method} {httpContext.Request.Path}";
+    var clientIp = httpContext.Connection.RemoteIpAddress?.ToString();
+    if (!string.IsNullOrWhiteSpace(clientIp))
+    {
+        requestMeta = $"{requestMeta} from {clientIp}";
+    }
+
+    if (!string.IsNullOrWhiteSpace(currentUserService.UserName))
+    {
+        requestMeta = $"{requestMeta} by {currentUserService.UserName}";
+    }
+
+    var result = await recommendationEngine.GetRecommendationsAsync(
+        subStageId,
+        actorUserId.Value,
+        requestMeta,
+        topCandidates,
+        cancellationToken);
+
+    if (result.IsFailure)
+    {
+        return ApiResponse.Failure(
+            result.Error?.Code ?? "ValidationError",
+            result.Error?.Message ?? "Validation failed.",
+            MapFailureStatusCode(result.Error?.Code));
+    }
+
+    return Results.Ok(ApiResponse.Success(result.Value!));
+})
+    .WithTags("Assignments")
+    .WithName("GetAssignmentRecommendations");
+
 assignmentsApi.MapDelete("/temporary/{assignmentId:guid}", async (
     Guid assignmentId,
     IAssignmentEngine assignmentEngine,
