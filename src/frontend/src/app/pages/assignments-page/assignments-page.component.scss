@@ -45,8 +45,11 @@
   display: grid;
   grid-template-columns: 1fr;
   gap: var(--s4);
-  overflow-x: hidden;
   min-width: 0;
+}
+
+.amp-timeline {
+  display: grid;
 }
 
 .amp-main,
@@ -60,14 +63,22 @@
   border: 1px solid var(--brd);
   border-radius: var(--r-lg);
   background: var(--surf);
-  padding: var(--s4);
+  padding: var(--s3);
   display: grid;
   gap: var(--s3);
+  min-width: 0;
+  overflow: visible;
+}
+
+.panel__header {
+  display: grid;
+  gap: 0.2rem;
 }
 
 .panel__header h2 {
   margin: 0 0 var(--s2);
   font-size: var(--fz-md);
+  line-height: 1.25;
 }
 
 .panel__header p {
@@ -76,13 +87,38 @@
   font-size: var(--fz-sm);
 }
 
+.rec-panel {
+  background: color-mix(in oklab, var(--info) 9%, var(--surf));
+  border-inline-start: 0.25rem solid var(--info);
+}
+
+.rec-context {
+  color: var(--plp-color-info-strong);
+  font-weight: 700;
+}
+
+.rec-legend {
+  margin-top: var(--s2);
+  padding: var(--s2);
+  border: 1px solid var(--brd);
+  border-radius: var(--r-md);
+  background: var(--surf-soft);
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3);
+  flex-wrap: wrap;
+}
+
 .dz-card,
 .rec-card {
   border: 1px solid var(--brd-muted);
   border-radius: var(--r-md);
-  padding: var(--s3);
+  padding: var(--s2) var(--s3);
   display: grid;
   gap: var(--s3);
+  min-width: 0;
+  overflow: visible;
 }
 
 .dz-card {
@@ -94,10 +130,34 @@
   box-shadow: var(--e2);
 }
 
+.dz-card,
+.rec-card,
+.w-card {
+  box-shadow: 0 1px 0 color-mix(in oklab, var(--plp-color-surface-soft) 18%, transparent);
+}
+
 .dz-status,
 .dz-list,
 .w-card {
   display: grid;
+  gap: var(--s2);
+}
+
+.dz-status-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+  min-width: 0;
+}
+
+.amp-journey-badges,
+.rec-header {
+  min-width: 0;
+}
+
+.amp-journey-badges {
+  display: flex;
+  flex-wrap: wrap;
   gap: var(--s2);
 }
 
@@ -107,10 +167,17 @@
   display: grid;
   gap: var(--s2);
   grid-template-columns: 1fr;
+  align-items: stretch;
+  min-width: 0;
 }
 
 .rec-card {
   background: var(--surf-soft);
+}
+
+.rec-card.rec-hero {
+  border-color: color-mix(in oklab, var(--info) 36%, var(--brd-muted));
+  box-shadow: 0 1px 0 color-mix(in oklab, var(--plp-color-info-2) 28%, transparent), var(--e2);
 }
 
 .rec-header,
@@ -121,7 +188,21 @@
 }
 
 .rec-header {
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.rec-header > div {
+  min-width: 0;
+}
+
+.rec-header h3,
+.rec-path {
+  overflow-wrap: anywhere;
+}
+
+.rec-header plp-status-badge {
+  grid-column: 1 / -1;
+  justify-self: start;
 }
 
 .rec-header h3,
@@ -170,13 +251,14 @@
   transform: translateX(-50%);
   z-index: 35;
   width: min(100% - var(--s4), 38rem);
-  max-height: calc(100vh - 2rem);
+  max-height: calc(100dvh - 2rem);
   overflow: auto;
   background: var(--surf);
   border: 1px solid var(--brd);
   border-radius: var(--r-lg);
   box-shadow: var(--e3);
   padding: var(--s4);
+  padding-bottom: calc(var(--s4) + env(safe-area-inset-bottom, 0px));
 }
 
 .md-header {
@@ -217,6 +299,19 @@
   text-align: start;
   color: var(--txt);
   width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.dz-card plp-worker-card,
+.w-card plp-worker-card {
+  min-width: 0;
+}
+
+.dz-actions button,
+.w-actions button,
+.md-actions button {
+  min-width: 0;
 }
 
 .md-chip--selected {
@@ -249,6 +344,12 @@
 
 @media (min-width: 900px) {
   .amp-layout {
-    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1.35fr) minmax(240px, 1fr);
+  }
+}
+
+@media (min-width: 1200px) {
+  .amp-layout {
+    grid-template-columns: minmax(0, 1.45fr) minmax(290px, 0.9fr);
   }
 }

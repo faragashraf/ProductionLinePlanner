@@ -1,13 +1,17 @@
 <article class="plp-factory-card">
   <div class="plp-factory-card__head">
-    <div>
+    <div class="plp-factory-card__info">
       <h3>{{ title }}</h3>
-      <p *ngIf="subtitle">{{ subtitle }}</p>
+      <p *ngIf="subtitle" class="plp-factory-card__subtitle">{{ subtitle }}</p>
+      <p class="plp-factory-card__meta">العاملون: {{ workersCurrent }} / {{ workersRequired }}</p>
     </div>
-    <plp-readiness-ring [value]="clampedReadiness" [status]="resolvedStatus" [size]="74"></plp-readiness-ring>
+
+    <div class="plp-factory-card__readiness">
+      <plp-readiness-ring [value]="clampedReadiness" [status]="resolvedStatus" [size]="56"></plp-readiness-ring>
+      <p class="plp-factory-card__readiness-percent">{{ clampedReadiness }}%</p>
+      <plp-completion-bar [value]="clampedReadiness" [status]="resolvedStatus" label="جاهزية" class="plp-factory-card__readiness-bar"></plp-completion-bar>
+    </div>
   </div>
 
-  <plp-completion-bar [value]="clampedReadiness" [status]="resolvedStatus" label="جاهزية"></plp-completion-bar>
-  <p class="plp-factory-card__meta">العاملون: {{ workersCurrent }} / {{ workersRequired }}</p>
   <ng-content />
 </article>

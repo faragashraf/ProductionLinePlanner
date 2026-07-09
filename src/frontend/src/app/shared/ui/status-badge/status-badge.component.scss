@@ -6,14 +6,22 @@
   justify-content: center;
   gap: var(--plp-spacing-2);
   width: fit-content;
+  max-width: 100%;
+  min-width: 0;
   border-radius: var(--plp-radius-pill);
   border: 1px solid transparent;
   padding: var(--badge-padding-y) var(--badge-padding-x);
   font-size: var(--plp-font-size-xxs);
   font-weight: 700;
   line-height: 1;
-  white-space: nowrap;
+  white-space: normal;
+  text-align: center;
   color: var(--plp-color-text);
+}
+
+.plp-status-badge span {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .plp-status-badge--present {

@@ -1,19 +1,48 @@
 .plp-factory-renderer {
   display: grid;
-  gap: var(--plp-spacing-4);
+  gap: var(--plp-spacing-1);
   width: 100%;
+  min-width: 0;
+}
+
+.plp-factory-renderer__lines-panel {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.plp-factory-renderer__lines-header {
+  display: grid;
+  gap: 0.1rem;
 }
 
 .plp-factory-renderer__guide {
   margin: 0;
   color: var(--plp-color-text-subtle);
-  font-size: var(--plp-font-size-sm);
+  font-size: var(--plp-font-size-xs);
+  font-weight: 600;
+}
+
+.plp-factory-renderer__subtitle {
+  margin: 0;
+  color: var(--plp-color-text-subtle);
+  font-size: var(--plp-font-size-xxs);
+}
+
+.plp-factory-renderer__lines-grid {
+  align-items: start;
+  width: 100%;
+  max-width: 100%;
+  --plp-grid-min-width: 142px;
 }
 
 .plp-factory-renderer__line-button {
   all: unset;
   width: 100%;
   text-align: start;
+  border-radius: var(--plp-radius-md);
+  overflow: visible;
+  display: grid;
+  gap: 0.15rem;
 }
 
 .plp-factory-renderer__line-button:focus-visible {

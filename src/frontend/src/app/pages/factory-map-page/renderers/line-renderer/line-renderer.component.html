@@ -7,16 +7,23 @@
     <p class="plp-line-renderer__subtitle">عرض المراحل الرئيسية للخط المختار.</p>
   </header>
 
-  <plp-production-line-card
-    [lineName]="line.name"
-    [statusText]="line.statusText"
-    [readinessPercent]="line.readinessPercent ?? 0"
-    [totalStages]="line.stages.length"
-    [activeStage]="line.activeStageName"
-    [status]="line.status ?? 'info'"
-  ></plp-production-line-card>
+  <article class="plp-line-renderer__summary">
+    <header>
+      <div>
+        <h2>{{ line.name }}</h2>
+        <p>{{ line.statusText }}</p>
+      </div>
+      <plp-status-badge [status]="line.status ?? 'info'" [label]="line.statusText" [compact]="true"></plp-status-badge>
+    </header>
+    <div class="plp-line-renderer__summary-meta">
+      <span>جاهزية: {{ line.readinessPercent ?? 0 }}%</span>
+      <span>المراحل: {{ line.stages.length }}</span>
+      <span>النشطة: {{ line.activeStageName }}</span>
+    </div>
+    <plp-completion-bar [value]="line.readinessPercent ?? 0" [status]="line.status ?? 'info'" label="جاهزية الخط"></plp-completion-bar>
+  </article>
 
-  <plp-responsive-grid [minItemWidth]="260" [gap]="'var(--plp-spacing-3)'">
+  <plp-responsive-grid class="plp-line-renderer__stages-grid" [minItemWidth]="240" [gap]="'var(--plp-spacing-2)'">
     <button
       type="button"
       class="plp-line-renderer__stage-button"

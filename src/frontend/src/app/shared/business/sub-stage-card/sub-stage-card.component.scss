@@ -5,18 +5,27 @@
   padding: var(--plp-spacing-3);
   display: grid;
   gap: var(--plp-spacing-2);
+  min-width: 0;
 }
 
 .plp-sub-stage-card header {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: start;
   gap: 0.7rem;
+  min-width: 0;
 }
 
 .plp-sub-stage-card h4 {
   margin: 0;
   font-size: var(--plp-font-size-sm);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.plp-sub-stage-card header > plp-status-badge {
+  justify-self: end;
+  min-width: 0;
 }
 
 .plp-sub-stage-card p {
