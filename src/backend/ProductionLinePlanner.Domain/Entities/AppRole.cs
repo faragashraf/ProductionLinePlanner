@@ -4,6 +4,8 @@ namespace ProductionLinePlanner.Domain.Entities;
 
 public class AppRole
 {
+    private AppRole() { }
+
     public AppRole(
         Guid id,
         UserRole role,

@@ -4,6 +4,8 @@ namespace ProductionLinePlanner.Domain.Entities;
 
 public class AppUser
 {
+    private AppUser() { }
+
     public AppUser(
         Guid id,
         string fullName,

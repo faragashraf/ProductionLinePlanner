@@ -4,6 +4,8 @@ namespace ProductionLinePlanner.Domain.Entities;
 
 public class AuditLog
 {
+    private AuditLog() { }
+
     public AuditLog(
         Guid id,
         Guid actorUserId,

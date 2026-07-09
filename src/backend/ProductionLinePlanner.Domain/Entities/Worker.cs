@@ -4,6 +4,8 @@ namespace ProductionLinePlanner.Domain.Entities;
 
 public class Worker
 {
+    private Worker() { }
+
     public Worker(
         Guid id,
         string employeeCode,

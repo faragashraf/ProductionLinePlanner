@@ -2,6 +2,8 @@ namespace ProductionLinePlanner.Domain.Entities;
 
 public class SubStage
 {
+    private SubStage() { }
+
     public SubStage(
         Guid id,
         Guid mainStageId,
