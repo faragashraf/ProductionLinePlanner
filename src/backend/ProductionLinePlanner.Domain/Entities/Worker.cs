@@ -33,8 +33,8 @@ public class Worker
     }
 
     public Guid Id { get; init; }
-    public string EmployeeCode { get; private set; }
-    public string FullName { get; private set; }
+    public string EmployeeCode { get; private set; } = string.Empty;
+    public string FullName { get; private set; } = string.Empty;
     /// <summary>External attendance identifiers from ZKTeco USERINFO.</summary>
     public string? AttendanceUserId { get; private set; }
     /// <summary>External attendance identifiers from ZKTeco USERINFO.</summary>

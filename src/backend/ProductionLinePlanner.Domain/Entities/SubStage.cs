@@ -35,7 +35,7 @@ public class SubStage
     public Guid Id { get; init; }
     public Guid MainStageId { get; init; }
     public MainStage? MainStage { get; set; }
-    public string Name { get; private set; }
+    public string Name { get; private set; } = string.Empty;
     public int Capacity { get; private set; }
     public int SequenceOrder { get; private set; }
     public bool IsActive { get; private set; }

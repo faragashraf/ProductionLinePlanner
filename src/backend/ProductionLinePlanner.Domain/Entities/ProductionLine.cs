@@ -35,7 +35,7 @@ public class ProductionLine
     public Guid Id { get; init; }
     public Guid FactoryId { get; init; }
     public Factory? Factory { get; set; }
-    public string Name { get; private set; }
+    public string Name { get; private set; } = string.Empty;
     public string? LineCode { get; private set; }
     public int SequenceOrder { get; private set; }
     public bool IsActive { get; private set; }

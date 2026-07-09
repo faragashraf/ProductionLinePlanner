@@ -59,8 +59,8 @@ public class WorkerTemporaryAssignment
     public DateTime EndAtUtc { get; private set; }
     public Guid AssignedByUserId { get; private set; }
     public Guid? ReplacementForWorkerId { get; private set; }
-    public string Reason { get; private set; }
-    public string Status { get; private set; }
+    public string Reason { get; private set; } = string.Empty;
+    public string Status { get; private set; } = string.Empty;
     public DateTime CreatedAtUtc { get; private set; }
     public DateTime UpdatedAtUtc { get; private set; }
 

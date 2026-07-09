@@ -35,7 +35,7 @@ public class MainStage
     public Guid Id { get; init; }
     public Guid ProductionLineId { get; init; }
     public ProductionLine? ProductionLine { get; set; }
-    public string Name { get; private set; }
+    public string Name { get; private set; } = string.Empty;
     public int SequenceOrder { get; private set; }
     public bool IsCritical { get; private set; }
     public bool IsActive { get; private set; }

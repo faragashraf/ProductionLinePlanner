@@ -33,11 +33,11 @@ public class AppUser
     }
 
     public Guid Id { get; init; }
-    public string FullName { get; private set; }
-    public string Email { get; private set; }
-    public string PasswordHash { get; private set; }
+    public string FullName { get; private set; } = string.Empty;
+    public string Email { get; private set; } = string.Empty;
+    public string PasswordHash { get; private set; } = string.Empty;
     public bool IsActive { get; private set; }
-    public string PreferredLanguage { get; private set; }
+    public string PreferredLanguage { get; private set; } = "en";
     public DateTime CreatedAtUtc { get; private set; }
     public DateTime UpdatedAtUtc { get; private set; }
 
