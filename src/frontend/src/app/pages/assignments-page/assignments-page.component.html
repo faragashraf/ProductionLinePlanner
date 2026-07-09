@@ -1,14 +1,315 @@
-<section class="page-frame">
-  <header class="page-header">
-    <h1>Assignments</h1>
-    <p>Placeholder لقائمة التعيينات الحالية.</p>
-  </header>
-  <div class="assignment-list">
-    <article class="assignment-card" *ngFor="let assignment of assignments">
-      <h2>{{ assignment.worker }}</h2>
-      <p>من: {{ assignment.from }}</p>
-      <p>إلى: {{ assignment.to }}</p>
-      <span class="ghost-pill">{{ assignment.type }}</span>
-    </article>
+<section class="page-frame assignment-management-page">
+  <plp-page-header title="إدارة التعيينات" description="واجهة أولية لعرض التوزيع الحالي واستعراض التعديلات المقترحة باستخدام مكوّنات Factory UI." [compact]="true">
+    <div header-actions>
+      <button
+        pButton
+        pRipple
+        class="p-button-sm p-button-help p-button-outlined"
+        type="button"
+        icon="pi pi-plus"
+        label="تعيين مؤقت"
+        (click)="openDefaultTemporary()"
+        aria-label="فتح نموذج التعيين المؤقت"
+      ></button>
+    </div>
+  </plp-page-header>
+
+  <section class="assignment-management-page__message-panel" *ngIf="lastSimulationMessage">
+    <div class="assignment-management-page__message-row">
+      <p class="assignment-management-page__message">{{ lastSimulationMessage }}</p>
+      <button
+        pButton
+        pRipple
+        class="p-button-text p-button-sm"
+        type="button"
+        icon="pi pi-times"
+        label="إغلاق"
+        (click)="clearSimulationMessage()"
+        aria-label="إغلاق رسالة المحاكاة"
+      ></button>
+    </div>
+  </section>
+
+  <div class="assignment-management-page__layout">
+    <section class="assignment-management-page__primary">
+      <section class="panel">
+        <div class="panel__header">
+          <h2>Drop Zones للمراحل الفرعية (Mock)</h2>
+          <p>اسحب/أفلت (واجهة mock) لمعاينة سلوك التوزيع — لا يوجد اتصال API حقيقي.</p>
+        </div>
+        <plp-responsive-grid [minItemWidth]="250" gap="var(--plp-spacing-3)">
+          <article *ngFor="let zone of subStageZones; trackBy: trackById" class="drop-zone-card">
+            <plp-sub-stage-card
+              [name]="zone.line + ' - ' + zone.name"
+              [workersCurrent]="zone.workersCurrent"
+              [workersRequired]="zone.workersRequired"
+              [status]="zone.status"
+            ></plp-sub-stage-card>
+
+            <div class="drop-zone-card__status">
+              <p>نسبة التغطية الآن</p>
+              <plp-status-badge [status]="zone.status" [compact]="true" [label]="zone.workersCurrent + ' / ' + zone.workersRequired"></plp-status-badge>
+            </div>
+
+            <div class="drop-zone-card__list">
+              <p class="drop-zone-card__muted" *ngIf="zone.workersCurrent === 0">
+                لا يوجد عمال حتى الآن
+              </p>
+              <plp-worker-card
+                *ngFor="let worker of getZoneWorkers(zone); trackBy: trackById"
+                [fullName]="worker.fullName"
+                [code]="worker.code"
+                [status]="worker.status"
+                [assignmentType]="worker.assignmentType"
+                [lastActivity]="worker.lastActivity"
+              ></plp-worker-card>
+            </div>
+
+            <div class="drop-zone-card__actions">
+              <button
+                pButton
+                pRipple
+                class="p-button-sm"
+                type="button"
+                icon="pi pi-user-plus"
+                label="تعيين مؤقت"
+                (click)="openTemporaryDialog(zone)"
+              ></button>
+              <button
+                pButton
+                pRipple
+                class="p-button-sm p-button-outlined"
+                type="button"
+                icon="pi pi-user-edit"
+                label="استبدال عامل"
+                [disabled]="zone.workersCurrent === 0"
+                (click)="openReplacementForZone(zone)"
+              ></button>
+            </div>
+          </article>
+        </plp-responsive-grid>
+      </section>
+
+      <section class="panel">
+        <div class="panel__header">
+          <h2>العاملون الحاليون</h2>
+          <p>كل بطاقة تتضمن الحالة والمرحلة الحالية والعلاقة الحالية بالتعيين.</p>
+        </div>
+        <plp-responsive-grid [minItemWidth]="260" gap="var(--plp-spacing-4)">
+          <article *ngFor="let worker of workers; trackBy: trackById" class="worker-card-shell">
+            <plp-worker-card
+              [fullName]="worker.fullName"
+              [code]="worker.code"
+              [status]="worker.status"
+              [assignmentType]="worker.assignmentType"
+              [lastActivity]="worker.lastActivity"
+            ></plp-worker-card>
+
+            <div class="worker-actions">
+              <button
+                pButton
+                pRipple
+                class="p-button-sm p-button-text"
+                type="button"
+                icon="pi pi-calendar-plus"
+                label="تعيين مؤقت"
+                (click)="openTemporaryFromWorker(worker)"
+                [disabled]="worker.assignmentType !== 'غير محدد'"
+              ></button>
+
+              <button
+                pButton
+                pRipple
+                class="p-button-sm p-button-text"
+                type="button"
+                icon="pi pi-users"
+                label="بديل"
+                (click)="openReplacementDialog(worker)"
+                [disabled]="worker.assignmentType === 'غير محدد'"
+              ></button>
+            </div>
+          </article>
+        </plp-responsive-grid>
+      </section>
+
+      <section class="panel">
+        <div class="panel__header">
+          <h2>التعيينات الحالية</h2>
+          <p>عرض مختصر للحالات المثبتة في الواجهة الحالية.</p>
+        </div>
+        <div class="assignment-management-page__assignments">
+          <plp-assignment-card
+            *ngFor="let assignment of assignments; trackBy: trackByAssignment"
+            [worker]="assignment.worker"
+            [fromStage]="assignment.from"
+            [toStage]="assignment.to"
+            [assignmentType]="assignment.type"
+            [status]="assignment.status"
+          ></plp-assignment-card>
+        </div>
+      </section>
+    </section>
+
+    <aside class="assignment-management-page__side">
+      <section class="panel">
+        <plp-timeline-card title="الجدول الزمني للتغييرات (Mock)" [items]="timelineEntries"></plp-timeline-card>
+      </section>
+
+      <section class="panel">
+        <div class="panel__header">
+          <h2>التوصيات الأعلى جودة</h2>
+          <p>المرشّح الأعلى نقاط مع أسباب واضحة وتحذير المخاطر قبل تنفيذ أي تعديل.</p>
+        </div>
+        <div class="recommendation-card__legend" id="recommendation-panel">
+          <span>ترتيب التوصية من الأعلى نقطة</span>
+        </div>
+        <article class="recommendation-card" *ngFor="let recommendation of recommendations; index as rank">
+          <header class="recommendation-card__header">
+            <span class="recommendation-card__rank">{{ rank + 1 }}</span>
+            <div>
+              <h3>{{ recommendation.workerName }}</h3>
+              <p class="recommendation-card__path">{{ recommendation.from }} -> {{ recommendation.to }}</p>
+            </div>
+            <plp-status-badge [status]="scoreTone(recommendation.score)" [label]="recommendation.score + ' نقطة'"></plp-status-badge>
+          </header>
+
+          <div class="recommendation-card__grid">
+            <section>
+              <h4>الأسباب</h4>
+              <ul>
+                <li *ngFor="let reason of recommendation.reasons">{{ reason }}</li>
+              </ul>
+            </section>
+            <section>
+              <h4>مخاطر مرصودة</h4>
+              <ul class="recommendation-card__risk-list" *ngIf="recommendation.risks.length > 0">
+                <li *ngFor="let risk of recommendation.risks">{{ risk }}</li>
+              </ul>
+              <p *ngIf="recommendation.risks.length === 0">لا توجد مخاطر عالية الظاهرة.</p>
+            </section>
+          </div>
+        </article>
+      </section>
+    </aside>
   </div>
+
+  <div
+    class="mock-overlay"
+    *ngIf="temporaryDialog.isOpen"
+    (click)="closeTemporaryDialog()"
+    aria-hidden="true"
+  ></div>
+  <section
+    class="mock-dialog"
+    *ngIf="temporaryDialog.isOpen"
+    role="dialog"
+    aria-modal="true"
+    aria-label="نموذج التعيين المؤقت"
+  >
+    <div class="mock-dialog__header">
+      <h3>تعيين مؤقت (Mock)</h3>
+      <button
+        class="mock-dialog__close"
+        type="button"
+        (click)="closeTemporaryDialog()"
+        aria-label="إغلاق التعيين المؤقت"
+      >
+        ×
+      </button>
+    </div>
+    <p class="mock-dialog__subline">الوجهة: {{ temporaryDialog.targetZoneLabel }}</p>
+    <p class="mock-dialog__subline">
+      هذا مجرد محاكاة داخل الواجهة — لا يتم حفظ أي تعديل ولا استدعاء API.
+    </p>
+
+    <div class="mock-dialog__section">
+      <p class="mock-dialog__section-title">اختر عاملًا متاحًا</p>
+      <div class="mock-dialog__chips">
+        <button
+          *ngFor="let worker of availableWorkersForTemporary; trackBy: trackById"
+          type="button"
+          [attr.aria-pressed]="worker.id === temporaryDialog.selectedWorkerId"
+          [class]="worker.id === temporaryDialog.selectedWorkerId ? 'mock-dialog__chip mock-dialog__chip--selected' : 'mock-dialog__chip'"
+          (click)="selectTemporaryWorker(worker.id)"
+        >
+          {{ worker.fullName }} - {{ worker.code }}
+        </button>
+      </div>
+      <p *ngIf="availableWorkersForTemporary.length === 0" class="mock-dialog__empty">
+        لا يوجد عامل متاح للتعيين المؤقت الآن.
+      </p>
+    </div>
+
+    <div class="mock-dialog__actions">
+      <button pButton pRipple class="p-button-sm p-button-text" type="button" label="إغلاق" (click)="closeTemporaryDialog()"></button>
+      <button
+        pButton
+        pRipple
+        class="p-button-sm p-button-help"
+        type="button"
+        label="حفظ محاكاة"
+        (click)="saveTemporaryAssignment()"
+      ></button>
+    </div>
+  </section>
+
+  <div
+    class="mock-overlay"
+    *ngIf="replacementDialog.isOpen"
+    (click)="closeReplacementDialog()"
+    aria-hidden="true"
+  ></div>
+  <section
+    class="mock-dialog"
+    *ngIf="replacementDialog.isOpen"
+    role="dialog"
+    aria-modal="true"
+    aria-label="نموذج استبدال عامل"
+  >
+    <div class="mock-dialog__header">
+      <h3>استبدال عامل (Mock)</h3>
+      <button
+        class="mock-dialog__close"
+        type="button"
+        (click)="closeReplacementDialog()"
+        aria-label="إغلاق استبدال العامل"
+      >
+        ×
+      </button>
+    </div>
+    <p class="mock-dialog__subline">المرشح المستهدف: {{ replacementTargetWorker?.fullName ?? 'غير محدد' }}</p>
+    <p class="mock-dialog__subline">
+      المرشح البديل يُعرض فقط من العمال غير المعيّنين حالياً (Mock) لتسهيل الفحص.
+    </p>
+
+    <div class="mock-dialog__section">
+      <p class="mock-dialog__section-title">اختر البديل المقترح</p>
+      <div class="mock-dialog__chips">
+        <button
+          *ngFor="let worker of replacementCandidates; trackBy: trackById"
+          type="button"
+          [attr.aria-pressed]="worker.id === replacementDialog.replacementWorkerId"
+          [class]="worker.id === replacementDialog.replacementWorkerId ? 'mock-dialog__chip mock-dialog__chip--selected' : 'mock-dialog__chip'"
+          (click)="selectReplacementWorker(worker.id)"
+        >
+          {{ worker.fullName }} - {{ worker.code }}
+        </button>
+      </div>
+      <p *ngIf="replacementCandidates.length === 0" class="mock-dialog__empty">
+        لا يوجد مرشح متاح لهذا الاستبدال الآن.
+      </p>
+    </div>
+
+    <div class="mock-dialog__actions">
+      <button pButton pRipple class="p-button-sm p-button-text" type="button" label="إغلاق" (click)="closeReplacementDialog()"></button>
+      <button
+        pButton
+        pRipple
+        class="p-button-sm p-button-info"
+        type="button"
+        label="تأكيد محاكاة"
+        (click)="saveReplacement()"
+      ></button>
+    </div>
+  </section>
 </section>
