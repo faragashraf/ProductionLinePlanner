@@ -1,0 +1,19 @@
+.placeholder-list {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.line-item {
+  background: #fff;
+  border: 1px solid #dbe4fc;
+  border-radius: 0.85rem;
+  padding: 0.9rem;
+}
+
+.line-item h2 {
+  margin: 0 0 0.35rem;
+}
+
+.primary-button {
+  margin-top: 0.55rem;
+}

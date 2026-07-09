@@ -1,0 +1,27 @@
+<section class="page-frame">
+  <header class="page-header">
+    <h1>Factory Map</h1>
+    <p>خريطة مصغرة تعتمد على mock data كبداية.</p>
+  </header>
+
+  <div class="line-grid">
+    <p-card *ngFor="let line of lines" styleClass="line-card">
+      <ng-template pTemplate="title">
+        <div class="line-title">
+          <span>{{ line.name }}</span>
+          <p-badge [value]="line.readinessLabel"></p-badge>
+        </div>
+      </ng-template>
+      <p>
+        readiness:
+        <strong>{{ line.statusPercent }}%</strong>
+      </p>
+      <div class="stages-scroll">
+        <article class="stage-block" *ngFor="let stage of line.stages">
+          <div class="stage-name">{{ stage.name }}</div>
+          <div class="stage-meta">عدد العاملين: {{ stage.workersCurrent }} / {{ stage.workersRequired }}</div>
+        </article>
+      </div>
+    </p-card>
+  </div>
+</section>

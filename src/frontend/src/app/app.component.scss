@@ -1,0 +1,20 @@
+:host {
+  display: block;
+}
+
+.page-frame {
+  width: 100%;
+  padding: 0.5rem 0;
+  box-sizing: border-box;
+}
+
+.page-header h1 {
+  margin: 0.2rem 0;
+  font-size: 1.45rem;
+}
+
+.page-header p {
+  margin-top: 0.25rem;
+  margin-bottom: 0.8rem;
+  color: #334155;
+}

@@ -1,0 +1,73 @@
+<div class="app-shell">
+  <header class="topbar">
+    <button
+      *ngIf="isMobile"
+      type="button"
+      class="mobile-menu-button"
+      aria-label="فتح القائمة"
+      (click)="toggleSidebar()"
+    >
+      <i class="pi pi-bars"></i>
+    </button>
+    <div class="brand">
+      <span class="brand-badge">PLP</span>
+      <div class="brand-texts">
+        <span class="brand-title">Production Line Planner</span>
+        <span class="brand-subtitle">App Shell Foundation</span>
+      </div>
+    </div>
+    <div class="topbar-actions">
+      <span class="notification-button">
+        <i class="pi pi-bell"></i>
+        <span class="notification-count">{{ notificationCount }}</span>
+      </span>
+    </div>
+  </header>
+
+  <p-sidebar
+    [(visible)]="isSidebarVisible"
+    [modal]="isMobile"
+    [showCloseIcon]="false"
+    position="left"
+    styleClass="shell-sidebar-shell"
+    (onHide)="closeSidebar()"
+  >
+    <ng-template pTemplate="header">
+      <div class="sidebar-header">القائمة</div>
+    </ng-template>
+    <ul class="menu-list">
+      <li
+        *ngFor="let item of navigationItems"
+        class="menu-item"
+        [class.active]="isActive(item.path)"
+      >
+        <a class="menu-link" [routerLink]="item.path" (click)="closeSidebar()">
+          <i class="pi {{ item.icon }}"></i>
+          <span>{{ item.label }}</span>
+        </a>
+      </li>
+    </ul>
+  </p-sidebar>
+
+  <aside class="sidebar desktop-sidebar">
+    <ul class="menu-list">
+      <li
+        *ngFor="let item of navigationItems"
+        class="menu-item"
+        [class.active]="isActive(item.path)"
+      >
+        <a class="menu-link" [routerLink]="item.path">
+          <i class="pi {{ item.icon }}"></i>
+          <span>{{ item.label }}</span>
+        </a>
+      </li>
+    </ul>
+  </aside>
+
+  <main class="main-content">
+    <p-breadcrumb [model]="breadcrumbItems" class="breadcrumb"></p-breadcrumb>
+    <section class="content-wrapper">
+      <router-outlet />
+    </section>
+  </main>
+</div>

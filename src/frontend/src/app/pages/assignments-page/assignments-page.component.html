@@ -1,0 +1,14 @@
+<section class="page-frame">
+  <header class="page-header">
+    <h1>Assignments</h1>
+    <p>Placeholder لقائمة التعيينات الحالية.</p>
+  </header>
+  <div class="assignment-list">
+    <article class="assignment-card" *ngFor="let assignment of assignments">
+      <h2>{{ assignment.worker }}</h2>
+      <p>من: {{ assignment.from }}</p>
+      <p>إلى: {{ assignment.to }}</p>
+      <span class="ghost-pill">{{ assignment.type }}</span>
+    </article>
+  </div>
+</section>

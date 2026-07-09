@@ -1,0 +1,16 @@
+<section class="page-frame auth-page">
+  <h1>تسجيل الدخول</h1>
+  <p>واجهة placeholder للمصادقة - لا يوجد auth حقيقي في هذه المرحلة.</p>
+
+  <form class="auth-card" (submit)="onLogin($event)">
+    <label>
+      <span>البريد الإلكتروني</span>
+      <input type="email" [value]="email" (input)="email = $any($event.target).value" />
+    </label>
+    <label>
+      <span>كلمة المرور</span>
+      <input type="password" [value]="password" (input)="password = $any($event.target).value" />
+    </label>
+    <button type="submit" class="primary-button" aria-label="تسجيل الدخول">دخول</button>
+  </form>
+</section>

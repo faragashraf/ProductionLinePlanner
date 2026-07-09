@@ -1,0 +1,30 @@
+.worker-list {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.worker-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.65rem;
+  align-items: center;
+  border: 1px solid #dbe4fc;
+  border-radius: 0.85rem;
+  padding: 0.8rem;
+  background: #fff;
+}
+
+.worker-item h2 {
+  margin: 0;
+}
+
+.worker-item p {
+  margin: 0.2rem 0 0;
+}
+
+.ghost-pill {
+  border: 1px solid #9caeff;
+  border-radius: 999px;
+  padding: 0.3rem 0.6rem;
+  white-space: nowrap;
+}

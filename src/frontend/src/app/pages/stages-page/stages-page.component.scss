@@ -1,0 +1,31 @@
+.stage-list {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.stage-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: center;
+  border: 1px solid #dbe4fc;
+  border-radius: 0.9rem;
+  padding: 0.9rem;
+  background: #fff;
+}
+
+.stage-row h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.stage-row p {
+  margin: 0.2rem 0 0;
+}
+
+.ghost-pill {
+  font-size: 0.8rem;
+  border-radius: 999px;
+  border: 1px solid #9caeff;
+  padding: 0.35rem 0.65rem;
+}

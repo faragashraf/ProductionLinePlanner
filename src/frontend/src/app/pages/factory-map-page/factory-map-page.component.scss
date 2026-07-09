@@ -1,0 +1,41 @@
+.line-grid {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.line-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.line-title span {
+  font-weight: 700;
+}
+
+.stages-scroll {
+  display: grid;
+  gap: 0.45rem;
+  overflow-x: auto;
+}
+
+.stage-block {
+  border: 1px dashed #d1dcff;
+  border-radius: 0.75rem;
+  padding: 0.55rem;
+}
+
+.stage-name {
+  font-weight: 600;
+}
+
+.stage-meta {
+  font-size: 0.86rem;
+  opacity: 0.75;
+}
+
+@media (min-width: 768px) {
+  .line-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
