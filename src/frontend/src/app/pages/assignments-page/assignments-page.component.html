@@ -204,14 +204,23 @@
 
       <section class="panel rec-panel">
         <div class="panel__header">
-          <h2>التوصيات المرتبطة بالمرحلة</h2>
+          <h2>العمال المقترحون لهذه المرحلة</h2>
           <p class="rec-context" *ngIf="hasContextSelection">مؤشر البداية: {{ selectedShortageLabel }}</p>
           <p *ngIf="!hasContextSelection">يمكن تفعيل التوصية من صفحة خريطة المصنع لتظهر مرتبطة تلقائيًا بالمرحلة.</p>
         </div>
 
+        <p class="plp-inline-state plp-inline-state--loading" *ngIf="isRecommendationsLoading">
+          <i class="pi pi-spin pi-spinner" aria-hidden="true"></i>
+          جارٍ تحميل توصيات الإسناد…
+        </p>
+
+        <p class="plp-inline-state plp-inline-state--warning" *ngIf="recommendationsFallbackMessage && !isRecommendationsLoading">
+          {{ recommendationsFallbackMessage }}
+        </p>
+
         <div class="rec-legend" id="recommendation-panel">
           <span>ترتيب التوصية من الأعلى نقطة</span>
-          <plp-status-badge status="info" [label]="hasContextSelection ? 'توصية متاحة' : 'مرشح عام'"></plp-status-badge>
+          <plp-status-badge status="info" [label]="recommendationStatusLabel"></plp-status-badge>
         </div>
 
         <article class="rec-card rec-hero" *ngIf="topRecommendation">
@@ -220,9 +229,12 @@
             <span class="rec-card__rank">1</span>
             <div>
               <h3>{{ topRecommendation.workerName }}</h3>
+              <p class="rec-code" *ngIf="topRecommendation.workerCode">
+                {{ topRecommendation.isDemo ? 'رمز العامل التجريبي:' : 'رمز العامل:' }} {{ topRecommendation.workerCode }}
+              </p>
               <p class="rec-path">{{ topRecommendation.from }} -> {{ topRecommendation.to }}</p>
             </div>
-            <plp-status-badge [status]="scoreTone(topRecommendation.score)" [label]="topRecommendation.score + ' نقطة'"></plp-status-badge>
+            <plp-status-badge *ngIf="topRecommendation.score !== null" [status]="scoreTone(topRecommendation.score)" [label]="topRecommendation.score + ' نقطة'"></plp-status-badge>
           </header>
 
           <div class="rec-grid">
@@ -247,9 +259,12 @@
             <span class="rec-card__rank">{{ rank + 2 }}</span>
             <div>
               <h3>{{ recommendation.workerName }}</h3>
+              <p class="rec-code" *ngIf="recommendation.workerCode">
+                {{ recommendation.isDemo ? 'رمز العامل التجريبي:' : 'رمز العامل:' }} {{ recommendation.workerCode }}
+              </p>
               <p class="rec-path">{{ recommendation.from }} -> {{ recommendation.to }}</p>
             </div>
-            <plp-status-badge [status]="scoreTone(recommendation.score)" [label]="recommendation.score + ' نقطة'"></plp-status-badge>
+            <plp-status-badge *ngIf="recommendation.score !== null" [status]="scoreTone(recommendation.score)" [label]="recommendation.score + ' نقطة'"></plp-status-badge>
           </header>
 
           <div class="rec-grid">

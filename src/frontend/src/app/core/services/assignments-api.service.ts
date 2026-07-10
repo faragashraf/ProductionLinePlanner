@@ -1,8 +1,9 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable } from '@angular/core';
-import { map, Observable, timeout } from 'rxjs';
+import { map, Observable, of, timeout } from 'rxjs';
 import { buildApiUrl } from '../config/api.config';
 import { ApiResponse } from '../models/api-response.model';
+import { isBackendGuid } from '../../shared/models/assignment-context.model';
 
 type RawRecord = Record<string, unknown>;
 
@@ -92,7 +93,8 @@ export interface AssignmentTimelineEntry {
 export interface AssignmentRecommendation {
   workerId: string;
   workerName: string;
-  score: number;
+  workerCode?: string;
+  score: number | null;
   reasons: string[];
   risks: string[];
 }
@@ -131,6 +133,10 @@ export class AssignmentsApiService {
   }
 
   getRecommendations(subStageId: string): Observable<AssignmentRecommendation[]> {
+    if (!isBackendGuid(subStageId)) {
+      return of([]);
+    }
+
     return this.http
       .get<ApiResponse<unknown>>(buildApiUrl('/api/assignments/recommendations'), { params: { subStageId } })
       .pipe(
@@ -222,16 +228,22 @@ export class AssignmentsApiService {
 
   private parseRecommendations(payload: unknown): AssignmentRecommendation[] {
     const source = this.normalizeObject(payload);
-    const candidates = this.parseEntityList(this.pickFirst(source, ['candidates', 'items', 'recommendations']));
+    const candidates = this.parseEntityList(
+      Array.isArray(payload) ? payload : this.pickFirst(source, ['candidates', 'items', 'recommendations', 'results', 'data'])
+    );
 
     return candidates
-      .map((candidate) => ({
-        workerId: this.pickString(candidate, ['workerId', 'id']),
-        workerName: this.pickString(candidate, ['workerName', 'fullName', 'name']),
-        score: this.toNumber(this.pickFirst(candidate, ['score', 'rank', 'points'])),
-        reasons: this.toStringList(this.pickFirst(candidate, ['reasons', 'reasonList'])),
-        risks: this.toStringList(this.pickFirst(candidate, ['riskWarnings', 'risks', 'warnings']))
-      }))
+      .map((candidate) => {
+        const workerCode = this.pickNullableString(candidate, ['workerCode']);
+        return {
+          workerId: this.pickString(candidate, ['workerId', 'id']),
+          workerName: this.pickString(candidate, ['workerName', 'fullName', 'name']),
+          ...(workerCode ? { workerCode } : {}),
+          score: this.toNullableNumber(this.pickFirst(candidate, ['score', 'rank', 'points'])),
+          reasons: this.toStringList(this.pickFirst(candidate, ['reasons', 'reasonList'])),
+          risks: this.toStringList(this.pickFirst(candidate, ['riskWarnings', 'risks', 'warnings']))
+        };
+      })
       .filter((candidate) => this.hasText(candidate.workerId) && this.hasText(candidate.workerName));
   }
 
@@ -321,15 +333,15 @@ export class AssignmentsApiService {
       : [];
   }
 
-  private toNumber(value: unknown): number {
+  private toNullableNumber(value: unknown): number | null {
     if (typeof value === 'number' && Number.isFinite(value)) {
       return value;
     }
     if (typeof value === 'string' && value.trim().length > 0) {
       const parsed = Number(value);
-      return Number.isFinite(parsed) ? parsed : 0;
+      return Number.isFinite(parsed) ? parsed : null;
     }
-    return 0;
+    return null;
   }
 
   private hasText(value: string): boolean {

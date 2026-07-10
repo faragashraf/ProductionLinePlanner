@@ -45,7 +45,9 @@ interface SubStageDropZone {
 
 interface RecommendationCandidate {
   workerName: string;
-  score: number;
+  workerCode: string | null;
+  isDemo: boolean;
+  score: number | null;
   from: string;
   to: string;
   reasons: string[];
@@ -85,12 +87,17 @@ export class AssignmentsPageComponent implements OnInit {
   showFallbackWarning = false;
   isBackendDataIncomplete = false;
   fallbackWarningMessage: string | null = null;
+  isRecommendationsLoading = false;
+  recommendationsFallbackMessage: string | null = null;
   isSavingTemporary = false;
   isSavingReplacement = false;
   isActionError = false;
+  private recommendationRequestVersion = 0;
 
   private readonly backendFailureWarning = 'لا يمكن الاتصال بالخادم حالياً، لذلك يتم عرض بيانات الإسناد التجريبية.';
   private readonly backendIncompleteWarning = 'لا توجد بيانات إسناد مكتملة حالياً، لذلك يتم عرض بيانات تجريبية.';
+  private readonly recommendationFailureWarning = 'لا يمكن تحميل توصيات الإسناد من الخادم حالياً، لذلك يتم عرض توصيات تجريبية.';
+  private readonly recommendationIncompleteWarning = 'لا توجد توصيات مكتملة حالياً، لذلك يتم عرض توصيات تجريبية.';
 
   constructor(
     private readonly route: ActivatedRoute,
@@ -100,6 +107,7 @@ export class AssignmentsPageComponent implements OnInit {
   ngOnInit(): void {
     this.initializeDemoContext();
     this.loadSelectedSubStageWorkers();
+    this.loadRecommendationsForContext();
   }
   assignments: AssignmentItem[] = [
     {
@@ -223,6 +231,8 @@ export class AssignmentsPageComponent implements OnInit {
   recommendations: RecommendationCandidate[] = [
     {
       workerName: 'نوال مرتضى',
+      workerCode: 'W-115',
+      isDemo: true,
       score: 97,
       from: 'غير محدد',
       to: 'الخط الأحمر - مرحلة التغليف',
@@ -237,6 +247,8 @@ export class AssignmentsPageComponent implements OnInit {
     },
     {
       workerName: 'محمود يونس',
+      workerCode: 'W-106',
+      isDemo: true,
       score: 93,
       from: 'غير محدد',
       to: 'الخط الأحمر - مرحلة الخلط',
@@ -251,6 +263,8 @@ export class AssignmentsPageComponent implements OnInit {
     },
     {
       workerName: 'إسماعيل زيد',
+      workerCode: 'W-121',
+      isDemo: true,
       score: 88,
       from: 'الغياب المؤقت',
       to: 'الخط الأزرق - مرحلة التغذية',
@@ -324,7 +338,7 @@ export class AssignmentsPageComponent implements OnInit {
   }
 
   get isDemoContext(): boolean {
-    return !!this.demoContext?.isDemoContext;
+    return !!this.demoContext && !this.isBackendAssignmentContext;
   }
 
   get selectedShortageZone(): SubStageDropZone | undefined {
@@ -381,6 +395,16 @@ export class AssignmentsPageComponent implements OnInit {
       return 'warning';
     }
     return 'absent';
+  }
+
+  get recommendationStatusLabel(): string {
+    if (this.isRecommendationsLoading) {
+      return 'جارٍ التحميل';
+    }
+    if (this.isDemoContext || this.recommendationsFallbackMessage) {
+      return 'توصية تجريبية';
+    }
+    return this.hasContextSelection ? 'توصية متاحة' : 'مرشح عام';
   }
 
   get recommendationsForContext(): RecommendationCandidate[] {
@@ -453,26 +477,49 @@ export class AssignmentsPageComponent implements OnInit {
         this.showFallbackWarning = false;
         this.isBackendDataIncomplete = false;
         this.fallbackWarningMessage = null;
-        this.loadOptionalRecommendations(subStageId);
       });
   }
 
-  private loadOptionalRecommendations(subStageId: string): void {
-    this.assignmentsApiService.getRecommendations(subStageId).subscribe({
-      next: (recommendations) => {
-        if (recommendations.length === 0) {
-          this.recommendations = this.createMockRecommendations();
-          this.showReadFallback('incomplete');
-          return;
-        }
+  private loadRecommendationsForContext(): void {
+    const subStageId = this.demoContext?.subStageId ?? '';
+    const requestVersion = ++this.recommendationRequestVersion;
+    if (!isBackendGuid(subStageId)) {
+      this.isRecommendationsLoading = false;
+      this.recommendations = this.createMockRecommendations();
+      this.recommendationsFallbackMessage = null;
+      return;
+    }
 
-        this.recommendations = recommendations.map((recommendation) => this.mapRecommendation(recommendation));
-      },
-      error: () => {
-        this.recommendations = this.createMockRecommendations();
-        this.showReadFallback('connection');
-      }
-    });
+    this.isRecommendationsLoading = true;
+    this.recommendations = [];
+    this.recommendationsFallbackMessage = null;
+    this.assignmentsApiService
+      .getRecommendations(subStageId)
+      .pipe(
+        finalize(() => {
+          if (this.isLatestRecommendationRequest(requestVersion)) {
+            this.isRecommendationsLoading = false;
+          }
+        })
+      )
+      .subscribe({
+        next: (recommendations) => {
+          if (!this.isLatestRecommendationRequest(requestVersion)) {
+            return;
+          }
+          if (recommendations.length === 0) {
+            this.useDemoRecommendations(this.recommendationIncompleteWarning);
+            return;
+          }
+
+          this.recommendations = recommendations.map((recommendation) => this.mapRecommendation(recommendation));
+        },
+        error: () => {
+          if (this.isLatestRecommendationRequest(requestVersion)) {
+            this.useDemoRecommendations(this.recommendationFailureWarning);
+          }
+        }
+      });
   }
 
   private applyBackendSubStageWorkers(data: SubStageWorkersData): void {
@@ -530,7 +577,9 @@ export class AssignmentsPageComponent implements OnInit {
   private mapRecommendation(recommendation: AssignmentRecommendation): RecommendationCandidate {
     return {
       workerName: recommendation.workerName,
-      score: Math.round(recommendation.score),
+      workerCode: recommendation.workerCode ?? null,
+      isDemo: false,
+      score: recommendation.score === null ? null : Math.round(recommendation.score),
       from: 'غير محدد',
       to: this.selectedShortageLabel,
       reasons: recommendation.reasons.length > 0 ? recommendation.reasons : ['لا توجد أسباب تفصيلية متاحة حالياً.'],
@@ -561,7 +610,15 @@ export class AssignmentsPageComponent implements OnInit {
     this.assignments = this.mockAssignments.map((assignment) => ({ ...assignment }));
     this.workers = this.mockWorkers.map((worker) => ({ ...worker }));
     this.subStageZones = this.mockSubStageZones.map((zone) => ({ ...zone, workerIds: [...zone.workerIds] }));
+  }
+
+  private useDemoRecommendations(message: string): void {
     this.recommendations = this.createMockRecommendations();
+    this.recommendationsFallbackMessage = message;
+  }
+
+  private isLatestRecommendationRequest(requestVersion: number): boolean {
+    return requestVersion === this.recommendationRequestVersion;
   }
 
   private createMockRecommendations(): RecommendationCandidate[] {
@@ -617,7 +674,10 @@ export class AssignmentsPageComponent implements OnInit {
     this.isActionError = false;
   }
 
-  scoreTone(score: number): FactoryStatus {
+  scoreTone(score: number | null): FactoryStatus {
+    if (score === null) {
+      return 'info';
+    }
     if (score >= 95) {
       return 'ready';
     }
@@ -718,6 +778,7 @@ export class AssignmentsPageComponent implements OnInit {
           this.showActionSuccess(`تم حفظ التعيين المؤقت للعامل ${worker.fullName}.`);
           this.closeTemporaryDialog();
           this.loadSelectedSubStageWorkers();
+          this.loadRecommendationsForContext();
         },
         error: () => {
           this.showActionError('تعذر حفظ التعيين المؤقت. يرجى مراجعة بيانات العامل والمحاولة مرة أخرى.');
@@ -798,6 +859,7 @@ export class AssignmentsPageComponent implements OnInit {
           this.showActionSuccess(`تم حفظ استبدال ${targetWorker.fullName} بالعامل ${replacementWorker.fullName}.`);
           this.closeReplacementDialog();
           this.loadSelectedSubStageWorkers();
+          this.loadRecommendationsForContext();
         },
         error: () => {
           this.showActionError('تعذر حفظ الاستبدال. يرجى مراجعة بيانات العاملين والمحاولة مرة أخرى.');
