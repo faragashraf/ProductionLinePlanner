@@ -1,11 +1,13 @@
-import { ChangeDetectionStrategy, Component } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnInit } from '@angular/core';
 import {
   FactoryLayout,
   MainStageLayout,
   ProductionLineLayout,
   SubStageLayout
 } from '../../shared/models/factory-visualization.model';
+import { FactoryMapApiService } from '../../core/services/factory-map-api.service';
 import { MockDataService } from '../../core/services/mock-data.service';
+import { catchError, finalize, of } from 'rxjs';
 
 type FactoryZoomLevel = 'factory' | 'line' | 'stage' | 'worker';
 
@@ -15,15 +17,71 @@ type FactoryZoomLevel = 'factory' | 'line' | 'stage' | 'worker';
   styleUrls: ['./factory-map-page.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush
 })
-export class FactoryMapPageComponent {
-  readonly layout: FactoryLayout;
+export class FactoryMapPageComponent implements OnInit {
+  isLoading = true;
+  showFallbackWarning = false;
+  isBackendDataIncomplete = false;
+  fallbackWarningMessage: string | null = null;
+  layout: FactoryLayout;
   currentZoom: FactoryZoomLevel = 'factory';
   private selectedLineId: string | null = null;
   private selectedMainStageId: string | null = null;
   private selectedSubStageId: string | null = null;
 
-  constructor(private readonly dataService: MockDataService) {
+  private readonly backendFailureWarning = 'لا يمكن الاتصال بالخادم حالياً، لذلك يتم عرض البيانات التجريبية.';
+  private readonly backendIncompleteWarning = 'لا توجد بيانات مكتملة لخريطة المصنع حالياً، لذلك يتم عرض بيانات تجريبية.';
+
+  constructor(
+    private readonly dataService: MockDataService,
+    private readonly factoryMapApiService: FactoryMapApiService
+  ) {
     this.layout = this.dataService.getFactoryLayout();
+  }
+
+  ngOnInit(): void {
+    this.loadFactoryMapData();
+  }
+
+  private loadFactoryMapData(): void {
+    this.factoryMapApiService
+      .loadFactoryMapData()
+      .pipe(
+        catchError(() => {
+          this.showFallbackWarning = true;
+          this.isBackendDataIncomplete = false;
+          this.fallbackWarningMessage = this.backendFailureWarning;
+          return of({
+            layout: this.dataService.getFactoryLayout(),
+            hasBackendData: false,
+            hasUsableBackendData: false
+          });
+        }),
+        finalize(() => {
+          this.isLoading = false;
+        })
+      )
+        .subscribe(({ layout, hasBackendData, hasUsableBackendData }) => {
+        if (!hasBackendData || !hasUsableBackendData) {
+          this.layout = this.dataService.getFactoryLayout();
+          this.showFallbackWarning = true;
+          this.isBackendDataIncomplete = true;
+          if (!this.fallbackWarningMessage) {
+            this.fallbackWarningMessage = this.backendIncompleteWarning;
+          }
+          return;
+        }
+
+        if (this.fallbackWarningMessage) {
+          this.fallbackWarningMessage = null;
+        }
+
+        if (this.isBackendDataIncomplete) {
+          this.isBackendDataIncomplete = false;
+        }
+
+        this.layout = layout;
+        this.showFallbackWarning = false;
+      });
   }
 
   get selectedLine(): ProductionLineLayout | undefined {

@@ -47,6 +47,36 @@ input {
   font-family: inherit;
 }
 
+.plp-inline-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0.65rem var(--plp-spacing-2);
+  border: 1px dashed var(--plp-color-border-muted);
+  border-radius: var(--plp-radius-md);
+  background: color-mix(in oklab, var(--plp-color-surface-soft) 65%, var(--plp-color-surface));
+  color: var(--plp-color-text-subtle);
+}
+
+.plp-inline-state--loading {
+  border-style: solid;
+  border-color: var(--plp-color-border);
+  background: var(--plp-color-surface);
+  color: var(--plp-color-text-subtle);
+}
+
+.plp-inline-state--warning {
+  border-style: solid;
+  border-color: color-mix(in oklab, var(--plp-color-warning) 45%, var(--plp-color-border));
+  background: color-mix(in oklab, var(--plp-color-warning) 14%, var(--plp-color-surface));
+  color: var(--plp-color-text);
+}
+
+.plp-inline-state--incomplete {
+  margin-bottom: var(--plp-spacing-2);
+}
+
 /* Shared placeholder utility */
 .primary-button {
   border: none;

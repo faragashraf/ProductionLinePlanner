@@ -12,147 +12,166 @@
     </div>
   </plp-page-header>
 
-  <nav class="factory-visualization-page__path" aria-label="مسار التنقل" role="navigation">
-    <button
-      type="button"
-      class="factory-visualization-page__path-button"
-      (click)="showFactory()"
-      [class.factory-visualization-page__path-button--active]="currentZoom === 'factory'"
-      [attr.aria-current]="currentZoom === 'factory' ? 'page' : null"
-    >
-      مصنع: {{ layout.name }}
-    </button>
+  <p
+    class="plp-inline-state plp-inline-state--loading"
+    *ngIf="isLoading"
+  >
+    <i class="pi pi-spin pi-spinner" aria-hidden="true"></i>
+    جارٍ تحميل خريطة المصنع…
+  </p>
 
-    <span *ngIf="selectedLine" class="factory-visualization-page__path-sep">/</span>
-    <button
-      *ngIf="selectedLine"
-      type="button"
-      class="factory-visualization-page__path-button"
-      [class.factory-visualization-page__path-button--active]="currentZoom === 'line'"
-      [attr.aria-current]="currentZoom === 'line' ? 'page' : null"
-      (click)="showLine()"
-      [disabled]="currentZoom === 'factory'"
-    >
-      {{ selectedLine.name }}
-    </button>
+  <p
+    class="plp-inline-state"
+    [class.plp-inline-state--warning]="showFallbackWarning && !isBackendDataIncomplete"
+    [class.plp-inline-state--incomplete]="isBackendDataIncomplete && !isLoading"
+    *ngIf="showFallbackWarning && !isLoading"
+  >
+    {{ fallbackWarningMessage }}
+  </p>
 
-    <span *ngIf="selectedMainStage" class="factory-visualization-page__path-sep">/</span>
-    <button
-      *ngIf="selectedMainStage"
-      type="button"
-      class="factory-visualization-page__path-button"
-      [class.factory-visualization-page__path-button--active]="currentZoom === 'stage' || currentZoom === 'worker'"
-      [attr.aria-current]="currentZoom === 'stage' ? 'page' : null"
-      [disabled]="currentZoom === 'factory' || currentZoom === 'line'"
-      (click)="showStage()"
-    >
-      {{ selectedMainStage.name }}
-    </button>
-
-    <span *ngIf="selectedSubStage && currentZoom === 'worker'" class="factory-visualization-page__path-sep">/</span>
-    <button
-      *ngIf="selectedSubStage && currentZoom === 'worker'"
-      type="button"
-      class="factory-visualization-page__path-button factory-visualization-page__path-button--active"
-      aria-current="page"
-    >
-      {{ selectedSubStage.name }}
-    </button>
-  </nav>
-
-  <section *ngIf="currentZoom === 'factory'" class="factory-map-overview" aria-label="نظرة عامة على المصنع">
-    <article class="factory-map-summary">
-      <div class="factory-map-summary__main">
-        <div class="factory-map-summary__title-row">
-          <h2>{{ layout.name }}</h2>
-          <plp-status-badge [status]="layout.status ?? 'info'" [compact]="true"></plp-status-badge>
-        </div>
-        <p class="factory-map-summary__description">{{ layout.description }}</p>
-        <div class="factory-map-summary__meta">
-          <span>العاملون: {{ layout.workersCurrent ?? 0 }} / {{ layout.workersRequired ?? 0 }}</span>
-          <span>خطوط التشغيل: {{ layout.lines.length }}</span>
-        </div>
-      </div>
-
-      <div class="factory-map-summary__readiness" aria-label="جاهزية المصنع">
-        <strong>{{ layout.readinessPercent ?? 0 }}%</strong>
-        <span>جاهزية المصنع</span>
-        <plp-completion-bar
-          [value]="layout.readinessPercent ?? 0"
-          [status]="layout.status ?? 'info'"
-          label="التقدم"
-        ></plp-completion-bar>
-      </div>
-    </article>
-
-    <section class="factory-map-lines" aria-label="خطوط الإنتاج">
+  <div *ngIf="!isLoading">
+    <nav class="factory-visualization-page__path" aria-label="مسار التنقل" role="navigation">
       <button
         type="button"
-        class="factory-map-line-card"
-        *ngFor="let line of layout.lines; trackBy: trackByLine"
-        (click)="onLineSelected(line.id)"
-        [attr.aria-label]="'فتح ' + line.name"
+        class="factory-visualization-page__path-button"
+        (click)="showFactory()"
+        [class.factory-visualization-page__path-button--active]="currentZoom === 'factory'"
+        [attr.aria-current]="currentZoom === 'factory' ? 'page' : null"
       >
-        <header class="factory-map-line-card__header">
-          <div>
-            <h3>{{ line.name }}</h3>
-            <p>{{ line.statusText }}</p>
-          </div>
-          <plp-status-badge [status]="line.status ?? 'info'" [label]="line.statusText" [compact]="true"></plp-status-badge>
-        </header>
+        مصنع: {{ layout.name }}
+      </button>
 
-        <div class="factory-map-line-card__readiness">
-          <strong>{{ line.readinessPercent ?? 0 }}%</strong>
+      <span *ngIf="selectedLine" class="factory-visualization-page__path-sep">/</span>
+      <button
+        *ngIf="selectedLine"
+        type="button"
+        class="factory-visualization-page__path-button"
+        [class.factory-visualization-page__path-button--active]="currentZoom === 'line'"
+        [attr.aria-current]="currentZoom === 'line' ? 'page' : null"
+        (click)="showLine()"
+        [disabled]="currentZoom === 'factory'"
+      >
+        {{ selectedLine.name }}
+      </button>
+
+      <span *ngIf="selectedMainStage" class="factory-visualization-page__path-sep">/</span>
+      <button
+        *ngIf="selectedMainStage"
+        type="button"
+        class="factory-visualization-page__path-button"
+        [class.factory-visualization-page__path-button--active]="currentZoom === 'stage' || currentZoom === 'worker'"
+        [attr.aria-current]="currentZoom === 'stage' ? 'page' : null"
+        [disabled]="currentZoom === 'factory' || currentZoom === 'line'"
+        (click)="showStage()"
+      >
+        {{ selectedMainStage.name }}
+      </button>
+
+      <span *ngIf="selectedSubStage && currentZoom === 'worker'" class="factory-visualization-page__path-sep">/</span>
+      <button
+        *ngIf="selectedSubStage && currentZoom === 'worker'"
+        type="button"
+        class="factory-visualization-page__path-button factory-visualization-page__path-button--active"
+        aria-current="page"
+      >
+        {{ selectedSubStage.name }}
+      </button>
+    </nav>
+
+    <section *ngIf="currentZoom === 'factory'" class="factory-map-overview" aria-label="نظرة عامة على المصنع">
+      <article class="factory-map-summary">
+        <div class="factory-map-summary__main">
+          <div class="factory-map-summary__title-row">
+            <h2>{{ layout.name }}</h2>
+            <plp-status-badge [status]="layout.status ?? 'info'" [compact]="true"></plp-status-badge>
+          </div>
+          <p class="factory-map-summary__description">{{ layout.description }}</p>
+          <div class="factory-map-summary__meta">
+            <span>العاملون: {{ layout.workersCurrent ?? 0 }} / {{ layout.workersRequired ?? 0 }}</span>
+            <span>خطوط التشغيل: {{ layout.lines.length }}</span>
+          </div>
+        </div>
+
+        <div class="factory-map-summary__readiness" aria-label="جاهزية المصنع">
+          <strong>{{ layout.readinessPercent ?? 0 }}%</strong>
+          <span>جاهزية المصنع</span>
           <plp-completion-bar
-            [value]="line.readinessPercent ?? 0"
-            [status]="line.status ?? 'info'"
-            label="جاهزية"
+            [value]="layout.readinessPercent ?? 0"
+            [status]="layout.status ?? 'info'"
+            label="التقدم"
           ></plp-completion-bar>
         </div>
+      </article>
 
-        <div class="factory-map-line-card__details">
-          <span>العاملون: {{ line.workersCurrent ?? 0 }} / {{ line.workersRequired ?? 0 }}</span>
-          <span>النشطة: {{ line.activeStageName }}</span>
-        </div>
+      <section class="factory-map-lines" aria-label="خطوط الإنتاج">
+        <button
+          type="button"
+          class="factory-map-line-card"
+          *ngFor="let line of layout.lines; trackBy: trackByLine"
+          (click)="onLineSelected(line.id)"
+          [attr.aria-label]="'فتح ' + line.name"
+        >
+          <header class="factory-map-line-card__header">
+            <div>
+              <h3>{{ line.name }}</h3>
+              <p>{{ line.statusText }}</p>
+            </div>
+            <plp-status-badge [status]="line.status ?? 'info'" [label]="line.statusText" [compact]="true"></plp-status-badge>
+          </header>
 
-        <div class="factory-map-line-card__stages" aria-label="مراحل الخط">
-          <span
-            class="factory-map-line-card__stage-chip"
-            *ngFor="let stage of line.stages | slice: 0 : 4; trackBy: trackByStage"
-          >
-            {{ stage.name }}
-          </span>
-          <span class="factory-map-line-card__stage-chip factory-map-line-card__stage-chip--more" *ngIf="line.stages.length > 4">
-            +{{ line.stages.length - 4 }}
-          </span>
-        </div>
-      </button>
+          <div class="factory-map-line-card__readiness">
+            <strong>{{ line.readinessPercent ?? 0 }}%</strong>
+            <plp-completion-bar
+              [value]="line.readinessPercent ?? 0"
+              [status]="line.status ?? 'info'"
+              label="جاهزية"
+            ></plp-completion-bar>
+          </div>
+
+          <div class="factory-map-line-card__details">
+            <span>العاملون: {{ line.workersCurrent ?? 0 }} / {{ line.workersRequired ?? 0 }}</span>
+            <span>النشطة: {{ line.activeStageName }}</span>
+          </div>
+
+          <div class="factory-map-line-card__stages" aria-label="مراحل الخط">
+            <span
+              class="factory-map-line-card__stage-chip"
+              *ngFor="let stage of line.stages | slice: 0 : 4; trackBy: trackByStage"
+            >
+              {{ stage.name }}
+            </span>
+            <span class="factory-map-line-card__stage-chip factory-map-line-card__stage-chip--more" *ngIf="line.stages.length > 4">
+              +{{ line.stages.length - 4 }}
+            </span>
+          </div>
+        </button>
+      </section>
     </section>
-  </section>
 
-  <plp-line-renderer
-    *ngIf="currentZoom === 'line' && selectedLine"
-    [line]="selectedLine"
-    (backToFactory)="showFactory()"
-    (mainStageSelected)="onMainStageSelected($event)"
-  ></plp-line-renderer>
+    <plp-line-renderer
+      *ngIf="currentZoom === 'line' && selectedLine"
+      [line]="selectedLine"
+      (backToFactory)="showFactory()"
+      (mainStageSelected)="onMainStageSelected($event)"
+    ></plp-line-renderer>
 
-  <plp-stage-renderer
-    *ngIf="currentZoom === 'stage' && selectedLine && selectedMainStage"
-    [line]="selectedLine"
-    [mainStage]="selectedMainStage"
-    [mode]="'stage'"
-    (back)="onStageBack($event)"
-    (subStageSelected)="onSubStageSelected($event)"
-  ></plp-stage-renderer>
+    <plp-stage-renderer
+      *ngIf="currentZoom === 'stage' && selectedLine && selectedMainStage"
+      [line]="selectedLine"
+      [mainStage]="selectedMainStage"
+      [mode]="'stage'"
+      (back)="onStageBack($event)"
+      (subStageSelected)="onSubStageSelected($event)"
+    ></plp-stage-renderer>
 
-  <plp-stage-renderer
-    *ngIf="currentZoom === 'worker' && selectedLine && selectedMainStage && selectedSubStage"
-    [line]="selectedLine"
-    [mainStage]="selectedMainStage"
-    [subStage]="selectedSubStage"
-    [mode]="'worker'"
-    (back)="onStageBack($event)"
-    (subStageSelected)="onSubStageSelected($event)"
-  ></plp-stage-renderer>
+    <plp-stage-renderer
+      *ngIf="currentZoom === 'worker' && selectedLine && selectedMainStage && selectedSubStage"
+      [line]="selectedLine"
+      [mainStage]="selectedMainStage"
+      [subStage]="selectedSubStage"
+      [mode]="'worker'"
+      (back)="onStageBack($event)"
+      (subStageSelected)="onSubStageSelected($event)"
+    ></plp-stage-renderer>
+  </div>
 </section>
