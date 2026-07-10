@@ -24,7 +24,21 @@
     </div>
   </plp-page-header>
 
-  <section class="amp-msg-panel" *ngIf="lastSimulationMessage">
+  <p class="plp-inline-state plp-inline-state--loading" *ngIf="isLoading">
+    <i class="pi pi-spin pi-spinner" aria-hidden="true"></i>
+    جارٍ تحميل بيانات الإسناد…
+  </p>
+
+  <p
+    class="plp-inline-state"
+    [class.plp-inline-state--warning]="showFallbackWarning && !isBackendDataIncomplete"
+    [class.plp-inline-state--incomplete]="isBackendDataIncomplete && !isLoading"
+    *ngIf="showFallbackWarning && !isLoading"
+  >
+    {{ fallbackWarningMessage }}
+  </p>
+
+  <section class="amp-msg-panel" [class.amp-msg-panel--error]="isActionError" *ngIf="lastSimulationMessage">
     <div class="amp-msg-row">
       <p class="amp-msg">{{ lastSimulationMessage }}</p>
       <button
@@ -59,8 +73,8 @@
     <section class="amp-main">
       <section class="panel">
         <div class="panel__header">
-          <h2>Drop Zones للمراحل الفرعية (Mock)</h2>
-          <p>اسحب/أفلت (واجهة mock) لمعاينة سلوك التوزيع — لا يوجد اتصال API حقيقي.</p>
+          <h2>Drop Zones للمراحل الفرعية</h2>
+          <p>واجهة توزيع تجريبية مع تحميل آمن لبيانات المرحلة الفرعية عند توفر سياق API صالح.</p>
         </div>
         <plp-responsive-grid [minItemWidth]="285" gap="var(--plp-spacing-2)">
           <article
@@ -271,7 +285,7 @@
     aria-label="نموذج التعيين المؤقت"
   >
     <div class="md-header">
-      <h3>تعيين مؤقت (Mock)</h3>
+      <h3>تعيين مؤقت</h3>
       <button
         class="md-close"
         type="button"
@@ -282,8 +296,11 @@
       </button>
     </div>
     <p class="md-subline">الوجهة: {{ temporaryDialog.targetZoneLabel }}</p>
-    <p class="md-subline">
-      هذا مجرد محاكاة داخل الواجهة — لا يتم حفظ أي تعديل ولا استدعاء API.
+    <p class="md-subline" *ngIf="!isBackendAssignmentContext">
+      هذا التعديل محاكاة داخل الواجهة التجريبية ولا يتم حفظه في الخادم.
+    </p>
+    <p class="md-subline" *ngIf="isBackendAssignmentContext">
+      عند توفر بيانات عامل ومصدر إسناد صالحين، يتم الحفظ لمدة ثماني ساعات.
     </p>
 
     <div class="md-section">
@@ -311,8 +328,9 @@
         pRipple
         class="p-button-sm p-button-help"
         type="button"
-        label="حفظ محاكاة"
+        [label]="isSavingTemporary ? 'جارٍ الحفظ...' : (isBackendAssignmentContext ? 'حفظ التعيين' : 'حفظ محاكاة')"
         (click)="saveTemporaryAssignment()"
+        [disabled]="isSavingTemporary"
       ></button>
     </div>
   </section>
@@ -331,7 +349,7 @@
     aria-label="نموذج استبدال عامل"
   >
     <div class="md-header">
-      <h3>استبدال عامل (Mock)</h3>
+      <h3>استبدال عامل</h3>
       <button
         class="md-close"
         type="button"
@@ -342,8 +360,11 @@
       </button>
     </div>
     <p class="md-subline">المرشح المستهدف: {{ replacementTargetWorker?.fullName ?? 'غير محدد' }}</p>
-    <p class="md-subline">
-      المرشح البديل يُعرض فقط من العمال غير المعيّنين حالياً (Mock) لتسهيل الفحص.
+    <p class="md-subline" *ngIf="!isBackendAssignmentContext">
+      المرشح البديل يُعرض فقط من العمال غير المعيّنين حالياً لتسهيل الفحص التجريبي.
+    </p>
+    <p class="md-subline" *ngIf="isBackendAssignmentContext">
+      عند توفر هويات API صالحة، يتم حفظ الاستبدال المؤقت لمدة ثماني ساعات.
     </p>
 
     <div class="md-section">
@@ -371,8 +392,9 @@
         pRipple
         class="p-button-sm p-button-info"
         type="button"
-        label="تأكيد محاكاة"
+        [label]="isSavingReplacement ? 'جارٍ الحفظ...' : (isBackendAssignmentContext ? 'تأكيد الاستبدال' : 'تأكيد محاكاة')"
         (click)="saveReplacement()"
+        [disabled]="isSavingReplacement"
       ></button>
     </div>
   </section>

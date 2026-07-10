@@ -1,5 +1,12 @@
 import { Component, OnInit } from '@angular/core';
 import { ActivatedRoute } from '@angular/router';
+import { catchError, finalize, of, switchMap } from 'rxjs';
+import {
+  ApiAssignmentType,
+  AssignmentRecommendation,
+  AssignmentsApiService,
+  SubStageWorkersData
+} from '../../core/services/assignments-api.service';
 import { deriveStatusFromReadiness, FactoryStatus } from '../../shared/models/factory-status.model';
 
 interface AssignmentItem {
@@ -54,6 +61,7 @@ interface StageDemoContext {
   lineName: string;
   stageId: string;
   stageName: string;
+  subStageId: string;
   source: 'factory-map' | 'manual';
 }
 
@@ -77,11 +85,25 @@ interface ReplacementDialogState {
 })
 export class AssignmentsPageComponent implements OnInit {
   demoContext: StageDemoContext | null = null;
+  isLoading = true;
+  showFallbackWarning = false;
+  isBackendDataIncomplete = false;
+  fallbackWarningMessage: string | null = null;
+  isSavingTemporary = false;
+  isSavingReplacement = false;
+  isActionError = false;
 
-  constructor(private readonly route: ActivatedRoute) {}
+  private readonly backendFailureWarning = 'لا يمكن الاتصال بالخادم حالياً، لذلك يتم عرض بيانات الإسناد التجريبية.';
+  private readonly backendIncompleteWarning = 'لا توجد بيانات إسناد مكتملة حالياً، لذلك يتم عرض بيانات تجريبية.';
+
+  constructor(
+    private readonly route: ActivatedRoute,
+    private readonly assignmentsApiService: AssignmentsApiService
+  ) {}
 
   ngOnInit(): void {
     this.initializeDemoContext();
+    this.loadSelectedSubStageWorkers();
   }
   assignments: AssignmentItem[] = [
     {
@@ -273,6 +295,15 @@ export class AssignmentsPageComponent implements OnInit {
     }
   ];
 
+  private readonly mockAssignments = this.assignments.map((assignment) => ({ ...assignment }));
+  private readonly mockWorkers = this.workers.map((worker) => ({ ...worker }));
+  private readonly mockSubStageZones = this.subStageZones.map((zone) => ({ ...zone, workerIds: [...zone.workerIds] }));
+  private readonly mockRecommendations = this.recommendations.map((recommendation) => ({
+    ...recommendation,
+    reasons: [...recommendation.reasons],
+    risks: [...recommendation.risks]
+  }));
+
   temporaryDialog: TemporaryDialogState = {
     isOpen: false,
     targetZoneId: 'red-mix',
@@ -290,6 +321,10 @@ export class AssignmentsPageComponent implements OnInit {
 
   get hasContextSelection(): boolean {
     return !!this.demoContext;
+  }
+
+  get isBackendAssignmentContext(): boolean {
+    return this.isGuid(this.demoContext?.subStageId ?? '');
   }
 
   get selectedShortageZone(): SubStageDropZone | undefined {
@@ -390,6 +425,7 @@ export class AssignmentsPageComponent implements OnInit {
     const contextStageName = this.route.snapshot.queryParamMap.get('stageName')?.trim();
     const lineId = this.route.snapshot.queryParamMap.get('lineId')?.trim() ?? '';
     const stageId = this.route.snapshot.queryParamMap.get('stageId')?.trim() ?? '';
+    const subStageId = this.route.snapshot.queryParamMap.get('subStageId')?.trim() ?? '';
     const source = this.route.snapshot.queryParamMap.get('source')?.trim() ?? 'manual';
 
     if (!contextLineName || !contextStageName) {
@@ -401,8 +437,155 @@ export class AssignmentsPageComponent implements OnInit {
       lineName: contextLineName,
       stageId,
       stageName: contextStageName,
+      subStageId,
       source: source === 'factory-map' ? 'factory-map' : 'manual'
     };
+  }
+
+  private loadSelectedSubStageWorkers(): void {
+    if (!this.isBackendAssignmentContext) {
+      this.isLoading = false;
+      return;
+    }
+
+    const subStageId = this.demoContext!.subStageId;
+    this.isLoading = true;
+    this.assignmentsApiService
+      .getSubStageWorkers(subStageId)
+      .pipe(
+        catchError(() => of(this.createConnectionFallbackData(subStageId))),
+        finalize(() => {
+          this.isLoading = false;
+        })
+      )
+      .subscribe((data) => {
+        if (!data.hasBackendData || !data.hasUsableBackendData) {
+          this.restoreMockAssignments();
+          this.showReadFallback(data.hasBackendData ? 'incomplete' : 'connection');
+          return;
+        }
+
+        this.applyBackendSubStageWorkers(data);
+        this.showFallbackWarning = false;
+        this.isBackendDataIncomplete = false;
+        this.fallbackWarningMessage = null;
+        this.loadOptionalRecommendations(subStageId);
+      });
+  }
+
+  private loadOptionalRecommendations(subStageId: string): void {
+    this.assignmentsApiService.getRecommendations(subStageId).subscribe({
+      next: (recommendations) => {
+        if (recommendations.length === 0) {
+          this.recommendations = this.createMockRecommendations();
+          this.showReadFallback('incomplete');
+          return;
+        }
+
+        this.recommendations = recommendations.map((recommendation) => this.mapRecommendation(recommendation));
+      },
+      error: () => {
+        this.recommendations = this.createMockRecommendations();
+        this.showReadFallback('connection');
+      }
+    });
+  }
+
+  private applyBackendSubStageWorkers(data: SubStageWorkersData): void {
+    const zone = this.selectedShortageZone ?? this.subStageZones[0];
+    this.workers = data.workers.map((worker) => this.mapBackendWorker(worker, zone));
+    this.assignments = data.workers.map((worker) => this.mapBackendAssignment(worker, zone));
+
+    if (!zone) {
+      return;
+    }
+
+    zone.workerIds = data.workers.map((worker) => worker.id);
+    zone.workersCurrent = data.workers.length;
+    zone.status = deriveStatusFromReadiness(this.getZoneReadiness(zone));
+  }
+
+  private mapBackendWorker(
+    worker: { id: string; fullName: string; code: string; assignmentType: ApiAssignmentType },
+    zone: SubStageDropZone | undefined
+  ): AssignmentWorker {
+    const assignmentType = this.mapBackendAssignmentType(worker.assignmentType);
+    return {
+      id: worker.id,
+      code: worker.code,
+      fullName: worker.fullName,
+      status: assignmentType === 'مؤقت' ? 'warning' : assignmentType === 'غير محدد' ? 'unassigned' : 'ready',
+      assignmentType,
+      line: zone?.line ?? 'غير محدد',
+      subStage: zone?.name ?? 'غير محدد',
+      lastActivity: assignmentType === 'مؤقت' ? 'تعيين مؤقت نشط' : 'تعيين حالي من الخادم'
+    };
+  }
+
+  private mapBackendAssignment(
+    worker: { fullName: string; assignmentType: ApiAssignmentType; fromSubStageId: string | null },
+    zone: SubStageDropZone | undefined
+  ): AssignmentItem {
+    const isTemporary = worker.assignmentType === 'Temporary' || worker.assignmentType === 'Replacement';
+    return {
+      worker: worker.fullName,
+      from: isTemporary && worker.fromSubStageId ? 'مرحلة سابقة مرتبطة' : 'تعيين ثابت',
+      to: zone ? `${zone.line} - ${zone.name}` : this.selectedShortageLabel,
+      type: isTemporary ? 'مؤقت' : 'ثابت',
+      status: isTemporary ? 'warning' : 'ready'
+    };
+  }
+
+  private mapBackendAssignmentType(type: ApiAssignmentType): AssignmentWorker['assignmentType'] {
+    if (type === 'Temporary' || type === 'Replacement') {
+      return 'مؤقت';
+    }
+    return 'ثابت';
+  }
+
+  private mapRecommendation(recommendation: AssignmentRecommendation): RecommendationCandidate {
+    return {
+      workerName: recommendation.workerName,
+      score: Math.round(recommendation.score),
+      from: 'غير محدد',
+      to: this.selectedShortageLabel,
+      reasons: recommendation.reasons.length > 0 ? recommendation.reasons : ['لا توجد أسباب تفصيلية متاحة حالياً.'],
+      risks: recommendation.risks,
+      targetLine: this.demoContext?.lineName ?? '',
+      targetStage: this.demoContext?.stageName ?? ''
+    };
+  }
+
+  private createConnectionFallbackData(subStageId: string): SubStageWorkersData {
+    return {
+      subStageId,
+      workers: [],
+      hasBackendData: false,
+      hasUsableBackendData: false
+    };
+  }
+
+  private showReadFallback(reason: 'connection' | 'incomplete'): void {
+    this.showFallbackWarning = true;
+    this.isBackendDataIncomplete = reason === 'incomplete';
+    this.fallbackWarningMessage = reason === 'connection'
+      ? this.backendFailureWarning
+      : this.backendIncompleteWarning;
+  }
+
+  private restoreMockAssignments(): void {
+    this.assignments = this.mockAssignments.map((assignment) => ({ ...assignment }));
+    this.workers = this.mockWorkers.map((worker) => ({ ...worker }));
+    this.subStageZones = this.mockSubStageZones.map((zone) => ({ ...zone, workerIds: [...zone.workerIds] }));
+    this.recommendations = this.createMockRecommendations();
+  }
+
+  private createMockRecommendations(): RecommendationCandidate[] {
+    return this.mockRecommendations.map((recommendation) => ({
+      ...recommendation,
+      reasons: [...recommendation.reasons],
+      risks: [...recommendation.risks]
+    }));
   }
 
   getZoneWorkers(zone: SubStageDropZone): AssignmentWorker[] {
@@ -447,6 +630,7 @@ export class AssignmentsPageComponent implements OnInit {
 
   clearSimulationMessage(): void {
     this.lastSimulationMessage = '';
+    this.isActionError = false;
   }
 
   scoreTone(score: number): FactoryStatus {
@@ -505,12 +689,56 @@ export class AssignmentsPageComponent implements OnInit {
     const zone = this.getZoneById(this.temporaryDialog.targetZoneId);
     const worker = this.getWorkerById(this.temporaryDialog.selectedWorkerId);
 
-    if (zone && worker) {
-      this.lastSimulationMessage = `تمت محاكاة تعيين ${worker.fullName} في ${zone.line} - ${zone.name}.`;
-    } else {
-      this.lastSimulationMessage = 'لا يوجد عامل متاح في هذه المحاكاة حتى الآن.';
+    if (!zone || !worker) {
+      this.showActionError('لا يوجد عامل متاح للتعيين المؤقت حالياً.');
+      return;
     }
-    this.closeTemporaryDialog();
+
+    if (!this.isBackendAssignmentContext) {
+      this.showActionSuccess(`تمت محاكاة تعيين ${worker.fullName} في ${zone.line} - ${zone.name}.`);
+      this.closeTemporaryDialog();
+      return;
+    }
+
+    const targetSubStageId = this.getBackendTargetSubStageId(zone);
+    if (!targetSubStageId || !this.isGuid(worker.id)) {
+      this.showActionError('تعذر حفظ التعيين المؤقت لأن بيانات الإسناد الحالية غير مكتملة.');
+      return;
+    }
+
+    this.isSavingTemporary = true;
+    this.assignmentsApiService
+      .getCurrentWorkerAssignment(worker.id)
+      .pipe(
+        switchMap((currentAssignment) => {
+          if (!currentAssignment.effectiveSubStageId || currentAssignment.effectiveSubStageId === targetSubStageId) {
+            throw new Error('A valid source sub-stage is required for a temporary assignment.');
+          }
+
+          const assignmentWindow = this.createTemporaryAssignmentWindow();
+          return this.assignmentsApiService.createTemporaryAssignment({
+            workerId: worker.id,
+            fromSubStageId: currentAssignment.effectiveSubStageId,
+            toSubStageId: targetSubStageId,
+            startAtUtc: assignmentWindow.startAtUtc,
+            endAtUtc: assignmentWindow.endAtUtc,
+            reason: 'تعيين مؤقت من واجهة إدارة التعيينات'
+          });
+        }),
+        finalize(() => {
+          this.isSavingTemporary = false;
+        })
+      )
+      .subscribe({
+        next: () => {
+          this.showActionSuccess(`تم حفظ التعيين المؤقت للعامل ${worker.fullName}.`);
+          this.closeTemporaryDialog();
+          this.loadSelectedSubStageWorkers();
+        },
+        error: () => {
+          this.showActionError('تعذر حفظ التعيين المؤقت. يرجى مراجعة بيانات العامل والمحاولة مرة أخرى.');
+        }
+      });
   }
 
   openReplacementDialog(worker: AssignmentWorker): void {
@@ -546,11 +774,83 @@ export class AssignmentsPageComponent implements OnInit {
   }
 
   saveReplacement(): void {
-    if (this.replacementTargetWorker && this.replacementSelectedWorker) {
-      this.lastSimulationMessage = `تمت محاكاة استبدال ${this.replacementTargetWorker.fullName} بالعامل ${this.replacementSelectedWorker.fullName} (موضع الاختبار).`;
-    } else {
-      this.lastSimulationMessage = 'اختر مرشح استبدال قبل حفظ محاكاة الاستبدال.';
+    const targetWorker = this.replacementTargetWorker;
+    const replacementWorker = this.replacementSelectedWorker;
+    if (!targetWorker || !replacementWorker) {
+      this.showActionError('اختر مرشح استبدال قبل حفظ التعديل.');
+      return;
     }
-    this.closeReplacementDialog();
+
+    if (!this.isBackendAssignmentContext) {
+      this.showActionSuccess(`تمت محاكاة استبدال ${targetWorker.fullName} بالعامل ${replacementWorker.fullName} (موضع الاختبار).`);
+      this.closeReplacementDialog();
+      return;
+    }
+
+    const targetSubStageId = this.getBackendTargetSubStageId();
+    if (!targetSubStageId || !this.isGuid(targetWorker.id) || !this.isGuid(replacementWorker.id)) {
+      this.showActionError('تعذر حفظ الاستبدال لأن بيانات الإسناد الحالية غير مكتملة.');
+      return;
+    }
+
+    const assignmentWindow = this.createTemporaryAssignmentWindow();
+    this.isSavingReplacement = true;
+    this.assignmentsApiService
+      .createReplacementAssignment({
+        replacementWorkerId: replacementWorker.id,
+        replacedWorkerId: targetWorker.id,
+        subStageId: targetSubStageId,
+        startAtUtc: assignmentWindow.startAtUtc,
+        endAtUtc: assignmentWindow.endAtUtc,
+        reason: 'استبدال مؤقت من واجهة إدارة التعيينات'
+      })
+      .pipe(
+        finalize(() => {
+          this.isSavingReplacement = false;
+        })
+      )
+      .subscribe({
+        next: () => {
+          this.showActionSuccess(`تم حفظ استبدال ${targetWorker.fullName} بالعامل ${replacementWorker.fullName}.`);
+          this.closeReplacementDialog();
+          this.loadSelectedSubStageWorkers();
+        },
+        error: () => {
+          this.showActionError('تعذر حفظ الاستبدال. يرجى مراجعة بيانات العاملين والمحاولة مرة أخرى.');
+        }
+      });
+  }
+
+  private getBackendTargetSubStageId(zone?: SubStageDropZone): string | null {
+    const selectedZone = this.selectedShortageZone ?? this.subStageZones[0];
+    if (zone && selectedZone && zone.id !== selectedZone.id) {
+      return null;
+    }
+
+    const subStageId = this.demoContext?.subStageId ?? '';
+    return this.isGuid(subStageId) ? subStageId : null;
+  }
+
+  private createTemporaryAssignmentWindow(): { startAtUtc: string; endAtUtc: string } {
+    const start = new Date();
+    const end = new Date(start.getTime() + 8 * 60 * 60 * 1000);
+    return {
+      startAtUtc: start.toISOString(),
+      endAtUtc: end.toISOString()
+    };
+  }
+
+  private showActionSuccess(message: string): void {
+    this.isActionError = false;
+    this.lastSimulationMessage = message;
+  }
+
+  private showActionError(message: string): void {
+    this.isActionError = true;
+    this.lastSimulationMessage = message;
+  }
+
+  private isGuid(value: string): boolean {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
   }
 }
