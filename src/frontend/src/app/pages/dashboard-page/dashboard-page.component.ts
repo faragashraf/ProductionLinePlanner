@@ -1,28 +1,21 @@
-import { Component } from '@angular/core';
+import { Component, OnInit } from '@angular/core';
+import { catchError, finalize, of } from 'rxjs';
 import {
-  DashboardCard,
-  FactoryMapLine,
-  FactoryReadinessSummary,
   AttendanceIndicator,
   MockDataService
 } from '../../core/services/mock-data.service';
-import { KpiTrend } from '../../core/services/mock-data.service';
+import { DashboardApiData, DashboardApiService, StageReadinessAlert } from '../../core/services/dashboard-api.service';
+import { DashboardCard, FactoryMapLine, FactoryReadinessSummary, KpiTrend } from '../../core/services/mock-data.service';
 import { FactoryStatus } from '../../shared/models/factory-status.model';
-
-interface StageReadinessAlert {
-  lineName: string;
-  stageName: string;
-  workersCurrent: number;
-  workersRequired: number;
-  shortageWorkers: number;
-}
 
 @Component({
   selector: 'app-dashboard-page',
   templateUrl: './dashboard-page.component.html',
   styleUrls: ['./dashboard-page.component.scss']
 })
-export class DashboardPageComponent {
+export class DashboardPageComponent implements OnInit {
+  isLoading = true;
+  showFallbackWarning = false;
   cards: DashboardCard[] = [];
   lineReadinessSummary: FactoryReadinessSummary = {
     overallReadiness: 0,
@@ -38,14 +31,49 @@ export class DashboardPageComponent {
   previewLines: FactoryMapLine[] = [];
   criticalReadinessAlerts: StageReadinessAlert[] = [];
 
-  constructor(private readonly dataService: MockDataService) {}
+  constructor(
+    private readonly dataService: MockDataService,
+    private readonly dashboardApiService: DashboardApiService
+  ) {}
 
   ngOnInit(): void {
-    this.cards = this.dataService.getDashboardCards();
-    this.previewLines = this.dataService.getFactoryMapData();
-    this.lineReadinessSummary = this.dataService.getFactoryReadinessSummary(this.previewLines);
-    this.attendanceIndicators = this.dataService.getAttendanceIndicators();
-    this.criticalReadinessAlerts = this.extractCriticalStageAlerts(this.previewLines);
+    this.loadDashboardData();
+  }
+
+  private loadDashboardData(): void {
+    this.dashboardApiService
+      .loadDashboardData()
+      .pipe(
+        catchError(() => {
+          this.showFallbackWarning = true;
+          return of(this.getMockDashboardData());
+        }),
+        finalize(() => {
+          this.isLoading = false;
+        })
+      )
+      .subscribe((data) => {
+        this.setDashboardData(data);
+      });
+  }
+
+  private setDashboardData(data: DashboardApiData): void {
+    this.cards = data.cards;
+    this.previewLines = data.previewLines;
+    this.lineReadinessSummary = data.lineReadinessSummary;
+    this.attendanceIndicators = data.attendanceIndicators;
+    this.criticalReadinessAlerts = data.criticalReadinessAlerts;
+  }
+
+  private getMockDashboardData(): DashboardApiData {
+    const previewLines = this.dataService.getFactoryMapData();
+    return {
+      cards: this.dataService.getDashboardCards(),
+      lineReadinessSummary: this.dataService.getFactoryReadinessSummary(previewLines),
+      attendanceIndicators: this.dataService.getAttendanceIndicators(),
+      previewLines,
+      criticalReadinessAlerts: this.dashboardApiService.extractCriticalReadinessAlerts(previewLines)
+    };
   }
 
   getTrendLabel(trend: KpiTrend): string {
@@ -157,26 +185,6 @@ export class DashboardPageComponent {
       return 'warning';
     }
     return 'critical';
-  }
-
-  private extractCriticalStageAlerts(lines: FactoryMapLine[]): StageReadinessAlert[] {
-    const alerts = lines.flatMap((line) =>
-      line.stages
-        .map((stage) => {
-          const shortageWorkers = Math.max(stage.workersRequired - stage.workersCurrent, 0);
-          return {
-            lineName: line.name,
-            stageName: stage.name,
-            workersCurrent: stage.workersCurrent,
-            workersRequired: stage.workersRequired,
-            shortageWorkers
-          };
-        })
-        .filter((stage) => stage.shortageWorkers > 0)
-    );
-
-    alerts.sort((a, b) => b.shortageWorkers - a.shortageWorkers);
-    return alerts.slice(0, 3);
   }
 
   getIndicatorClass(tone: AttendanceIndicator['tone']): string {
