@@ -1,5 +1,6 @@
 import { Injectable } from '@angular/core';
 import { FactoryStatus, deriveStatusFromReadiness } from '../../shared/models/factory-status.model';
+import { WorkerPageItem } from '../../shared/models/worker.model';
 import { FactoryLayout, MainStageLayout, ProductionLineLayout, SubStageLayout } from '../../shared/models/factory-visualization.model';
 
 export type KpiTrend = 'up' | 'down' | 'stable';
@@ -61,6 +62,14 @@ export class MockDataService {
       { label: 'حاضر', value: 74, icon: 'pi pi-check', tone: 'green' },
       { label: 'متأخر', value: 5, icon: 'pi pi-clock', tone: 'yellow' },
       { label: 'غائب', value: 12, icon: 'pi pi-times', tone: 'red' }
+    ];
+  }
+
+  getWorkersMock(): WorkerPageItem[] {
+    return [
+      { code: 'W-101', fullName: 'أحمد سعيد', state: 'جاهز' },
+      { code: 'W-102', fullName: 'سارة علي', state: 'متأخر' },
+      { code: 'W-109', fullName: 'محمود يونس', state: 'غائب' }
     ];
   }
 

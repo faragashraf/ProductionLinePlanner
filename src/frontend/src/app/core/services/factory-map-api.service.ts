@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { forkJoin, map, Observable } from 'rxjs';
+import { catchError, map, Observable, of, timeout } from 'rxjs';
 import { ApiResponse } from '../models/api-response.model';
 import { buildApiUrl } from '../config/api.config';
 import { deriveStatusFromReadiness } from '../../shared/models/factory-status.model';
@@ -14,11 +14,15 @@ import {
 } from '../../shared/models/factory-visualization.model';
 
 type RawRecord = Record<string, unknown>;
+type FactoryMapFallbackReason = 'incomplete' | 'connection';
+
+const FACTORY_MAP_REQUEST_TIMEOUT_MS = 1500;
 
 export interface FactoryMapApiData {
   layout: FactoryLayout;
   hasBackendData: boolean;
   hasUsableBackendData: boolean;
+  fallbackReason?: FactoryMapFallbackReason;
 }
 
 interface FactoryReadinessSummary {
@@ -35,32 +39,23 @@ export class FactoryMapApiService {
   constructor(private readonly http: HttpClient) {}
 
   loadFactoryMapData(): Observable<FactoryMapApiData> {
-    return forkJoin({
-      factories: this.getFactories(),
-      productionLines: this.getProductionLines(),
-      mainStages: this.getMainStages(),
-      subStages: this.getSubStages(),
-      factoryReadiness: this.getFactoryReadiness(),
-      lineReadiness: this.getProductionLineReadiness()
-    }).pipe(
-      map(({ factories, productionLines, mainStages, subStages, factoryReadiness, lineReadiness }) => {
+    return this.getFactories().pipe(
+      timeout(FACTORY_MAP_REQUEST_TIMEOUT_MS),
+      map((factories) => {
+        const selectedFactory = factories[0] ?? {};
         const mapped = this.mapFactoryLayout(
           factories,
-          productionLines,
-          mainStages,
-          subStages,
-          factoryReadiness,
-          lineReadiness
+          this.getNestedProductionLines(selectedFactory),
+          [],
+          [],
+          this.getEmptyFactoryReadiness(),
+          []
         );
-        const hasBackendData = this.hasBackendData(factories, productionLines, mainStages, subStages, lineReadiness);
+        const hasBackendData = this.hasBackendData(factories);
         const hasUsableBackendData = this.hasUsableBackendData(mapped, hasBackendData);
 
         if (!hasBackendData || !hasUsableBackendData) {
-          return {
-            layout: hasUsableBackendData ? mapped : this.getEmptyFactoryLayout(),
-            hasBackendData,
-            hasUsableBackendData: false
-          };
+          return this.createFallbackData('incomplete', hasBackendData);
         }
 
         return {
@@ -68,7 +63,8 @@ export class FactoryMapApiService {
           hasBackendData: true,
           hasUsableBackendData: true
         };
-      })
+      }),
+      catchError(() => of(this.createFallbackData('connection')))
     );
   }
 
@@ -81,64 +77,34 @@ export class FactoryMapApiService {
       );
   }
 
-  private getProductionLines(): Observable<RawRecord[]> {
-    return this.http
-      .get<ApiResponse<unknown>>(buildApiUrl('/api/production-lines'))
-      .pipe(
-        map((response) => this.parseEntityList(this.extractPayload(response))),
-        map((lines) => lines.map((item) => this.normalizeObject(item)))
-      );
+  private hasBackendData(factories: RawRecord[]): boolean {
+    return factories.length > 0;
   }
 
-  private getMainStages(): Observable<RawRecord[]> {
-    return this.http
-      .get<ApiResponse<unknown>>(buildApiUrl('/api/main-stages'))
-      .pipe(
-        map((response) => this.parseEntityList(this.extractPayload(response))),
-        map((stages) => stages.map((item) => this.normalizeObject(item)))
-      );
+  private getNestedProductionLines(factory: RawRecord): RawRecord[] {
+    return this.toArray(this.pickFirst(factory, ['productionLines', 'lines', 'items']))
+      .map((line) => this.normalizeObject(line));
   }
 
-  private getSubStages(): Observable<RawRecord[]> {
-    return this.http
-      .get<ApiResponse<unknown>>(buildApiUrl('/api/sub-stages'))
-      .pipe(
-        map((response) => this.parseEntityList(this.extractPayload(response))),
-        map((stages) => stages.map((item) => this.normalizeObject(item)))
-      );
+  private createFallbackData(
+    fallbackReason: FactoryMapFallbackReason,
+    hasBackendData = false
+  ): FactoryMapApiData {
+    return {
+      layout: this.getEmptyFactoryLayout(),
+      hasBackendData,
+      hasUsableBackendData: false,
+      fallbackReason
+    };
   }
 
-  private getFactoryReadiness(): Observable<FactoryReadinessSummary> {
-    return this.http
-      .get<ApiResponse<unknown>>(buildApiUrl('/api/readiness/factory'))
-      .pipe(
-        map((response) => this.parseFactoryReadiness(this.extractPayload(response))),
-      );
-  }
-
-  private getProductionLineReadiness(): Observable<RawRecord[]> {
-    return this.http
-      .get<ApiResponse<unknown>>(buildApiUrl('/api/readiness/production-lines'))
-      .pipe(
-        map((response) => this.parseEntityList(this.extractPayload(response))),
-        map((lines) => lines.map((item) => this.normalizeObject(item)))
-      );
-  }
-
-  private hasBackendData(
-    factories: RawRecord[],
-    productionLines: RawRecord[],
-    mainStages: RawRecord[],
-    subStages: RawRecord[],
-    lineReadiness: RawRecord[]
-  ): boolean {
-    return (
-      factories.length > 0 ||
-      productionLines.length > 0 ||
-      mainStages.length > 0 ||
-      subStages.length > 0 ||
-      lineReadiness.length > 0
-    );
+  private getEmptyFactoryReadiness(): FactoryReadinessSummary {
+    return {
+      overallReadiness: 0,
+      workersCurrent: 0,
+      workersRequired: 0,
+      totalLines: 0
+    };
   }
 
   private hasUsableBackendData(layout: FactoryLayout, hasBackendData: boolean): boolean {

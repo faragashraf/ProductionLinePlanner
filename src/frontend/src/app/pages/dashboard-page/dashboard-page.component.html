@@ -4,12 +4,12 @@
     <p>مرشد سريع لمسار الوردية: جاهزية المصنع → نقاط العجز → التوصية.</p>
   </header>
 
-  <p class="summary-note" *ngIf="isLoading" style="display:flex;align-items:center;gap:.55rem;">
+  <p class="plp-inline-state plp-inline-state--loading" *ngIf="isLoading">
     <i class="pi pi-spin pi-spinner" aria-hidden="true"></i>
     جارٍ تحميل مؤشرات لوحة التحكم…
   </p>
 
-  <p class="summary-note--alert" *ngIf="showFallbackWarning && !isLoading">
+  <p class="plp-inline-state plp-inline-state--warning" *ngIf="showFallbackWarning && !isLoading">
     لا يمكن الاتصال بالخادم حالياً، لذلك يتم عرض البيانات التجريبية.
   </p>
 

@@ -1,9 +1,21 @@
 <section class="page-frame">
   <header class="page-header">
-    <h1>Workers</h1>
+    <h1>العمال</h1>
   </header>
-  <div class="worker-list">
-    <article class="worker-item" *ngFor="let worker of workers">
+  <p class="plp-inline-state plp-inline-state--loading" *ngIf="isLoading">
+    <i class="pi pi-spin pi-spinner" aria-hidden="true"></i>
+    جارٍ تحميل بيانات العمال…
+  </p>
+  <p
+    class="plp-inline-state"
+    [class.plp-inline-state--warning]="showFallbackWarning && !isBackendDataIncomplete"
+    [class.plp-inline-state--incomplete]="isBackendDataIncomplete && !isLoading"
+    *ngIf="showFallbackWarning && !isLoading"
+  >
+    {{ fallbackWarningMessage }}
+  </p>
+  <div class="worker-list" *ngIf="!isLoading">
+    <article class="worker-item" *ngFor="let worker of workers; trackBy: trackByCode">
       <div>
         <h2>{{ worker.fullName }}</h2>
         <p>كود العامل: {{ worker.code }}</p>

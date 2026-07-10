@@ -1,11 +1,11 @@
-import { ChangeDetectionStrategy, Component, OnInit } from '@angular/core';
+import { ChangeDetectionStrategy, ChangeDetectorRef, Component, OnInit } from '@angular/core';
 import {
   FactoryLayout,
   MainStageLayout,
   ProductionLineLayout,
   SubStageLayout
 } from '../../shared/models/factory-visualization.model';
-import { FactoryMapApiService } from '../../core/services/factory-map-api.service';
+import { FactoryMapApiData, FactoryMapApiService } from '../../core/services/factory-map-api.service';
 import { MockDataService } from '../../core/services/mock-data.service';
 import { catchError, finalize, of } from 'rxjs';
 
@@ -33,7 +33,8 @@ export class FactoryMapPageComponent implements OnInit {
 
   constructor(
     private readonly dataService: MockDataService,
-    private readonly factoryMapApiService: FactoryMapApiService
+    private readonly factoryMapApiService: FactoryMapApiService,
+    private readonly changeDetectorRef: ChangeDetectorRef
   ) {
     this.layout = this.dataService.getFactoryLayout();
   }
@@ -43,45 +44,41 @@ export class FactoryMapPageComponent implements OnInit {
   }
 
   private loadFactoryMapData(): void {
+    this.isLoading = true;
     this.factoryMapApiService
       .loadFactoryMapData()
       .pipe(
-        catchError(() => {
-          this.showFallbackWarning = true;
-          this.isBackendDataIncomplete = false;
-          this.fallbackWarningMessage = this.backendFailureWarning;
-          return of({
-            layout: this.dataService.getFactoryLayout(),
-            hasBackendData: false,
-            hasUsableBackendData: false
-          });
-        }),
+        catchError(() => of(this.getConnectionFallbackData())),
         finalize(() => {
           this.isLoading = false;
+          this.changeDetectorRef.markForCheck();
         })
       )
-        .subscribe(({ layout, hasBackendData, hasUsableBackendData }) => {
-        if (!hasBackendData || !hasUsableBackendData) {
+      .subscribe((data) => {
+        if (!data.hasBackendData || !data.hasUsableBackendData) {
           this.layout = this.dataService.getFactoryLayout();
           this.showFallbackWarning = true;
-          this.isBackendDataIncomplete = true;
-          if (!this.fallbackWarningMessage) {
-            this.fallbackWarningMessage = this.backendIncompleteWarning;
-          }
+          this.isBackendDataIncomplete = data.fallbackReason !== 'connection';
+          this.fallbackWarningMessage = data.fallbackReason === 'connection'
+            ? this.backendFailureWarning
+            : this.backendIncompleteWarning;
           return;
         }
 
-        if (this.fallbackWarningMessage) {
-          this.fallbackWarningMessage = null;
-        }
-
-        if (this.isBackendDataIncomplete) {
-          this.isBackendDataIncomplete = false;
-        }
-
-        this.layout = layout;
+        this.layout = data.layout;
         this.showFallbackWarning = false;
+        this.isBackendDataIncomplete = false;
+        this.fallbackWarningMessage = null;
       });
+  }
+
+  private getConnectionFallbackData(): FactoryMapApiData {
+    return {
+      layout: this.dataService.getFactoryLayout(),
+      hasBackendData: false,
+      hasUsableBackendData: false,
+      fallbackReason: 'connection'
+    };
   }
 
   get selectedLine(): ProductionLineLayout | undefined {
