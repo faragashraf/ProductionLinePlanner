@@ -7,6 +7,11 @@ import {
   AssignmentsApiService,
   SubStageWorkersData
 } from '../../core/services/assignments-api.service';
+import {
+  AssignmentContext,
+  isBackendGuid,
+  readAssignmentContext
+} from '../../shared/models/assignment-context.model';
 import { deriveStatusFromReadiness, FactoryStatus } from '../../shared/models/factory-status.model';
 
 interface AssignmentItem {
@@ -56,15 +61,6 @@ interface TimelineEntry {
   status: FactoryStatus;
 }
 
-interface StageDemoContext {
-  lineId: string;
-  lineName: string;
-  stageId: string;
-  stageName: string;
-  subStageId: string;
-  source: 'factory-map' | 'manual';
-}
-
 interface TemporaryDialogState {
   isOpen: boolean;
   targetZoneId: string;
@@ -84,7 +80,7 @@ interface ReplacementDialogState {
   styleUrls: ['./assignments-page.component.scss']
 })
 export class AssignmentsPageComponent implements OnInit {
-  demoContext: StageDemoContext | null = null;
+  demoContext: AssignmentContext | null = null;
   isLoading = true;
   showFallbackWarning = false;
   isBackendDataIncomplete = false;
@@ -324,18 +320,23 @@ export class AssignmentsPageComponent implements OnInit {
   }
 
   get isBackendAssignmentContext(): boolean {
-    return this.isGuid(this.demoContext?.subStageId ?? '');
+    return isBackendGuid(this.demoContext?.subStageId);
+  }
+
+  get isDemoContext(): boolean {
+    return !!this.demoContext?.isDemoContext;
   }
 
   get selectedShortageZone(): SubStageDropZone | undefined {
     if (!this.demoContext) {
       return undefined;
     }
+    const selectedStageName = this.demoContext.subStageName || this.demoContext.mainStageName;
     return (
       this.subStageZones.find(
-        (zone) => zone.line === this.demoContext!.lineName && zone.name === this.demoContext!.stageName
+        (zone) => zone.line === this.demoContext!.productionLineName && zone.name === selectedStageName
       ) ??
-      this.subStageZones.find((zone) => zone.line === this.demoContext!.lineName)
+      this.subStageZones.find((zone) => zone.line === this.demoContext!.productionLineName)
     );
   }
 
@@ -343,7 +344,8 @@ export class AssignmentsPageComponent implements OnInit {
     if (!this.demoContext) {
       return 'يرجى اختيار مرحلة لربط التوصية';
     }
-    return `${this.demoContext.lineName} - ${this.demoContext.stageName}`;
+    const stageName = this.demoContext.subStageName || this.demoContext.mainStageName;
+    return [this.demoContext.productionLineName, stageName].filter((value) => value.length > 0).join(' - ');
   }
 
   get selectedShortageReadiness(): number {
@@ -421,34 +423,16 @@ export class AssignmentsPageComponent implements OnInit {
   }
 
   private initializeDemoContext(): void {
-    const contextLineName = this.route.snapshot.queryParamMap.get('lineName')?.trim();
-    const contextStageName = this.route.snapshot.queryParamMap.get('stageName')?.trim();
-    const lineId = this.route.snapshot.queryParamMap.get('lineId')?.trim() ?? '';
-    const stageId = this.route.snapshot.queryParamMap.get('stageId')?.trim() ?? '';
-    const subStageId = this.route.snapshot.queryParamMap.get('subStageId')?.trim() ?? '';
-    const source = this.route.snapshot.queryParamMap.get('source')?.trim() ?? 'manual';
-
-    if (!contextLineName || !contextStageName) {
-      return;
-    }
-
-    this.demoContext = {
-      lineId,
-      lineName: contextLineName,
-      stageId,
-      stageName: contextStageName,
-      subStageId,
-      source: source === 'factory-map' ? 'factory-map' : 'manual'
-    };
+    this.demoContext = readAssignmentContext((key) => this.route.snapshot.queryParamMap.get(key));
   }
 
   private loadSelectedSubStageWorkers(): void {
-    if (!this.isBackendAssignmentContext) {
+    const subStageId = this.demoContext?.subStageId ?? '';
+    if (!isBackendGuid(subStageId)) {
       this.isLoading = false;
       return;
     }
 
-    const subStageId = this.demoContext!.subStageId;
     this.isLoading = true;
     this.assignmentsApiService
       .getSubStageWorkers(subStageId)
@@ -551,8 +535,8 @@ export class AssignmentsPageComponent implements OnInit {
       to: this.selectedShortageLabel,
       reasons: recommendation.reasons.length > 0 ? recommendation.reasons : ['لا توجد أسباب تفصيلية متاحة حالياً.'],
       risks: recommendation.risks,
-      targetLine: this.demoContext?.lineName ?? '',
-      targetStage: this.demoContext?.stageName ?? ''
+      targetLine: this.demoContext?.productionLineName ?? '',
+      targetStage: this.demoContext?.subStageName || this.demoContext?.mainStageName || ''
     };
   }
 
@@ -701,7 +685,7 @@ export class AssignmentsPageComponent implements OnInit {
     }
 
     const targetSubStageId = this.getBackendTargetSubStageId(zone);
-    if (!targetSubStageId || !this.isGuid(worker.id)) {
+    if (!targetSubStageId || !isBackendGuid(worker.id)) {
       this.showActionError('تعذر حفظ التعيين المؤقت لأن بيانات الإسناد الحالية غير مكتملة.');
       return;
     }
@@ -788,7 +772,7 @@ export class AssignmentsPageComponent implements OnInit {
     }
 
     const targetSubStageId = this.getBackendTargetSubStageId();
-    if (!targetSubStageId || !this.isGuid(targetWorker.id) || !this.isGuid(replacementWorker.id)) {
+    if (!targetSubStageId || !isBackendGuid(targetWorker.id) || !isBackendGuid(replacementWorker.id)) {
       this.showActionError('تعذر حفظ الاستبدال لأن بيانات الإسناد الحالية غير مكتملة.');
       return;
     }
@@ -828,7 +812,7 @@ export class AssignmentsPageComponent implements OnInit {
     }
 
     const subStageId = this.demoContext?.subStageId ?? '';
-    return this.isGuid(subStageId) ? subStageId : null;
+    return isBackendGuid(subStageId) ? subStageId : null;
   }
 
   private createTemporaryAssignmentWindow(): { startAtUtc: string; endAtUtc: string } {
@@ -850,7 +834,4 @@ export class AssignmentsPageComponent implements OnInit {
     this.lastSimulationMessage = message;
   }
 
-  private isGuid(value: string): boolean {
-    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
-  }
 }

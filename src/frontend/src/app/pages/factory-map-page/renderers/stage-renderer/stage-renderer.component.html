@@ -39,13 +39,7 @@
     <a
       class="plp-stage-renderer__journey-link p-button p-button-text p-button-sm"
       [routerLink]="['/assignments']"
-      [queryParams]="{
-        source: 'factory-map',
-        lineId: line.id,
-        lineName: line.name,
-        stageId: mainStage.id,
-        stageName: mainStage.name
-      }"
+      [queryParams]="mainStageAssignmentQueryParams"
       aria-label="بدء توصية لهذه المرحلة"
     >
       بدء التوصية من هذه المرحلة
@@ -77,6 +71,16 @@
       [workersRequired]="subStage.workersRequired ?? 0"
       [status]="subStage.status ?? 'info'"
     ></plp-sub-stage-card>
+
+    <a
+      class="plp-stage-renderer__journey-link p-button p-button-text p-button-sm"
+      [routerLink]="['/assignments']"
+      [queryParams]="subStageAssignmentQueryParams"
+      [attr.aria-label]="'فتح التعيينات لمرحلة ' + subStage.name"
+    >
+      فتح التعيينات لهذه المرحلة
+      <i class="pi pi-arrow-left" aria-hidden="true"></i>
+    </a>
 
     <p class="plp-stage-renderer__workers-title">العاملون في {{ subStage.name }}</p>
 

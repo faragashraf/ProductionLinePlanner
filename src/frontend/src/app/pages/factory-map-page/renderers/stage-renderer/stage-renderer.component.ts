@@ -1,5 +1,10 @@
 import { ChangeDetectionStrategy, Component, EventEmitter, Input, Output } from '@angular/core';
 import { ProductionLineLayout, SubStageLayout, MainStageLayout, WorkerLayout } from '../../../../shared/models/factory-visualization.model';
+import {
+  AssignmentContextQueryParams,
+  assignmentContextToQueryParams,
+  createFactoryMapAssignmentContext
+} from '../../../../shared/models/assignment-context.model';
 
 type StageRenderMode = 'stage' | 'worker';
 type StageRendererBack = 'line' | 'stage';
@@ -29,6 +34,18 @@ export class StageRendererComponent {
 
   onSubStageSelected(subStageId: string): void {
     this.subStageSelected.emit(subStageId);
+  }
+
+  get mainStageAssignmentQueryParams(): AssignmentContextQueryParams {
+    return this.getAssignmentQueryParams();
+  }
+
+  get subStageAssignmentQueryParams(): AssignmentContextQueryParams {
+    return this.subStage ? this.getAssignmentQueryParams(this.subStage) : this.getAssignmentQueryParams();
+  }
+
+  private getAssignmentQueryParams(subStage?: SubStageLayout): AssignmentContextQueryParams {
+    return assignmentContextToQueryParams(createFactoryMapAssignmentContext(this.line, this.mainStage, subStage));
   }
 
   trackBySubStage(_index: number, subStage: SubStageLayout): string {

@@ -57,8 +57,9 @@
   <section class="amp-journey" *ngIf="hasContextSelection">
     <article class="panel">
       <div class="panel__header">
-        <h2>سيناريو Demo المرتبط بالخريطة</h2>
-        <p>تم استدعاء صفحة التعيينات من {{ demoContext?.lineName }} ({{ demoContext?.stageName }}).</p>
+        <h2>سياق التعيين المرتبط بالخريطة</h2>
+        <p>الإسناد لمرحلة: {{ demoContext?.subStageName || demoContext?.mainStageName }} ضمن {{ demoContext?.productionLineName }}.</p>
+        <p *ngIf="isDemoContext">يتم عرض بيانات إسناد تجريبية لهذه المرحلة لحين توفر الربط الكامل ببيانات المصنع.</p>
       </div>
       <div class="amp-journey-badges">
         <plp-status-badge [status]="attendanceTone" [label]="'حضور فعلي: ' + attendanceRate + '%'"></plp-status-badge>
