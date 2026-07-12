@@ -1,0 +1,8 @@
+flowchart LR
+    A["USERINFO / CHECKINOUT (ZK Source)"] -->|Read-only| B["AttendanceSyncService"]
+    B --> C["Resolve by AttendanceUserId (stable)"]
+    C --> D["Fallback Badge mapping if unique"]
+    D --> E["Worker (AppDb)"]
+    E --> F["AttendanceRecord snapshot"]
+    F --> G["GetTodayAttendance / worker detail"]
+    B --> H["AttendanceSyncResult (inserted, updated, skipped)"]

@@ -1,0 +1,10 @@
+flowchart LR
+    A["Production Stage"] --> B["ProductionStageOutput (Physical Quantity)"]
+    A --> C["WorkerAllocation rows"]
+    C --> D["Worker A 50%"]
+    C --> E["Worker B 50%"]
+    B --> F["Payroll Engine"]
+    D --> F
+    E --> F
+    F --> G["Compensation modes"]
+    G --> H["SharedPayrollTotal = not 1000 when physical=500"]

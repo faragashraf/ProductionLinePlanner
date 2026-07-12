@@ -1,0 +1,14 @@
+flowchart TD
+    A["Login / Refresh"] --> B["Backend resolves roles"]
+    B --> C["Get RolePermissions"]
+    B --> D["Get UserOverrides (Grant/Deny)"]
+    C --> E["Merge effective permissions"]
+    D --> E
+    E --> F["Remove denied permissions"]
+    F --> G["Emit token claims or session cache"]
+    G --> H["GET /api/auth/me"]
+    H --> I["Frontend PermissionService"]
+    I --> J["Route canMatch/canActivate"]
+    I --> K["Permission Directive (UI buttons)"]
+    J --> L["403 on unauthorized"]
+    K --> M["UX hidden/disabled"]
