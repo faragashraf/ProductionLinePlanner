@@ -1,0 +1,12 @@
+stateDiagram-v2
+    [*] --> Public
+    Public --> Login: /login
+    Public --> AppShell: Authenticated
+    AppShell --> UncheckedRoute: before permission load
+    UncheckedRoute --> LoadingPerms: route open
+    LoadingPerms --> Authorized : permission match
+    LoadingPerms --> Forbidden401 : no token
+    LoadingPerms --> Forbidden403 : no permission
+    Authorized --> Rendered : canMatch + canActivate
+    Rendered --> UIHide: directive gating
+    UIHide --> Rendered
