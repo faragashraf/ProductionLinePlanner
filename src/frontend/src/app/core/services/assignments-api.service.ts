@@ -106,6 +106,15 @@ export class AssignmentsApiService {
   constructor(private readonly http: HttpClient) {}
 
   getSubStageWorkers(subStageId: string): Observable<SubStageWorkersData> {
+    if (!isBackendGuid(subStageId)) {
+      return of<SubStageWorkersData>({
+        subStageId,
+        workers: [],
+        hasBackendData: false,
+        hasUsableBackendData: false
+      });
+    }
+
     return this.http
       .get<ApiResponse<unknown>>(buildApiUrl(`/api/assignments/sub-stages/${encodeURIComponent(subStageId)}/workers`))
       .pipe(
@@ -115,6 +124,19 @@ export class AssignmentsApiService {
   }
 
   getCurrentWorkerAssignment(workerId: string): Observable<CurrentWorkerAssignment> {
+    if (!this.isBackendWorkerId(workerId)) {
+      return of<CurrentWorkerAssignment>({
+        workerId,
+        effectiveSubStageId: null,
+        assignmentType: null,
+        startedAtUtc: null,
+        endsAtUtc: null,
+        fromSubStageId: null,
+        toSubStageId: null,
+        replacementForWorkerId: null
+      });
+    }
+
     return this.http
       .get<ApiResponse<unknown>>(buildApiUrl(`/api/workers/${encodeURIComponent(workerId)}/current-assignment`))
       .pipe(
@@ -124,6 +146,10 @@ export class AssignmentsApiService {
   }
 
   getWorkerTimeline(workerId: string): Observable<AssignmentTimelineEntry[]> {
+    if (!this.isBackendWorkerId(workerId)) {
+      return of<AssignmentTimelineEntry[]>([]);
+    }
+
     return this.http
       .get<ApiResponse<unknown>>(buildApiUrl(`/api/assignments/${encodeURIComponent(workerId)}/timeline`))
       .pipe(
@@ -346,5 +372,9 @@ export class AssignmentsApiService {
 
   private hasText(value: string): boolean {
     return value.trim().length > 0;
+  }
+
+  private isBackendWorkerId(workerId: string): boolean {
+    return isBackendGuid(workerId);
   }
 }

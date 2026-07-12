@@ -1,8 +1,9 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { forkJoin, map, Observable } from 'rxjs';
+import { forkJoin, map, Observable, timeout } from 'rxjs';
 import { ApiResponse } from '../models/api-response.model';
 import { buildApiUrl } from '../config/api.config';
+import { STANDARD_API_TIMEOUT_MS } from '../config/api-timeout.config';
 import { resolveFactoryStatus, FactoryStatus } from '../../shared/models/factory-status.model';
 import { WorkerPageItem } from '../../shared/models/worker.model';
 
@@ -24,6 +25,7 @@ export class WorkersApiService {
     return forkJoin({
       workers: this.getWorkers()
     }).pipe(
+      timeout(STANDARD_API_TIMEOUT_MS),
       map(({ workers }) => {
         const hasBackendData = workers.length > 0;
         const mappedWithCompleteness = workers.map((worker, index) => ({
