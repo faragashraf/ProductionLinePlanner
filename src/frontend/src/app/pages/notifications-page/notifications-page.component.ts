@@ -18,4 +18,20 @@ export class NotificationsPageComponent {
     { title: 'مزامنة الحضور مكتملة', message: 'تم تحديث حالة الحضور قبل دقيقة', severity: 'info', isRead: false },
     { title: 'تحديث جاهزية', message: 'الجاهزية العامة انخفضت إلى 82%', severity: 'critical', isRead: true },
   ];
+
+  getSeverityLabel(severity: NotificationItem['severity']): string {
+    switch (severity) {
+      case 'warning':
+        return 'تنبيه';
+      case 'critical':
+        return 'حرج';
+      case 'info':
+      default:
+        return 'معلومة';
+    }
+  }
+
+  trackByNotification(index: number, item: NotificationItem): string {
+    return `${item.title}-${item.message}-${item.severity}`;
+  }
 }

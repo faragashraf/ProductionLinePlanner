@@ -75,6 +75,10 @@ input {
 
 .plp-inline-state--incomplete {
   margin-bottom: var(--plp-spacing-2);
+  border-style: solid;
+  border-color: color-mix(in oklab, var(--plp-color-warning) 32%, var(--plp-color-border));
+  background: color-mix(in oklab, var(--plp-color-warning) 9%, var(--plp-color-surface));
+  color: var(--plp-color-text);
 }
 
 /* Shared placeholder utility */

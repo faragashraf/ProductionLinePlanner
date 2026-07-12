@@ -1,7 +1,8 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
-import { BehaviorSubject, Observable, catchError, map, of, switchMap, tap, throwError } from 'rxjs';
+import { BehaviorSubject, Observable, catchError, map, of, switchMap, tap, throwError, timeout } from 'rxjs';
 import { buildApiUrl } from '../config/api.config';
+import { AUTH_API_TIMEOUT_MS } from '../config/api-timeout.config';
 import { AUTH_STORAGE_KEYS } from '../config/auth-storage.config';
 import { ApiResponse } from '../models/api-response.model';
 import {
@@ -54,6 +55,7 @@ export class AuthService {
     this.authWarningSubject.next(null);
 
     return this.http.post<ApiResponse<AuthLoginResponse>>(buildApiUrl('/api/auth/login'), request).pipe(
+      timeout(AUTH_API_TIMEOUT_MS),
       map(response => this.extractData(response)),
       tap(response => this.storeLoginResponse(response, request.email)),
       switchMap(response =>
@@ -75,6 +77,7 @@ export class AuthService {
 
   getCurrentUser(): Observable<AuthUser> {
     return this.http.get<ApiResponse<CurrentUserResponse>>(buildApiUrl('/api/auth/me')).pipe(
+      timeout(AUTH_API_TIMEOUT_MS),
       map(response => this.extractData(response)),
       map(response => this.toAuthUser(response)),
       tap(user => this.storeCurrentUser(user))

@@ -2,12 +2,13 @@ import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { ApiResponse } from '../models/api-response.model';
 import { buildApiUrl } from '../config/api.config';
+import { STANDARD_API_TIMEOUT_MS } from '../config/api-timeout.config';
 import { DashboardCard, AttendanceIndicator, FactoryReadinessSummary, FactoryMapLine } from './mock-data.service';
 import {
   deriveStatusFromReadiness,
   FactoryStatus
 } from '../../shared/models/factory-status.model';
-import { forkJoin, map, Observable } from 'rxjs';
+import { forkJoin, map, Observable, timeout } from 'rxjs';
 
 interface DashboardAttendanceSummary {
   presentWorkers: number;
@@ -68,6 +69,7 @@ export class DashboardApiService {
       attendanceSummary: this.getAttendanceToday(),
       unreadNotifications: this.getUnreadNotifications()
     }).pipe(
+      timeout(STANDARD_API_TIMEOUT_MS),
       map(({ factoryReadiness, productionLines, attendanceSummary, unreadNotifications }) => {
         const lineSummary = this.getFactoryReadinessFromLines(productionLines);
         const lineReadinessSummary = this.mergeFactoryReadiness(factoryReadiness, lineSummary, attendanceSummary);
