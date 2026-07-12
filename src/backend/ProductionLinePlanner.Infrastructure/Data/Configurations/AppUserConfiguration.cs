@@ -44,5 +44,10 @@ public sealed class AppUserConfiguration : IEntityTypeConfiguration<AppUser>
                     join.HasIndex("AppUserId");
                     join.HasIndex("AppRoleId");
                 });
+
+        builder.HasMany(x => x.PermissionOverrides)
+            .WithOne(x => x.AppUser)
+            .HasForeignKey(x => x.AppUserId)
+            .OnDelete(DeleteBehavior.Restrict);
     }
 }

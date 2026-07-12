@@ -26,7 +26,7 @@ public static class AuthTokenService
         return Convert.ToBase64String(hash);
     }
 
-    public static string CreateAccessToken(
+public static string CreateAccessToken(
         AppUser user,
         DateTime issuedAtUtc,
         DateTime expiresAtUtc,
@@ -63,14 +63,5 @@ public static class AuthTokenService
         var handler = new JwtSecurityTokenHandler();
         var token = handler.CreateToken(tokenDescriptor);
         return handler.WriteToken(token);
-    }
-
-    public static string[] ResolvePermissionsForRoles(string[] roles)
-    {
-        return roles.Contains(UserRole.SuperAdmin.ToString(), StringComparer.OrdinalIgnoreCase)
-            ? ["users.read", "users.write", "system.read", "system.write"]
-            : roles.Contains(UserRole.Admin.ToString(), StringComparer.OrdinalIgnoreCase)
-                ? ["users.read", "system.read", "dashboard.read", "readiness.read"]
-                : Array.Empty<string>();
     }
 }

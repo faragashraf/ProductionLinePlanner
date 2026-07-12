@@ -1,0 +1,904 @@
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
+using Microsoft.EntityFrameworkCore;
+using ProductionLinePlanner.Application.Abstractions;
+using ProductionLinePlanner.Application.DTOs;
+using ProductionLinePlanner.Application.Requests;
+using ProductionLinePlanner.Domain.Enums;
+using ProductionLinePlanner.Domain.Entities;
+using ProductionLinePlanner.Domain.Authorization;
+using ProductionLinePlanner.Api.Authorization;
+using ProductionLinePlanner.Infrastructure.Data;
+
+public static class IamAdminEndpoints
+{
+    public static void MapIamAdminEndpoints(this WebApplication app)
+    {
+var adminApi = app.MapGroup("/api/admin").RequireAuthorization();
+
+adminApi.MapGet("/permissions/catalog", async (
+    IPermissionService permissionService,
+    CancellationToken cancellationToken) =>
+{
+    var catalog = await permissionService.GetCatalogAsync(cancellationToken);
+    var grouped = catalog
+        .Where(permission => permission.IsActive)
+        .OrderBy(permission => permission.Capability)
+        .ThenBy(permission => permission.Name)
+        .GroupBy(permission => permission.Capability, StringComparer.OrdinalIgnoreCase)
+        .Select(group => new PermissionCatalogGroupDto
+        {
+            Capability = group.Key,
+            Permissions = group.Select(permission => new PermissionCatalogItemDto
+            {
+                Name = permission.Name,
+                Capability = permission.Capability,
+                DescriptionAr = permission.DescriptionAr,
+                DescriptionEn = permission.DescriptionEn,
+                IsCritical = permission.IsCritical,
+                IsActive = permission.IsActive
+            })
+                .ToArray()
+        })
+        .ToArray();
+
+    return Results.Ok(ApiResponse.Success(grouped));
+})
+    .RequirePermission("permissions.assign")
+    .WithTags("IAM")
+    .WithName("GetPermissionCatalog");
+
+adminApi.MapGet("/users", async (
+    AppDbContext dbContext,
+    CancellationToken cancellationToken) =>
+{
+    var users = await dbContext.AppUsers
+        .AsNoTracking()
+        .Include(x => x.Roles)
+        .OrderBy(x => x.FullName)
+        .ThenBy(x => x.Email)
+        .Select(user => new AdminUserListItemDto
+        {
+            Id = user.Id,
+            FullName = user.FullName,
+            Email = user.Email,
+            IsActive = user.IsActive,
+            Roles = user.Roles
+                .OrderBy(role => role.Name)
+                .Select(role => role.Role.ToString())
+                .ToArray()
+        })
+        .ToArrayAsync(cancellationToken);
+
+    return Results.Ok(ApiResponse.Success(users));
+})
+    .RequirePermission("users.view")
+    .WithTags("IAM")
+    .WithName("ListUsers");
+
+adminApi.MapGet("/users/{userId:guid}/authorization", async (
+    Guid userId,
+    AppDbContext dbContext,
+    IPermissionService permissionService,
+    CancellationToken cancellationToken) =>
+{
+    var user = await dbContext.AppUsers
+        .AsNoTracking()
+        .Include(user => user.Roles)
+        .FirstOrDefaultAsync(x => x.Id == userId, cancellationToken);
+
+    if (user is null)
+    {
+        return ApiResponse.Failure("NotFound", "User not found.", 404);
+    }
+
+    var catalog = (await permissionService.GetCatalogAsync(cancellationToken))
+        .Where(permission => permission.IsActive)
+        .ToDictionary(permission => permission.Name, permission => permission, StringComparer.OrdinalIgnoreCase);
+
+    var userPermissionGrantOverrides = await (
+            from permissionOverride in dbContext.UserPermissionOverrides.AsNoTracking()
+            join permission in dbContext.Permissions.AsNoTracking()
+                on permissionOverride.PermissionId equals permission.Id
+            where permissionOverride.AppUserId == userId && permission.IsActive
+            select new { Name = permission.Name, permissionOverride.Effect })
+        .ToArrayAsync(cancellationToken);
+
+    var rolePermissionNames = await (
+            from rolePermission in dbContext.RolePermissions.AsNoTracking()
+            join permission in dbContext.Permissions.AsNoTracking()
+                on rolePermission.PermissionId equals permission.Id
+            where rolePermission.AppRoleId != Guid.Empty &&
+                  permission.IsActive &&
+                  dbContext.AppUsers.Any(user => user.Id == userId && user.Roles.Any(role => role.Id == rolePermission.AppRoleId))
+            select permission.Name)
+        .Distinct()
+        .ToArrayAsync(cancellationToken);
+
+    var roleGrants = new HashSet<string>(rolePermissionNames, StringComparer.OrdinalIgnoreCase);
+    var directGrants = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    var directDenies = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+    foreach (var overrideEntry in userPermissionGrantOverrides)
+    {
+        if (overrideEntry.Effect == PermissionEffect.Grant)
+        {
+            directGrants.Add(overrideEntry.Name);
+        }
+        else
+        {
+            directDenies.Add(overrideEntry.Name);
+        }
+    }
+
+    var allPermissionNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    allPermissionNames.UnionWith(roleGrants);
+    allPermissionNames.UnionWith(directGrants);
+    allPermissionNames.UnionWith(directDenies);
+
+    var effectivePermissions = await permissionService.GetEffectivePermissionsAsync(userId, cancellationToken);
+    var effectivePermissionSet = effectivePermissions.ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+    var effective = allPermissionNames
+        .Where(allPermissionNames.Contains)
+        .Select(permissionName =>
+        {
+            var sources = new List<string>();
+            if (roleGrants.Contains(permissionName))
+            {
+                sources.Add("Role Grant");
+            }
+
+            if (directGrants.Contains(permissionName))
+            {
+                sources.Add("User Grant");
+            }
+
+            if (directDenies.Contains(permissionName))
+            {
+                sources.Add("User Deny");
+            }
+
+            var description = catalog.GetValueOrDefault(permissionName);
+            return new EffectivePermissionItemDto
+            {
+                Permission = permissionName,
+                Granted = effectivePermissionSet.Contains(permissionName),
+                Sources = sources.ToArray(),
+                IsCritical = description?.IsCritical ?? false,
+                DescriptionAr = description?.DescriptionAr,
+                DescriptionEn = description?.DescriptionEn
+            };
+        })
+        .OrderBy(x => x.Permission)
+        .ToArray();
+
+    return Results.Ok(ApiResponse.Success(new AdminUserAuthorizationDto
+    {
+        Id = user.Id,
+        FullName = user.FullName,
+        Email = user.Email,
+        IsActive = user.IsActive,
+        PermissionsVersion = user.UpdatedAtUtc,
+        Roles = user.Roles
+            .OrderBy(role => role.Name)
+            .Select(role => role.Role.ToString())
+            .ToArray(),
+        DirectGrants = directGrants
+            .OrderBy(permission => permission)
+            .ToArray(),
+        DirectDenies = directDenies
+            .OrderBy(permission => permission)
+            .ToArray(),
+        EffectivePermissions = effective
+    }));
+})
+    .RequirePermission("users.view")
+    .WithTags("IAM")
+    .WithName("GetUserAuthorization");
+
+adminApi.MapPatch("/users/{userId:guid}/roles", async (
+    Guid userId,
+    UserRoleAssignmentsRequest request,
+    AppDbContext dbContext,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
+    CancellationToken cancellationToken) =>
+{
+    var actorUserId = currentUserService.UserId;
+    if (actorUserId is null)
+    {
+        return ApiResponse.Failure("Unauthorized", "User context is required.");
+    }
+
+    var user = await dbContext.AppUsers
+        .Include(x => x.Roles)
+        .FirstOrDefaultAsync(x => x.Id == userId, cancellationToken);
+
+    if (user is null)
+    {
+        return ApiResponse.Failure("NotFound", "User not found.", 404);
+    }
+
+    var requestedRoleNames = NormalizeRoleInputs(request.Roles);
+    if (requestedRoleNames.Length == 0)
+    {
+        return ApiResponse.Failure("ValidationError", "At least one role is required.");
+    }
+
+    if (!TryParseRoleNames(requestedRoleNames, out var requestedRoles, out var invalidRoles))
+    {
+        return ApiResponse.Failure("ValidationError", "Unknown role names: " + string.Join(", ", invalidRoles));
+    }
+
+    var requestedRoleEntities = await dbContext.AppRoles
+        .Where(role => requestedRoles.Contains(role.Role))
+        .ToListAsync(cancellationToken);
+
+    if (requestedRoleEntities.Count != requestedRoles.Length)
+    {
+        return ApiResponse.Failure("ValidationError", "One or more roles were not found in database.");
+    }
+
+    var currentRoles = user.Roles
+        .Select(role => role.Role)
+        .OrderBy(role => role.ToString())
+        .ToArray();
+
+    if (currentRoles.Contains(UserRole.SuperAdmin) && requestedRoleEntities.All(role => role.Role != UserRole.SuperAdmin))
+    {
+        var otherActiveSuperAdmins = await dbContext.AppUsers
+            .AsNoTracking()
+            .Where(x => x.Id != userId && x.IsActive)
+            .CountAsync(x => x.Roles.Any(role => role.Role == UserRole.SuperAdmin), cancellationToken);
+
+        if (SuperAdminProtection.WouldRemoveLastActiveSuperAdmin(true, otherActiveSuperAdmins))
+        {
+            return ApiResponse.Failure("Forbidden", "Cannot remove SuperAdmin role from the last active SuperAdmin user.", 403);
+        }
+    }
+
+    var beforeRoles = user.Roles
+        .Select(role => role.Role.ToString())
+        .OrderBy(role => role)
+        .ToArray();
+
+    user.Roles.Clear();
+    foreach (var role in requestedRoleEntities)
+    {
+        user.Roles.Add(role);
+    }
+
+    dbContext.Entry(user).Property(nameof(AppUser.UpdatedAtUtc)).CurrentValue = DateTime.UtcNow;
+    await dbContext.SaveChangesAsync(cancellationToken);
+
+    var afterRoles = user.Roles
+        .Select(role => role.Role.ToString())
+        .OrderBy(role => role)
+        .ToArray();
+
+    AssignmentHelpers.AddAuditLog(
+        dbContext,
+        actorUserId.Value,
+        AuditActionType.Update,
+        nameof(AppUser),
+        user.Id.ToString(),
+        before: new { roles = beforeRoles },
+        after: new { roles = afterRoles },
+        httpContext);
+    await dbContext.SaveChangesAsync(cancellationToken);
+
+    return Results.Ok(ApiResponse.Success(new { userId = user.Id, roles = afterRoles }));
+})
+    .RequirePermission("users.manage")
+    .WithTags("IAM")
+    .WithName("UpdateUserRoles");
+
+adminApi.MapPatch("/users/{userId:guid}/status", async (
+    Guid userId,
+    UserStatusRequest request,
+    AppDbContext dbContext,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
+    CancellationToken cancellationToken) =>
+{
+    var actorUserId = currentUserService.UserId;
+    if (actorUserId is null)
+    {
+        return ApiResponse.Failure("Unauthorized", "User context is required.");
+    }
+
+    var user = await dbContext.AppUsers
+        .Include(x => x.Roles)
+        .FirstOrDefaultAsync(x => x.Id == userId, cancellationToken);
+
+    if (user is null)
+    {
+        return ApiResponse.Failure("NotFound", "User not found.", 404);
+    }
+
+    if (!request.IsActive && user.IsActive && user.Roles.Any(role => role.Role == UserRole.SuperAdmin))
+    {
+        var otherActiveSuperAdmins = await dbContext.AppUsers
+            .AsNoTracking()
+            .Where(x => x.Id != userId && x.IsActive)
+            .CountAsync(x => x.Roles.Any(role => role.Role == UserRole.SuperAdmin), cancellationToken);
+
+        if (SuperAdminProtection.WouldRemoveLastActiveSuperAdmin(true, otherActiveSuperAdmins))
+        {
+            return ApiResponse.Failure("Forbidden", "Cannot disable the last active SuperAdmin user.", 403);
+        }
+    }
+
+    if (user.IsActive == request.IsActive)
+    {
+        return Results.Ok(ApiResponse.Success(new { userId = user.Id, isActive = user.IsActive }));
+    }
+
+    var before = new { user.IsActive };
+    dbContext.Entry(user).Property(nameof(AppUser.IsActive)).CurrentValue = request.IsActive;
+    dbContext.Entry(user).Property(nameof(AppUser.UpdatedAtUtc)).CurrentValue = DateTime.UtcNow;
+    await dbContext.SaveChangesAsync(cancellationToken);
+
+    AssignmentHelpers.AddAuditLog(
+        dbContext,
+        actorUserId.Value,
+        AuditActionType.Update,
+        nameof(AppUser),
+        user.Id.ToString(),
+        before,
+        new { isActive = request.IsActive },
+        httpContext);
+
+    return Results.Ok(ApiResponse.Success(new { userId = user.Id, isActive = user.IsActive }));
+})
+    .RequirePermission("users.manage")
+    .WithTags("IAM")
+    .WithName("SetUserStatus");
+
+adminApi.MapPost("/users/{userId:guid}/permission-overrides", async (
+    Guid userId,
+    UserPermissionOverrideRequest request,
+    AppDbContext dbContext,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
+    CancellationToken cancellationToken) =>
+{
+    var actorUserId = currentUserService.UserId;
+    if (actorUserId is null)
+    {
+        return ApiResponse.Failure("Unauthorized", "User context is required.");
+    }
+
+    var permissionName = request.Permission?.Trim();
+    if (string.IsNullOrWhiteSpace(permissionName))
+    {
+        return ApiResponse.Failure("ValidationError", "Permission is required.");
+    }
+
+    if (!TryParsePermissionEffect(request.Effect, out var effect))
+    {
+        return ApiResponse.Failure("ValidationError", "Effect must be either Grant or Deny.");
+    }
+
+    var user = await dbContext.AppUsers
+        .AsNoTracking()
+        .AnyAsync(x => x.Id == userId && x.IsActive, cancellationToken);
+    if (!user)
+    {
+        return ApiResponse.Failure("NotFound", "Active user not found.", 404);
+    }
+
+    var permission = await dbContext.Permissions.FirstOrDefaultAsync(x => x.Name == permissionName && x.IsActive, cancellationToken);
+    if (permission is null)
+    {
+        return ApiResponse.Failure("ValidationError", "Unknown or inactive permission.");
+    }
+
+    var existingOverride = await dbContext.UserPermissionOverrides
+        .FirstOrDefaultAsync(x => x.AppUserId == userId && x.PermissionId == permission.Id, cancellationToken);
+
+    if (existingOverride is not null)
+    {
+        return ApiResponse.Failure("Conflict", "A direct override already exists for this user and permission.", 409);
+    }
+
+    dbContext.UserPermissionOverrides.Add(new UserPermissionOverride(
+        appUserId: userId,
+        permissionId: permission.Id,
+        effect: effect,
+        createdByUserId: actorUserId));
+
+    AssignmentHelpers.AddAuditLog(
+        dbContext,
+        actorUserId.Value,
+        AuditActionType.Update,
+        nameof(AppUser),
+        userId.ToString(),
+        before: null,
+        after: new { permission = permission.Name, effect = effect.ToString() },
+        httpContext);
+    await dbContext.SaveChangesAsync(cancellationToken);
+
+    return Results.Ok(ApiResponse.Success(new
+    {
+        userId,
+        permission = permission.Name,
+        effect = effect.ToString()
+    }));
+})
+    .RequirePermission("permissions.assign")
+    .WithTags("IAM")
+    .WithName("SetUserPermissionOverride");
+
+adminApi.MapDelete("/users/{userId:guid}/permission-overrides/{permissionName}", async (
+    Guid userId,
+    string permissionName,
+    AppDbContext dbContext,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
+    CancellationToken cancellationToken) =>
+{
+    var actorUserId = currentUserService.UserId;
+    if (actorUserId is null)
+    {
+        return ApiResponse.Failure("Unauthorized", "User context is required.");
+    }
+
+    var normalizedPermissionName = permissionName.Trim();
+    if (string.IsNullOrWhiteSpace(normalizedPermissionName))
+    {
+        return ApiResponse.Failure("ValidationError", "Permission is required.");
+    }
+
+    var userExists = await dbContext.AppUsers
+        .AsNoTracking()
+        .AnyAsync(x => x.Id == userId, cancellationToken);
+    if (!userExists)
+    {
+        return ApiResponse.Failure("NotFound", "User not found.", 404);
+    }
+
+    var permission = await dbContext.Permissions
+        .AsNoTracking()
+        .FirstOrDefaultAsync(x => x.Name == normalizedPermissionName, cancellationToken);
+    if (permission is null)
+    {
+        return ApiResponse.Failure("ValidationError", "Permission is unknown.");
+    }
+
+    var existingOverride = await dbContext.UserPermissionOverrides
+        .FirstOrDefaultAsync(x => x.AppUserId == userId && x.PermissionId == permission.Id, cancellationToken);
+    if (existingOverride is null)
+    {
+        return Results.Ok(ApiResponse.Success(new { removed = false }));
+    }
+
+    dbContext.UserPermissionOverrides.Remove(existingOverride);
+    await dbContext.SaveChangesAsync(cancellationToken);
+
+    AssignmentHelpers.AddAuditLog(
+        dbContext,
+        actorUserId.Value,
+        AuditActionType.Update,
+        nameof(AppUser),
+        userId.ToString(),
+        before: new { permission = permission.Name, effect = existingOverride.Effect.ToString() },
+        after: null,
+        httpContext);
+
+    return Results.Ok(ApiResponse.Success(new { removed = true }));
+})
+    .RequirePermission("permissions.assign")
+    .WithTags("IAM")
+    .WithName("RemoveUserPermissionOverride");
+
+adminApi.MapGet("/roles", async (
+    AppDbContext dbContext,
+    CancellationToken cancellationToken) =>
+{
+    var roles = await dbContext.AppRoles
+        .AsNoTracking()
+        .Select(role => new
+        {
+            Id = role.Id,
+            Role = role.Role,
+            Name = role.Name,
+            role.Description,
+            role.IsSystemRole,
+            role.IsActive,
+            Permissions =
+                from rolePermission in dbContext.RolePermissions
+                join permission in dbContext.Permissions
+                    on rolePermission.PermissionId equals permission.Id
+                where rolePermission.AppRoleId == role.Id && permission.IsActive
+                select permission.Name,
+            AssignedUsers = dbContext.AppUsers.Count(user => user.Roles.Any(r => r.Id == role.Id))
+        })
+        .ToArrayAsync(cancellationToken);
+
+    var mappedRoles = roles
+        .Select(role => new AdminRoleDto
+        {
+            Id = role.Id,
+            Role = role.Role.ToString(),
+            Name = role.Name,
+            Description = role.Description,
+            IsSystemRole = role.IsSystemRole,
+            IsActive = role.IsActive,
+            Permissions = role.Permissions.OrderBy(permission => permission).ToArray(),
+            AssignedUsers = role.AssignedUsers
+        })
+        .ToArray();
+
+    return Results.Ok(ApiResponse.Success(mappedRoles));
+})
+    .RequirePermission("roles.view")
+    .WithTags("IAM")
+    .WithName("ListRoles");
+
+adminApi.MapPost("/roles", async (
+    RoleCreateRequest request,
+    AppDbContext dbContext,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
+    CancellationToken cancellationToken) =>
+{
+    var actorUserId = currentUserId(currentUserService);
+    if (actorUserId is null)
+    {
+        return ApiResponse.Failure("Unauthorized", "User context is required.");
+    }
+
+    var roleName = request.Role?.Trim();
+    if (string.IsNullOrWhiteSpace(roleName))
+    {
+        return ApiResponse.Failure("ValidationError", "Role is required.");
+    }
+
+    if (!Enum.TryParse<UserRole>(roleName, ignoreCase: true, out var parsedRole))
+    {
+        return ApiResponse.Failure("ValidationError", "Unsupported role value.");
+    }
+
+    var roleExists = await dbContext.AppRoles.AnyAsync(x => x.Role == parsedRole, cancellationToken);
+    if (roleExists)
+    {
+        return ApiResponse.Failure("Conflict", "Role already exists.");
+    }
+
+    var roleEntity = new AppRole(
+        id: Guid.NewGuid(),
+        role: parsedRole,
+        name: parsedRole.ToString(),
+        description: request.Description,
+        isSystemRole: parsedRole == UserRole.SuperAdmin,
+        isActive: true,
+        createdAtUtc: DateTime.UtcNow);
+
+    dbContext.AppRoles.Add(roleEntity);
+
+    if (parsedRole == UserRole.SuperAdmin)
+    {
+        foreach (var permission in PermissionCatalog.All.Where(permission => PermissionCatalog.IsKnown(permission.Name)))
+        {
+            var permissionEntity = await dbContext.Permissions.FirstOrDefaultAsync(x => x.Name == permission.Name, cancellationToken);
+            if (permissionEntity is null)
+            {
+                continue;
+            }
+
+            dbContext.RolePermissions.Add(new RolePermission(roleEntity.Id, permissionEntity.Id));
+        }
+    }
+
+    await dbContext.SaveChangesAsync(cancellationToken);
+    AssignmentHelpers.AddAuditLog(
+        dbContext,
+        actorUserId.Value,
+        AuditActionType.Create,
+        nameof(AppRole),
+        roleEntity.Id.ToString(),
+        before: null,
+        after: new { roleEntity.Role, roleEntity.Name, roleEntity.Description, roleEntity.IsSystemRole },
+        httpContext);
+
+    return Results.Created($"/api/admin/roles/{roleEntity.Id}", ApiResponse.Success(new AdminRoleDto
+    {
+        Id = roleEntity.Id,
+        Role = roleEntity.Role.ToString(),
+        Name = roleEntity.Name,
+        Description = roleEntity.Description,
+        IsSystemRole = roleEntity.IsSystemRole,
+        IsActive = roleEntity.IsActive,
+        Permissions = [],
+        AssignedUsers = 0
+    }));
+})
+    .RequirePermission("roles.manage")
+    .WithTags("IAM")
+    .WithName("CreateRole");
+
+adminApi.MapPatch("/roles/{roleId:guid}", async (
+    Guid roleId,
+    RoleUpdateRequest request,
+    AppDbContext dbContext,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
+    CancellationToken cancellationToken) =>
+{
+    var actorUserId = currentUserId(currentUserService);
+    if (actorUserId is null)
+    {
+        return ApiResponse.Failure("Unauthorized", "User context is required.");
+    }
+
+    var role = await dbContext.AppRoles
+        .FirstOrDefaultAsync(x => x.Id == roleId, cancellationToken);
+    if (role is null)
+    {
+        return ApiResponse.Failure("NotFound", "Role not found.", 404);
+    }
+
+    if (role.Role == UserRole.SuperAdmin && request.IsActive is false)
+    {
+        return ApiResponse.Failure("Forbidden", "Cannot deactivate SuperAdmin role.", 403);
+    }
+
+    var beforeRole = new { role.Name, role.Description, role.IsActive };
+
+    if (!string.IsNullOrWhiteSpace(request.Name?.Trim()))
+    {
+        var newName = request.Name.Trim();
+        dbContext.Entry(role).Property(nameof(AppRole.Name)).CurrentValue = newName;
+    }
+
+    if (!string.IsNullOrWhiteSpace(request.Description))
+    {
+        dbContext.Entry(role).Property(nameof(AppRole.Description)).CurrentValue = request.Description.Trim();
+    }
+
+    if (request.IsActive.HasValue)
+    {
+        dbContext.Entry(role).Property(nameof(AppRole.IsActive)).CurrentValue = request.IsActive.Value;
+    }
+
+    dbContext.Entry(role).Property(nameof(AppRole.UpdatedAtUtc)).CurrentValue = DateTime.UtcNow;
+    await dbContext.SaveChangesAsync(cancellationToken);
+
+    AssignmentHelpers.AddAuditLog(
+        dbContext,
+        actorUserId.Value,
+        AuditActionType.Update,
+        nameof(AppRole),
+        role.Id.ToString(),
+        beforeRole,
+        after: new { role.Name, role.Description, role.IsActive },
+        httpContext);
+
+    return Results.Ok(ApiResponse.Success(new AdminRoleDto
+    {
+        Id = role.Id,
+        Role = role.Role.ToString(),
+        Name = role.Name,
+        Description = role.Description,
+        IsSystemRole = role.IsSystemRole,
+        IsActive = role.IsActive,
+        AssignedUsers = await dbContext.AppUsers.CountAsync(user => user.Roles.Any(userRole => userRole.Id == role.Id), cancellationToken),
+        Permissions = await (
+                from rolePermission in dbContext.RolePermissions
+                join permission in dbContext.Permissions
+                    on rolePermission.PermissionId equals permission.Id
+                where rolePermission.AppRoleId == roleId && !string.IsNullOrWhiteSpace(permission.Name)
+                select permission.Name)
+            .ToArrayAsync(cancellationToken)
+    }));
+})
+    .RequirePermission("roles.manage")
+    .WithTags("IAM")
+    .WithName("UpdateRole");
+
+adminApi.MapDelete("/roles/{roleId:guid}", async (
+    Guid roleId,
+    AppDbContext dbContext,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
+    CancellationToken cancellationToken) =>
+{
+    var actorUserId = currentUserId(currentUserService);
+    if (actorUserId is null)
+    {
+        return ApiResponse.Failure("Unauthorized", "User context is required.");
+    }
+
+    var role = await dbContext.AppRoles.FirstOrDefaultAsync(x => x.Id == roleId, cancellationToken);
+    if (role is null)
+    {
+        return ApiResponse.Failure("NotFound", "Role not found.", 404);
+    }
+
+    if (role.IsSystemRole || role.Role == UserRole.SuperAdmin)
+    {
+        return ApiResponse.Failure("Forbidden", "Cannot delete system role.");
+    }
+
+    var assignedUsers = await dbContext.AppUsers.CountAsync(x => x.Roles.Any(r => r.Id == roleId), cancellationToken);
+    if (assignedUsers > 0)
+    {
+        return ApiResponse.Failure("Conflict", "Cannot delete role while users are assigned.", 409);
+    }
+
+    var beforeRole = new { role.Role, role.Name, role.Description, role.IsActive };
+    dbContext.AppRoles.Remove(role);
+
+    AssignmentHelpers.AddAuditLog(
+        dbContext,
+        actorUserId.Value,
+        AuditActionType.Delete,
+        nameof(AppRole),
+        role.Id.ToString(),
+        beforeRole,
+        after: null,
+        httpContext);
+
+    await dbContext.SaveChangesAsync(cancellationToken);
+    return Results.NoContent();
+})
+    .RequirePermission("roles.manage")
+    .WithTags("IAM")
+    .WithName("DeleteRole");
+
+adminApi.MapPut("/roles/{roleId:guid}/permissions", async (
+    Guid roleId,
+    RolePermissionSetRequest request,
+    AppDbContext dbContext,
+    IPermissionService permissionService,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
+    CancellationToken cancellationToken) =>
+{
+    var actorUserId = currentUserId(currentUserService);
+    if (actorUserId is null)
+    {
+        return ApiResponse.Failure("Unauthorized", "User context is required.");
+    }
+
+    var role = await dbContext.AppRoles
+        .Include(role => role.Permissions)
+        .FirstOrDefaultAsync(x => x.Id == roleId, cancellationToken);
+    if (role is null)
+    {
+        return ApiResponse.Failure("NotFound", "Role not found.", 404);
+    }
+
+    var catalogPermissions = (await permissionService.GetCatalogAsync(cancellationToken))
+        .Where(permission => permission.IsActive)
+        .Select(permission => permission.Name)
+        .ToArray();
+
+    var requestedPermissionNames = NormalizePermissionNames(request.PermissionNames);
+    var unknownPermissions = requestedPermissionNames
+        .Where(permission => !catalogPermissions.Contains(permission, StringComparer.OrdinalIgnoreCase))
+        .ToArray();
+
+    if (unknownPermissions.Length > 0)
+    {
+        return ApiResponse.Failure("ValidationError", "Unknown permissions: " + string.Join(", ", unknownPermissions));
+    }
+
+    if (role.Role == UserRole.SuperAdmin)
+    {
+        requestedPermissionNames = catalogPermissions;
+    }
+
+    var requestedSet = new HashSet<string>(requestedPermissionNames, StringComparer.OrdinalIgnoreCase);
+    var permissionEntities = await dbContext.Permissions
+        .AsNoTracking()
+        .Where(permission => permission.IsActive && requestedSet.Contains(permission.Name))
+        .ToListAsync(cancellationToken);
+
+    var currentPermissionNames = await (
+            from rolePermission in dbContext.RolePermissions.AsNoTracking()
+            join permission in dbContext.Permissions.AsNoTracking()
+                on rolePermission.PermissionId equals permission.Id
+            where rolePermission.AppRoleId == roleId
+            select permission.Name)
+        .ToHashSetAsync(StringComparer.OrdinalIgnoreCase, cancellationToken);
+
+    var requestedPermissionIds = permissionEntities
+        .Select(permission => permission.Id)
+        .ToHashSet();
+
+    foreach (var entry in role.Permissions.ToArray())
+    {
+        if (!requestedPermissionIds.Contains(entry.PermissionId))
+        {
+            role.Permissions.Remove(entry);
+        }
+    }
+
+    foreach (var permission in permissionEntities)
+    {
+        if (role.Permissions.Any(existing => existing.PermissionId == permission.Id))
+        {
+            continue;
+        }
+
+        role.Permissions.Add(new RolePermission(roleId, permission.Id));
+    }
+
+    dbContext.Entry(role).Property(nameof(AppRole.UpdatedAtUtc)).CurrentValue = DateTime.UtcNow;
+    await dbContext.SaveChangesAsync(cancellationToken);
+
+    AssignmentHelpers.AddAuditLog(
+        dbContext,
+        actorUserId.Value,
+        AuditActionType.Update,
+        nameof(AppRole),
+        role.Id.ToString(),
+        before: new { Permissions = currentPermissionNames.OrderBy(permission => permission).ToArray() },
+        after: new { Permissions = requestedSet.OrderBy(permission => permission).ToArray() },
+        httpContext);
+
+    var assignedUsers = await dbContext.AppUsers.CountAsync(user => user.Roles.Any(userRole => userRole.Id == role.Id), cancellationToken);
+    return Results.Ok(ApiResponse.Success(new AdminRoleDto
+    {
+        Id = role.Id,
+        Role = role.Role.ToString(),
+        Name = role.Name,
+        Description = role.Description,
+        IsSystemRole = role.IsSystemRole,
+        IsActive = role.IsActive,
+        AssignedUsers = assignedUsers,
+        Permissions = requestedSet.OrderBy(permission => permission).ToArray()
+    }));
+})
+    .RequirePermission("roles.manage")
+    .WithTags("IAM")
+    .WithName("SetRolePermissions");
+
+    }
+
+    private static Guid? currentUserId(ICurrentUserService currentUserService) => currentUserService.UserId;
+
+    private static string[] NormalizeRoleInputs(string[]? roles) =>
+        (roles ?? Array.Empty<string>())
+            .Select(role => role?.Trim() ?? string.Empty)
+            .Where(role => role.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+    private static bool TryParseRoleNames(
+        string[] normalizedRoleNames,
+        out UserRole[] parsedRoles,
+        out string[] invalidRoles)
+    {
+        var roles = new List<UserRole>();
+        var invalid = new List<string>();
+        foreach (var role in normalizedRoleNames)
+        {
+            if (Enum.TryParse<UserRole>(role, true, out var parsedRole))
+            {
+                roles.Add(parsedRole);
+            }
+            else
+            {
+                invalid.Add(role);
+            }
+        }
+
+        parsedRoles = roles.Distinct().ToArray();
+        invalidRoles = invalid.ToArray();
+        return invalidRoles.Length == 0;
+    }
+
+    private static string[] NormalizePermissionNames(string[]? permissions) =>
+        (permissions ?? Array.Empty<string>())
+            .Select(permission => permission?.Trim() ?? string.Empty)
+            .Where(permission => permission.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+    private static bool TryParsePermissionEffect(string effect, out PermissionEffect permissionEffect) =>
+        Enum.TryParse(effect?.Trim(), true, out permissionEffect);
+}

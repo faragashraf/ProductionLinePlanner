@@ -5,9 +5,11 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using ProductionLinePlanner.Application.Engines;
 using ProductionLinePlanner.Application.Services;
+using ProductionLinePlanner.Application.Abstractions;
 using ProductionLinePlanner.Infrastructure.Data;
 using ProductionLinePlanner.Infrastructure.Attendance;
 using ProductionLinePlanner.Infrastructure.Attendance.Services;
+using ProductionLinePlanner.Infrastructure.Authorization;
 using ProductionLinePlanner.Infrastructure.BusinessEngines;
 
 namespace ProductionLinePlanner.Infrastructure;
@@ -60,6 +62,8 @@ public static class DependencyInjection
         services.AddScoped<IReadinessEngine, ReadinessEngine>();
         services.AddScoped<INotificationEngine, NotificationEngine>();
         services.AddScoped<IAuditEngine, AuditEngine>();
+        services.AddScoped<IPermissionService, PermissionService>();
+        services.AddScoped<IRolePermissionSeedService, PermissionSeedService>();
 
         return services;
     }

@@ -69,6 +69,8 @@
 - `departments.manage`
 - `attendance.view`
 - `attendance.sync`
+- `factory-structure.view`
+- `factory-structure.manage`
 - `compensation.view`
 - `compensation.manage`
 - `compensation.import`
@@ -88,6 +90,8 @@
 - `roles.manage`
 - `permissions.assign`
 - `audit.view`
+
+`factory-structure.*` تخص المصانع وخطوط الإنتاج وبنية المصنع، وهي مختلفة عن `production.*` الخاصة بالتنفيذ اليومي. قراءة factories/production lines تستخدم `factory-structure.view`، بينما POST/PUT/PATCH/DELETE تستخدم `factory-structure.manage`.
 
 ## Audit
 

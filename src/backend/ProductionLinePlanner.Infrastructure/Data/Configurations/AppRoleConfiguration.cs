@@ -19,10 +19,15 @@ public sealed class AppRoleConfiguration : IEntityTypeConfiguration<AppRole>
             .IsRequired();
         builder.Property(x => x.Name).IsRequired().HasMaxLength(100);
         builder.Property(x => x.Description).HasMaxLength(500);
+        builder.Property(x => x.IsActive).HasDefaultValue(true);
         builder.Property(x => x.IsSystemRole).HasDefaultValue(false);
         builder.Property(x => x.CreatedAtUtc).IsRequired();
         builder.Property(x => x.UpdatedAtUtc).IsRequired();
 
         builder.HasIndex(x => x.Role).IsUnique();
+        builder.HasMany(x => x.Permissions)
+            .WithOne(x => x.AppRole)
+            .HasForeignKey(x => x.AppRoleId)
+            .OnDelete(DeleteBehavior.Restrict);
     }
 }
