@@ -36,7 +36,16 @@ public static class AssignmentHelpers
         "RevokedAtUtc",
         "IsRead",
         "ReadAtUtc",
-        "IsActive"
+        "IsActive",
+        "Name",
+        "Description",
+        "Roles",
+        "RoleIds",
+        "Permissions",
+        "PermissionNames",
+        "Permission",
+        "Effect",
+        "Result"
     };
 
     private static readonly JsonSerializerOptions AuditJsonOptions = new()
@@ -317,6 +326,14 @@ public static class AssignmentHelpers
                 if (IsSimpleType(value))
                 {
                     result[property.Name] = value;
+                }
+                else if (value is System.Collections.IEnumerable values && value is not string)
+                {
+                    var safeValues = values.Cast<object?>().Where(item => item is not null && IsSimpleType(item)).ToArray();
+                    if (safeValues.Length > 0)
+                    {
+                        result[property.Name] = safeValues;
+                    }
                 }
             }
 

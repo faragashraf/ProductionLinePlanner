@@ -35,7 +35,12 @@ public static string CreateAccessToken(
         SymmetricSecurityKey signingKey)
     {
         var tokenId = Guid.NewGuid().ToString("N");
-        var roles = user.Roles.Select(r => new Claim(ClaimTypes.Role, r.Role.ToString())).ToArray();
+        var roles = user.Roles
+            .Select(role => role.Role?.ToString() ?? role.Name)
+            .Where(role => !string.IsNullOrWhiteSpace(role))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Select(role => new Claim(ClaimTypes.Role, role))
+            .ToArray();
         var claims = new List<Claim>
         {
             new(JwtRegisteredClaimNames.Sub, user.Id.ToString()),

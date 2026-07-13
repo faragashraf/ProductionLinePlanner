@@ -9,11 +9,15 @@ import { AssignmentsPageComponent } from './pages/assignments-page/assignments-p
 import { NotificationsPageComponent } from './pages/notifications-page/notifications-page.component';
 import { LoginPageComponent } from './pages/login-page/login-page.component';
 import { AppShellComponent } from './layout/app-shell/app-shell.component';
+import { AccessDeniedPageComponent } from './pages/access-denied-page/access-denied-page.component';
 import { AuthGuard } from './core/guards/auth.guard';
-import { RoleGuard } from './core/guards/role.guard';
+import { PermissionCanActivateGuard } from './core/guards/permission-can-activate.guard';
+import { PermissionCanMatchGuard } from './core/guards/permission-can-match.guard';
+import { PERMISSIONS } from './core/config/permission-identifiers';
 
-const routes: Routes = [
+export const APP_ROUTES: Routes = [
   { path: 'login', component: LoginPageComponent, data: { title: 'تسجيل الدخول', breadcrumb: 'تسجيل الدخول' } },
+  { path: '403', component: AccessDeniedPageComponent, data: { title: 'غير مصرح', breadcrumb: '403' } },
   {
     path: '',
     component: AppShellComponent,
@@ -22,11 +26,61 @@ const routes: Routes = [
     children: [
       { path: '', redirectTo: 'dashboard', pathMatch: 'full' },
       { path: 'dashboard', component: DashboardPageComponent, data: { title: 'لوحة التحكم', breadcrumb: 'لوحة التحكم' } },
-      { path: 'factory-map', component: FactoryMapPageComponent, data: { title: 'خريطة المصنع', breadcrumb: 'خريطة المصنع' } },
-      { path: 'production-lines', component: ProductionLinesPageComponent, data: { title: 'خطوط الإنتاج', breadcrumb: 'خطوط الإنتاج', roles: ['Admin', 'SuperAdmin'] } },
-      { path: 'stages', component: StagesPageComponent, data: { title: 'المراحل', breadcrumb: 'المراحل' } },
-      { path: 'workers', component: WorkersPageComponent, data: { title: 'العاملون', breadcrumb: 'العاملون', roles: ['Admin', 'SuperAdmin'] } },
-      { path: 'assignments', component: AssignmentsPageComponent, data: { title: 'التعيينات', breadcrumb: 'التعيينات', roles: ['Admin', 'SuperAdmin'] }, canActivate: [RoleGuard] },
+      {
+        path: 'factory-map',
+        component: FactoryMapPageComponent,
+        canActivate: [PermissionCanActivateGuard],
+        data: { title: 'خريطة المصنع', breadcrumb: 'خريطة المصنع', permission: PERMISSIONS.factoryStructure.view }
+      },
+      {
+        path: 'production-lines',
+        component: ProductionLinesPageComponent,
+        canActivate: [PermissionCanActivateGuard],
+        data: {
+          title: 'خطوط الإنتاج',
+          breadcrumb: 'خطوط الإنتاج',
+          permission: PERMISSIONS.factoryStructure.view
+        }
+      },
+      {
+        path: 'stages',
+        component: StagesPageComponent,
+        canActivate: [PermissionCanActivateGuard],
+        data: {
+          title: 'المراحل',
+          breadcrumb: 'المراحل',
+          permission: PERMISSIONS.stages.view
+        }
+      },
+      {
+        path: 'workers',
+        component: WorkersPageComponent,
+        canActivate: [PermissionCanActivateGuard],
+        data: {
+          title: 'العاملون',
+          breadcrumb: 'العاملون',
+          permission: PERMISSIONS.workers.view
+        }
+      },
+      {
+        path: 'assignments',
+        component: AssignmentsPageComponent,
+        canActivate: [PermissionCanActivateGuard],
+        data: {
+          title: 'التعيينات',
+          breadcrumb: 'التعيينات',
+          permission: PERMISSIONS.assignments.view
+        }
+      },
+      {
+        path: 'admin',
+        loadChildren: () => import('./pages/admin/iam-admin.module').then((module) => module.IamAdminModule),
+        canMatch: [PermissionCanMatchGuard],
+        canActivate: [PermissionCanActivateGuard],
+        data: {
+          requireAny: [PERMISSIONS.users.view, PERMISSIONS.roles.view, PERMISSIONS.permissions.assign]
+        }
+      },
       { path: 'notifications', component: NotificationsPageComponent, data: { title: 'الإشعارات', breadcrumb: 'الإشعارات' } },
       { path: '**', redirectTo: 'dashboard' }
     ]
@@ -35,7 +89,7 @@ const routes: Routes = [
 ];
 
 @NgModule({
-  imports: [RouterModule.forRoot(routes)],
+  imports: [RouterModule.forRoot(APP_ROUTES)],
   exports: [RouterModule]
 })
 export class AppRoutingModule { }

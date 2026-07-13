@@ -16,7 +16,7 @@ public sealed class AppRoleConfiguration : IEntityTypeConfiguration<AppRole>
         builder.Property(x => x.Role)
             .HasConversion<string>()
             .HasMaxLength(60)
-            .IsRequired();
+            .IsRequired(false);
         builder.Property(x => x.Name).IsRequired().HasMaxLength(100);
         builder.Property(x => x.Description).HasMaxLength(500);
         builder.Property(x => x.IsActive).HasDefaultValue(true);
@@ -25,6 +25,7 @@ public sealed class AppRoleConfiguration : IEntityTypeConfiguration<AppRole>
         builder.Property(x => x.UpdatedAtUtc).IsRequired();
 
         builder.HasIndex(x => x.Role).IsUnique();
+        builder.HasIndex(x => x.Name).IsUnique();
         builder.HasMany(x => x.Permissions)
             .WithOne(x => x.AppRole)
             .HasForeignKey(x => x.AppRoleId)

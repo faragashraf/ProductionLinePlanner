@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
+using System.Data;
 using ProductionLinePlanner.Application.Abstractions;
 using ProductionLinePlanner.Application.DTOs;
 using ProductionLinePlanner.Application.Requests;
@@ -65,7 +66,7 @@ adminApi.MapGet("/users", async (
             IsActive = user.IsActive,
             Roles = user.Roles
                 .OrderBy(role => role.Name)
-                .Select(role => role.Role.ToString())
+                .Select(role => role.Name)
                 .ToArray()
         })
         .ToArrayAsync(cancellationToken);
@@ -182,7 +183,7 @@ adminApi.MapGet("/users/{userId:guid}/authorization", async (
         PermissionsVersion = user.UpdatedAtUtc,
         Roles = user.Roles
             .OrderBy(role => role.Name)
-            .Select(role => role.Role.ToString())
+            .Select(role => role.Name)
             .ToArray(),
         DirectGrants = directGrants
             .OrderBy(permission => permission)
@@ -201,6 +202,7 @@ adminApi.MapPatch("/users/{userId:guid}/roles", async (
     Guid userId,
     UserRoleAssignmentsRequest request,
     AppDbContext dbContext,
+    IIamDelegationPolicy delegationPolicy,
     ICurrentUserService currentUserService,
     HttpContext httpContext,
     CancellationToken cancellationToken) =>
@@ -210,6 +212,8 @@ adminApi.MapPatch("/users/{userId:guid}/roles", async (
     {
         return ApiResponse.Failure("Unauthorized", "User context is required.");
     }
+
+    await using var roleAssignmentTransaction = await dbContext.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
 
     var user = await dbContext.AppUsers
         .Include(x => x.Roles)
@@ -226,26 +230,37 @@ adminApi.MapPatch("/users/{userId:guid}/roles", async (
         return ApiResponse.Failure("ValidationError", "At least one role is required.");
     }
 
-    if (!TryParseRoleNames(requestedRoleNames, out var requestedRoles, out var invalidRoles))
-    {
-        return ApiResponse.Failure("ValidationError", "Unknown role names: " + string.Join(", ", invalidRoles));
-    }
-
+    var normalizedRequestedRoleNames = requestedRoleNames
+        .Select(role => role.ToUpperInvariant())
+        .ToArray();
     var requestedRoleEntities = await dbContext.AppRoles
-        .Where(role => requestedRoles.Contains(role.Role))
+        .Where(role => normalizedRequestedRoleNames.Contains(role.Name.ToUpper()))
         .ToListAsync(cancellationToken);
 
-    if (requestedRoleEntities.Count != requestedRoles.Length)
+    if (requestedRoleEntities.Count != requestedRoleNames.Length)
     {
         return ApiResponse.Failure("ValidationError", "One or more roles were not found in database.");
     }
 
-    var currentRoles = user.Roles
-        .Select(role => role.Role)
-        .OrderBy(role => role.ToString())
-        .ToArray();
+    foreach (var role in requestedRoleEntities.Where(role => user.Roles.All(current => current.Id != role.Id)))
+    {
+        var decision = await delegationPolicy.CanAssignRoleAsync(actorUserId.Value, userId, role, cancellationToken);
+        if (!decision.Allowed)
+        {
+            return ApiResponse.Failure(decision.Code, decision.Message, 403);
+        }
+    }
 
-    if (currentRoles.Contains(UserRole.SuperAdmin) && requestedRoleEntities.All(role => role.Role != UserRole.SuperAdmin))
+    foreach (var role in user.Roles.Where(role => role.Role == UserRole.SuperAdmin && requestedRoleEntities.All(requested => requested.Id != role.Id)))
+    {
+        var decision = await delegationPolicy.CanAssignRoleAsync(actorUserId.Value, userId, role, cancellationToken);
+        if (!decision.Allowed)
+        {
+            return ApiResponse.Failure(decision.Code, "Only another SuperAdmin can remove SuperAdmin.", 403);
+        }
+    }
+
+    if (user.Roles.Any(role => role.Role == UserRole.SuperAdmin) && requestedRoleEntities.All(role => role.Role != UserRole.SuperAdmin))
     {
         var otherActiveSuperAdmins = await dbContext.AppUsers
             .AsNoTracking()
@@ -259,7 +274,7 @@ adminApi.MapPatch("/users/{userId:guid}/roles", async (
     }
 
     var beforeRoles = user.Roles
-        .Select(role => role.Role.ToString())
+        .Select(role => role.Name)
         .OrderBy(role => role)
         .ToArray();
 
@@ -273,7 +288,7 @@ adminApi.MapPatch("/users/{userId:guid}/roles", async (
     await dbContext.SaveChangesAsync(cancellationToken);
 
     var afterRoles = user.Roles
-        .Select(role => role.Role.ToString())
+        .Select(role => role.Name)
         .OrderBy(role => role)
         .ToArray();
 
@@ -288,11 +303,33 @@ adminApi.MapPatch("/users/{userId:guid}/roles", async (
         httpContext);
     await dbContext.SaveChangesAsync(cancellationToken);
 
+    await roleAssignmentTransaction.CommitAsync(cancellationToken);
+
     return Results.Ok(ApiResponse.Success(new { userId = user.Id, roles = afterRoles }));
 })
     .RequirePermission("users.manage")
     .WithTags("IAM")
     .WithName("UpdateUserRoles");
+
+adminApi.MapPut("/users/{userId:guid}/authorization", async (
+    Guid userId,
+    UserAuthorizationUpdateRequest request,
+    IIamAuthorizationService authorizationService,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
+    CancellationToken cancellationToken) =>
+{
+    var actorUserId = currentUserService.UserId;
+    if (actorUserId is null)
+        return ApiResponse.Failure("Unauthorized", "User context is required.");
+    var result = await authorizationService.ReplaceAsync(actorUserId.Value, userId, request, $"{httpContext.Request.Method} {httpContext.Request.Path}", cancellationToken);
+    return result.Succeeded
+        ? Results.Ok(ApiResponse.Success(new { userId, roleIds = result.RoleIds, directGrants = result.DirectGrants, directDenies = result.DirectDenies }))
+        : ApiResponse.Failure(result.Code, result.Message, result.StatusCode);
+})
+    .RequirePermission("users.manage")
+    .WithTags("IAM")
+    .WithName("ReplaceUserAuthorization");
 
 adminApi.MapPatch("/users/{userId:guid}/status", async (
     Guid userId,
@@ -307,6 +344,8 @@ adminApi.MapPatch("/users/{userId:guid}/status", async (
     {
         return ApiResponse.Failure("Unauthorized", "User context is required.");
     }
+
+    await using var userStatusTransaction = await dbContext.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
 
     var user = await dbContext.AppUsers
         .Include(x => x.Roles)
@@ -349,6 +388,9 @@ adminApi.MapPatch("/users/{userId:guid}/status", async (
         before,
         new { isActive = request.IsActive },
         httpContext);
+    await dbContext.SaveChangesAsync(cancellationToken);
+
+    await userStatusTransaction.CommitAsync(cancellationToken);
 
     return Results.Ok(ApiResponse.Success(new { userId = user.Id, isActive = user.IsActive }));
 })
@@ -360,6 +402,7 @@ adminApi.MapPost("/users/{userId:guid}/permission-overrides", async (
     Guid userId,
     UserPermissionOverrideRequest request,
     AppDbContext dbContext,
+    IIamDelegationPolicy delegationPolicy,
     ICurrentUserService currentUserService,
     HttpContext httpContext,
     CancellationToken cancellationToken) =>
@@ -393,6 +436,12 @@ adminApi.MapPost("/users/{userId:guid}/permission-overrides", async (
     if (permission is null)
     {
         return ApiResponse.Failure("ValidationError", "Unknown or inactive permission.");
+    }
+
+    var delegationDecision = await delegationPolicy.CanChangeDirectPermissionAsync(actorUserId.Value, userId, permission.Name, effect, false, cancellationToken);
+    if (!delegationDecision.Allowed)
+    {
+        return ApiResponse.Failure(delegationDecision.Code, delegationDecision.Message, 403);
     }
 
     var existingOverride = await dbContext.UserPermissionOverrides
@@ -435,6 +484,7 @@ adminApi.MapDelete("/users/{userId:guid}/permission-overrides/{permissionName}",
     Guid userId,
     string permissionName,
     AppDbContext dbContext,
+    IIamDelegationPolicy delegationPolicy,
     ICurrentUserService currentUserService,
     HttpContext httpContext,
     CancellationToken cancellationToken) =>
@@ -474,6 +524,12 @@ adminApi.MapDelete("/users/{userId:guid}/permission-overrides/{permissionName}",
         return Results.Ok(ApiResponse.Success(new { removed = false }));
     }
 
+    var delegationDecision = await delegationPolicy.CanChangeDirectPermissionAsync(actorUserId.Value, userId, permission.Name, existingOverride.Effect, true, cancellationToken);
+    if (!delegationDecision.Allowed)
+    {
+        return ApiResponse.Failure(delegationDecision.Code, delegationDecision.Message, 403);
+    }
+
     dbContext.UserPermissionOverrides.Remove(existingOverride);
     await dbContext.SaveChangesAsync(cancellationToken);
 
@@ -486,6 +542,7 @@ adminApi.MapDelete("/users/{userId:guid}/permission-overrides/{permissionName}",
         before: new { permission = permission.Name, effect = existingOverride.Effect.ToString() },
         after: null,
         httpContext);
+    await dbContext.SaveChangesAsync(cancellationToken);
 
     return Results.Ok(ApiResponse.Success(new { removed = true }));
 })
@@ -502,7 +559,6 @@ adminApi.MapGet("/roles", async (
         .Select(role => new
         {
             Id = role.Id,
-            Role = role.Role,
             Name = role.Name,
             role.Description,
             role.IsSystemRole,
@@ -521,7 +577,7 @@ adminApi.MapGet("/roles", async (
         .Select(role => new AdminRoleDto
         {
             Id = role.Id,
-            Role = role.Role.ToString(),
+            Role = role.Name,
             Name = role.Name,
             Description = role.Description,
             IsSystemRole = role.IsSystemRole,
@@ -550,18 +606,24 @@ adminApi.MapPost("/roles", async (
         return ApiResponse.Failure("Unauthorized", "User context is required.");
     }
 
-    var roleName = request.Role?.Trim();
-    if (string.IsNullOrWhiteSpace(roleName))
+    var roleName = request.Name?.Trim();
+    if (string.IsNullOrWhiteSpace(roleName) || roleName.Length > AppRole.MaxNameLength)
     {
-        return ApiResponse.Failure("ValidationError", "Role is required.");
+        return ApiResponse.Failure("ValidationError", $"Role name is required and cannot exceed {AppRole.MaxNameLength} characters.");
     }
 
-    if (!Enum.TryParse<UserRole>(roleName, ignoreCase: true, out var parsedRole))
+    if (SystemRoleCatalog.IsSystemRoleName(roleName))
     {
-        return ApiResponse.Failure("ValidationError", "Unsupported role value.");
+        return ApiResponse.Failure("Conflict", "System role names are reserved.", 409);
     }
 
-    var roleExists = await dbContext.AppRoles.AnyAsync(x => x.Role == parsedRole, cancellationToken);
+    if (!AppRole.IsDescriptionWithinLimit(request.Description))
+    {
+        return ApiResponse.Failure("ValidationError", $"Role description cannot exceed {AppRole.MaxDescriptionLength} characters.");
+    }
+
+    var normalizedRoleName = roleName.ToUpperInvariant();
+    var roleExists = await dbContext.AppRoles.AnyAsync(x => x.Name.ToUpper() == normalizedRoleName, cancellationToken);
     if (roleExists)
     {
         return ApiResponse.Failure("Conflict", "Role already exists.");
@@ -569,28 +631,12 @@ adminApi.MapPost("/roles", async (
 
     var roleEntity = new AppRole(
         id: Guid.NewGuid(),
-        role: parsedRole,
-        name: parsedRole.ToString(),
+        name: roleName,
         description: request.Description,
-        isSystemRole: parsedRole == UserRole.SuperAdmin,
         isActive: true,
         createdAtUtc: DateTime.UtcNow);
 
     dbContext.AppRoles.Add(roleEntity);
-
-    if (parsedRole == UserRole.SuperAdmin)
-    {
-        foreach (var permission in PermissionCatalog.All.Where(permission => PermissionCatalog.IsKnown(permission.Name)))
-        {
-            var permissionEntity = await dbContext.Permissions.FirstOrDefaultAsync(x => x.Name == permission.Name, cancellationToken);
-            if (permissionEntity is null)
-            {
-                continue;
-            }
-
-            dbContext.RolePermissions.Add(new RolePermission(roleEntity.Id, permissionEntity.Id));
-        }
-    }
 
     await dbContext.SaveChangesAsync(cancellationToken);
     AssignmentHelpers.AddAuditLog(
@@ -602,11 +648,12 @@ adminApi.MapPost("/roles", async (
         before: null,
         after: new { roleEntity.Role, roleEntity.Name, roleEntity.Description, roleEntity.IsSystemRole },
         httpContext);
+    await dbContext.SaveChangesAsync(cancellationToken);
 
     return Results.Created($"/api/admin/roles/{roleEntity.Id}", ApiResponse.Success(new AdminRoleDto
     {
         Id = roleEntity.Id,
-        Role = roleEntity.Role.ToString(),
+        Role = roleEntity.Name,
         Name = roleEntity.Name,
         Description = roleEntity.Description,
         IsSystemRole = roleEntity.IsSystemRole,
@@ -640,30 +687,41 @@ adminApi.MapPatch("/roles/{roleId:guid}", async (
         return ApiResponse.Failure("NotFound", "Role not found.", 404);
     }
 
-    if (role.Role == UserRole.SuperAdmin && request.IsActive is false)
+    if (!role.CanModifyDefinition && (request.Name is not null || request.HasDescription || request.IsActive.HasValue))
     {
-        return ApiResponse.Failure("Forbidden", "Cannot deactivate SuperAdmin role.", 403);
+        return ApiResponse.Failure("Forbidden", "System role definitions are product-controlled.", 403);
     }
 
     var beforeRole = new { role.Name, role.Description, role.IsActive };
 
-    if (!string.IsNullOrWhiteSpace(request.Name?.Trim()))
+    if (request.HasDescription && !AppRole.IsDescriptionWithinLimit(request.Description))
+    {
+        return ApiResponse.Failure("ValidationError", $"Role description cannot exceed {AppRole.MaxDescriptionLength} characters.");
+    }
+
+    if (request.Name is not null)
     {
         var newName = request.Name.Trim();
-        dbContext.Entry(role).Property(nameof(AppRole.Name)).CurrentValue = newName;
+        if (newName.Length == 0 || newName.Length > AppRole.MaxNameLength)
+        {
+            return ApiResponse.Failure("ValidationError", $"Role name is required and cannot exceed {AppRole.MaxNameLength} characters.");
+        }
+
+        if (role.IsSystemRole && !string.Equals(role.Name, newName, StringComparison.OrdinalIgnoreCase))
+        {
+            return ApiResponse.Failure("Forbidden", "Cannot rename a system role.", 403);
+        }
+
+        var duplicateName = await dbContext.AppRoles.AnyAsync(
+            existing => existing.Id != roleId && existing.Name.ToUpper() == newName.ToUpper(),
+            cancellationToken);
+        if (duplicateName)
+        {
+            return ApiResponse.Failure("Conflict", "Role name already exists.", 409);
+        }
     }
 
-    if (!string.IsNullOrWhiteSpace(request.Description))
-    {
-        dbContext.Entry(role).Property(nameof(AppRole.Description)).CurrentValue = request.Description.Trim();
-    }
-
-    if (request.IsActive.HasValue)
-    {
-        dbContext.Entry(role).Property(nameof(AppRole.IsActive)).CurrentValue = request.IsActive.Value;
-    }
-
-    dbContext.Entry(role).Property(nameof(AppRole.UpdatedAtUtc)).CurrentValue = DateTime.UtcNow;
+    role.UpdateDetails(request.Name, request.HasDescription, request.Description, request.IsActive);
     await dbContext.SaveChangesAsync(cancellationToken);
 
     AssignmentHelpers.AddAuditLog(
@@ -675,11 +733,12 @@ adminApi.MapPatch("/roles/{roleId:guid}", async (
         beforeRole,
         after: new { role.Name, role.Description, role.IsActive },
         httpContext);
+    await dbContext.SaveChangesAsync(cancellationToken);
 
     return Results.Ok(ApiResponse.Success(new AdminRoleDto
     {
         Id = role.Id,
-        Role = role.Role.ToString(),
+        Role = role.Name,
         Name = role.Name,
         Description = role.Description,
         IsSystemRole = role.IsSystemRole,
@@ -717,7 +776,7 @@ adminApi.MapDelete("/roles/{roleId:guid}", async (
         return ApiResponse.Failure("NotFound", "Role not found.", 404);
     }
 
-    if (role.IsSystemRole || role.Role == UserRole.SuperAdmin)
+    if (role.IsSystemRole)
     {
         return ApiResponse.Failure("Forbidden", "Cannot delete system role.");
     }
@@ -753,6 +812,7 @@ adminApi.MapPut("/roles/{roleId:guid}/permissions", async (
     RolePermissionSetRequest request,
     AppDbContext dbContext,
     IPermissionService permissionService,
+    IIamDelegationPolicy delegationPolicy,
     ICurrentUserService currentUserService,
     HttpContext httpContext,
     CancellationToken cancellationToken) =>
@@ -771,6 +831,11 @@ adminApi.MapPut("/roles/{roleId:guid}/permissions", async (
         return ApiResponse.Failure("NotFound", "Role not found.", 404);
     }
 
+    if (!role.CanModifyDefinition)
+    {
+        return ApiResponse.Failure("Forbidden", "System role permissions are product-controlled.", 403);
+    }
+
     var catalogPermissions = (await permissionService.GetCatalogAsync(cancellationToken))
         .Where(permission => permission.IsActive)
         .Select(permission => permission.Name)
@@ -786,9 +851,10 @@ adminApi.MapPut("/roles/{roleId:guid}/permissions", async (
         return ApiResponse.Failure("ValidationError", "Unknown permissions: " + string.Join(", ", unknownPermissions));
     }
 
-    if (role.Role == UserRole.SuperAdmin)
+    var delegationDecision = await delegationPolicy.CanManageRolePermissionsAsync(actorUserId.Value, requestedPermissionNames, cancellationToken);
+    if (!delegationDecision.Allowed)
     {
-        requestedPermissionNames = catalogPermissions;
+        return ApiResponse.Failure(delegationDecision.Code, delegationDecision.Message, 403);
     }
 
     var requestedSet = new HashSet<string>(requestedPermissionNames, StringComparer.OrdinalIgnoreCase);
@@ -839,12 +905,13 @@ adminApi.MapPut("/roles/{roleId:guid}/permissions", async (
         before: new { Permissions = currentPermissionNames.OrderBy(permission => permission).ToArray() },
         after: new { Permissions = requestedSet.OrderBy(permission => permission).ToArray() },
         httpContext);
+    await dbContext.SaveChangesAsync(cancellationToken);
 
     var assignedUsers = await dbContext.AppUsers.CountAsync(user => user.Roles.Any(userRole => userRole.Id == role.Id), cancellationToken);
     return Results.Ok(ApiResponse.Success(new AdminRoleDto
     {
         Id = role.Id,
-        Role = role.Role.ToString(),
+        Role = role.Name,
         Name = role.Name,
         Description = role.Description,
         IsSystemRole = role.IsSystemRole,
@@ -867,30 +934,6 @@ adminApi.MapPut("/roles/{roleId:guid}/permissions", async (
             .Where(role => role.Length > 0)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
-
-    private static bool TryParseRoleNames(
-        string[] normalizedRoleNames,
-        out UserRole[] parsedRoles,
-        out string[] invalidRoles)
-    {
-        var roles = new List<UserRole>();
-        var invalid = new List<string>();
-        foreach (var role in normalizedRoleNames)
-        {
-            if (Enum.TryParse<UserRole>(role, true, out var parsedRole))
-            {
-                roles.Add(parsedRole);
-            }
-            else
-            {
-                invalid.Add(role);
-            }
-        }
-
-        parsedRoles = roles.Distinct().ToArray();
-        invalidRoles = invalid.ToArray();
-        return invalidRoles.Length == 0;
-    }
 
     private static string[] NormalizePermissionNames(string[]? permissions) =>
         (permissions ?? Array.Empty<string>())

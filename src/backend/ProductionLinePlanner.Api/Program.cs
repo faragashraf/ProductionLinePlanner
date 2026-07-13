@@ -182,15 +182,8 @@ var app = builder.Build();
 if (!isEfDesignTime)
 {
     await using var seedScope = app.Services.CreateAsyncScope();
-    try
-    {
-        var permissionSeedService = seedScope.ServiceProvider.GetRequiredService<IRolePermissionSeedService>();
-        await permissionSeedService.EnsureSeedAsync();
-    }
-    catch (Exception ex)
-    {
-        app.Logger.LogWarning(ex, "Permission catalog/seed initialization was skipped due to startup failure.");
-    }
+    var permissionSeedService = seedScope.ServiceProvider.GetRequiredService<IRolePermissionSeedService>();
+    await permissionSeedService.EnsureSeedAsync();
 }
 
 if (app.Environment.IsDevelopment())
@@ -356,7 +349,7 @@ authApi.MapPost("/login", async (
         after: new { Event = "AuthLogin", user.Email },
         httpContext: httpContext);
     var roles = user.Roles
-        .Select(role => role.Role.ToString())
+        .Select(role => role.Name)
         .Distinct(StringComparer.OrdinalIgnoreCase)
         .OrderBy(role => role)
         .ToArray();
@@ -400,7 +393,7 @@ authApi.MapGet("/me", async (
     }
 
     var roles = user.Roles
-        .Select(role => role.Role.ToString())
+        .Select(role => role.Name)
         .Distinct(StringComparer.OrdinalIgnoreCase)
         .OrderBy(role => role)
         .ToArray();
@@ -577,6 +570,25 @@ authApi.MapPost("/refresh", async (
 
     if (!storedToken.IsUsable(now))
     {
+        if (storedToken.IsRevoked)
+        {
+            await dbContext.RefreshTokens
+                .Where(token => token.AppUserId == storedToken.AppUserId && !token.IsRevoked)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(token => token.IsRevoked, true)
+                    .SetProperty(token => token.RevokedAtUtc, now)
+                    .SetProperty(token => token.RevokedReason, "RefreshTokenReuseDetected"), cancellationToken);
+            AssignmentHelpers.AddAuditLog(
+                dbContext,
+                storedToken.AppUserId,
+                AuditActionType.Revoke,
+                nameof(RefreshToken),
+                storedToken.Id.ToString(),
+                before: new { Result = "RefreshTokenReuseDetected" },
+                after: new { Result = "SessionRevoked" },
+                httpContext);
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
         if (!storedToken.IsRevoked)
         {
             storedToken.Revoke(now, "Expired");
@@ -588,7 +600,7 @@ authApi.MapPost("/refresh", async (
 
     var user = storedToken.AppUser;
     var roles = user.Roles
-        .Select(role => role.Role.ToString())
+        .Select(role => role.Name)
         .Distinct(StringComparer.OrdinalIgnoreCase)
         .OrderBy(role => role)
         .ToArray();
@@ -600,8 +612,34 @@ authApi.MapPost("/refresh", async (
     var newRefreshTokenHash = AuthTokenService.HashRefreshToken(newRefreshToken);
     var newRefreshTokenExpiresAt = now.AddDays(jwtRefreshTokenDays);
 
-    storedToken.Revoke(now, "Rotated");
-    storedToken.MarkAsUsed(now);
+    var rotationSucceeded = await dbContext.RefreshTokens
+        .Where(token => token.Id == storedToken.Id && !token.IsRevoked && token.ExpiresAtUtc > now)
+        .ExecuteUpdateAsync(setters => setters
+            .SetProperty(token => token.IsRevoked, true)
+            .SetProperty(token => token.RevokedAtUtc, now)
+            .SetProperty(token => token.RevokedReason, "Rotated")
+            .SetProperty(token => token.LastUsedAtUtc, now), cancellationToken);
+    if (rotationSucceeded != 1)
+    {
+        await dbContext.RefreshTokens
+            .Where(token => token.AppUserId == user.Id && !token.IsRevoked)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(token => token.IsRevoked, true)
+                .SetProperty(token => token.RevokedAtUtc, now)
+                .SetProperty(token => token.RevokedReason, "RefreshTokenReuseDetected"), cancellationToken);
+        AssignmentHelpers.AddAuditLog(
+            dbContext,
+            user.Id,
+            AuditActionType.Revoke,
+            nameof(RefreshToken),
+            storedToken.Id.ToString(),
+            before: new { Result = "ConcurrentRefreshReuseDetected" },
+            after: new { Result = "SessionRevoked" },
+            httpContext);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return ApiResponse.Failure("InvalidToken", "Invalid refresh token.", 401);
+    }
+
     dbContext.RefreshTokens.Add(new RefreshToken(
         id: Guid.NewGuid(),
         appUserId: user.Id,

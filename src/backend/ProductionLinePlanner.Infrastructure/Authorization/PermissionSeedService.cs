@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using ProductionLinePlanner.Application.Abstractions;
 using ProductionLinePlanner.Domain.Authorization;
 using ProductionLinePlanner.Domain.Entities;
@@ -7,7 +8,9 @@ using ProductionLinePlanner.Infrastructure.Data;
 
 namespace ProductionLinePlanner.Infrastructure.Authorization;
 
-public sealed class PermissionSeedService(AppDbContext dbContext) : IRolePermissionSeedService
+public sealed class PermissionSeedService(
+    AppDbContext dbContext,
+    ILogger<PermissionSeedService> logger) : IRolePermissionSeedService
 {
     private static readonly SemaphoreSlim SeedSemaphore = new(1, 1);
     private static bool _seededOnce;
@@ -63,9 +66,14 @@ public sealed class PermissionSeedService(AppDbContext dbContext) : IRolePermiss
                 .Where(x => permissionByName.Values.Contains(x.Id))
                 .ToDictionaryAsync(x => x.Name, x => x, StringComparer.OrdinalIgnoreCase, cancellationToken);
 
+            var addedAssignments = 0;
+            var removedAssignments = 0;
+
             foreach (var role in Enum.GetValues<UserRole>())
             {
-                var roleEntity = await dbContext.AppRoles.FirstOrDefaultAsync(x => x.Role == role, cancellationToken);
+                var roleEntity = await dbContext.AppRoles
+                    .Include(x => x.Permissions)
+                    .FirstOrDefaultAsync(x => x.Role == role, cancellationToken);
                 if (roleEntity is null)
                 {
                     var now = DateTime.UtcNow;
@@ -84,45 +92,49 @@ public sealed class PermissionSeedService(AppDbContext dbContext) : IRolePermiss
                         role: role,
                         name: role.ToString(),
                         description: roleDescription,
-                        isSystemRole: role is UserRole.SuperAdmin,
+                    isSystemRole: true,
                         isActive: true,
                         createdAtUtc: now);
                     dbContext.AppRoles.Add(roleEntity);
                     await dbContext.SaveChangesAsync(cancellationToken);
                 }
+                else if (!roleEntity.IsSystemRole)
+                {
+                    roleEntity.MarkAsSystemRole();
+                }
 
                 var targetPermissions = GetPermissionsForRole(role).ToList();
-                var rolePermissionNames = targetPermissions
-                    .Select(permission => permission.ToLowerInvariant())
+                var authoritativePermissionIds = targetPermissions
                     .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .ToArray();
+                    .Where(allPermissions.ContainsKey)
+                    .Select(permissionName => allPermissions[permissionName].Id)
+                    .ToHashSet();
 
-                var existingAssignments = await (
-                        from assignment in dbContext.RolePermissions.AsNoTracking()
-                        join permission in dbContext.Permissions.AsNoTracking()
-                            on assignment.PermissionId equals permission.Id
-                        where assignment.AppRoleId == roleEntity.Id
-                        select permission.Name)
-                    .ToListAsync(cancellationToken);
+                var existingPermissionIds = roleEntity.Permissions
+                    .Select(assignment => assignment.PermissionId)
+                    .ToHashSet();
 
-                foreach (var permissionName in rolePermissionNames)
+                foreach (var assignment in roleEntity.Permissions
+                             .Where(assignment => !authoritativePermissionIds.Contains(assignment.PermissionId))
+                             .ToArray())
                 {
-                    if (!allPermissions.TryGetValue(permissionName, out var permission))
-                    {
-                        continue;
-                    }
+                    dbContext.RolePermissions.Remove(assignment);
+                    removedAssignments++;
+                }
 
-                    if (existingAssignments.Contains(permission.Name, StringComparer.OrdinalIgnoreCase))
-                    {
-                        continue;
-                    }
-
-                    dbContext.RolePermissions.Add(new RolePermission(roleEntity.Id, permission.Id));
+                foreach (var permissionId in authoritativePermissionIds.Where(permissionId => !existingPermissionIds.Contains(permissionId)))
+                {
+                    dbContext.RolePermissions.Add(new RolePermission(roleEntity.Id, permissionId));
+                    addedAssignments++;
                 }
             }
 
             await dbContext.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
+            logger.LogInformation(
+                "Reconciled system role permissions: {AddedAssignments} grants added and {RemovedAssignments} grants removed.",
+                addedAssignments,
+                removedAssignments);
             _seededOnce = true;
         }
         finally

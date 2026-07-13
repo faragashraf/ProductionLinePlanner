@@ -1,0 +1,68 @@
+<section class="page-frame">
+  <header class="page-header">
+    <h1>إدارة الأدوار</h1>
+    <p>عرض الأدوار الحالية وسعة الصلاحيات المرتبطة.</p>
+  </header>
+
+  <button
+    pButton
+    pRipple
+    class="p-button-sm"
+    type="button"
+    icon="pi pi-refresh"
+    (click)="loadRoles()"
+    [disabled]="isLoading"
+  >تحديث</button>
+
+  <button *plpCan="permissions.roles.manage" pButton pRipple class="p-button-sm p-button-outlined" type="button" (click)="startCreate()">دور جديد</button>
+
+  <plp-iam-list-skeleton *ngIf="isLoading" [rows]="4" [dense]="true"></plp-iam-list-skeleton>
+
+  <p class="plp-inline-state plp-inline-state--warning" *ngIf="hasError && !isLoading">
+    {{ errorMessage }}
+  </p>
+
+  <section class="admin-table" *ngIf="!isLoading && !hasError">
+    <article
+      class="admin-table__row"
+      *ngFor="let role of roles; trackBy: trackByRoleId"
+    >
+      <div>
+        <h2>{{ role.name }} <span class="muted">({{ role.role }})</span></h2>
+        <p>{{ role.description || 'بدون وصف' }}</p>
+      </div>
+      <div>
+        <span class="pill">{{ role.assignedUsers }} مستخدم</span>
+      </div>
+      <div class="roles-meta">
+        <span>المستخدمين: {{ role.assignedUsers }}</span>
+        <span>الحالة: {{ roleTypeLabel(role) }}</span>
+      </div>
+      <p class="role-perms">صلاحيات: {{ role.permissions.join(', ') || 'غير محددة' }}</p>
+      <div class="role-actions" *plpCan="permissions.roles.manage">
+        <button pButton pRipple class="p-button-sm p-button-text" type="button" (click)="editRole(role)">تعديل</button>
+        <button pButton pRipple class="p-button-sm p-button-danger p-button-text" type="button" [disabled]="role.isSystemRole || role.assignedUsers > 0 || isSaving" (click)="deleteRole(role)">حذف</button>
+      </div>
+    </article>
+
+    <p class="plp-inline-state" *ngIf="roles.length === 0">
+      لا توجد أدوار ظاهرة.
+    </p>
+  </section>
+
+  <section class="role-editor" *plpCan="permissions.roles.manage">
+    <h2>{{ selectedRole ? 'تعديل الدور' : 'إنشاء دور' }}</h2>
+    <p *ngIf="selectedRole?.isSystemRole" class="plp-inline-state">هذا دور نظامي وتتم إدارة صلاحياته بواسطة المنتج.</p>
+    <label>اسم الدور <input type="text" [(ngModel)]="draft.name" [disabled]="selectedRole?.isSystemRole === true" /></label>
+    <label>الوصف <input type="text" [(ngModel)]="draft.description" [maxlength]="maxDescriptionLength" [disabled]="selectedRole?.isSystemRole === true" /></label>
+    <small class="description-count">{{ (draft.description || '').length }} / {{ maxDescriptionLength }}</small>
+    <label class="toggle"><input type="checkbox" [(ngModel)]="draft.isActive" [disabled]="selectedRole?.isSystemRole === true" /> نشط</label>
+    <button pButton pRipple class="p-button-sm" type="button" [disabled]="isSaving || selectedRole?.isSystemRole === true" (click)="saveRole()">{{ isSaving ? 'جارٍ الحفظ…' : 'حفظ بيانات الدور' }}</button>
+
+    <ng-container *plpCan="permissions.permissions.assign">
+      <h3>الصلاحيات حسب القدرة</h3>
+      <plp-permission-selection [groups]="catalog" [selected]="selectedPermissions" [disabled]="!selectedRole || selectedRole.isSystemRole || isSaving" (selectedChange)="selectedPermissions = $event"></plp-permission-selection>
+      <button pButton pRipple class="p-button-sm p-button-outlined" type="button" [disabled]="!selectedRole || selectedRole.isSystemRole || isSaving" (click)="savePermissions()">حفظ مجموعة الصلاحيات</button>
+    </ng-container>
+  </section>
+</section>

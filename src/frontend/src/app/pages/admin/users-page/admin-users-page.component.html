@@ -1,0 +1,60 @@
+<section class="page-frame">
+  <header class="page-header">
+    <h1>إدارة المستخدمين</h1>
+    <p>عرض المستخدمين، الحالة، والأدوار الأساسية.</p>
+  </header>
+
+  <button
+    pButton
+    pRipple
+    class="p-button-sm"
+    type="button"
+    icon="pi pi-refresh"
+    [disabled]="isLoading || isRefreshing"
+    (click)="loadUsers(false)"
+  >تحديث</button>
+
+  <input
+    class="admin-search"
+    type="search"
+    [(ngModel)]="searchTerm"
+    placeholder="ابحث بالاسم أو البريد أو الدور…"
+    aria-label="بحث في المستخدمين"
+  />
+
+  <plp-iam-list-skeleton *ngIf="isLoading" [rows]="5"></plp-iam-list-skeleton>
+
+  <p class="plp-inline-state plp-inline-state--warning" *ngIf="hasError && !isLoading">
+    {{ errorMessage }}
+  </p>
+
+  <div class="admin-table" *ngIf="!isLoading && !hasError">
+    <article
+      class="admin-table__row"
+      *ngFor="let user of filteredUsers; trackBy: trackByUserId"
+      (click)="openAuthorization(user.id)"
+    >
+      <div>
+        <h2>{{ user.fullName }}</h2>
+        <p>{{ user.email }}</p>
+      </div>
+      <div>
+        <span class="pill">{{ user.isActive ? 'مفعل' : 'معطل' }}</span>
+      </div>
+      <div class="roles">{{ user.roles.join('، ') || 'بدون أدوار' }}</div>
+      <button
+        *plpCan="permissions.users.manage"
+        pButton
+        pRipple
+        class="p-button-sm p-button-outlined"
+        type="button"
+        [disabled]="savingUserId === user.id"
+        (click)="toggleStatus(user, $event)"
+      >{{ savingUserId === user.id ? 'جارٍ الحفظ…' : (user.isActive ? 'تعطيل' : 'تفعيل') }}</button>
+    </article>
+
+    <p class="plp-inline-state" *ngIf="filteredUsers.length === 0">
+      لا يوجد مستخدمون لعرضهم.
+    </p>
+  </div>
+</section>

@@ -1,0 +1,11 @@
+.plp-iam-skeleton { display: grid; gap: var(--plp-spacing-1); }
+.plp-iam-skeleton__row { display: grid; grid-template-columns: 2.25rem minmax(0, 1fr) 4.5rem; align-items: center; gap: .75rem; min-height: 4.75rem; padding: .75rem; border: 1px solid var(--plp-border-color, #d7dae3); border-radius: .6rem; background: var(--plp-surface-2, #fff); }
+.plp-iam-skeleton--dense .plp-iam-skeleton__row { min-height: 3.6rem; }
+.plp-iam-skeleton__avatar, .plp-iam-skeleton__badge, .plp-iam-skeleton__line { display:block; border-radius: 999px; background: var(--plp-color-muted-soft, #e2e8f0); animation: plp-iam-shimmer 1.35s ease-in-out infinite; }
+.plp-iam-skeleton__avatar { width: 2.25rem; height: 2.25rem; }
+.plp-iam-skeleton__details { display:grid; gap:.5rem; }
+.plp-iam-skeleton__line--title { width: 42%; height:.72rem; }
+.plp-iam-skeleton__line--body { width: 75%; height:.56rem; }
+.plp-iam-skeleton__badge { width: 4.25rem; height: 1.35rem; }
+@keyframes plp-iam-shimmer { 0%,100% { opacity:.58; } 50% { opacity:1; } }
+@media (prefers-reduced-motion: reduce) { .plp-iam-skeleton__avatar, .plp-iam-skeleton__badge, .plp-iam-skeleton__line { animation:none; } }

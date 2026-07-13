@@ -1,14 +1,10 @@
 import { Component, HostListener, OnDestroy, OnInit } from '@angular/core';
 import { ActivatedRoute, ActivationEnd, NavigationEnd, Router } from '@angular/router';
 import { MenuItem } from 'primeng/api';
-import { Subject, filter, takeUntil } from 'rxjs';
+import { Subject, filter, takeUntil, map } from 'rxjs';
+import { APP_NAVIGATION_ITEMS, AppNavigationItem } from '../../core/config/navigation.config';
+import { PermissionHydrationState, PermissionService } from '../../core/services/permission.service';
 import { AuthService } from '../../core/services/auth.service';
-
-interface AppNavigationItem {
-  label: string;
-  path: string;
-  icon: string;
-}
 
 @Component({
   selector: 'app-shell',
@@ -21,26 +17,38 @@ export class AppShellComponent implements OnInit, OnDestroy {
   breadcrumbItems: MenuItem[] = [];
   notificationCount = 3;
 
-  navigationItems: AppNavigationItem[] = [
-    { label: 'لوحة التحكم', path: '/dashboard', icon: 'pi-home' },
-    { label: 'خريطة المصنع', path: '/factory-map', icon: 'pi-map' },
-    { label: 'خطوط الإنتاج', path: '/production-lines', icon: 'pi-sitemap' },
-    { label: 'المراحل', path: '/stages', icon: 'pi-list' },
-    { label: 'العاملون', path: '/workers', icon: 'pi-users' },
-    { label: 'التعيينات', path: '/assignments', icon: 'pi-file-check' },
-    { label: 'الإشعارات', path: '/notifications', icon: 'pi-bell' },
-  ];
+  navigationItems: AppNavigationItem[] = [];
+  permissionHydrationState: PermissionHydrationState = 'idle';
 
   private destroy$ = new Subject<void>();
 
   constructor(
     private readonly router: Router,
     private readonly activatedRoute: ActivatedRoute,
-    private readonly authService: AuthService
+    private readonly authService: AuthService,
+    private readonly permissionService: PermissionService
   ) {}
 
   ngOnInit(): void {
     this.checkViewport();
+
+    this.permissionService.hydrationState$
+      .pipe(takeUntil(this.destroy$))
+      .subscribe((state) => {
+        this.permissionHydrationState = state;
+      });
+
+    this.permissionService.permissions$
+      .pipe(
+        map(() => this.permissionService.filterNavigation(APP_NAVIGATION_ITEMS)),
+        takeUntil(this.destroy$)
+      )
+      .subscribe((items) => {
+        this.navigationItems = items;
+      });
+
+    this.permissionService.ensureHydrated().subscribe();
+
     this.router.events
       .pipe(
         filter(event => event instanceof NavigationEnd || event instanceof ActivationEnd),
@@ -49,6 +57,7 @@ export class AppShellComponent implements OnInit, OnDestroy {
       .subscribe(() => {
         this.breadcrumbItems = this.buildBreadcrumbs(this.activatedRoute.root.snapshot);
       });
+
     this.breadcrumbItems = this.buildBreadcrumbs(this.activatedRoute.root.snapshot);
   }
 
@@ -80,6 +89,14 @@ export class AppShellComponent implements OnInit, OnDestroy {
   logout(): void {
     this.authService.logout();
     this.router.navigateByUrl('/login');
+  }
+
+  get isNavigationLoading(): boolean {
+    return this.permissionHydrationState === 'loading';
+  }
+
+  get showNavigation(): boolean {
+    return this.permissionHydrationState !== 'loading';
   }
 
   private buildBreadcrumbs(routeSnapshot: any): MenuItem[] {

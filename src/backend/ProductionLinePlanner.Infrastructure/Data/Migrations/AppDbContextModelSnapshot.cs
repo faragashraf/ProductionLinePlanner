@@ -50,7 +50,6 @@ namespace ProductionLinePlanner.Infrastructure.Data.Migrations
                         .HasColumnType("nvarchar(100)");
 
                     b.Property<string>("Role")
-                        .IsRequired()
                         .HasMaxLength(60)
                         .HasColumnType("nvarchar(60)");
 
@@ -59,8 +58,12 @@ namespace ProductionLinePlanner.Infrastructure.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("Role")
+                    b.HasIndex("Name")
                         .IsUnique();
+
+                    b.HasIndex("Role")
+                        .IsUnique()
+                        .HasFilter("[Role] IS NOT NULL");
 
                     b.ToTable("AppRoles", (string)null);
                 });

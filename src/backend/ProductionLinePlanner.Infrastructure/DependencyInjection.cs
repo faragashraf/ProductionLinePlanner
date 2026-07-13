@@ -63,6 +63,8 @@ public static class DependencyInjection
         services.AddScoped<INotificationEngine, NotificationEngine>();
         services.AddScoped<IAuditEngine, AuditEngine>();
         services.AddScoped<IPermissionService, PermissionService>();
+        services.AddScoped<IIamDelegationPolicy, IamDelegationPolicy>();
+        services.AddScoped<IIamAuthorizationService, IamAuthorizationService>();
         services.AddScoped<IRolePermissionSeedService, PermissionSeedService>();
 
         return services;

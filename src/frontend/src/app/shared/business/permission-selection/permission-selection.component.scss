@@ -1,0 +1,7 @@
+.permission-selection { display:grid; gap:.75rem; }
+.permission-selection__group { border:1px solid var(--plp-border-color, #d7dae3); border-radius:.6rem; padding:.75rem; }
+.permission-selection__group h4 { margin:0 0 .5rem; }
+.permission-selection__item { display:grid; grid-template-columns:auto minmax(0,1fr) auto; gap:.55rem; align-items:start; padding:.45rem 0; cursor:pointer; border-top:1px dashed color-mix(in srgb, currentColor 12%, transparent); }
+.permission-selection__item:first-of-type { border-top:0; }
+.permission-selection__item small { display:block; margin-top:.15rem; color:#64748b; }
+.permission-selection__item em { font-style:normal; color:#b91c1c; font-size:.78rem; }

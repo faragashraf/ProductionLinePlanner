@@ -13,6 +13,7 @@ import { WorkersPageComponent } from './pages/workers-page/workers-page.componen
 import { AssignmentsPageComponent } from './pages/assignments-page/assignments-page.component';
 import { NotificationsPageComponent } from './pages/notifications-page/notifications-page.component';
 import { LoginPageComponent } from './pages/login-page/login-page.component';
+import { AccessDeniedPageComponent } from './pages/access-denied-page/access-denied-page.component';
 import { AppShellComponent } from './layout/app-shell/app-shell.component';
 import { SidebarModule } from 'primeng/sidebar';
 import { BreadcrumbModule } from 'primeng/breadcrumb';
@@ -29,6 +30,7 @@ import { AuthTokenInterceptor } from './core/interceptors/auth-token.interceptor
   declarations: [
     AppComponent,
     DashboardPageComponent,
+    AccessDeniedPageComponent,
     FactoryMapPageComponent,
     ProductionLinesPageComponent,
     StagesPageComponent,

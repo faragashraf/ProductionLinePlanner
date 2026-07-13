@@ -20,6 +20,9 @@ import { SubStageCardComponent } from './business/sub-stage-card/sub-stage-card.
 import { WorkerCardComponent } from './business/worker-card/worker-card.component';
 import { AssignmentCardComponent } from './business/assignment-card/assignment-card.component';
 import { NotificationCardComponent } from './business/notification-card/notification-card.component';
+import { PermissionDirective } from '../core/directives/permission.directive';
+import { IamListSkeletonComponent } from './ui/iam-list-skeleton/iam-list-skeleton.component';
+import { PermissionSelectionComponent } from './business/permission-selection/permission-selection.component';
 
 @NgModule({
   declarations: [
@@ -42,7 +45,10 @@ import { NotificationCardComponent } from './business/notification-card/notifica
     SubStageCardComponent,
     WorkerCardComponent,
     AssignmentCardComponent,
-    NotificationCardComponent
+    NotificationCardComponent,
+    PermissionDirective,
+    IamListSkeletonComponent,
+    PermissionSelectionComponent
   ],
   imports: [CommonModule],
   exports: [
@@ -65,7 +71,10 @@ import { NotificationCardComponent } from './business/notification-card/notifica
     SubStageCardComponent,
     WorkerCardComponent,
     AssignmentCardComponent,
-    NotificationCardComponent
+    NotificationCardComponent,
+    PermissionDirective,
+    IamListSkeletonComponent,
+    PermissionSelectionComponent
   ]
 })
 export class SharedModule {}
