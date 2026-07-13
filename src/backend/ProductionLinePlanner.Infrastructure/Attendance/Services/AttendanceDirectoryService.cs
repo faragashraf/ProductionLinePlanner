@@ -4,12 +4,13 @@ using ProductionLinePlanner.Application.Abstractions;
 using ProductionLinePlanner.Application.Common;
 using ProductionLinePlanner.Infrastructure.Attendance;
 using ProductionLinePlanner.Infrastructure.Attendance.Entities;
+using Microsoft.Extensions.Options;
 
 namespace ProductionLinePlanner.Infrastructure.Attendance.Services;
 
 public sealed class AttendanceDirectoryService(
     AttendanceDbContext attendanceDbContext,
-    AttendanceSourceOptions sourceOptions) : IAttendanceEmployeeReader, IAttendanceEmployeeWriter, IAttendanceDepartmentReader, IAttendanceDepartmentWriter
+    IOptions<AttendanceSourceOptions> sourceOptions) : IAttendanceEmployeeReader, IAttendanceEmployeeWriter, IAttendanceDepartmentReader, IAttendanceDepartmentWriter
 {
     public async Task<Result<AttendanceEmployeeRecord?>> GetByAttendanceUserIdAsync(
         string attendanceUserId,
@@ -216,7 +217,7 @@ public sealed class AttendanceDirectoryService(
         return int.TryParse(attendanceUserId, out userId);
     }
 
-    private string GetUserInfoTableName() => sourceOptions.UserInfoTable ?? "USERINFO";
+    private string GetUserInfoTableName() => sourceOptions.Value.UserInfoTable ?? "USERINFO";
 
-    private string GetDepartmentsTableName() => sourceOptions.DepartmentsTable ?? "DEPARTMENTS";
+    private string GetDepartmentsTableName() => sourceOptions.Value.DepartmentsTable ?? "DEPARTMENTS";
 }
