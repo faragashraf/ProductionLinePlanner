@@ -20,11 +20,14 @@ import { BreadcrumbModule } from 'primeng/breadcrumb';
 import { CardModule } from 'primeng/card';
 import { BadgeModule } from 'primeng/badge';
 import { ButtonModule } from 'primeng/button';
+import { TableModule } from 'primeng/table';
 import { SharedModule } from './shared/shared.module';
 import { FactoryRendererComponent } from './pages/factory-map-page/renderers/factory-renderer/factory-renderer.component';
 import { LineRendererComponent } from './pages/factory-map-page/renderers/line-renderer/line-renderer.component';
 import { StageRendererComponent } from './pages/factory-map-page/renderers/stage-renderer/stage-renderer.component';
 import { AuthTokenInterceptor } from './core/interceptors/auth-token.interceptor';
+import { ManufacturingWorkspaceLayoutComponent } from './pages/manufacturing-workspace/manufacturing-workspace-layout.component';
+import { ManufacturingPlaceholderPageComponent } from './pages/manufacturing-workspace/manufacturing-placeholder-page.component';
 
 @NgModule({
   declarations: [
@@ -39,6 +42,8 @@ import { AuthTokenInterceptor } from './core/interceptors/auth-token.interceptor
     NotificationsPageComponent,
     LoginPageComponent,
     AppShellComponent,
+    ManufacturingWorkspaceLayoutComponent,
+    ManufacturingPlaceholderPageComponent,
     FactoryRendererComponent,
     LineRendererComponent,
     StageRendererComponent
@@ -53,6 +58,7 @@ import { AuthTokenInterceptor } from './core/interceptors/auth-token.interceptor
     CardModule,
     BadgeModule,
     ButtonModule,
+    TableModule,
     SharedModule
   ],
   providers: [

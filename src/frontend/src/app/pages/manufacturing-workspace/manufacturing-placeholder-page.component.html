@@ -1,0 +1,48 @@
+<section class="manufacturing-page" [attr.aria-busy]="isLoading">
+  <ng-container *ngIf="isLoading; else content">
+    <div class="manufacturing-page__skeleton-grid" role="status" aria-label="جارٍ تحميل مساحة التصنيع">
+      <plp-loading-skeleton
+        *ngFor="let placeholder of [1, 2, 3]"
+        [lines]="3"
+        [showAvatar]="false"
+        [cardLike]="true"
+      ></plp-loading-skeleton>
+    </div>
+  </ng-container>
+
+  <ng-template #content>
+    <header class="manufacturing-page__heading">
+      <div class="manufacturing-page__icon"><i class="pi" [ngClass]="item.icon"></i></div>
+      <div>
+        <span class="manufacturing-page__eyebrow">Manufacturing Foundation</span>
+        <h2>{{ item.label }}</h2>
+        <p>{{ item.description }}</p>
+      </div>
+    </header>
+
+    <section *ngIf="isDashboard; else placeholder" class="manufacturing-page__dashboard" aria-label="مجالات بيانات التصنيع">
+      <p-card *ngFor="let card of [item]" styleClass="manufacturing-page__dashboard-card">
+        <div class="manufacturing-page__dashboard-card-icon"><i class="pi" [ngClass]="card.icon"></i></div>
+        <h3>لوحة بيانات التصنيع</h3>
+        <p>المسارات الأساسية جاهزة ومحمية بالصلاحيات. ستظهر بيانات كل مجال عند تنفيذ قدرات الـCRUD لاحقًا.</p>
+      </p-card>
+      <p-card styleClass="manufacturing-page__dashboard-card">
+        <div class="manufacturing-page__dashboard-card-icon"><i class="pi pi-sitemap"></i></div>
+        <h3>هيكل قابل للتوسع</h3>
+        <p>الموظفون والأقسام وبنية المصنع والمراحل والنماذج والتعويضات تتشارك نفس الـWorkspace.</p>
+      </p-card>
+      <p-card styleClass="manufacturing-page__dashboard-card">
+        <div class="manufacturing-page__dashboard-card-icon"><i class="pi pi-lock"></i></div>
+        <h3>وصول متحكم به</h3>
+        <p>إظهار التنقل وحماية المسارات مبنيان على كتالوج الصلاحيات الحالي، وليس على أسماء الأدوار.</p>
+      </p-card>
+    </section>
+
+    <ng-template #placeholder>
+      <p-card styleClass="manufacturing-page__placeholder-card">
+        <plp-empty-state></plp-empty-state>
+        <p class="manufacturing-page__placeholder-note">هذه صفحة تأسيسية فقط. لا توجد نماذج أو عمليات تعديل أو بيانات تجريبية ضمن هذا النطاق.</p>
+      </p-card>
+    </ng-template>
+  </ng-template>
+</section>

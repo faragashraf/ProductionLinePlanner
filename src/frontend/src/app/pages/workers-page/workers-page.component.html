@@ -1,26 +1,144 @@
-<section class="page-frame">
-  <header class="page-header">
-    <h1>العمال</h1>
-  </header>
-  <p class="plp-inline-state plp-inline-state--loading" *ngIf="isLoading">
-    <i class="pi pi-spin pi-spinner" aria-hidden="true"></i>
-    جارٍ تحميل بيانات العمال…
-  </p>
-  <p
-    class="plp-inline-state"
-    [class.plp-inline-state--warning]="showFallbackWarning && !isBackendDataIncomplete"
-    [class.plp-inline-state--incomplete]="isBackendDataIncomplete && !isLoading"
-    *ngIf="showFallbackWarning && !isLoading"
-  >
-    {{ fallbackWarningMessage }}
-  </p>
-  <div class="worker-list" *ngIf="!isLoading">
-    <article class="worker-item" *ngFor="let worker of workers; trackBy: trackByCode">
-      <div>
-        <h2>{{ worker.fullName }}</h2>
-        <p>كود العامل: {{ worker.code }}</p>
-      </div>
-      <span class="ghost-pill">{{ worker.state }}</span>
-    </article>
+<section class="page-frame workers-page">
+  <plp-page-header title="العاملون" description="عرض وعرض تفاصيل بيانات العاملين مع بحث فوري." [compact]="true">
+    <div header-actions>
+      <button
+        pButton
+        pRipple
+        class="p-button-sm p-button-outlined"
+        type="button"
+        icon="pi pi-refresh"
+        label="تحديث"
+        [disabled]="isLoading"
+        (click)="onRefresh()"
+        aria-label="تحديث قائمة العاملين"
+      ></button>
+    </div>
+  </plp-page-header>
+
+  <div class="workers-toolbar">
+    <label class="sr-only" for="workersSearch">بحث</label>
+    <input
+      id="workersSearch"
+      class="workers-search"
+      type="search"
+      [value]="searchTerm"
+      placeholder="ابحث باسم العامل أو الكود"
+      aria-label="بحث في العاملين"
+      (input)="onSearch($event)"
+    />
   </div>
+
+  <plp-loading-skeleton *ngIf="isLoading && !hasLoadedOnce" [lines]="7" [showAvatar]="false"></plp-loading-skeleton>
+
+  <plp-error-state
+    *ngIf="hasAnyError && hasLoadedOnce && !isLoading"
+    [title]="'تعذر تحميل قائمة العاملين'"
+    [description]="errorMessage"
+    [actionText]="errorRetryText"
+    (action)="onRefresh()"
+  ></plp-error-state>
+
+  <section class="workers-empty" *ngIf="isEmpty && hasLoadedOnce && !hasAnyError && !isLoading">
+    <plp-empty-state
+      title="لا يوجد موظفون"
+      description="لا توجد بيانات عاملين حالياً."
+      actionText="تحديث"
+      (action)="onRefresh()"
+    ></plp-empty-state>
+  </section>
+
+  <section class="workers-empty" *ngIf="isSearchableEmpty && !hasAnyError && !isLoading">
+    <plp-empty-state
+      title="لا توجد نتائج"
+      [description]="'لا توجد نتائج مطابقة لكلمة البحث: ' + searchTerm"
+      actionText="مسح البحث"
+      (action)="onClearSearch()"
+    ></plp-empty-state>
+  </section>
+
+  <section class="workers-table-shell" *ngIf="!isLoading && !hasAnyError && workers.length > 0">
+    <p-table
+      [value]="workers"
+      dataKey="code"
+      [rows]="rows"
+      [paginator]="isServerSidePagination"
+      [totalRecords]="totalRecords"
+      [first]="first"
+      [lazy]="isServerSidePagination"
+      [loading]="isTableLoading"
+      (onLazyLoad)="onLazyLoad($event)"
+      responsiveLayout="scroll"
+      [scrollHeight]="'auto'"
+    >
+      <ng-template pTemplate="header">
+        <tr>
+          <th>اسم العامل</th>
+          <th>الكود</th>
+          <th>القسم</th>
+          <th>الحالة</th>
+          <th>التواصل</th>
+          <th>الإجراءات</th>
+        </tr>
+      </ng-template>
+      <ng-template pTemplate="body" let-worker>
+        <tr>
+          <td>{{ worker.fullName }}</td>
+          <td>{{ worker.code }}</td>
+          <td>{{ worker.department || '-' }}</td>
+          <td>
+            <span class="workers-state">{{ worker.state }}</span>
+          </td>
+          <td>
+            <div class="workers-contact">
+              <span *ngIf="worker.phone">{{ worker.phone }}</span>
+              <span *ngIf="!worker.phone && worker.email">{{ worker.email }}</span>
+              <span *ngIf="!worker.phone && !worker.email">-</span>
+            </div>
+          </td>
+          <td>
+            <button
+              pButton
+              pRipple
+              class="p-button-sm p-button-text"
+              type="button"
+              icon="pi pi-eye"
+              label="عرض التفاصيل"
+              (click)="openWorkerDetails(worker)"
+              *plpCan="permissions.workers.view"
+            ></button>
+          </td>
+        </tr>
+      </ng-template>
+      <ng-template pTemplate="emptymessage">
+        <tr>
+          <td colspan="6">لا يوجد عناصر لعرضها.</td>
+        </tr>
+      </ng-template>
+    </p-table>
+  </section>
+
+  <section class="workers-details" *ngIf="selectedWorker && !isLoading">
+    <header class="workers-details__header">
+      <h2>تفاصيل العامل</h2>
+      <button
+        pButton
+        pRipple
+        class="p-button-sm p-button-text"
+        type="button"
+        icon="pi pi-times"
+        label="إغلاق"
+        (click)="closeWorkerDetails()"
+        aria-label="إغلاق تفاصيل العامل"
+      ></button>
+    </header>
+
+    <div class="workers-details__content">
+      <p><strong>الاسم:</strong> {{ selectedWorker.fullName }}</p>
+      <p><strong>الكود:</strong> {{ selectedWorker.code }}</p>
+      <p><strong>الحالة:</strong> {{ selectedWorker.state }}</p>
+      <p><strong>القسم:</strong> {{ selectedWorker.department || '-' }}</p>
+      <p><strong>الهاتف:</strong> {{ selectedWorker.phone || '-' }}</p>
+      <p><strong>البريد الإلكتروني:</strong> {{ selectedWorker.email || '-' }}</p>
+    </div>
+  </section>
 </section>

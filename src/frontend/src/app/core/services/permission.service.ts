@@ -24,6 +24,7 @@ export class PermissionService {
   private readonly hydrationStateSubject = new BehaviorSubject<PermissionHydrationState>('idle');
   private readonly hasHydratedSubject = new BehaviorSubject<boolean>(false);
   private hydrationRequest: Observable<string[]> | null = null;
+  private hydrationEpoch = 0;
 
   readonly permissions$ = this.permissionsSubject.asObservable();
   readonly hydrationState$ = this.hydrationStateSubject.asObservable();
@@ -37,12 +38,19 @@ export class PermissionService {
         return;
       }
 
+      if (!this.authService.isAuthenticated()) {
+        this.clear();
+        return;
+      }
+
       const permissions = user.permissions ?? [];
       const normalizedPermissions = this.normalizePermissions(permissions);
       this.permissionsSubject.next(normalizedPermissions);
       this.permissionsSignal.set(normalizedPermissions);
-      // Cached permissions are only UX hints. The current token must be
-      // hydrated from /api/auth/me before protected content is evaluated.
+      // Cached permissions are only UX hints.
+      if (!this.hydrationRequest && !this.hasHydratedSubject.value) {
+        this.hydrationStateSubject.next('idle');
+      }
     });
   }
 
@@ -62,6 +70,10 @@ export class PermissionService {
 
   get hydrationState(): PermissionHydrationState {
     return this.hydrationStateSubject.value;
+  }
+
+  get hasHydrated(): boolean {
+    return this.hasHydratedSubject.value;
   }
 
   hasAny(permissions: string[] | string): boolean {
@@ -108,8 +120,7 @@ export class PermissionService {
     }
 
     if (!this.authService.isAuthenticated()) {
-      this.hydrationStateSubject.next('ready');
-      this.hasHydratedSubject.next(true);
+      this.clear();
       return of([]);
     }
 
@@ -118,17 +129,28 @@ export class PermissionService {
     }
 
     this.hydrationStateSubject.next('loading');
+    const requestEpoch = ++this.hydrationEpoch;
     this.hydrationRequest = this.authService.getCurrentUser().pipe(
       map((user) => this.normalizePermissions(user.permissions)),
       tap((permissions) => {
+        if (requestEpoch !== this.hydrationEpoch) {
+          return;
+        }
+
         this.permissionsSubject.next(permissions);
         this.permissionsSignal.set(permissions);
         this.hydrationStateSubject.next('ready');
         this.hasHydratedSubject.next(true);
       }),
       catchError((error) => {
+        if (requestEpoch !== this.hydrationEpoch) {
+          throw error;
+        }
+
         this.hydrationStateSubject.next('error');
         this.hasHydratedSubject.next(false);
+        this.permissionsSubject.next([]);
+        this.permissionsSignal.set([]);
         throw error;
       }),
       finalize(() => {
@@ -141,6 +163,7 @@ export class PermissionService {
   }
 
   clear(): void {
+    this.hydrationEpoch += 1;
     this.permissionsSubject.next([]);
     this.permissionsSignal.set([]);
     this.hydrationStateSubject.next('idle');
@@ -155,10 +178,26 @@ export class PermissionService {
   filterNavigation<T extends PermissionRequirementDescriptor & { children?: T[]; order: number }>(items: T[]): T[] {
     return items
       .map((item) => {
-        const children = item.children ? this.filterNavigation(item.children) : undefined;
-        return children ? { ...item, children } : item;
+        const hasChildren = Array.isArray(item.children) && item.children.length > 0;
+        const filteredChildren = this.filterNavigation(item.children ?? []);
+        const hasPermittedChildren = filteredChildren.length > 0;
+        const parentHasPermission = this.hasAccess(item);
+
+        if (!parentHasPermission) {
+          return undefined;
+        }
+
+        if (hasChildren && !hasPermittedChildren && !item.showWithoutChildren) {
+          return undefined;
+        }
+
+        if (hasChildren) {
+          return { ...item, children: filteredChildren };
+        }
+
+        return { ...item };
       })
-      .filter((item) => item.children ? item.children.length > 0 : this.hasAccess(item))
+      .filter((item): item is T => Boolean(item))
       .sort((left, right) => left.order - right.order);
   }
 

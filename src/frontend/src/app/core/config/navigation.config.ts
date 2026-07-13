@@ -1,5 +1,6 @@
 import { PERMISSIONS } from './permission-identifiers';
 import { PermissionRequirementDescriptor } from '../authorization/permission-requirement';
+import { MANUFACTURING_WORKSPACE_VIEW_PERMISSIONS } from './manufacturing-workspace.config';
 
 export interface AppNavigationItem extends PermissionRequirementDescriptor {
   id: string;
@@ -13,6 +14,15 @@ export interface AppNavigationItem extends PermissionRequirementDescriptor {
 
 export const APP_NAVIGATION_ITEMS: AppNavigationItem[] = [
   { id: 'dashboard', label: 'لوحة التحكم', route: '/dashboard', icon: 'pi-home', order: 10, group: 'workspace' },
+  {
+    id: 'manufacturing-workspace',
+    label: 'مساحة التصنيع',
+    route: '/manufacturing/dashboard',
+    icon: 'pi-briefcase',
+    order: 15,
+    group: 'workspace',
+    requireAny: [...MANUFACTURING_WORKSPACE_VIEW_PERMISSIONS]
+  },
   { id: 'factory-map', label: 'خريطة المصنع', route: '/factory-map', icon: 'pi-map', order: 20, group: 'workspace', permission: PERMISSIONS.factoryStructure.view },
   { id: 'production-lines', label: 'خطوط الإنتاج', route: '/production-lines', icon: 'pi-sitemap', order: 30, group: 'workspace', permission: PERMISSIONS.factoryStructure.view },
   { id: 'stages', label: 'المراحل', route: '/stages', icon: 'pi-list', order: 40, group: 'workspace', permission: PERMISSIONS.stages.view },

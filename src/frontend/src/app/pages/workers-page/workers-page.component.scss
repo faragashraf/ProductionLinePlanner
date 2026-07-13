@@ -1,30 +1,100 @@
-.worker-list {
+.workers-page {
   display: grid;
-  gap: 0.65rem;
+  gap: var(--plp-spacing-3);
 }
 
-.worker-item {
+.workers-toolbar {
+  margin-top: calc(var(--plp-spacing-1) * -1);
+}
+
+.workers-search {
+  width: 100%;
+  max-width: 22rem;
+  min-height: 2.4rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--plp-color-border);
+  border-radius: var(--plp-radius-md);
+  background: var(--plp-color-surface);
+  color: var(--plp-color-text);
+  font-size: var(--plp-font-size-sm);
+}
+
+.workers-table-shell,
+.workers-empty {
+  width: 100%;
+}
+
+.workers-table-shell :host {
+  width: 100%;
+}
+
+.workers-state {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 1.75rem;
+  min-width: 2.75rem;
+  padding: 0 0.55rem;
+  border-radius: var(--plp-radius-pill);
+  border: 1px solid color-mix(in oklab, var(--plp-color-border) 70%, transparent);
+  background: color-mix(in oklab, var(--plp-color-surface-soft) 75%, var(--plp-color-surface));
+}
+
+.workers-contact {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.workers-details {
+  border: 1px solid var(--plp-color-border);
+  border-radius: var(--plp-radius-lg);
+  background: var(--plp-color-surface);
+  padding: var(--plp-spacing-3);
+  display: grid;
+  gap: var(--plp-spacing-2);
+}
+
+.workers-details__header {
   display: flex;
   justify-content: space-between;
-  gap: 0.65rem;
   align-items: center;
-  border: 1px solid #dbe4fc;
-  border-radius: 0.85rem;
-  padding: 0.8rem;
-  background: #fff;
+  gap: var(--plp-spacing-2);
 }
 
-.worker-item h2 {
+.workers-details h2 {
   margin: 0;
+  font-size: var(--plp-font-size-lg);
 }
 
-.worker-item p {
-  margin: 0.2rem 0 0;
+.workers-details__content {
+  display: grid;
+  gap: var(--plp-spacing-2);
 }
 
-.ghost-pill {
-  border: 1px solid #9caeff;
-  border-radius: 999px;
-  padding: 0.3rem 0.6rem;
+.workers-details p {
+  margin: 0;
+  color: var(--plp-color-text-subtle);
+}
+
+.workers-details strong {
+  color: var(--plp-color-text);
+}
+
+.sr-only {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  border: 0;
   white-space: nowrap;
+}
+
+@media (max-width: 767px) {
+  .workers-search {
+    max-width: none;
+  }
 }

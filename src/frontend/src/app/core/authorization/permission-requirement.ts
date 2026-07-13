@@ -2,6 +2,7 @@ export interface PermissionRequirementDescriptor {
   permission?: string;
   requireAny?: string | string[];
   requireAll?: string | string[];
+  showWithoutChildren?: boolean;
 }
 
 export interface ParsedPermissionRequirement {
@@ -15,24 +16,31 @@ export function parsePermissionRequirement(data: Record<string, unknown> | undef
     return { hasMetadata: false, isMalformed: false };
   }
 
-  const rawValues = [data['permission'], data['requireAny'], data['requireAll']];
-  const hasMetadata = rawValues.some((value) => value !== undefined);
-  if (!hasMetadata) {
-    return { hasMetadata: false, isMalformed: false };
+  const hasPermission = data['permission'] !== undefined;
+  const hasAny = data['requireAny'] !== undefined;
+  const hasAll = data['requireAll'] !== undefined;
+
+  const modeCount = Number(hasPermission) + Number(hasAny) + Number(hasAll);
+  if (modeCount === 0) {
+    return { hasMetadata: false, isMalformed: true };
   }
 
-  const single = normalizeSingle(data['permission']);
-  const any = normalizeList(data['requireAny']);
-  const all = normalizeList(data['requireAll']);
-  const malformed =
-    (data['permission'] !== undefined && !single) ||
-    (data['requireAny'] !== undefined && !any) ||
-    (data['requireAll'] !== undefined && !all) ||
-    [single, any, all].filter(Boolean).length !== 1;
+  const permission = hasPermission ? normalizeSingle(data['permission']) : undefined;
+  const requireAny = hasAny ? normalizeList(data['requireAny']) : undefined;
+  const requireAll = hasAll ? normalizeList(data['requireAll']) : undefined;
+
+  const malformed = modeCount !== 1 || (permission === undefined && requireAny === undefined && requireAll === undefined);
+  const requirement = malformed
+    ? undefined
+    : permission !== undefined
+      ? { permission }
+      : requireAny !== undefined
+        ? { requireAny }
+        : { requireAll };
 
   return malformed
     ? { hasMetadata: true, isMalformed: true }
-    : { hasMetadata: true, isMalformed: false, requirement: { permission: single, requireAny: any, requireAll: all } };
+    : { hasMetadata: true, isMalformed: false, requirement };
 }
 
 function normalizeSingle(value: unknown): string | undefined {

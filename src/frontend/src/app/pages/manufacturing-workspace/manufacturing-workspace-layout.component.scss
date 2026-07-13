@@ -1,0 +1,94 @@
+:host {
+  display: block;
+}
+
+.manufacturing-workspace {
+  display: grid;
+  gap: var(--plp-spacing-4);
+  width: 100%;
+}
+
+.manufacturing-workspace__header {
+  display: grid;
+  gap: var(--plp-spacing-3);
+  padding: var(--plp-spacing-5);
+  border: 1px solid var(--plp-color-border);
+  border-radius: var(--plp-radius-lg);
+  background:
+    linear-gradient(120deg, color-mix(in oklab, var(--plp-color-info-soft) 76%, var(--plp-color-surface)), var(--plp-color-surface));
+  box-shadow: var(--plp-elevation-1);
+}
+
+.manufacturing-workspace__eyebrow {
+  color: var(--plp-color-info-strong);
+  font-size: var(--plp-font-size-xs);
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.manufacturing-workspace h1,
+.manufacturing-workspace p {
+  margin: 0;
+}
+
+.manufacturing-workspace h1 {
+  margin-top: var(--plp-spacing-1);
+  font-size: clamp(var(--plp-font-size-xl), 4vw, 2rem);
+}
+
+.manufacturing-workspace p {
+  margin-top: var(--plp-spacing-2);
+  color: var(--plp-color-text-soft);
+}
+
+.manufacturing-workspace__status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--plp-spacing-2);
+  align-self: start;
+  padding: var(--plp-spacing-2) var(--plp-spacing-3);
+  border-radius: var(--plp-radius-pill);
+  background: var(--plp-color-surface);
+  color: var(--plp-color-info-strong);
+  font-size: var(--plp-font-size-xs);
+  font-weight: 700;
+}
+
+.manufacturing-workspace__navigation {
+  display: flex;
+  gap: var(--plp-spacing-2);
+  overflow-x: auto;
+  padding-bottom: var(--plp-spacing-1);
+  scrollbar-width: thin;
+}
+
+.manufacturing-workspace__nav-item {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--plp-spacing-2);
+  min-height: 2.75rem;
+  padding: 0 var(--plp-spacing-3);
+  border: 1px solid var(--plp-color-border);
+  border-radius: var(--plp-radius-md);
+  background: var(--plp-color-surface);
+  color: var(--plp-color-text-soft);
+  font-size: var(--plp-font-size-sm);
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.manufacturing-workspace__nav-item:hover,
+.manufacturing-workspace__nav-item--active {
+  border-color: var(--plp-color-info);
+  background: var(--plp-color-info);
+  color: #ffffff;
+}
+
+@media (min-width: 768px) {
+  .manufacturing-workspace__header {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+  }
+}
