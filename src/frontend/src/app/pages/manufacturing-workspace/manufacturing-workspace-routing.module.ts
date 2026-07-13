@@ -35,7 +35,13 @@ export const MANUFACTURING_WORKSPACE_ROUTES: Routes = [
     children: [
       { path: '', redirectTo: 'dashboard', pathMatch: 'full' },
       { path: 'dashboard', component: ManufacturingPlaceholderPageComponent, canMatch: [PermissionCanMatchGuard], canActivate: [PermissionCanActivateGuard], data: manufacturingRouteData(manufacturingDashboard) },
-      { path: 'employees', component: ManufacturingPlaceholderPageComponent, canMatch: [PermissionCanMatchGuard], canActivate: [PermissionCanActivateGuard], data: manufacturingRouteData(employees) },
+      {
+        path: 'employees',
+        loadChildren: () => import('../workers-page/workers-page.module').then((module) => module.WorkersPageModule),
+        canMatch: [PermissionCanMatchGuard],
+        canActivate: [PermissionCanActivateGuard],
+        data: manufacturingRouteData(employees)
+      },
       { path: 'departments', component: ManufacturingPlaceholderPageComponent, canMatch: [PermissionCanMatchGuard], canActivate: [PermissionCanActivateGuard], data: manufacturingRouteData(departments) },
       { path: 'factory-structure', component: ManufacturingPlaceholderPageComponent, canMatch: [PermissionCanMatchGuard], canActivate: [PermissionCanActivateGuard], data: manufacturingRouteData(factoryStructure) },
       { path: 'stages', component: ManufacturingMasterDataPageComponent, canMatch: [PermissionCanMatchGuard], canActivate: [PermissionCanActivateGuard], data: manufacturingRouteData(stages) },
