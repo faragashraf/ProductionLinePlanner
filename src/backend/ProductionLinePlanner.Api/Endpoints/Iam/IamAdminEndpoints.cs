@@ -563,15 +563,34 @@ adminApi.MapGet("/roles", async (
             role.Description,
             role.IsSystemRole,
             role.IsActive,
-            Permissions =
-                from rolePermission in dbContext.RolePermissions
-                join permission in dbContext.Permissions
-                    on rolePermission.PermissionId equals permission.Id
-                where rolePermission.AppRoleId == role.Id && permission.IsActive
-                select permission.Name,
             AssignedUsers = dbContext.AppUsers.Count(user => user.Roles.Any(r => r.Id == role.Id))
         })
         .ToArrayAsync(cancellationToken);
+
+    var rolePermissions = await dbContext.RolePermissions
+        .AsNoTracking()
+        .Join(
+            dbContext.Permissions.AsNoTracking(),
+            rolePermission => rolePermission.PermissionId,
+            permission => permission.Id,
+            (rolePermission, permission) => new
+            {
+                rolePermission.AppRoleId,
+                PermissionName = permission.Name,
+                permission.IsActive
+            })
+        .Where(item => item.IsActive)
+        .ToArrayAsync(cancellationToken);
+
+    var permissionsByRole = rolePermissions
+        .GroupBy(item => item.AppRoleId)
+        .ToDictionary(
+            group => group.Key,
+            group => group
+                .Select(item => item.PermissionName)
+                .Distinct(StringComparer.Ordinal)
+                .OrderBy(name => name, StringComparer.Ordinal)
+                .ToArray());
 
     var mappedRoles = roles
         .Select(role => new AdminRoleDto
@@ -582,7 +601,9 @@ adminApi.MapGet("/roles", async (
             Description = role.Description,
             IsSystemRole = role.IsSystemRole,
             IsActive = role.IsActive,
-            Permissions = role.Permissions.OrderBy(permission => permission).ToArray(),
+            Permissions = permissionsByRole.TryGetValue(role.Id, out var permissions)
+                ? permissions
+                : Array.Empty<string>(),
             AssignedUsers = role.AssignedUsers
         })
         .ToArray();
