@@ -38,6 +38,24 @@ public sealed class AttendanceDirectoryService(
             IsActive: true));
     }
 
+    public async Task<Result<AttendanceEmployeeRecord[]>> GetAllAsync(CancellationToken cancellationToken = default)
+    {
+        var sourceUsers = await attendanceDbContext.UserInfos
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
+
+        var records = sourceUsers
+            .Select(x => new AttendanceEmployeeRecord(
+                AttendanceUserId: x.UserId?.ToString(),
+                DepartmentId: x.DepartmentId,
+                BadgeNumber: x.BadgeNumber,
+                Name: x.Name,
+                IsActive: true))
+            .ToArray();
+
+        return Result<AttendanceEmployeeRecord[]>.Success(records);
+    }
+
     public async Task<Result<AttendanceDepartmentRecord[]>> GetAllDepartmentsAsync(CancellationToken cancellationToken = default)
     {
         var departments = await attendanceDbContext.Departments

@@ -16,9 +16,28 @@ public sealed class PermissionAuthorizationHandlerTests
     }
 
     [Fact]
+    public async Task Authenticated_user_with_workers_manage_permission_succeeds()
+    {
+        var context = await AuthorizeAsync(
+            authenticated: true,
+            permissions: ["workers.manage"],
+            requiredPermission: "workers.manage");
+
+        Assert.True(context.HasSucceeded);
+    }
+
+    [Fact]
     public async Task Authenticated_user_without_permission_is_forbidden()
     {
         var context = await AuthorizeAsync(authenticated: true, permissions: []);
+
+        Assert.False(context.HasSucceeded);
+    }
+
+    [Fact]
+    public async Task Authenticated_user_without_workers_manage_permission_is_forbidden()
+    {
+        var context = await AuthorizeAsync(authenticated: true, permissions: ["factory-structure.view"], requiredPermission: "workers.manage");
 
         Assert.False(context.HasSucceeded);
     }
@@ -31,13 +50,16 @@ public sealed class PermissionAuthorizationHandlerTests
         Assert.False(context.HasSucceeded);
     }
 
-    private static async Task<AuthorizationHandlerContext> AuthorizeAsync(bool authenticated, IReadOnlyCollection<string> permissions)
+    private static async Task<AuthorizationHandlerContext> AuthorizeAsync(
+        bool authenticated,
+        IReadOnlyCollection<string> permissions,
+        string requiredPermission = "factory-structure.view")
     {
         var identity = new ClaimsIdentity(
             authenticated ? [new Claim(ClaimTypes.NameIdentifier, Guid.NewGuid().ToString())] : [],
             authenticated ? "test" : null);
         var context = new AuthorizationHandlerContext(
-            [new PermissionRequirement("factory-structure.view")],
+            [new PermissionRequirement(requiredPermission)],
             new ClaimsPrincipal(identity),
             resource: null);
         var handler = new PermissionAuthorizationHandler(

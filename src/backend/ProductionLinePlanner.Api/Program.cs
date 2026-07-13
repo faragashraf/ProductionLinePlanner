@@ -1669,6 +1669,34 @@ workersApi.MapGet("", async (
     .WithTags("Workers")
     .WithName("GetWorkers");
 
+workersApi.MapPost("/sync", async (
+    IWorkerInitialSyncService syncService,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
+    CancellationToken cancellationToken) =>
+{
+    var actorUserId = currentUserService.UserId;
+    if (actorUserId is null)
+    {
+        return ApiResponse.Failure("Unauthorized", "User context is required.");
+    }
+
+    var requestMeta = $"{httpContext.Request.Method} {httpContext.Request.Path}";
+    var result = await syncService.SyncWorkersAsync(actorUserId.Value, requestMeta, cancellationToken);
+    if (result.IsFailure)
+    {
+        return ApiResponse.Failure(
+            result.Error?.Code ?? "WorkerInitialSyncFailed",
+            result.Error?.Message ?? "Unable to run worker initial sync.",
+            MapFailureStatusCode(result.Error?.Code));
+    }
+
+    return Results.Ok(ApiResponse.Success(result.Value!));
+})
+    .RequirePermission("workers.manage")
+    .WithTags("Workers")
+    .WithName("SyncWorkersInitial");
+
 workersApi.MapGet("/{workerId:guid}", async (
     Guid workerId,
     IEmployeeMasterDataService employeeService,
