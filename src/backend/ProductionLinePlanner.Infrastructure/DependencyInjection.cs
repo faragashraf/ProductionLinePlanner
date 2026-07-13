@@ -67,6 +67,17 @@ public static class DependencyInjection
         services.AddScoped<IIamAuthorizationService, IamAuthorizationService>();
         services.AddScoped<IRolePermissionSeedService, PermissionSeedService>();
 
+        services.AddScoped<IAttendanceEmployeeReader, AttendanceDirectoryService>();
+        services.AddScoped<IAttendanceEmployeeWriter, AttendanceDirectoryService>();
+        services.AddScoped<IAttendanceDepartmentReader, AttendanceDirectoryService>();
+        services.AddScoped<IAttendanceDepartmentWriter, AttendanceDirectoryService>();
+
+        services.AddScoped<IEmployeeMasterDataService, EmployeeMasterDataService>();
+        services.AddScoped<IDepartmentAdministrationService, DepartmentAdministrationService>();
+        services.AddScoped<IProductionStageCatalogService, ProductionStageCatalogService>();
+        services.AddScoped<IProductModelService, ProductModelService>();
+        services.AddScoped<IWorkerCompensationService, WorkerCompensationService>();
+
         return services;
     }
 

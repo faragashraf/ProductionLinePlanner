@@ -14,6 +14,11 @@ public class Worker
         string? badgeNumber = null,
         string? phone = null,
         bool isActive = true,
+        EmploymentStatus employmentStatus = EmploymentStatus.Active,
+        DateTime? employmentEndDate = null,
+        int? attendanceDepartmentId = null,
+        string? photoReference = null,
+        DateTime? lastExternalSyncAt = null,
         DateTime? createdAtUtc = null)
     {
         if (string.IsNullOrWhiteSpace(employeeCode))
@@ -28,6 +33,11 @@ public class Worker
         BadgeNumber = string.IsNullOrWhiteSpace(badgeNumber) ? null : badgeNumber.Trim();
         Phone = string.IsNullOrWhiteSpace(phone) ? null : phone.Trim();
         IsActive = isActive;
+        EmploymentStatus = employmentStatus;
+        EmploymentEndDate = employmentEndDate;
+        AttendanceDepartmentId = attendanceDepartmentId;
+        PhotoReference = string.IsNullOrWhiteSpace(photoReference) ? null : photoReference.Trim();
+        LastExternalSyncAt = lastExternalSyncAt;
         CreatedAtUtc = createdAtUtc ?? DateTime.UtcNow;
         UpdatedAtUtc = CreatedAtUtc;
     }
@@ -41,6 +51,11 @@ public class Worker
     public string? BadgeNumber { get; private set; }
     public string? Phone { get; private set; }
     public bool IsActive { get; private set; }
+    public EmploymentStatus EmploymentStatus { get; private set; }
+    public DateTime? EmploymentEndDate { get; private set; }
+    public int? AttendanceDepartmentId { get; private set; }
+    public string? PhotoReference { get; private set; }
+    public DateTime? LastExternalSyncAt { get; private set; }
     public DateTime CreatedAtUtc { get; private set; }
     public DateTime UpdatedAtUtc { get; private set; }
 
@@ -55,6 +70,25 @@ public class Worker
         UpdatedAtUtc = atUtc ?? DateTime.UtcNow;
     }
 
+    public void SetAttendanceDepartmentId(int? attendanceDepartmentId, DateTime? atUtc = null)
+    {
+        AttendanceDepartmentId = attendanceDepartmentId;
+        UpdatedAtUtc = atUtc ?? DateTime.UtcNow;
+        LastExternalSyncAt = UpdatedAtUtc;
+    }
+
+    public void SetPhone(string? phone, DateTime? atUtc = null)
+    {
+        Phone = string.IsNullOrWhiteSpace(phone) ? null : phone.Trim();
+        UpdatedAtUtc = atUtc ?? DateTime.UtcNow;
+    }
+
+    public void SetPhotoReference(string? photoReference, DateTime? atUtc = null)
+    {
+        PhotoReference = string.IsNullOrWhiteSpace(photoReference) ? null : photoReference.Trim();
+        UpdatedAtUtc = atUtc ?? DateTime.UtcNow;
+    }
+
     public void UpdateName(string fullName, DateTime? atUtc = null)
     {
         if (string.IsNullOrWhiteSpace(fullName))
@@ -62,5 +96,52 @@ public class Worker
 
         FullName = fullName.Trim();
         UpdatedAtUtc = atUtc ?? DateTime.UtcNow;
+    }
+
+    public void SetEmploymentStatus(EmploymentStatus status, DateTime? atUtc = null, DateTime? employmentEndDate = null)
+    {
+        EmploymentStatus = status;
+
+        if (status == EmploymentStatus.LeftEmployment)
+        {
+            if (!employmentEndDate.HasValue)
+            {
+                employmentEndDate = atUtc ?? DateTime.UtcNow;
+            }
+            EmploymentEndDate = employmentEndDate;
+            IsActive = false;
+        }
+        else
+        {
+            EmploymentEndDate = null;
+            IsActive = true;
+        }
+
+        UpdatedAtUtc = atUtc ?? DateTime.UtcNow;
+    }
+
+    public void Suspend(DateTime? atUtc = null)
+    {
+        EmploymentStatus = EmploymentStatus.Suspended;
+        IsActive = false;
+        UpdatedAtUtc = atUtc ?? DateTime.UtcNow;
+    }
+
+    public void Activate(DateTime? atUtc = null)
+    {
+        EmploymentStatus = EmploymentStatus.Active;
+        EmploymentEndDate = null;
+        IsActive = true;
+        UpdatedAtUtc = atUtc ?? DateTime.UtcNow;
+    }
+
+    public void MarkExternalSync(DateTime syncedAt, int? attendanceDepartmentId = null)
+    {
+        LastExternalSyncAt = syncedAt;
+        if (attendanceDepartmentId.HasValue)
+        {
+            AttendanceDepartmentId = attendanceDepartmentId;
+        }
+        UpdatedAtUtc = syncedAt;
     }
 }

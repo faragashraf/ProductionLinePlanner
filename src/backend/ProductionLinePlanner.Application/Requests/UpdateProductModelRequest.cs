@@ -1,10 +1,9 @@
 namespace ProductionLinePlanner.Application.Requests;
 
-public sealed class UpdateSubStageRequest
+public sealed class UpdateProductModelRequest
 {
     public string? Code { get; init; }
     public string? Name { get; init; }
-    public int? Capacity { get; init; }
-    public int? DefaultOrder { get; init; }
+    public string? Description { get; init; }
     public bool? IsActive { get; init; }
 }
