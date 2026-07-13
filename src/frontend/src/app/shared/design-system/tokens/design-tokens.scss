@@ -1,13 +1,160 @@
+/* Production Design System — authoritative tokens. */
 :root {
+  color-scheme: light;
+
+  /* Typography — Cairo is loaded from @fontsource/cairo in styles.scss. */
+  --plp-font-family: 'Cairo', 'Segoe UI', Tahoma, Arial, -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --plp-font-family-mono: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+  --plp-font-weight-regular: 400;
+  --plp-font-weight-medium: 500;
+  --plp-font-weight-semibold: 600;
+  --plp-font-weight-bold: 700;
+  --plp-font-size-12: 0.75rem;
+  --plp-font-size-14: 0.875rem;
+  --plp-font-size-16: 1rem;
+  --plp-font-size-18: 1.125rem;
+  --plp-font-size-20: 1.25rem;
+  --plp-font-size-24: 1.5rem;
+  --plp-font-size-28: 1.75rem;
+  --plp-line-height-tight: 1.2;
+  --plp-line-height-heading: 1.35;
+  --plp-line-height-base: 1.5;
+  --plp-letter-spacing-tight: -0.01em;
+  --plp-letter-spacing-normal: 0;
+  --plp-font-variant-numeric: tabular-nums lining-nums;
+
+  --plp-type-display: var(--plp-font-size-28);
+  --plp-type-page-title: var(--plp-font-size-24);
+  --plp-type-section-title: var(--plp-font-size-20);
+  --plp-type-body: var(--plp-font-size-16);
+  --plp-type-supporting: var(--plp-font-size-14);
+  --plp-type-caption: var(--plp-font-size-12);
+  --plp-type-dense: var(--plp-font-size-14);
+
+  /* Approved spacing scale: 4, 8, 12, 16, 20, 24, 32, 40, 48. */
+  --plp-space-4: 0.25rem;
+  --plp-space-8: 0.5rem;
+  --plp-space-12: 0.75rem;
+  --plp-space-16: 1rem;
+  --plp-space-20: 1.25rem;
+  --plp-space-24: 1.5rem;
+  --plp-space-32: 2rem;
+  --plp-space-40: 2.5rem;
+  --plp-space-48: 3rem;
+
+  --plp-border-width: 1px;
+  --plp-radius-xs: var(--plp-space-4);
+  --plp-radius-sm: var(--plp-space-8);
+  --plp-radius-md: var(--plp-space-12);
+  --plp-radius-lg: var(--plp-space-16);
+  --plp-radius-xl: var(--plp-space-20);
+  --plp-radius-pill: 999px;
+  --plp-shadow-1: 0 1px 3px rgba(15, 23, 42, 0.12);
+  --plp-shadow-2: 0 4px 12px rgba(15, 23, 42, 0.14);
+  --plp-shadow-3: 0 10px 22px rgba(15, 23, 42, 0.16);
+  --plp-shadow-4: 0 16px 32px rgba(15, 23, 42, 0.18);
+  --plp-elevation-1: var(--plp-shadow-1);
+  --plp-elevation-2: var(--plp-shadow-2);
+  --plp-elevation-3: var(--plp-shadow-3);
+
+  /* Standard mobile/tablet density. Compact density is desktop fine-pointer only. */
+  --plp-touch-target-min: 2.75rem;
+  --plp-control-height-standard: var(--plp-touch-target-min);
+  --plp-control-height-compact-desktop: 2.5rem;
+  --plp-table-row-min-height: var(--plp-control-height-standard);
+  --plp-table-row-min-height-dense-desktop: var(--plp-control-height-compact-desktop);
+  --plp-table-cell-padding-block: var(--plp-space-12);
+  --plp-table-cell-padding-inline: var(--plp-space-16);
+  --plp-toolbar-action-gap: var(--plp-space-8);
+  --plp-focus-outline-width: 2px;
+  --plp-focus-offset: 2px;
+  --plp-disabled-opacity: 0.64;
+
+  --plp-motion-instant: 80ms;
+  --plp-motion-fast: 120ms;
+  --plp-motion-base: 160ms;
+  --plp-motion-slow: 200ms;
+  --plp-motion-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --plp-motion-ease-emphasized: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  /* CSS layer contract. PrimeNG runtime values are configured centrally. */
+  --plp-z-base: 0;
+  --plp-z-sticky: 100;
+  --plp-z-dropdown: 1000;
+  --plp-z-menu: 1050;
+  --plp-z-modal: 1200;
+  --plp-z-dialog: var(--plp-z-modal);
+  --plp-z-confirm-dialog: var(--plp-z-modal);
+  --plp-z-toast: 1300;
+  --plp-z-tooltip: 1400;
+
+  --plp-content-width-compact: 30rem;
+  --plp-content-width-narrow: 45rem;
+  --plp-content-width-default: 60rem;
+  --plp-content-width-wide: 80rem;
+  --plp-content-width-max: 90rem;
+  --plp-page-padding: var(--plp-space-16);
+  --plp-dialog-gutter: var(--plp-space-16);
+  --plp-dialog-width: var(--plp-content-width-compact);
+  --plp-dialog-width-wide: var(--plp-content-width-narrow);
+  --plp-grid-gap: var(--plp-space-16);
+
+  --plp-breakpoint-phone-max: 599px;
+  --plp-breakpoint-tablet-portrait-min: 600px;
+  --plp-breakpoint-tablet-landscape-min: 768px;
+  --plp-breakpoint-desktop-min: 1024px;
+  --plp-breakpoint-wide-min: 1280px;
+  --plp-bp-sm: var(--plp-breakpoint-tablet-portrait-min);
+  --plp-bp-md: var(--plp-breakpoint-tablet-landscape-min);
+  --plp-bp-lg: var(--plp-breakpoint-desktop-min);
+  --plp-bp-xl: var(--plp-breakpoint-wide-min);
+
+  /* Compatibility aliases are removed only after page migrations complete. */
+  --plp-spacing-1: var(--plp-space-4);
+  --plp-spacing-2: var(--plp-space-8);
+  --plp-spacing-3: var(--plp-space-12);
+  --plp-spacing-4: var(--plp-space-16);
+  --plp-spacing-5: var(--plp-space-20);
+  --plp-spacing-6: var(--plp-space-24);
+  --plp-spacing-8: var(--plp-space-32);
+  --plp-spacing-10: var(--plp-space-40);
+  --plp-spacing-12: var(--plp-space-48);
+  --plp-font-size-xxs: var(--plp-font-size-12);
+  --plp-font-size-xs: var(--plp-font-size-14);
+  --plp-font-size-sm: var(--plp-font-size-14);
+  --plp-font-size-base: var(--plp-font-size-16);
+  --plp-font-size-md: var(--plp-font-size-16);
+  --plp-font-size-lg: var(--plp-font-size-20);
+  --plp-font-size-xl: var(--plp-font-size-24);
+  --plp-font-size-2xl: var(--plp-font-size-28);
+}
+
+/* Light is the only implemented palette. A future palette targets data-theme. */
+:root[data-theme='light'] {
   --plp-color-background: #f4f7ff;
   --plp-color-surface: #ffffff;
   --plp-color-surface-soft: #f8fbff;
   --plp-color-surface-raised: #ffffff;
+  --plp-color-surface-selected: #e8f0ff;
+  --plp-color-selected-border: #93b4f7;
+  --plp-color-selected-text: #1e40af;
   --plp-color-border: #dce5ff;
   --plp-color-border-muted: #e6ecff;
+  --plp-color-border-strong: #b8c9f5;
   --plp-color-text: #0f172a;
   --plp-color-text-soft: #475569;
   --plp-color-text-subtle: #64748b;
+  --plp-color-text-inverse: #ffffff;
+  --plp-color-primary: #2563eb;
+  --plp-color-primary-hover: #1d4ed8;
+  --plp-color-primary-active: #1e40af;
+  --plp-color-primary-soft: #dbeafe;
+  --plp-color-focus: #2563eb;
+  --plp-color-focus-ring: rgba(37, 99, 235, 0.32);
+  --plp-color-disabled-bg: #eef2f7;
+  --plp-color-disabled-text: #94a3b8;
+  --plp-color-disabled-border: #d7e0ed;
+  --plp-color-overlay: rgba(15, 23, 42, 0.48);
 
   --plp-color-success: #16a34a;
   --plp-color-success-soft: #dcfce7;
@@ -18,23 +165,29 @@
   --plp-color-danger: #dc2626;
   --plp-color-danger-soft: #fee2e2;
   --plp-color-danger-strong: #991b1b;
-  --plp-color-muted: #334155;
-  --plp-color-muted-soft: #e2e8f0;
   --plp-color-info: #2563eb;
   --plp-color-info-soft: #dbeafe;
   --plp-color-info-strong: #1d4ed8;
-  --plp-color-info-2: #0ea5e9;
+  --plp-color-neutral: #334155;
+  --plp-color-neutral-soft: #e2e8f0;
   --plp-color-ready: #0891b2;
   --plp-color-ready-soft: #cffafe;
   --plp-color-ready-strong: #0e7490;
 
+  --plp-border-default: var(--plp-border-width) solid var(--plp-color-border);
+  --plp-border-muted: var(--plp-border-width) solid var(--plp-color-border-muted);
+  --plp-focus-outline: var(--plp-focus-outline-width) solid var(--plp-color-focus);
+
+  --plp-color-muted: var(--plp-color-neutral);
+  --plp-color-muted-soft: var(--plp-color-neutral-soft);
+  --plp-color-info-2: #0ea5e9;
   --plp-status-present: var(--plp-color-success);
   --plp-status-present-bg: var(--plp-color-success-soft);
   --plp-status-late: var(--plp-color-warning);
   --plp-status-late-bg: var(--plp-color-warning-soft);
   --plp-status-absent: var(--plp-color-danger);
   --plp-status-absent-bg: var(--plp-color-danger-soft);
-  --plp-status-unassigned: var(--plp-color-muted);
+  --plp-status-unassigned: var(--plp-color-neutral);
   --plp-status-unassigned-bg: #f1f5f9;
   --plp-status-ready: var(--plp-color-ready);
   --plp-status-ready-bg: var(--plp-color-ready-soft);
@@ -44,84 +197,31 @@
   --plp-status-critical-bg: var(--plp-color-danger-soft);
   --plp-status-info: var(--plp-color-info);
   --plp-status-info-bg: var(--plp-color-info-soft);
-
-  --plp-spacing-1: 0.25rem;
-  --plp-spacing-2: 0.5rem;
-  --plp-spacing-3: 0.75rem;
-  --plp-spacing-4: 1rem;
-  --plp-spacing-5: 1.25rem;
-  --plp-spacing-6: 1.5rem;
-  --plp-spacing-8: 2rem;
-  --plp-spacing-10: 2.5rem;
-  --plp-spacing-12: 3rem;
-
-  --plp-radius-sm: 0.5rem;
-  --plp-radius-md: 0.75rem;
-  --plp-radius-lg: 1rem;
-  --plp-radius-xl: 1.25rem;
-  --plp-radius-pill: 999px;
-
-  --plp-font-size-xxs: 0.75rem;
-  --plp-font-size-xs: 0.85rem;
-  --plp-font-size-sm: 0.95rem;
-  --plp-font-size-base: 1rem;
-  --plp-font-size-md: 1.05rem;
-  --plp-font-size-lg: 1.2rem;
-  --plp-font-size-xl: 1.45rem;
-  --plp-font-size-2xl: 1.75rem;
-
-  --plp-line-height-tight: 1.15;
-  --plp-line-height-base: 1.5;
-
-  --plp-elevation-1: 0 1px 3px rgba(15, 23, 42, 0.12);
-  --plp-elevation-2: 0 4px 12px rgba(15, 23, 42, 0.14);
-  --plp-elevation-3: 0 10px 22px rgba(15, 23, 42, 0.16);
-
-  --plp-font-family:
-    'Cairo',
-    'Segoe UI',
-    Tahoma,
-    Arial,
-    -apple-system,
-    BlinkMacSystemFont,
-    system-ui,
-    sans-serif;
-
-  --plp-bp-sm: 640px;
-  --plp-bp-md: 768px;
-  --plp-bp-lg: 1024px;
-  --plp-bp-xl: 1280px;
 }
 
 .plp-shell-bg {
   min-height: 100dvh;
-  background:
-    linear-gradient(
-      180deg,
-      #f4f8ff 0%,
-      #eef3ff 35%,
-      #f7f8fd 100%
-    );
+  background: linear-gradient(180deg, #f4f8ff 0%, #eef3ff 35%, #f7f8fd 100%);
 }
 
 .plp-card {
   background: var(--plp-color-surface);
-  border: 1px solid var(--plp-color-border);
+  border: var(--plp-border-default);
   border-radius: var(--plp-radius-md);
   box-shadow: var(--plp-elevation-1);
   color: var(--plp-color-text);
 }
 
 .plp-title-1 {
-  font-size: var(--plp-font-size-xl);
-  font-weight: 700;
+  font-size: var(--plp-type-page-title);
+  font-weight: var(--plp-font-weight-bold);
   line-height: var(--plp-line-height-tight);
   margin: 0;
 }
 
 .plp-title-2 {
-  font-size: var(--plp-font-size-lg);
-  font-weight: 700;
-  line-height: var(--plp-line-height-tight);
+  font-size: var(--plp-type-section-title);
+  font-weight: var(--plp-font-weight-bold);
+  line-height: var(--plp-line-height-heading);
   margin: 0;
 }

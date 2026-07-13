@@ -1,58 +1,21 @@
+@import '@fontsource/cairo/400.css';
+@import '@fontsource/cairo/500.css';
+@import '@fontsource/cairo/600.css';
+@import '@fontsource/cairo/700.css';
 @import 'primeng/resources/primeng.min.css';
 @import 'primeng/resources/themes/lara-light-blue/theme.css';
 @import 'primeicons/primeicons.css';
 @import 'primeflex/primeflex.css';
 @import './app/shared/design-system/tokens/design-tokens.scss';
-
-:root {
-  color-scheme: light;
-  direction: rtl;
-  font-family: var(--plp-font-family);
-  font-feature-settings: normal;
-  font-variation-settings: normal;
-  --font-family: var(--plp-font-family);
-  --font-feature-settings: normal;
-}
-
-* {
-  box-sizing: border-box;
-}
-
-html,
-body {
-  margin: 0;
-  min-height: 100%;
-  width: 100%;
-  overflow-x: hidden;
-  font-family: 'Cairo', 'Segoe UI', Tahoma, Arial, sans-serif;
-}
-
-app-root {
-  display: block;
-  min-height: 100%;
-}
-
-body {
-  background: var(--plp-color-background);
-  color: var(--plp-color-text);
-  font-family: var(--plp-font-family);
-}
-
-a {
-  color: inherit;
-}
-
-button,
-input {
-  font-family: inherit;
-}
+@import './app/shared/design-system/foundation/global-foundation.scss';
+@import './app/shared/design-system/primeng/primeng-theme-bridge.scss';
 
 .plp-inline-state {
   display: inline-flex;
   align-items: center;
-  gap: 0.45rem;
+  gap: var(--plp-space-4);
   margin: 0;
-  padding: 0.65rem var(--plp-spacing-2);
+  padding: var(--plp-space-8);
   border: 1px dashed var(--plp-color-border-muted);
   border-radius: var(--plp-radius-md);
   background: color-mix(in oklab, var(--plp-color-surface-soft) 65%, var(--plp-color-surface));
@@ -84,10 +47,10 @@ input {
 /* Shared placeholder utility */
 .primary-button {
   border: none;
-  border-radius: 0.65rem;
-  height: 40px;
-  padding: 0 0.9rem;
-  background: #0f172a;
-  color: #fff;
-  font-weight: 700;
+  border-radius: var(--plp-radius-sm);
+  min-height: var(--plp-control-height-standard);
+  padding: 0 var(--plp-space-12);
+  background: var(--plp-color-text);
+  color: var(--plp-color-text-inverse);
+  font-weight: var(--plp-font-weight-bold);
 }

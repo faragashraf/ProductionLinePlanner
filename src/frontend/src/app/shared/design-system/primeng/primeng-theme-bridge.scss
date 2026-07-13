@@ -1,0 +1,525 @@
+/*
+ * PrimeNG 17.18.15 Lara compatibility bridge.
+ *
+ * Lara 17 ships static colour rules, so this bridge intentionally owns the
+ * component states used by the product. Keep PrimeNG-version-specific
+ * selectors in this file and do not copy them into page styles.
+ */
+
+:root {
+  /* Variables consumed by compatible Lara 17 rules and future presets. */
+  --primary-color: var(--plp-color-primary);
+  --primary-color-text: var(--plp-color-text-inverse);
+  --surface-ground: var(--plp-color-background);
+  --surface-section: var(--plp-color-surface-soft);
+  --surface-card: var(--plp-color-surface);
+  --surface-overlay: var(--plp-color-surface-raised);
+  --surface-border: var(--plp-color-border);
+  --text-color: var(--plp-color-text);
+  --text-color-secondary: var(--plp-color-text-soft);
+  --highlight-bg: var(--plp-color-surface-selected);
+  --highlight-text-color: var(--plp-color-selected-text);
+  --border-radius: var(--plp-radius-sm);
+  --focus-ring: 0 0 0 var(--plp-space-4) var(--plp-color-focus-ring);
+  --maskbg: var(--plp-color-overlay);
+}
+
+.p-component {
+  font-family: var(--plp-font-family);
+}
+
+/* Buttons and icon actions. */
+.p-button {
+  background: var(--plp-color-primary);
+  border-color: var(--plp-color-primary);
+  border-radius: var(--plp-radius-sm);
+  color: var(--plp-color-text-inverse);
+  min-block-size: var(--plp-control-height-standard);
+  padding: var(--plp-space-8) var(--plp-space-16);
+  transition:
+    background-color var(--plp-motion-fast) var(--plp-motion-ease-standard),
+    border-color var(--plp-motion-fast) var(--plp-motion-ease-standard),
+    box-shadow var(--plp-motion-fast) var(--plp-motion-ease-standard),
+    color var(--plp-motion-fast) var(--plp-motion-ease-standard),
+    transform var(--plp-motion-fast) var(--plp-motion-ease-standard);
+}
+
+.p-button.p-button-icon-only {
+  min-inline-size: var(--plp-touch-target-min);
+}
+
+.p-button:not(:disabled):not(.p-disabled):hover {
+  background: var(--plp-color-primary-hover);
+  border-color: var(--plp-color-primary-hover);
+  transform: translateY(-1px);
+}
+
+.p-button:not(:disabled):not(.p-disabled):active {
+  background: var(--plp-color-primary-active);
+  border-color: var(--plp-color-primary-active);
+  transform: translateY(0);
+}
+
+.p-button.p-button-text,
+.p-button.p-button-outlined {
+  background: transparent;
+  color: var(--plp-color-primary);
+}
+
+.p-button.p-button-outlined {
+  border-color: var(--plp-color-primary);
+}
+
+.p-button.p-button-text:not(:disabled):not(.p-disabled):hover,
+.p-button.p-button-outlined:not(:disabled):not(.p-disabled):hover {
+  background: var(--plp-color-primary-soft);
+  border-color: var(--plp-color-primary-hover);
+  color: var(--plp-color-primary-hover);
+}
+
+.p-button.p-button-secondary {
+  background: var(--plp-color-neutral);
+  border-color: var(--plp-color-neutral);
+}
+
+.p-button.p-button-success {
+  background: var(--plp-color-success);
+  border-color: var(--plp-color-success);
+}
+
+.p-button.p-button-warning {
+  background: var(--plp-color-warning);
+  border-color: var(--plp-color-warning);
+}
+
+.p-button.p-button-danger {
+  background: var(--plp-color-danger);
+  border-color: var(--plp-color-danger);
+}
+
+.p-button.p-button-text.p-button-secondary,
+.p-button.p-button-outlined.p-button-secondary {
+  background: transparent;
+  border-color: var(--plp-color-neutral);
+  color: var(--plp-color-neutral);
+}
+
+.p-button.p-button-text.p-button-success,
+.p-button.p-button-outlined.p-button-success {
+  background: transparent;
+  border-color: var(--plp-color-success);
+  color: var(--plp-color-success-strong);
+}
+
+.p-button.p-button-text.p-button-warning,
+.p-button.p-button-outlined.p-button-warning {
+  background: transparent;
+  border-color: var(--plp-color-warning);
+  color: var(--plp-color-warning-strong);
+}
+
+.p-button.p-button-text.p-button-danger,
+.p-button.p-button-outlined.p-button-danger {
+  background: transparent;
+  border-color: var(--plp-color-danger);
+  color: var(--plp-color-danger-strong);
+}
+
+.p-button:disabled,
+.p-button.p-disabled {
+  background: var(--plp-color-disabled-bg);
+  border-color: var(--plp-color-disabled-border);
+  color: var(--plp-color-disabled-text);
+  opacity: var(--plp-disabled-opacity);
+}
+
+.p-ripple .p-ink {
+  background: color-mix(in oklab, var(--plp-color-primary) 22%, transparent);
+  transition: opacity var(--plp-motion-fast) var(--plp-motion-ease-standard);
+}
+
+/* Inputs, input numbers, dropdowns, selects, and multiselects. */
+.p-inputtext,
+.p-inputnumber-input,
+.p-dropdown,
+.p-select,
+.p-multiselect {
+  background: var(--plp-color-surface);
+  border-color: var(--plp-color-border);
+  border-radius: var(--plp-radius-sm);
+  color: var(--plp-color-text);
+  min-block-size: var(--plp-control-height-standard);
+}
+
+.p-inputtext:hover,
+.p-inputnumber-input:hover,
+.p-dropdown:not(.p-disabled):hover,
+.p-select:not(.p-disabled):hover,
+.p-multiselect:not(.p-disabled):hover {
+  border-color: var(--plp-color-border-strong);
+}
+
+.p-inputtext:focus-visible,
+.p-inputnumber-input:focus-visible,
+.p-dropdown.p-focus,
+.p-select.p-focus,
+.p-multiselect.p-focus,
+.p-checkbox .p-checkbox-box.p-focus,
+.p-radiobutton .p-radiobutton-box.p-focus {
+  box-shadow: var(--focus-ring);
+  outline: none;
+}
+
+.p-inputtext:disabled,
+.p-inputnumber-input:disabled,
+.p-dropdown.p-disabled,
+.p-select.p-disabled,
+.p-multiselect.p-disabled {
+  background: var(--plp-color-disabled-bg);
+  border-color: var(--plp-color-disabled-border);
+  color: var(--plp-color-disabled-text);
+  opacity: var(--plp-disabled-opacity);
+}
+
+.p-inputtext[readonly],
+.p-inputnumber-input[readonly],
+.p-dropdown.p-disabled,
+.p-select.p-disabled,
+.p-multiselect.p-disabled {
+  background: var(--plp-color-surface-soft);
+}
+
+.p-inputtext.p-invalid,
+.p-inputtext.ng-dirty.ng-invalid,
+.p-inputnumber-input.p-invalid,
+.p-inputnumber-input.ng-dirty.ng-invalid,
+.p-dropdown.p-invalid,
+.p-select.p-invalid,
+.p-multiselect.p-invalid {
+  border-color: var(--plp-color-danger);
+}
+
+/* Checkboxes and radios retain compact visual marks inside 44px hit areas. */
+p-checkbox,
+.p-checkbox,
+p-radiobutton,
+.p-radiobutton {
+  align-items: center;
+  display: inline-flex;
+  justify-content: center;
+  min-block-size: var(--plp-touch-target-min);
+  min-inline-size: var(--plp-touch-target-min);
+}
+
+.p-checkbox .p-checkbox-box,
+.p-radiobutton .p-radiobutton-box {
+  background: var(--plp-color-surface);
+  border-color: var(--plp-color-border-strong);
+}
+
+.p-checkbox .p-checkbox-box {
+  block-size: var(--plp-space-20);
+  border-radius: var(--plp-radius-xs);
+  inline-size: var(--plp-space-20);
+}
+
+.p-checkbox .p-checkbox-box.p-highlight,
+.p-radiobutton .p-radiobutton-box.p-highlight {
+  background: var(--plp-color-primary);
+  border-color: var(--plp-color-primary);
+}
+
+/* Dialogs, confirm dialogs, and modal masks. */
+.p-dialog-mask,
+.p-sidebar-mask {
+  background: var(--plp-color-overlay);
+  transition: opacity var(--plp-motion-base) var(--plp-motion-ease-standard);
+}
+
+.p-dialog {
+  background: var(--plp-color-surface-raised);
+  border: var(--plp-border-default);
+  border-radius: var(--plp-radius-lg);
+  box-shadow: var(--plp-shadow-4);
+  color: var(--plp-color-text);
+  max-inline-size: calc(100vw - (var(--plp-dialog-gutter) * 2));
+  overflow: hidden;
+  transition:
+    opacity var(--plp-motion-base) var(--plp-motion-ease-standard),
+    transform var(--plp-motion-base) var(--plp-motion-ease-emphasized);
+  width: min(var(--plp-dialog-width), 100%);
+}
+
+.p-dialog .p-dialog-header,
+.p-dialog .p-dialog-content,
+.p-dialog .p-dialog-footer {
+  background: var(--plp-color-surface-raised);
+  color: var(--plp-color-text);
+  padding: var(--plp-space-16);
+}
+
+.p-dialog .p-dialog-header {
+  border-block-end: var(--plp-border-muted);
+}
+
+.p-dialog .p-dialog-footer {
+  border-block-start: var(--plp-border-muted);
+}
+
+/* Toast and status feedback. Toast needs !important because PrimeNG sets inline z-index. */
+.p-toast {
+  z-index: var(--plp-z-toast) !important;
+}
+
+.p-toast .p-toast-message {
+  background: var(--plp-color-surface-raised);
+  border: var(--plp-border-default);
+  border-radius: var(--plp-radius-md);
+  box-shadow: var(--plp-shadow-3);
+  color: var(--plp-color-text);
+  transition:
+    opacity var(--plp-motion-base) var(--plp-motion-ease-standard),
+    transform var(--plp-motion-base) var(--plp-motion-ease-emphasized);
+}
+
+.p-toast .p-toast-message.p-toast-message-success {
+  border-color: var(--plp-color-success);
+}
+
+.p-toast .p-toast-message.p-toast-message-info {
+  border-color: var(--plp-color-info);
+}
+
+.p-toast .p-toast-message.p-toast-message-warn {
+  border-color: var(--plp-color-warning);
+}
+
+.p-toast .p-toast-message.p-toast-message-error {
+  border-color: var(--plp-color-danger);
+}
+
+/* Tables and paginators use the operational density tokens. */
+.p-datatable .p-datatable-thead > tr > th {
+  background: var(--plp-color-surface-soft);
+  border-color: var(--plp-color-border);
+  color: var(--plp-color-text-soft);
+  font-size: var(--plp-type-dense);
+  font-weight: var(--plp-font-weight-semibold);
+  padding: var(--plp-table-cell-padding-block) var(--plp-table-cell-padding-inline);
+}
+
+.p-datatable .p-datatable-tbody > tr > td {
+  border-color: var(--plp-color-border-muted);
+  color: var(--plp-color-text);
+  font-size: var(--plp-type-dense);
+  min-block-size: var(--plp-table-row-min-height);
+  padding: var(--plp-table-cell-padding-block) var(--plp-table-cell-padding-inline);
+}
+
+.p-datatable .p-datatable-tbody > tr {
+  transition: background-color var(--plp-motion-fast) var(--plp-motion-ease-standard);
+}
+
+.p-datatable .p-datatable-tbody > tr:hover {
+  background: var(--plp-color-surface-soft);
+}
+
+.p-datatable .p-datatable-tbody > tr.p-highlight {
+  background: var(--plp-color-surface-selected);
+  color: var(--plp-color-selected-text);
+}
+
+.p-paginator {
+  background: var(--plp-color-surface);
+  border-color: var(--plp-color-border);
+  gap: var(--plp-space-4);
+  padding: var(--plp-space-12);
+}
+
+.p-paginator .p-paginator-element {
+  border-radius: var(--plp-radius-sm);
+  color: var(--plp-color-text-soft);
+  min-block-size: var(--plp-touch-target-min);
+  min-inline-size: var(--plp-touch-target-min);
+}
+
+.p-paginator .p-paginator-element:not(.p-disabled):hover,
+.p-paginator .p-paginator-element.p-highlight {
+  background: var(--plp-color-surface-selected);
+  color: var(--plp-color-selected-text);
+}
+
+/* Tags and badges expose semantic severity without page-specific colours. */
+.p-tag,
+.p-badge {
+  background: var(--plp-color-neutral);
+  border-radius: var(--plp-radius-pill);
+  color: var(--plp-color-text-inverse);
+  font-size: var(--plp-type-caption);
+  font-weight: var(--plp-font-weight-semibold);
+}
+
+.p-tag.p-tag-success,
+.p-badge.p-badge-success {
+  background: var(--plp-color-success);
+}
+
+.p-tag.p-tag-info,
+.p-badge.p-badge-info {
+  background: var(--plp-color-info);
+}
+
+.p-tag.p-tag-warning,
+.p-badge.p-badge-warning {
+  background: var(--plp-color-warning);
+}
+
+.p-tag.p-tag-danger,
+.p-badge.p-badge-danger {
+  background: var(--plp-color-danger);
+}
+
+/* Cards, panels, toolbar, tabs, menus, trees, and connected overlays. */
+.p-toolbar,
+.p-card,
+.p-panel,
+.p-menu,
+.p-menubar,
+.p-tieredmenu,
+.p-contextmenu,
+.p-overlaypanel,
+.p-dropdown-panel,
+.p-select-overlay,
+.p-multiselect-panel,
+.p-autocomplete-panel,
+.p-calendar-panel,
+.p-tree {
+  background: var(--plp-color-surface-raised);
+  border-color: var(--plp-color-border);
+  color: var(--plp-color-text);
+}
+
+.p-card,
+.p-panel,
+.p-menu,
+.p-menubar,
+.p-tieredmenu,
+.p-contextmenu,
+.p-overlaypanel,
+.p-dropdown-panel,
+.p-select-overlay,
+.p-multiselect-panel,
+.p-autocomplete-panel,
+.p-calendar-panel {
+  border: var(--plp-border-default);
+  border-radius: var(--plp-radius-md);
+}
+
+.p-card .p-card-body,
+.p-panel .p-panel-header,
+.p-panel .p-panel-content,
+.p-toolbar {
+  padding: var(--plp-space-16);
+}
+
+.p-tabview .p-tabview-nav,
+.p-tabmenu .p-tabmenu-nav,
+.p-tabs {
+  background: var(--plp-color-surface);
+  border-color: var(--plp-color-border);
+}
+
+.p-menu .p-menuitem-link,
+.p-menubar .p-menuitem-link,
+.p-tieredmenu .p-menuitem-link,
+.p-contextmenu .p-menuitem-link,
+.p-tabview .p-tabview-nav li .p-tabview-nav-link,
+.p-tabmenu .p-tabmenu-nav .p-tabmenuitem .p-menuitem-link,
+.p-tabs .p-tablist-tab {
+  color: var(--plp-color-text);
+  min-block-size: var(--plp-touch-target-min);
+}
+
+.p-menu .p-menuitem-link:hover,
+.p-tieredmenu .p-menuitem-link:hover,
+.p-contextmenu .p-menuitem-link:hover,
+.p-menubar .p-menuitem-link:hover,
+.p-dropdown-panel .p-dropdown-item:not(.p-highlight):not(.p-disabled):hover,
+.p-multiselect-panel .p-multiselect-item:not(.p-highlight):not(.p-disabled):hover {
+  background: var(--plp-color-surface-soft);
+}
+
+.p-dropdown-panel .p-dropdown-item.p-highlight,
+.p-multiselect-panel .p-multiselect-item.p-highlight,
+.p-menu .p-menuitem.p-highlight > .p-menuitem-content,
+.p-tieredmenu .p-menuitem.p-highlight > .p-menuitem-content,
+.p-contextmenu .p-menuitem.p-highlight > .p-menuitem-content {
+  background: var(--plp-color-surface-selected);
+  color: var(--plp-color-selected-text);
+}
+
+.p-skeleton {
+  background: var(--plp-color-surface-soft);
+  border-radius: var(--plp-radius-sm);
+}
+
+.p-skeleton::after {
+  background: linear-gradient(90deg, transparent, color-mix(in oklab, var(--plp-color-primary-soft) 70%, transparent), transparent);
+}
+
+.p-tooltip .p-tooltip-text {
+  background: var(--plp-color-text);
+  border-radius: var(--plp-radius-sm);
+  box-shadow: var(--plp-shadow-3);
+  color: var(--plp-color-text-inverse);
+}
+
+/* Narrow RTL compatibility for PrimeNG 17 physical-direction rules. */
+:root[dir='rtl'] .p-link {
+  text-align: start;
+}
+
+:root[dir='rtl'] .p-menu .p-submenu-icon,
+:root[dir='rtl'] .p-tieredmenu .p-submenu-icon,
+:root[dir='rtl'] .p-menubar .p-submenu-icon,
+:root[dir='rtl'] .p-contextmenu .p-submenu-icon {
+  margin-inline-end: 0;
+  margin-inline-start: auto;
+  transform: scaleX(-1);
+}
+
+:root[dir='rtl'] .p-paginator,
+:root[dir='rtl'] .p-dropdown,
+:root[dir='rtl'] .p-select,
+:root[dir='rtl'] .p-multiselect,
+:root[dir='rtl'] .p-connected-overlay {
+  text-align: start;
+}
+
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  .plp-density-compact .p-button,
+  .plp-density-compact .p-inputtext,
+  .plp-density-compact .p-inputnumber-input,
+  .plp-density-compact .p-dropdown,
+  .plp-density-compact .p-select,
+  .plp-density-compact .p-multiselect,
+  .plp-density-compact p-checkbox,
+  .plp-density-compact .p-checkbox,
+  .plp-density-compact p-radiobutton,
+  .plp-density-compact .p-radiobutton {
+    min-block-size: var(--plp-control-height-compact-desktop);
+  }
+
+  .plp-density-compact .p-datatable .p-datatable-tbody > tr > td {
+    min-block-size: var(--plp-table-row-min-height-dense-desktop);
+    padding-block: var(--plp-space-8);
+  }
+}
+
+@media (min-width: 1024px) {
+  .p-dialog .p-dialog-header,
+  .p-dialog .p-dialog-content,
+  .p-dialog .p-dialog-footer {
+    padding: var(--plp-space-24);
+  }
+}
