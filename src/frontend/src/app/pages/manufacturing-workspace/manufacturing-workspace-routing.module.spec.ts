@@ -2,6 +2,7 @@ import { PERMISSIONS } from '../../core/config/permission-identifiers';
 import { PermissionCanActivateGuard } from '../../core/guards/permission-can-activate.guard';
 import { PermissionCanMatchGuard } from '../../core/guards/permission-can-match.guard';
 import { FactoryStructureFoundationPageComponent } from './factory-structure-foundation-page.component';
+import { ManufacturingCompensationPageComponent } from './manufacturing-compensation-page.component';
 import { ManufacturingDepartmentsPageComponent } from './manufacturing-departments-page.component';
 import { ManufacturingPlaceholderPageComponent } from './manufacturing-placeholder-page.component';
 import { MANUFACTURING_WORKSPACE_ROUTES } from './manufacturing-workspace-routing.module';
@@ -35,5 +36,15 @@ describe('ManufacturingWorkspaceRoutingModule', () => {
     expect(route?.canMatch).toContain(PermissionCanMatchGuard);
     expect(route?.canActivate).toContain(PermissionCanActivateGuard);
     expect(route?.data?.['permission']).toBe(PERMISSIONS.factoryStructure.view);
+  });
+
+  it('routes compensation to the operational compensation page with compensation.view permission', () => {
+    const route = childRoutes.find(item => item.path === 'compensation');
+
+    expect(route?.component).toBe(ManufacturingCompensationPageComponent);
+    expect(route?.component).not.toBe(ManufacturingPlaceholderPageComponent);
+    expect(route?.canMatch).toContain(PermissionCanMatchGuard);
+    expect(route?.canActivate).toContain(PermissionCanActivateGuard);
+    expect(route?.data?.['permission']).toBe(PERMISSIONS.compensation.view);
   });
 });

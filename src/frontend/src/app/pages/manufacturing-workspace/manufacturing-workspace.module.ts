@@ -4,6 +4,7 @@ import { CardModule } from 'primeng/card';
 import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
 import { TableModule } from 'primeng/table';
+import { DialogModule } from 'primeng/dialog';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { SharedModule } from '../../shared/shared.module';
 import { ManufacturingWorkspaceLayoutComponent } from './manufacturing-workspace-layout.component';
@@ -12,6 +13,7 @@ import { ProductionCostRecordingPageComponent } from './production-cost-recordin
 import { ManufacturingMasterDataPageComponent } from './manufacturing-master-data-page.component';
 import { ManufacturingDepartmentsPageComponent } from './manufacturing-departments-page.component';
 import { FactoryStructureFoundationPageComponent } from './factory-structure-foundation-page.component';
+import { ManufacturingCompensationPageComponent } from './manufacturing-compensation-page.component';
 import { ManufacturingWorkspaceRoutingModule } from './manufacturing-workspace-routing.module';
 
 @NgModule({
@@ -21,7 +23,8 @@ import { ManufacturingWorkspaceRoutingModule } from './manufacturing-workspace-r
     ProductionCostRecordingPageComponent,
     ManufacturingMasterDataPageComponent,
     ManufacturingDepartmentsPageComponent,
-    FactoryStructureFoundationPageComponent
+    FactoryStructureFoundationPageComponent,
+    ManufacturingCompensationPageComponent
   ],
   imports: [
     CommonModule,
@@ -30,6 +33,7 @@ import { ManufacturingWorkspaceRoutingModule } from './manufacturing-workspace-r
     ButtonModule,
     InputTextModule,
     TableModule,
+    DialogModule,
     FormsModule,
     ReactiveFormsModule,
     ManufacturingWorkspaceRoutingModule

@@ -41,4 +41,34 @@ describe('ManufacturingMasterDataApiService', () => {
 
     expect(departments).toEqual([{ departmentId: 4, name: 'Challenger' }]);
   });
+
+  it('maps active compensation model options from the endpoint envelope', () => {
+    let models: unknown[] = [];
+    service.compensationModels().subscribe(value => models = value);
+
+    const request = http.expectOne(item => item.method === 'GET' && item.urlWithParams.includes('/api/compensation/models?includeInactive=false'));
+    request.flush({ success: true, data: { items: [{ id: 'model-grm001', code: 'GRM001', name: 'جرومان', isActive: true }] } });
+
+    expect(models).toEqual([{ id: 'model-grm001', code: 'GRM001', name: 'جرومان', isActive: true }]);
+  });
+
+  it('maps stage configuration and sends only compensation-editable fields on save', () => {
+    let stageCount = 0;
+    service.compensationModelStages('model-grm001').subscribe(value => stageCount = value.length);
+    http.expectOne(item => item.method === 'GET' && item.url.endsWith('/api/compensation/models/model-grm001/stages')).flush({
+      success: true,
+      data: [{ id: 'stage-1', productModelId: 'model-grm001', subStageId: 'sub-1', subStageCode: 'STG001', subStageName: 'تجهيز', stageOrder: 1, piecePrice: 0.5, standardSeconds: 22, compensationMode: 'SharedPercentage', isRequired: true, isActive: true }]
+    });
+
+    service.updateCompensationModelStage('model-grm001', 'stage-1', {
+      compensationMode: 'FullRatePerWorker',
+      piecePrice: 0.75,
+      standardSeconds: 18
+    }).subscribe();
+    const request = http.expectOne(item => item.method === 'PATCH' && item.url.endsWith('/api/compensation/models/model-grm001/stages/stage-1'));
+    expect(request.request.body).toEqual({ compensationMode: 'FullRatePerWorker', piecePrice: 0.75, standardSeconds: 18 });
+    request.flush({ success: true, data: { id: 'stage-1', subStageId: 'sub-1', stageOrder: 1, piecePrice: 0.75, standardSeconds: 18, compensationMode: 'FullRatePerWorker', isRequired: true, isActive: true } });
+
+    expect(stageCount).toBe(1);
+  });
 });

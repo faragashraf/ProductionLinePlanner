@@ -223,6 +223,7 @@ var mainStagesApi = app.MapGroup("/api/main-stages").RequireAuthorization();
 var subStagesApi = app.MapGroup("/api/sub-stages").RequireAuthorization();
 var workersApi = app.MapGroup("/api/workers").RequireAuthorization();
 var productModelsApi = app.MapGroup("/api/product-models").RequireAuthorization();
+var compensationApi = app.MapGroup("/api/compensation").RequireAuthorization();
 var workerCompensationApi = app.MapGroup("/api/workers/{workerId:guid}/compensation").RequireAuthorization();
 var assignmentsApi = app.MapGroup("/api/assignments").RequireAuthorization();
 var factoryStructureApi = app.MapGroup("/api/factory-structure").RequireAuthorization();
@@ -2127,6 +2128,11 @@ productModelsApi.MapPost("/{modelId:guid}/stages", async (
     HttpContext httpContext,
     CancellationToken cancellationToken) =>
 {
+    if (request.InvalidCompensationMode is not null)
+    {
+        return ApiResponse.Failure("ValidationError", request.InvalidCompensationMode, StatusCodes.Status400BadRequest);
+    }
+
     var actorUserId = currentUserService.UserId;
     if (actorUserId is null)
     {
@@ -2161,6 +2167,11 @@ productModelsApi.MapPatch("/{modelId:guid}/stages/{modelStageId:guid}", async (
     HttpContext httpContext,
     CancellationToken cancellationToken) =>
 {
+    if (request.InvalidCompensationMode is not null)
+    {
+        return ApiResponse.Failure("ValidationError", request.InvalidCompensationMode, StatusCodes.Status400BadRequest);
+    }
+
     var actorUserId = currentUserService.UserId;
     if (actorUserId is null)
     {
@@ -2252,6 +2263,92 @@ productModelsApi.MapPost("/{modelId:guid}/stages/copy", async (
     .RequirePermission("models.manage")
     .WithTags("ProductModels")
     .WithName("CopyModelStages");
+
+compensationApi.MapGet("/models", async (
+    IProductModelService productModelService,
+    CancellationToken cancellationToken,
+    string? search = null,
+    bool includeInactive = false,
+    int page = 1,
+    int pageSize = 50) =>
+{
+    var result = await productModelService.GetModelsAsync(search, includeInactive ? null : true, page, pageSize, cancellationToken);
+    if (result.IsFailure)
+    {
+        return ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code));
+    }
+
+    return Results.Ok(new
+    {
+        success = true,
+        data = new
+        {
+            items = result.Value ?? Array.Empty<ProductModelDto>(),
+            totalCount = result.TotalCount,
+            pageNumber = result.PageNumber,
+            pageSize = result.PageSize
+        }
+    });
+})
+    .RequirePermission("compensation.view")
+    .WithTags("Compensation")
+    .WithName("GetCompensationProductModels");
+
+compensationApi.MapGet("/models/{modelId:guid}/stages", async (
+    Guid modelId,
+    IProductModelService productModelService,
+    CancellationToken cancellationToken) =>
+{
+    var result = await productModelService.GetModelStagesAsync(modelId, cancellationToken);
+    if (result.IsFailure)
+    {
+        return ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code));
+    }
+
+    return Results.Ok(ApiResponse.Success(result.Value ?? Array.Empty<ProductModelStageDto>()));
+})
+    .RequirePermission("compensation.view")
+    .WithTags("Compensation")
+    .WithName("GetCompensationProductModelStages");
+
+compensationApi.MapPatch("/models/{modelId:guid}/stages/{modelStageId:guid}", async (
+    Guid modelId,
+    Guid modelStageId,
+    UpsertProductModelStageRequest request,
+    IProductModelService productModelService,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
+    CancellationToken cancellationToken) =>
+{
+    if (request.InvalidCompensationMode is not null)
+    {
+        return ApiResponse.Failure("ValidationError", request.InvalidCompensationMode, StatusCodes.Status400BadRequest);
+    }
+
+    if (request.SubStageId is not null || request.StageOrder is not null || request.IsRequired is not null || request.IsActive is not null ||
+        request.HasEffectiveFrom || request.EffectiveFrom is not null)
+    {
+        return ApiResponse.Failure("ValidationError", "Only compensation mode, piece price, and standard seconds can be changed from compensation configuration.", StatusCodes.Status400BadRequest);
+    }
+
+    var actorUserId = currentUserService.UserId;
+    if (actorUserId is null)
+    {
+        return ApiResponse.Failure("Unauthorized", "User context is required.");
+    }
+
+    var requestMeta = $"{httpContext.Request.Method} {httpContext.Request.Path}";
+    var result = await productModelService.UpdateModelStageAsync(modelId, modelStageId, request, actorUserId.Value, requestMeta, cancellationToken);
+    if (result.IsFailure)
+    {
+        return ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code));
+    }
+
+    return Results.Ok(ApiResponse.Success(result.Value!));
+})
+    .RequirePermission("compensation.manage")
+    .WithTags("Compensation")
+    .WithName("UpdateCompensationProductModelStage");
 
 workerCompensationApi.MapGet("/current", async (
     Guid workerId,

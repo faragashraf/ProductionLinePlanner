@@ -14,6 +14,7 @@ public sealed class UpsertProductModelStageRequest
     // Omission preserves the current value; an explicit null clears it.
     public bool HasStandardSeconds { get; init; }
     public CompensationMode? CompensationMode { get; init; }
+    public string? InvalidCompensationMode { get; init; }
     public bool? IsRequired { get; init; }
     public bool? IsActive { get; init; }
     public DateTime? EffectiveFrom { get; init; }
@@ -32,6 +33,8 @@ public sealed class UpsertProductModelStageRequestJsonConverter : JsonConverter<
             ? value.Deserialize<T>(options)
             : default;
 
+        var (compensationMode, invalidCompensationMode) = ReadCompensationMode(root);
+
         return new UpsertProductModelStageRequest
         {
             SubStageId = Read<Guid?>("subStageId"),
@@ -39,12 +42,30 @@ public sealed class UpsertProductModelStageRequestJsonConverter : JsonConverter<
             PiecePrice = Read<decimal?>("piecePrice"),
             StandardSeconds = Read<decimal?>("standardSeconds"),
             HasStandardSeconds = root.TryGetProperty("standardSeconds", out _),
-            CompensationMode = Read<CompensationMode?>("compensationMode"),
+            CompensationMode = compensationMode,
+            InvalidCompensationMode = invalidCompensationMode,
             IsRequired = Read<bool?>("isRequired"),
             IsActive = Read<bool?>("isActive"),
             EffectiveFrom = Read<DateTime?>("effectiveFrom"),
             HasEffectiveFrom = root.TryGetProperty("effectiveFrom", out _)
         };
+    }
+
+    private static (CompensationMode? Value, string? Error) ReadCompensationMode(JsonElement root)
+    {
+        if (!root.TryGetProperty("compensationMode", out var value) || value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+        {
+            return (null, null);
+        }
+
+        if (value.ValueKind == JsonValueKind.String &&
+            Enum.TryParse<CompensationMode>(value.GetString(), ignoreCase: false, out var mode) &&
+            Enum.IsDefined(mode))
+        {
+            return (mode, null);
+        }
+
+        return (null, "compensationMode must be one of SharedPercentage, FullRatePerWorker, or FixedAmount.");
     }
 
     public override void Write(Utf8JsonWriter writer, UpsertProductModelStageRequest value, JsonSerializerOptions options)
