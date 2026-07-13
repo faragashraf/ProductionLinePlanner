@@ -13,7 +13,7 @@ import { AdminRolesPageComponent } from './roles-page/admin-roles-page.component
 import { UserAuthorizationPageComponent } from './user-authorization-page/user-authorization-page.component';
 import { AdminUsersPageComponent } from './users-page/admin-users-page.component';
 
-const routes: Routes = [
+export const IAM_ADMIN_ROUTES: Routes = [
   { path: 'users', component: AdminUsersPageComponent, canActivate: [PermissionCanActivateGuard], data: { title: 'إدارة المستخدمين', breadcrumb: 'إدارة المستخدمين', permission: PERMISSIONS.users.view } },
   { path: 'users/:id', component: UserAuthorizationPageComponent, canActivate: [PermissionCanActivateGuard], data: { title: 'صلاحيات المستخدم', breadcrumb: 'صلاحيات المستخدم', permission: PERMISSIONS.users.view } },
   { path: 'roles', component: AdminRolesPageComponent, canActivate: [PermissionCanActivateGuard], data: { title: 'إدارة الأدوار', breadcrumb: 'إدارة الأدوار', permission: PERMISSIONS.roles.view } },
@@ -23,6 +23,6 @@ const routes: Routes = [
 
 @NgModule({
   declarations: [AdminUsersPageComponent, UserAuthorizationPageComponent, AdminRolesPageComponent, PermissionCatalogPageComponent],
-  imports: [CommonModule, FormsModule, RouterModule.forChild(routes), ButtonModule, InputTextModule, RippleModule, SharedModule]
+  imports: [CommonModule, FormsModule, RouterModule.forChild(IAM_ADMIN_ROUTES), ButtonModule, InputTextModule, RippleModule, SharedModule]
 })
 export class IamAdminModule {}

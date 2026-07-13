@@ -20,7 +20,7 @@ export class PermissionCanActivateGuard implements CanActivate {
     route: ActivatedRouteSnapshot,
     _state: RouterStateSnapshot
   ): Observable<boolean | UrlTree> | Promise<boolean | UrlTree> | boolean | UrlTree {
-    return this.routeAccess.evaluate(route.data);
+    return this.routeAccess.evaluate(route.routeConfig?.data as Record<string, unknown> | undefined);
   }
 
 }

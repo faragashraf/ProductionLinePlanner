@@ -9,7 +9,6 @@ import { DashboardPageComponent } from './pages/dashboard-page/dashboard-page.co
 import { FactoryMapPageComponent } from './pages/factory-map-page/factory-map-page.component';
 import { ProductionLinesPageComponent } from './pages/production-lines-page/production-lines-page.component';
 import { StagesPageComponent } from './pages/stages-page/stages-page.component';
-import { WorkersPageComponent } from './pages/workers-page/workers-page.component';
 import { AssignmentsPageComponent } from './pages/assignments-page/assignments-page.component';
 import { NotificationsPageComponent } from './pages/notifications-page/notifications-page.component';
 import { LoginPageComponent } from './pages/login-page/login-page.component';
@@ -34,7 +33,6 @@ import { AuthTokenInterceptor } from './core/interceptors/auth-token.interceptor
     FactoryMapPageComponent,
     ProductionLinesPageComponent,
     StagesPageComponent,
-    WorkersPageComponent,
     AssignmentsPageComponent,
     NotificationsPageComponent,
     LoginPageComponent,

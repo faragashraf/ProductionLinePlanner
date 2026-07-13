@@ -1,0 +1,29 @@
+<section class="manufacturing-workspace">
+  <header class="manufacturing-workspace__header">
+    <div>
+      <span class="manufacturing-workspace__eyebrow">Manufacturing Workspace</span>
+      <h1>مساحة التصنيع</h1>
+      <p>أساس موحّد لإدارة بيانات المصنع قبل بدء عمليات الإنشاء والتعديل.</p>
+    </div>
+    <span class="manufacturing-workspace__status"><i class="pi pi-shield"></i> عرض حسب الصلاحيات</span>
+  </header>
+
+  <nav class="manufacturing-workspace__navigation" aria-label="تنقل مساحة التصنيع">
+    <ng-container *ngIf="!isNavigationLoading; else navigationLoading">
+      <a
+        *ngFor="let item of visibleItems"
+        class="manufacturing-workspace__nav-item"
+        [class.manufacturing-workspace__nav-item--active]="isActive(item)"
+        [routerLink]="item.route"
+      >
+        <i class="pi" [ngClass]="item.icon"></i>
+        <span>{{ item.label }}</span>
+      </a>
+    </ng-container>
+    <ng-template #navigationLoading>
+      <plp-loading-skeleton [lines]="2" [showAvatar]="false" [cardLike]="true"></plp-loading-skeleton>
+    </ng-template>
+  </nav>
+
+  <router-outlet></router-outlet>
+</section>

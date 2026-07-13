@@ -4,7 +4,6 @@ import { DashboardPageComponent } from './pages/dashboard-page/dashboard-page.co
 import { FactoryMapPageComponent } from './pages/factory-map-page/factory-map-page.component';
 import { ProductionLinesPageComponent } from './pages/production-lines-page/production-lines-page.component';
 import { StagesPageComponent } from './pages/stages-page/stages-page.component';
-import { WorkersPageComponent } from './pages/workers-page/workers-page.component';
 import { AssignmentsPageComponent } from './pages/assignments-page/assignments-page.component';
 import { NotificationsPageComponent } from './pages/notifications-page/notifications-page.component';
 import { LoginPageComponent } from './pages/login-page/login-page.component';
@@ -14,6 +13,7 @@ import { AuthGuard } from './core/guards/auth.guard';
 import { PermissionCanActivateGuard } from './core/guards/permission-can-activate.guard';
 import { PermissionCanMatchGuard } from './core/guards/permission-can-match.guard';
 import { PERMISSIONS } from './core/config/permission-identifiers';
+import { MANUFACTURING_WORKSPACE_VIEW_PERMISSIONS } from './core/config/manufacturing-workspace.config';
 
 export const APP_ROUTES: Routes = [
   { path: 'login', component: LoginPageComponent, data: { title: 'تسجيل الدخول', breadcrumb: 'تسجيل الدخول' } },
@@ -26,6 +26,17 @@ export const APP_ROUTES: Routes = [
     children: [
       { path: '', redirectTo: 'dashboard', pathMatch: 'full' },
       { path: 'dashboard', component: DashboardPageComponent, data: { title: 'لوحة التحكم', breadcrumb: 'لوحة التحكم' } },
+      {
+        path: 'manufacturing',
+        loadChildren: () => import('./pages/manufacturing-workspace/manufacturing-workspace.module').then((module) => module.ManufacturingWorkspaceModule),
+        canMatch: [PermissionCanMatchGuard],
+        canActivate: [PermissionCanActivateGuard],
+        data: {
+          title: 'مساحة التصنيع',
+          breadcrumb: 'مساحة التصنيع',
+          requireAny: [...MANUFACTURING_WORKSPACE_VIEW_PERMISSIONS]
+        }
+      },
       {
         path: 'factory-map',
         component: FactoryMapPageComponent,
@@ -54,13 +65,7 @@ export const APP_ROUTES: Routes = [
       },
       {
         path: 'workers',
-        component: WorkersPageComponent,
-        canActivate: [PermissionCanActivateGuard],
-        data: {
-          title: 'العاملون',
-          breadcrumb: 'العاملون',
-          permission: PERMISSIONS.workers.view
-        }
+        loadChildren: () => import('./pages/workers-page/workers-page.module').then((module) => module.WorkersPageModule)
       },
       {
         path: 'assignments',
