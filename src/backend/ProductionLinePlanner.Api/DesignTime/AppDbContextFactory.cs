@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
+using Microsoft.Extensions.Configuration;
 using ProductionLinePlanner.Infrastructure.Data;
 
 namespace ProductionLinePlanner.Api.DesignTime;
@@ -12,8 +13,29 @@ public sealed class AppDbContextFactory : IDesignTimeDbContextFactory<AppDbConte
 {
     public AppDbContext CreateDbContext(string[] args)
     {
+        var environment = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? "Production";
+
+        var configuration = new ConfigurationBuilder()
+            .SetBasePath(AppContext.BaseDirectory)
+            .AddJsonFile("appsettings.json", optional: false)
+            .AddJsonFile($"appsettings.{environment}.json", optional: true)
+            .AddEnvironmentVariables();
+
+        if (string.Equals(environment, "Development", StringComparison.OrdinalIgnoreCase))
+        {
+            configuration.AddUserSecrets(typeof(AppDbContextFactory).Assembly);
+        }
+
+        var resolvedConfiguration = configuration.Build();
+        var connectionString = resolvedConfiguration.GetConnectionString("AppDatabase");
+
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            throw new InvalidOperationException("Missing required connection string 'ConnectionStrings:AppDatabase'.");
+        }
+
         var options = new DbContextOptionsBuilder<AppDbContext>()
-            .UseSqlServer("Server=(localdb)\\mssqllocaldb;Database=ProductionLinePlannerDesignTime;Trusted_Connection=True;TrustServerCertificate=True;")
+            .UseSqlServer(connectionString)
             .Options;
 
         return new AppDbContext(options);
