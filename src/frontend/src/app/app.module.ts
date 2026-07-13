@@ -24,7 +24,7 @@ import { FactoryRendererComponent } from './pages/factory-map-page/renderers/fac
 import { LineRendererComponent } from './pages/factory-map-page/renderers/line-renderer/line-renderer.component';
 import { StageRendererComponent } from './pages/factory-map-page/renderers/stage-renderer/stage-renderer.component';
 import { AuthTokenInterceptor } from './core/interceptors/auth-token.interceptor';
-import { PrimeNGConfig } from 'primeng/api';
+import { ConfirmationService, PrimeNGConfig } from 'primeng/api';
 import { configureProductionPrimeNg } from './shared/design-system/layering/production-z-index';
 
 @NgModule({
@@ -56,6 +56,7 @@ import { configureProductionPrimeNg } from './shared/design-system/layering/prod
     SharedModule
   ],
   providers: [
+    ConfirmationService,
     {
       provide: HTTP_INTERCEPTORS,
       useClass: AuthTokenInterceptor,
