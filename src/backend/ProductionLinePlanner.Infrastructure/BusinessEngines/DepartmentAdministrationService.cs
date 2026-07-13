@@ -14,6 +14,7 @@ public sealed class DepartmentAdministrationService(
     IAttendanceDepartmentReader attendanceDepartmentReader,
     IAttendanceDepartmentWriter attendanceDepartmentWriter,
     IAttendanceEmployeeWriter attendanceEmployeeWriter,
+    IAttendanceEmployeeReader attendanceEmployeeReader,
     IAuditEngine auditEngine) : IDepartmentAdministrationService
 {
     public async Task<Result<AttendanceDepartmentRecord[]>> GetDepartmentsAsync(CancellationToken cancellationToken = default)
@@ -176,6 +177,22 @@ public sealed class DepartmentAdministrationService(
         }
 
         var before = new { worker.Id, worker.AttendanceDepartmentId };
+        var externalSnapshot = await attendanceEmployeeReader.GetByAttendanceUserIdAsync(worker.AttendanceUserId!, cancellationToken);
+        if (externalSnapshot.IsFailure)
+        {
+            return Result.Failure(externalSnapshot.Error!);
+        }
+
+        if (externalSnapshot.Value is null)
+        {
+            return Result.Failure(new Error("NotFound", "Worker was not found in attendance source."));
+        }
+
+        if (!externalSnapshot.Value.DepartmentId.HasValue)
+        {
+            return Result.Failure(new Error("NeedsReconciliation", "Attendance source does not provide an original department for rollback."));
+        }
+
         var changed = await attendanceEmployeeWriter.UpdateWorkerDepartmentAsync(worker.AttendanceUserId!, departmentId, cancellationToken);
         if (changed.IsFailure)
         {
@@ -185,7 +202,28 @@ public sealed class DepartmentAdministrationService(
         worker.SetAttendanceDepartmentId(departmentId, DateTime.UtcNow);
         dbContext.Entry(worker).Property(nameof(Worker.LastExternalSyncAt)).CurrentValue = DateTime.UtcNow;
 
-        await dbContext.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (Exception)
+        {
+            var rollback = await attendanceEmployeeWriter.UpdateWorkerDepartmentAsync(
+                worker.AttendanceUserId!,
+                externalSnapshot.Value.DepartmentId.Value,
+                cancellationToken);
+
+            if (rollback.IsFailure)
+            {
+                return Result.Failure(new Error(
+                    "NeedsReconciliation",
+                    "Planner persistence failed and attendance department rollback also failed."));
+            }
+
+            return Result.Failure(new Error(
+                "PersistenceFailed",
+                "Planner persistence failed; the attendance department change was rolled back."));
+        }
         await auditEngine.RecordAsync(
             actorUserId,
             Domain.Enums.AuditActionType.Update,
@@ -247,16 +285,6 @@ public sealed class DepartmentAdministrationService(
         {
             return Result.Failure(existing.Error!);
         }
-
-        var before = existing.Value!;
-        await auditEngine.RecordAsync(
-            actorUserId,
-            Domain.Enums.AuditActionType.Delete,
-            "Department",
-            departmentId.ToString(),
-            before: before,
-            after: null,
-            requestMeta: requestMeta);
 
         return Result.Failure(new Error("ValidationError", "Delete is not supported for attendance departments in V1."));
     }

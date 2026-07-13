@@ -8,6 +8,8 @@ public interface IWorkerCompensationService
 {
     Task<Result<WorkerSalaryHistoryDto>> GetCurrentSalaryAsync(Guid workerId, CancellationToken cancellationToken = default);
 
+    Task<Result<WorkerSalaryHistoryDto>> GetCurrentSalaryAsync(Guid workerId, DateTime asOfUtc, CancellationToken cancellationToken = default);
+
     Task<Result<WorkerSalaryHistoryDto[]>> GetSalaryHistoryAsync(Guid workerId, CancellationToken cancellationToken = default);
 
     Task<Result<WorkerSalaryHistoryDto>> SetSalaryAsync(

@@ -285,6 +285,23 @@ public sealed class EmployeeMasterDataService(
         var updateNameRequired = fullName is not null;
         var updateDepartmentRequired = attendanceDepartmentId.HasValue;
 
+        var snapshot = await attendanceEmployeeReader.GetByAttendanceUserIdAsync(normalizedAttendanceUserId, cancellationToken);
+        if (snapshot.IsFailure)
+        {
+            return Result.Failure(snapshot.Error!);
+        }
+
+        if (snapshot.Value is null)
+        {
+            return Result.Failure(new Error("NotFound", "Worker was not found in attendance source."));
+        }
+
+        var originalExternalName = snapshot.Value.Name;
+        if (updateNameRequired && string.IsNullOrWhiteSpace(originalExternalName))
+        {
+            return Result.Failure(new Error("NeedsReconciliation", "Attendance source does not provide an original name for rollback."));
+        }
+
         if (updateNameRequired)
         {
             var name = fullName!.Trim();
@@ -311,13 +328,15 @@ public sealed class EmployeeMasterDataService(
             {
                 if (updateNameRequired)
                 {
-                    var current = await attendanceEmployeeReader.GetByAttendanceUserIdAsync(normalizedAttendanceUserId, cancellationToken);
-                    if (current.IsSuccess && current.Value is not null && !string.IsNullOrWhiteSpace(current.Value.Name))
+                    var rollback = await attendanceEmployeeWriter.UpdateWorkerFullNameAsync(
+                        normalizedAttendanceUserId,
+                        originalExternalName,
+                        cancellationToken);
+                    if (rollback.IsFailure)
                     {
-                        _ = await attendanceEmployeeWriter.UpdateWorkerFullNameAsync(
-                            normalizedAttendanceUserId,
-                            current.Value.Name,
-                            cancellationToken);
+                        return Result.Failure(new Error(
+                            "NeedsReconciliation",
+                            "Attendance department update failed and the name rollback also failed."));
                     }
                 }
 

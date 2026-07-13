@@ -398,7 +398,7 @@ public sealed class ProductModelService(
         }
 
         var duplicateOrder = await dbContext.ProductModelStages.AnyAsync(
-            x => x.ProductModelId == modelId && x.StageOrder == request.StageOrder.Value && x.IsActive,
+            x => x.ProductModelId == modelId && x.StageOrder == request.StageOrder.Value,
             cancellationToken);
         if (duplicateOrder)
         {
@@ -468,7 +468,8 @@ public sealed class ProductModelService(
         }
 
         if (request.SubStageId is null && request.StageOrder is null && request.PiecePrice is null &&
-            request.StandardSeconds is null && request.CompensationMode is null && request.IsRequired is null && request.IsActive is null)
+            !request.HasStandardSeconds && request.StandardSeconds is null && request.CompensationMode is null && request.IsRequired is null && request.IsActive is null &&
+            !request.HasEffectiveFrom && request.EffectiveFrom is null)
         {
             return Result<ProductModelStageDto>.Failure(new Error("ValidationError", "No updatable fields were provided."));
         }
@@ -497,7 +498,7 @@ public sealed class ProductModelService(
             return Result<ProductModelStageDto>.Failure(new Error("ValidationError", "PiecePrice must be greater than or equal to 0."));
         }
 
-        if (request.StandardSeconds is <= 0m)
+        if ((request.HasStandardSeconds || request.StandardSeconds.HasValue) && request.StandardSeconds is <= 0m)
         {
             return Result<ProductModelStageDto>.Failure(new Error("ValidationError", "StandardSeconds must be greater than 0 when provided."));
         }
@@ -516,7 +517,7 @@ public sealed class ProductModelService(
         if (request.StageOrder is not null)
         {
             var duplicateOrder = await dbContext.ProductModelStages.AnyAsync(
-                x => x.Id != entity.Id && x.ProductModelId == modelId && x.StageOrder == stageOrder && x.IsActive,
+                x => x.Id != entity.Id && x.ProductModelId == modelId && x.StageOrder == stageOrder,
                 cancellationToken);
             if (duplicateOrder)
             {
@@ -529,11 +530,11 @@ public sealed class ProductModelService(
             subStageId,
             stageOrder,
             request.PiecePrice ?? entity.PiecePrice,
-            request.StandardSeconds,
+            request.HasStandardSeconds || request.StandardSeconds.HasValue ? request.StandardSeconds : entity.StandardSeconds,
             request.CompensationMode ?? entity.CompensationMode,
             request.IsRequired ?? entity.IsRequired,
             request.IsActive ?? entity.IsActive,
-            request.EffectiveFrom,
+            request.HasEffectiveFrom || request.EffectiveFrom.HasValue ? request.EffectiveFrom : entity.EffectiveFrom,
             DateTime.UtcNow);
 
         dbContext.Entry(entity).Property(nameof(ProductModelStage.UpdatedAtUtc)).CurrentValue = DateTime.UtcNow;
@@ -664,13 +665,17 @@ public sealed class ProductModelService(
         var targetExisting = await dbContext.ProductModelStages
             .AsNoTracking()
             .Where(x => x.ProductModelId == request.TargetModelId)
-            .Select(x => x.SubStageId)
+            .Select(x => new { x.SubStageId, x.StageOrder })
             .ToListAsync(cancellationToken);
 
-        var overlap = sourceStages.Any(stage => targetExisting.Contains(stage.SubStageId));
-        if (overlap)
+        if (sourceStages.Any(stage => targetExisting.Any(existing => existing.SubStageId == stage.SubStageId)))
         {
             return Result.Failure(new Error("Conflict", "Target model already has stage entries for one or more source stages."));
+        }
+
+        if (sourceStages.Any(stage => targetExisting.Any(existing => existing.StageOrder == stage.StageOrder)))
+        {
+            return Result.Failure(new Error("Conflict", "Target model already has stage entries for one or more source stage orders."));
         }
 
         foreach (var sourceStage in sourceStages)

@@ -26,6 +26,7 @@ public sealed class WorkerSalaryHistoryConfiguration : IEntityTypeConfiguration<
         builder.HasIndex(x => new { x.WorkerId, x.EffectiveFrom });
         builder.HasIndex(x => new { x.WorkerId, x.EffectiveTo });
         builder.HasIndex(x => new { x.WorkerId, x.EffectiveTo })
+            .IsUnique()
             .HasFilter("[EffectiveTo] IS NULL")
             .HasDatabaseName("IX_WorkerSalaryHistories_Current");
 

@@ -19,7 +19,20 @@ public sealed class WorkerCompensationService(
         Guid workerId,
         CancellationToken cancellationToken = default)
     {
-        var current = await GetCurrentSalaryRecordAsync(workerId, cancellationToken);
+        return await GetCurrentSalaryAsync(workerId, DateTime.UtcNow, cancellationToken);
+    }
+
+    public async Task<Result<WorkerSalaryHistoryDto>> GetCurrentSalaryAsync(
+        Guid workerId,
+        DateTime asOfUtc,
+        CancellationToken cancellationToken = default)
+    {
+        if (asOfUtc == default)
+        {
+            return Result<WorkerSalaryHistoryDto>.Failure(new Error("ValidationError", "AsOfUtc is required."));
+        }
+
+        var current = await GetCurrentSalaryRecordAsync(workerId, asOfUtc, cancellationToken);
         if (current is null)
         {
             return Result<WorkerSalaryHistoryDto>.Failure(new Error("NotFound", "No active salary found for this worker."));
@@ -155,7 +168,14 @@ public sealed class WorkerCompensationService(
             createdAtUtc: DateTime.UtcNow);
 
         dbContext.WorkerSalaryHistories.Add(entity);
-        await dbContext.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException)
+        {
+            return Result<WorkerSalaryHistoryDto>.Failure(new Error("Conflict", "A current salary record already exists for this worker."));
+        }
 
         await auditEngine.RecordAsync(
             actorUserId,
@@ -273,7 +293,7 @@ public sealed class WorkerCompensationService(
         ? "EGP"
         : currencyCode.Trim().ToUpperInvariant();
 
-    private async Task<WorkerSalaryHistory?> GetCurrentSalaryRecordAsync(Guid workerId, CancellationToken cancellationToken)
+    private async Task<WorkerSalaryHistory?> GetCurrentSalaryRecordAsync(Guid workerId, DateTime asOfUtc, CancellationToken cancellationToken)
     {
         if (await WorkerExistsAsync(workerId, cancellationToken) is false)
         {
@@ -282,7 +302,8 @@ public sealed class WorkerCompensationService(
 
         return await dbContext.WorkerSalaryHistories
             .AsNoTracking()
-            .Where(x => x.WorkerId == workerId && x.EffectiveTo == null)
+            .Where(x => x.WorkerId == workerId && x.EffectiveFrom <= asOfUtc &&
+                (x.EffectiveTo == null || x.EffectiveTo > asOfUtc))
             .OrderByDescending(x => x.EffectiveFrom)
             .FirstOrDefaultAsync(cancellationToken);
     }

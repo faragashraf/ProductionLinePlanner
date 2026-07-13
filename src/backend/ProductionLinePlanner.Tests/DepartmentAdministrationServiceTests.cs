@@ -125,7 +125,7 @@ public sealed class DepartmentAdministrationServiceTests
 
         Assert.True(result.IsFailure);
         Assert.Equal("ValidationError", result.Error!.Code);
-        Assert.Single(fixture.AuditEngine.Calls);
+        Assert.Empty(fixture.AuditEngine.Calls);
     }
 
     [Fact]
@@ -254,6 +254,7 @@ public sealed class DepartmentAdministrationServiceTests
                 departmentReader,
                 departmentWriterForService,
                 serviceAttendanceWriter,
+                attendanceEmployeeReader,
                 auditEngine);
 
             return new DepartmentFixture(

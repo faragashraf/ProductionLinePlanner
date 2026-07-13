@@ -52,6 +52,73 @@ namespace ProductionLinePlanner.Infrastructure.Data.Migrations
                 defaultValue: "",
                 collation: "SQL_Latin1_General_CP1_CI_AS");
 
+            migrationBuilder.Sql("""
+                ;WITH MissingCodes AS
+                (
+                    SELECT [Id], CONCAT(N'STG-', UPPER(REPLACE(CONVERT(nvarchar(36), [Id]), N'-', N''))) AS [Code]
+                    FROM [dbo].[SubStages]
+                    WHERE NULLIF(LTRIM(RTRIM([Code])), N'') IS NULL
+                )
+                UPDATE [SubStages]
+                SET [Code] = MissingCodes.[Code]
+                FROM [dbo].[SubStages]
+                INNER JOIN MissingCodes ON MissingCodes.[Id] = [SubStages].[Id];
+
+                IF EXISTS
+                (
+                    SELECT [Code] COLLATE SQL_Latin1_General_CP1_CI_AS
+                    FROM [dbo].[SubStages]
+                    GROUP BY [Code] COLLATE SQL_Latin1_General_CP1_CI_AS
+                    HAVING COUNT(*) > 1 OR MAX(LEN([Code])) > 120 OR SUM(CASE WHEN LEN(LTRIM(RTRIM([Code]))) = 0 THEN 1 ELSE 0 END) > 0
+                )
+                    THROW 51000, 'SubStage Code remediation could not guarantee unique non-empty values.', 1;
+                """);
+
+            migrationBuilder.Sql("""
+                ;WITH MaxOrderByMainStage AS
+                (
+                    SELECT
+                        [MainStageId],
+                        MAX([SequenceOrder]) AS [CurrentMaxOrder]
+                    FROM [dbo].[SubStages]
+                    GROUP BY [MainStageId]
+                ),
+                InvalidOrders AS
+                (
+                    SELECT
+                        s.[Id],
+                        s.[MainStageId],
+                        COALESCE(m.[CurrentMaxOrder], 0)
+                            + ROW_NUMBER() OVER (PARTITION BY s.[MainStageId] ORDER BY s.[Id]) AS [ReplacementOrder]
+                    FROM [dbo].[SubStages] s
+                    LEFT JOIN MaxOrderByMainStage m
+                        ON m.[MainStageId] = s.[MainStageId]
+                    WHERE s.[SequenceOrder] <= 0
+                )
+                UPDATE s
+                SET [SequenceOrder] = i.[ReplacementOrder]
+                FROM [dbo].[SubStages] s
+                INNER JOIN InvalidOrders i ON i.[Id] = s.[Id];
+
+                ;WITH SequenceOrderCollisionCheck AS
+                (
+                    SELECT [MainStageId], [SequenceOrder], COUNT(*) AS [RowsPerOrder]
+                    FROM [dbo].[SubStages]
+                    GROUP BY [MainStageId], [SequenceOrder]
+                    HAVING COUNT(*) > 1
+                )
+                IF EXISTS (SELECT 1 FROM SequenceOrderCollisionCheck)
+                    THROW 51002, 'SubStage SequenceOrder remediation produced duplicate order values within a MainStage.', 1;
+
+                IF EXISTS
+                (
+                    SELECT 1
+                    FROM [dbo].[SubStages]
+                    WHERE [SequenceOrder] <= 0
+                )
+                    THROW 51001, 'SubStage SequenceOrder remediation could not guarantee positive values.', 1;
+                """);
+
             migrationBuilder.CreateTable(
                 name: "ProductModels",
                 columns: table => new
@@ -173,6 +240,7 @@ namespace ProductionLinePlanner.Infrastructure.Data.Migrations
                 name: "IX_WorkerSalaryHistories_Current",
                 table: "WorkerSalaryHistories",
                 columns: new[] { "WorkerId", "EffectiveTo" },
+                unique: true,
                 filter: "[EffectiveTo] IS NULL");
 
             migrationBuilder.CreateIndex(

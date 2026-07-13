@@ -2197,10 +2197,13 @@ productModelsApi.MapPost("/{modelId:guid}/stages/copy", async (
 
 workerCompensationApi.MapGet("/current", async (
     Guid workerId,
+    DateTime? asOfUtc,
     IWorkerCompensationService workerCompensationService,
     CancellationToken cancellationToken) =>
 {
-    var result = await workerCompensationService.GetCurrentSalaryAsync(workerId, cancellationToken);
+    var result = asOfUtc.HasValue
+        ? await workerCompensationService.GetCurrentSalaryAsync(workerId, asOfUtc.Value, cancellationToken)
+        : await workerCompensationService.GetCurrentSalaryAsync(workerId, cancellationToken);
     if (result.IsFailure)
     {
         return ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code));
