@@ -67,6 +67,21 @@ export class WorkersApiService {
       );
   }
 
+  loadFactoryStructureEligibleWorkers(subStageId: string): Observable<WorkerPageItem[]> {
+    return this.http
+      .get<ApiResponse<unknown>>(buildApiUrl(`/api/factory-structure/sub-stages/${encodeURIComponent(subStageId)}/eligible-workers`))
+      .pipe(
+        timeout(STANDARD_API_TIMEOUT_MS),
+        map((response) => {
+          const payload = this.extractPayload(response);
+          const workersPayload = this.parseEntityList(payload);
+          return workersPayload
+            .map((worker, index) => this.mapWorker(worker, index))
+            .filter((worker) => this.hasText(worker.id ?? '') && this.hasText(worker.code) && this.hasText(worker.fullName));
+        })
+      );
+  }
+
   private buildWorkersParams(page: number, pageSize: number, search: string): HttpParams {
     let params = new HttpParams().set('page', String(page)).set('pageSize', String(pageSize));
 

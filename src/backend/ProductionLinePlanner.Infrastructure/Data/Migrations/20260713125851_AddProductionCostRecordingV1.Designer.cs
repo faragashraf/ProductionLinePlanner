@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using ProductionLinePlanner.Infrastructure.Data;
 
@@ -11,9 +12,11 @@ using ProductionLinePlanner.Infrastructure.Data;
 namespace ProductionLinePlanner.Infrastructure.Data.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260713125851_AddProductionCostRecordingV1")]
+    partial class AddProductionCostRecordingV1
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -598,11 +601,6 @@ namespace ProductionLinePlanner.Infrastructure.Data.Migrations
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid>("ConcurrencyToken")
-                        .IsConcurrencyToken()
-                        .HasColumnType("uniqueidentifier");
-
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("datetime2");
 
@@ -741,12 +739,6 @@ namespace ProductionLinePlanner.Infrastructure.Data.Migrations
                     b.Property<Guid?>("CancelledBy")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<Guid>("ClientRequestId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid>("ConcurrencyToken")
-                        .IsConcurrencyToken()
-                        .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("datetime2");
@@ -782,15 +774,6 @@ namespace ProductionLinePlanner.Infrastructure.Data.Migrations
                         .HasPrecision(18, 4)
                         .HasColumnType("decimal(18,4)");
 
-                    b.Property<string>("SnapshotProductModelCode")
-                        .IsRequired()
-                        .HasMaxLength(80)
-                        .HasColumnType("nvarchar(80)");
-
-                    b.Property<string>("SnapshotProductModelName")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
 
                     b.Property<string>("SnapshotStageCode")
                         .IsRequired()
@@ -818,10 +801,6 @@ namespace ProductionLinePlanner.Infrastructure.Data.Migrations
                     b.HasIndex("ProductModelStageId");
 
                     b.HasIndex("ProductionDate", "Status");
-
-                    b.HasIndex("ProductionOrderId", "ClientRequestId")
-                        .IsUnique();
-
                     b.HasIndex("ProductionOrderId", "ProductModelStageId");
 
                     b.ToTable("StageProductionRecords", (string)null);

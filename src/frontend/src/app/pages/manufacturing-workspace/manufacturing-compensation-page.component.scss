@@ -1,0 +1,62 @@
+:host ::ng-deep .compensation-edit-dialog {
+  direction: rtl;
+}
+
+.compensation-edit-dialog__form {
+  display: grid;
+  gap: 1rem;
+}
+
+.compensation-edit-dialog__form label {
+  display: grid;
+  gap: .375rem;
+}
+
+.compensation-edit-dialog__form input,
+.compensation-edit-dialog__form select {
+  min-height: 2.75rem;
+  width: 100%;
+}
+
+.compensation-edit-dialog__context {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: .75rem;
+  margin: 0;
+}
+
+.compensation-edit-dialog__context div {
+  min-width: 0;
+}
+
+.compensation-edit-dialog__context dt {
+  color: var(--text-color-secondary);
+  font-size: .875rem;
+}
+
+.compensation-edit-dialog__context dd {
+  margin: .25rem 0 0;
+  overflow-wrap: anywhere;
+}
+
+.compensation-edit-dialog__form footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem;
+  justify-content: flex-start;
+}
+
+.compensation-edit-dialog__error {
+  color: var(--red-600);
+  margin: 0;
+}
+
+@media (max-width: 640px) {
+  .compensation-edit-dialog__context {
+    grid-template-columns: 1fr;
+  }
+
+  .compensation-edit-dialog__form footer > * {
+    flex: 1 1 8rem;
+  }
+}

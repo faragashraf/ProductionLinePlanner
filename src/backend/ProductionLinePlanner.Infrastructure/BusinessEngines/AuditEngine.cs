@@ -36,6 +36,35 @@ public sealed class AuditEngine : IAuditEngine
         "IsRead",
         "ReadAtUtc",
         "IsActive"
+        ,"OrderNumber"
+        ,"ProductionOrderId"
+        ,"ProductModelStageId"
+        ,"ProductionDate"
+        ,"PlannedQuantity"
+        ,"ProducedQuantity"
+        ,"AcceptedQuantity"
+        ,"RejectedQuantity"
+        ,"TotalWorkerEarnings"
+        ,"TotalEarnings"
+        ,"WorkerCount"
+        ,"RecordId"
+        ,"OrderId"
+        ,"EmployeeCode"
+        ,"Percentage"
+        ,"FixedAmount"
+        ,"EquivalentQuantity"
+        ,"CalculatedEarning"
+        ,"ConcurrencyToken"
+        ,"SnapshotProductModelCode"
+        ,"SnapshotProductModelName"
+        ,"SnapshotStageCode"
+        ,"SnapshotStageName"
+        ,"SnapshotPiecePrice"
+        ,"SnapshotStandardSeconds"
+        ,"SnapshotCompensationMode"
+        ,"CompensationMode"
+        ,"Allocations"
+        ,"Result"
     };
 
     private static readonly JsonSerializerOptions AuditJsonOptions = new()
@@ -133,6 +162,18 @@ public sealed class AuditEngine : IAuditEngine
                 if (IsSimpleType(value))
                 {
                     result[property.Name] = value;
+                }
+                else if (property.Name.Equals("Allocations", StringComparison.OrdinalIgnoreCase) && value is System.Collections.IEnumerable allocations)
+                {
+                    var items = new List<object?>();
+                    foreach (var allocation in allocations)
+                    {
+                        if (allocation is null) continue;
+                        var safeAllocation = BuildSafePayload(allocation);
+                        if (safeAllocation is not null) items.Add(safeAllocation);
+                        if (items.Count == 100) break;
+                    }
+                    result[property.Name] = items;
                 }
             }
 

@@ -78,6 +78,7 @@ public static class DependencyInjection
         services.AddScoped<IProductionStageCatalogService, ProductionStageCatalogService>();
         services.AddScoped<IProductModelService, ProductModelService>();
         services.AddScoped<IWorkerCompensationService, WorkerCompensationService>();
+        services.AddScoped<IProductionCostRecordingService, ProductionCostRecordingService>();
 
         return services;
     }
