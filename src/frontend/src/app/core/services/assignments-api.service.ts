@@ -2,6 +2,7 @@ import { HttpClient } from '@angular/common/http';
 import { Injectable } from '@angular/core';
 import { map, Observable, of, timeout } from 'rxjs';
 import { buildApiUrl } from '../config/api.config';
+import { STANDARD_API_TIMEOUT_MS } from '../config/api-timeout.config';
 import { ApiResponse } from '../models/api-response.model';
 import { isBackendGuid } from '../../shared/models/assignment-context.model';
 
@@ -123,6 +124,24 @@ export class AssignmentsApiService {
       );
   }
 
+  getFactoryStructureSubStageWorkers(subStageId: string): Observable<SubStageWorkersData> {
+    if (!isBackendGuid(subStageId)) {
+      return of<SubStageWorkersData>({
+        subStageId,
+        workers: [],
+        hasBackendData: false,
+        hasUsableBackendData: false
+      });
+    }
+
+    return this.http
+      .get<ApiResponse<unknown>>(buildApiUrl(`/api/factory-structure/sub-stages/${encodeURIComponent(subStageId)}/workers`))
+      .pipe(
+        timeout(STANDARD_API_TIMEOUT_MS),
+        map((response) => this.mapSubStageWorkers(this.extractPayload(response), subStageId))
+      );
+  }
+
   getCurrentWorkerAssignment(workerId: string): Observable<CurrentWorkerAssignment> {
     if (!this.isBackendWorkerId(workerId)) {
       return of<CurrentWorkerAssignment>({
@@ -174,6 +193,12 @@ export class AssignmentsApiService {
   createDefaultAssignment(request: DefaultAssignmentRequest): Observable<AssignmentActionResult> {
     return this.http
       .post<ApiResponse<unknown>>(buildApiUrl('/api/assignments/default'), request)
+      .pipe(timeout(ASSIGNMENTS_WRITE_TIMEOUT_MS), map((response) => this.mapActionResult(this.extractPayload(response))));
+  }
+
+  createFactoryStructureDefaultAssignment(request: DefaultAssignmentRequest): Observable<AssignmentActionResult> {
+    return this.http
+      .post<ApiResponse<unknown>>(buildApiUrl('/api/factory-structure/assignments/default'), request)
       .pipe(timeout(ASSIGNMENTS_WRITE_TIMEOUT_MS), map((response) => this.mapActionResult(this.extractPayload(response))));
   }
 

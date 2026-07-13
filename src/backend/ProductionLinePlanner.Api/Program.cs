@@ -225,6 +225,7 @@ var workersApi = app.MapGroup("/api/workers").RequireAuthorization();
 var productModelsApi = app.MapGroup("/api/product-models").RequireAuthorization();
 var workerCompensationApi = app.MapGroup("/api/workers/{workerId:guid}/compensation").RequireAuthorization();
 var assignmentsApi = app.MapGroup("/api/assignments").RequireAuthorization();
+var factoryStructureApi = app.MapGroup("/api/factory-structure").RequireAuthorization();
 var attendanceApi = app.MapGroup("/api/attendance").RequireAuthorization();
 var notificationsApi = app.MapGroup("/api/notifications").RequireAuthorization();
 var readinessApi = app.MapGroup("/api/readiness").RequireAuthorization();
@@ -1184,7 +1185,7 @@ productionLinesApi.MapPatch("/{lineId:guid}", async (
         return ApiResponse.Failure("Unauthorized", "User context is required.");
     }
 
-    var entity = await dbContext.ProductionLines.FirstOrDefaultAsync(x => x.Id == lineId && x.IsActive, cancellationToken);
+    var entity = await dbContext.ProductionLines.FirstOrDefaultAsync(x => x.Id == lineId, cancellationToken);
     if (entity is null)
     {
         return ApiResponse.Failure("NotFound", "Production line not found.", statusCode: 404);
@@ -1378,10 +1379,11 @@ mainStagesApi.MapGet("/{mainStageId:guid}/sub-stages", async (
     CancellationToken cancellationToken,
     string? search = null,
     bool? isActive = true,
+    bool includeInactive = false,
     int page = 1,
     int pageSize = 50) =>
 {
-    var result = await stageCatalogService.GetSubStagesAsync(mainStageId, search, isActive, page, pageSize, cancellationToken);
+    var result = await stageCatalogService.GetSubStagesAsync(mainStageId, search, includeInactive ? null : isActive, page, pageSize, cancellationToken);
     if (result.IsFailure)
     {
         return ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code));
@@ -2672,6 +2674,108 @@ assignmentsApi.MapGet("/sub-stages/{subStageId:guid}/workers", async (
     .RequirePermission("assignments.view")
     .WithTags("Assignments")
     .WithName("GetWorkersInSubStage");
+
+factoryStructureApi.MapGet("/sub-stages/{subStageId:guid}/workers", async (
+    Guid subStageId,
+    IAssignmentEngine assignmentEngine,
+    CancellationToken cancellationToken,
+    DateTime? asOfUtc = null) =>
+{
+    var result = await assignmentEngine.GetSubStageWorkersAsync(subStageId, asOfUtc, cancellationToken);
+    if (result.IsFailure)
+    {
+        return ApiResponse.Failure(
+            result.Error?.Code ?? "ValidationError",
+            result.Error?.Message ?? "Validation failed.",
+            MapFailureStatusCode(result.Error?.Code));
+    }
+
+    return Results.Ok(ApiResponse.Success(result.Value!));
+})
+    .RequirePermission(FactoryStructurePermissions.View)
+    .WithTags("FactoryStructure")
+    .WithName("GetFactoryStructureSubStageWorkers");
+
+factoryStructureApi.MapGet("/sub-stages/{subStageId:guid}/eligible-workers", async (
+    Guid subStageId,
+    AppDbContext dbContext,
+    CancellationToken cancellationToken) =>
+{
+    var subStageExists = await dbContext.SubStages
+        .AsNoTracking()
+        .AnyAsync(x => x.Id == subStageId && x.IsActive, cancellationToken);
+
+    if (!subStageExists)
+    {
+        return ApiResponse.Failure("NotFound", "SubStage not found or inactive.", 404);
+    }
+
+    var workers = await dbContext.Workers
+        .AsNoTracking()
+        .Where(x => x.IsActive && x.EmploymentStatus != EmploymentStatus.LeftEmployment)
+        .OrderBy(x => x.EmployeeCode)
+        .Select(x => new
+        {
+            id = x.Id,
+            code = x.EmployeeCode,
+            fullName = x.FullName,
+            state = "جاهز",
+            phone = x.Phone
+        })
+        .ToArrayAsync(cancellationToken);
+
+    return Results.Ok(ApiResponse.Success(new
+    {
+        items = workers,
+        totalCount = workers.Length,
+        pageNumber = 1,
+        pageSize = workers.Length
+    }));
+})
+    .RequirePermission(FactoryStructurePermissions.View)
+    .WithTags("FactoryStructure")
+    .WithName("GetFactoryStructureEligibleWorkers");
+
+factoryStructureApi.MapPost("/assignments/default", async (
+    CreateDefaultAssignmentRequest request,
+    IAssignmentEngine assignmentEngine,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
+    CancellationToken cancellationToken) =>
+{
+    var actorUserId = currentUserService.UserId;
+    if (actorUserId is null)
+    {
+        return ApiResponse.Failure("Unauthorized", "User context is required.");
+    }
+
+    var requestMeta = $"{httpContext.Request.Method} {httpContext.Request.Path}";
+    var result = await assignmentEngine.CreateOrUpdateDefaultAssignmentAsync(request, actorUserId.Value, requestMeta, cancellationToken);
+    if (result.IsFailure)
+    {
+        return ApiResponse.Failure(
+            result.Error?.Code ?? "ValidationError",
+            result.Error?.Message ?? "Validation failed.",
+            MapFailureStatusCode(result.Error?.Code));
+    }
+
+    var value = result.Value!;
+    var response = new
+    {
+        assignmentId = value.AssignmentId,
+        workerId = value.WorkerId,
+        subStageId = value.SubStageId,
+        assignmentType = value.AssignmentType,
+        startsAt = value.StartsAtUtc
+    };
+
+    return value.IsCreated
+        ? Results.Created($"/api/factory-structure/assignments/default/{value.AssignmentId}", ApiResponse.Success(response))
+        : Results.Ok(ApiResponse.Success(response));
+})
+    .RequirePermission(FactoryStructurePermissions.Manage)
+    .WithTags("FactoryStructure")
+    .WithName("CreateOrUpdateFactoryStructureDefaultAssignment");
 
 notificationsApi.MapGet("", async (
     INotificationEngine notificationEngine,

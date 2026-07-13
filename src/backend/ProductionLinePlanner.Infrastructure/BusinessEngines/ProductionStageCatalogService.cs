@@ -258,7 +258,7 @@ public sealed class ProductionStageCatalogService(
             return Result<MainStageDto>.Failure(new Error("ValidationError", "MainStageId is required."));
         }
 
-        var entity = await dbContext.MainStages.FirstOrDefaultAsync(x => x.Id == mainStageId && x.IsActive, cancellationToken);
+        var entity = await dbContext.MainStages.FirstOrDefaultAsync(x => x.Id == mainStageId, cancellationToken);
         if (entity is null)
         {
             return Result<MainStageDto>.Failure(new Error("NotFound", "Main stage not found."));
@@ -501,7 +501,7 @@ public sealed class ProductionStageCatalogService(
             return Result<SubStageDto>.Failure(new Error("ValidationError", "SubStageId is required."));
         }
 
-        var entity = await dbContext.SubStages.FirstOrDefaultAsync(x => x.Id == subStageId && x.IsActive, cancellationToken);
+        var entity = await dbContext.SubStages.FirstOrDefaultAsync(x => x.Id == subStageId, cancellationToken);
         if (entity is null)
         {
             return Result<SubStageDto>.Failure(new Error("NotFound", "Sub stage not found."));

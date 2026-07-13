@@ -5,6 +5,7 @@ import { ManufacturingPlaceholderPageComponent } from './manufacturing-placehold
 import { ProductionCostRecordingPageComponent } from './production-cost-recording-page.component';
 import { ManufacturingMasterDataPageComponent } from './manufacturing-master-data-page.component';
 import { ManufacturingDepartmentsPageComponent } from './manufacturing-departments-page.component';
+import { FactoryStructureFoundationPageComponent } from './factory-structure-foundation-page.component';
 import { PermissionCanActivateGuard } from '../../core/guards/permission-can-activate.guard';
 import { PermissionCanMatchGuard } from '../../core/guards/permission-can-match.guard';
 import { MANUFACTURING_WORKSPACE_ITEMS } from '../../core/config/manufacturing-workspace.config';
@@ -44,7 +45,7 @@ export const MANUFACTURING_WORKSPACE_ROUTES: Routes = [
         data: manufacturingRouteData(employees)
       },
       { path: 'departments', component: ManufacturingDepartmentsPageComponent, canMatch: [PermissionCanMatchGuard], canActivate: [PermissionCanActivateGuard], data: manufacturingRouteData(departments) },
-      { path: 'factory-structure', component: ManufacturingPlaceholderPageComponent, canMatch: [PermissionCanMatchGuard], canActivate: [PermissionCanActivateGuard], data: manufacturingRouteData(factoryStructure) },
+      { path: 'factory-structure', component: FactoryStructureFoundationPageComponent, canMatch: [PermissionCanMatchGuard], canActivate: [PermissionCanActivateGuard], data: manufacturingRouteData(factoryStructure) },
       { path: 'stages', component: ManufacturingMasterDataPageComponent, canMatch: [PermissionCanMatchGuard], canActivate: [PermissionCanActivateGuard], data: manufacturingRouteData(stages) },
       { path: 'models', component: ManufacturingMasterDataPageComponent, canMatch: [PermissionCanMatchGuard], canActivate: [PermissionCanActivateGuard], data: manufacturingRouteData(models) },
       { path: 'compensation', component: ManufacturingPlaceholderPageComponent, canMatch: [PermissionCanMatchGuard], canActivate: [PermissionCanActivateGuard], data: manufacturingRouteData(compensation) },
