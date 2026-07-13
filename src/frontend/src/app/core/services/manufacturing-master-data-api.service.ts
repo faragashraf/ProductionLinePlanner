@@ -10,11 +10,13 @@ export interface SubStageOption { id: string; mainStageId: string; name: string;
 export interface ProductionLineOption { id: string; name: string; isActive?: boolean; }
 export interface ProductModelItem { id: string; code: string; name: string; description?: string; isActive: boolean; }
 export interface ModelStageItem { id: string; subStageId: string; stageOrder: number; piecePrice: number; standardSeconds?: number; compensationMode: string; isRequired: boolean; isActive: boolean; }
+export interface DepartmentItem { departmentId: number; name: string; isActive?: boolean; status?: string; }
 
 @Injectable({ providedIn: 'root' })
 export class ManufacturingMasterDataApiService {
   constructor(private readonly http: HttpClient) {}
   mainStages(): Observable<MainStageOption[]> { return this.getItems('/api/main-stages'); } subStages(): Observable<SubStageOption[]> { return this.getItems('/api/sub-stages'); } productionLines(): Observable<ProductionLineOption[]> { return this.getItems('/api/production-lines'); }
+  departments(): Observable<DepartmentItem[]> { return this.getItems('/api/departments'); }
   createMain(value: unknown): Observable<MainStageOption> { return this.post('/api/main-stages', value); } updateMain(id: string, value: unknown): Observable<MainStageOption> { return this.patch(`/api/main-stages/${id}`, value); } deactivateMain(id: string): Observable<unknown> { return this.delete(`/api/main-stages/${id}`); }
   createSub(value: unknown): Observable<SubStageOption> { return this.post('/api/sub-stages', value); } updateSub(id: string, value: unknown): Observable<SubStageOption> { return this.patch(`/api/sub-stages/${id}`, value); } deactivateSub(id: string): Observable<unknown> { return this.delete(`/api/sub-stages/${id}`); }
   models(): Observable<ProductModelItem[]> { return this.getItems('/api/product-models?includeInactive=true'); } modelStages(id: string): Observable<ModelStageItem[]> { return this.get(`/api/product-models/${id}/stages`); }

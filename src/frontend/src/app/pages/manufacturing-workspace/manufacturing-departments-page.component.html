@@ -1,0 +1,83 @@
+<section class="page-frame departments-page" dir="rtl">
+  <plp-page-header title="الأقسام" description="عرض أقسام الحضور المتزامنة من مصدر ZKTime." [compact]="true">
+    <div header-actions>
+      <button
+        pButton
+        class="p-button-sm p-button-outlined"
+        type="button"
+        icon="pi pi-refresh"
+        label="تحديث"
+        [disabled]="isLoading"
+        (click)="onRefresh()"
+        aria-label="تحديث قائمة الأقسام"
+      ></button>
+    </div>
+  </plp-page-header>
+
+  <div class="departments-toolbar">
+    <label class="sr-only" for="departmentsSearch">بحث</label>
+    <input
+      id="departmentsSearch"
+      class="departments-search"
+      type="search"
+      [value]="searchTerm"
+      placeholder="ابحث باسم القسم أو الكود"
+      aria-label="بحث في الأقسام"
+      (input)="onSearch($event)"
+    />
+  </div>
+
+  <plp-loading-skeleton *ngIf="isLoading && !hasLoadedOnce" [lines]="5" [showAvatar]="false"></plp-loading-skeleton>
+
+  <plp-error-state
+    *ngIf="hasError && hasLoadedOnce && !isLoading"
+    [title]="'تعذر تحميل قائمة الأقسام'"
+    [description]="errorMessage"
+    [actionText]="errorRetryText"
+    (action)="onRefresh()"
+  ></plp-error-state>
+
+  <section class="departments-empty" *ngIf="isEmpty && hasLoadedOnce && !hasError && !isLoading">
+    <plp-empty-state
+      title="لا توجد أقسام"
+      description="لا توجد بيانات أقسام متاحة حالياً."
+      actionText="تحديث"
+      (action)="onRefresh()"
+    ></plp-empty-state>
+  </section>
+
+  <section class="departments-empty" *ngIf="isSearchableEmpty && !hasError && !isLoading">
+    <plp-empty-state
+      title="لا توجد نتائج"
+      [description]="'لا توجد نتائج مطابقة لكلمة البحث: ' + searchTerm"
+      actionText="مسح البحث"
+      (action)="onClearSearch()"
+    ></plp-empty-state>
+  </section>
+
+  <section class="departments-table-shell" *ngIf="!isLoading && !hasError && filteredDepartments.length > 0">
+    <p-table [value]="filteredDepartments" dataKey="departmentId" responsiveLayout="scroll" [scrollHeight]="'auto'">
+      <ng-template pTemplate="header">
+        <tr>
+          <th>كود القسم</th>
+          <th>اسم القسم</th>
+          <th>الحالة</th>
+        </tr>
+      </ng-template>
+      <ng-template pTemplate="body" let-department>
+        <tr>
+          <td>{{ department.departmentId }}</td>
+          <td>{{ department.name }}</td>
+          <td>
+            <span class="departments-status">{{ displayStatus(department) }}</span>
+          </td>
+        </tr>
+      </ng-template>
+      <ng-template pTemplate="emptymessage">
+        <tr>
+          <td colspan="3">لا يوجد عناصر لعرضها.</td>
+        </tr>
+      </ng-template>
+    </p-table>
+  </section>
+</section>

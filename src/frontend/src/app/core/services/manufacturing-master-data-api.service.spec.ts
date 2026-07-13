@@ -24,4 +24,21 @@ describe('ManufacturingMasterDataApiService', () => {
     http.expectOne(request => request.url.endsWith('/api/product-models?includeInactive=true')).flush(page([{ id: 'model-1', isActive: false }]));
     expect(values).toEqual([[{ id: 'main-1' }], [{ id: 'sub-1' }], [{ id: 'line-1' }], [{ id: 'model-1', isActive: false }]]);
   });
+
+  it('unwraps department responses from the existing API envelope', () => {
+    let departments: unknown[] = [];
+
+    service.departments().subscribe(value => departments = value);
+
+    http.expectOne(request => request.url.endsWith('/api/departments')).flush({
+      success: true,
+      data: {
+        items: [
+          { departmentId: 4, name: 'Challenger' }
+        ]
+      }
+    });
+
+    expect(departments).toEqual([{ departmentId: 4, name: 'Challenger' }]);
+  });
 });

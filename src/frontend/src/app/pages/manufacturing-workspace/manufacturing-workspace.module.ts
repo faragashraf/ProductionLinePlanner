@@ -10,6 +10,7 @@ import { ManufacturingWorkspaceLayoutComponent } from './manufacturing-workspace
 import { ManufacturingPlaceholderPageComponent } from './manufacturing-placeholder-page.component';
 import { ProductionCostRecordingPageComponent } from './production-cost-recording-page.component';
 import { ManufacturingMasterDataPageComponent } from './manufacturing-master-data-page.component';
+import { ManufacturingDepartmentsPageComponent } from './manufacturing-departments-page.component';
 import { ManufacturingWorkspaceRoutingModule } from './manufacturing-workspace-routing.module';
 
 @NgModule({
@@ -17,7 +18,8 @@ import { ManufacturingWorkspaceRoutingModule } from './manufacturing-workspace-r
     ManufacturingWorkspaceLayoutComponent,
     ManufacturingPlaceholderPageComponent,
     ProductionCostRecordingPageComponent,
-    ManufacturingMasterDataPageComponent
+    ManufacturingMasterDataPageComponent,
+    ManufacturingDepartmentsPageComponent
   ],
   imports: [
     CommonModule,
