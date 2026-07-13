@@ -15,6 +15,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading.RateLimiting;
 using ProductionLinePlanner.Application.Abstractions;
+using ProductionLinePlanner.Application.Common;
 using ProductionLinePlanner.Application.DTOs;
 using ProductionLinePlanner.Application.Engines;
 using ProductionLinePlanner.Application.Services;
@@ -247,6 +248,7 @@ app.MapGet("/api/error", (HttpContext context) =>
         UnauthorizedAccessException => (StatusCodes.Status401Unauthorized, "Unauthorized", "UnauthorizedAccess"),
         System.ComponentModel.DataAnnotations.ValidationException => (StatusCodes.Status400BadRequest, "Validation Failed", "ValidationError"),
         KeyNotFoundException => (StatusCodes.Status404NotFound, "Not Found", "ResourceNotFound"),
+        ProductionConflictException => (StatusCodes.Status409Conflict, "Conflict", "ProductionConflict"),
         DbUpdateConcurrencyException => (StatusCodes.Status409Conflict, "Conflict", "ConcurrencyConflict"),
         _ => (StatusCodes.Status500InternalServerError, "Internal Server Error", "UnhandledError")
     };
@@ -1033,6 +1035,31 @@ factoriesApi.MapGet("/{factoryId:guid}/production-lines", async (
 })
     .WithTags("ProductionLines")
     .WithName("GetProductionLinesByFactory")
+    .RequirePermission(FactoryStructurePermissions.ForHttpMethod("GET"));
+
+productionLinesApi.MapGet("", async (
+    AppDbContext dbContext,
+    CancellationToken cancellationToken,
+    bool includeInactive = false,
+    int page = 1,
+    int pageSize = 50) =>
+{
+    if (page < 1 || pageSize < 1 || pageSize > 200)
+    {
+        return ApiResponse.Failure("ValidationError", "page and pageSize must be positive, pageSize max 200.");
+    }
+
+    var query = dbContext.ProductionLines.AsNoTracking();
+    if (!includeInactive) query = query.Where(x => x.IsActive);
+    var totalCount = await query.CountAsync(cancellationToken);
+    var items = await query.OrderBy(x => x.SequenceOrder).ThenBy(x => x.Name).Skip((page - 1) * pageSize).Take(pageSize).Select(x => new ProductionLineDto
+    {
+        Id = x.Id, FactoryId = x.FactoryId, Name = x.Name, LineCode = x.LineCode, SequenceOrder = x.SequenceOrder, IsActive = x.IsActive
+    }).ToArrayAsync(cancellationToken);
+    return Results.Ok(new { success = true, data = new { items, totalCount, pageNumber = page, pageSize } });
+})
+    .WithTags("ProductionLines")
+    .WithName("GetProductionLines")
     .RequirePermission(FactoryStructurePermissions.ForHttpMethod("GET"));
 
 productionLinesApi.MapGet("/{lineId:guid}", async (
@@ -1939,10 +1966,11 @@ productModelsApi.MapGet("", async (
     CancellationToken cancellationToken,
     string? search = null,
     bool? isActive = true,
+    bool includeInactive = false,
     int page = 1,
     int pageSize = 50) =>
 {
-    var result = await productModelService.GetModelsAsync(search, isActive, page, pageSize, cancellationToken);
+    var result = await productModelService.GetModelsAsync(search, includeInactive ? null : isActive, page, pageSize, cancellationToken);
     if (result.IsFailure)
     {
         return ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code));
@@ -2974,5 +3002,7 @@ static IResult? ValidateBootstrapSecret(string? requestBootstrapSecret, string? 
 
     return null;
 }
+
+ProductionLinePlanner.Api.Endpoints.ProductionCostRecordingEndpoints.MapProductionCostRecordingEndpoints(app);
 
 app.Run();

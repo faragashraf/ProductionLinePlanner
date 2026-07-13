@@ -1,0 +1,6 @@
+namespace ProductionLinePlanner.Application.DTOs;
+
+public sealed record ProductionOrderDto(Guid Id, string OrderNumber, Guid ProductModelId, string ProductModelCode, Guid? ProductionLineId, DateOnly ProductionDate, decimal PlannedQuantity, string Status, string? Notes);
+public sealed record ProductionWorkerAllocationDto(Guid WorkerId, string WorkerName, decimal? Percentage, decimal? FixedAmount, decimal EquivalentQuantity, decimal CalculatedEarning, string? Notes);
+public sealed record StageProductionRecordDto(Guid Id, Guid ProductionOrderId, Guid ProductModelStageId, DateOnly ProductionDate, decimal ProducedQuantity, decimal AcceptedQuantity, decimal RejectedQuantity, string Status, string StageCode, string StageName, string ProductModelCode, string ProductModelName, decimal PiecePrice, decimal? StandardSeconds, string CompensationMode, decimal TotalWorkerEarnings, Guid ConcurrencyToken, IReadOnlyCollection<ProductionWorkerAllocationDto> Workers, string? Notes);
+public sealed record DailyProductionCostReportRowDto(Guid RecordId, DateOnly ProductionDate, string OrderNumber, string ModelCode, string StageCode, string StageName, decimal ProducedQuantity, decimal AcceptedQuantity, decimal RejectedQuantity, decimal StageCost, string CompensationMode, string Status, IReadOnlyCollection<ProductionWorkerAllocationDto> Workers);
