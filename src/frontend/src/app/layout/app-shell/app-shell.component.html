@@ -35,33 +35,44 @@
     <ng-template pTemplate="header">
       <div class="sidebar-header">القائمة</div>
     </ng-template>
-    <ul class="menu-list">
-      <li
-        *ngFor="let item of navigationItems"
-        class="menu-item"
-        [class.active]="isActive(item.path)"
-      >
-        <a class="menu-link" [routerLink]="item.path" (click)="closeSidebar()">
-          <i class="pi {{ item.icon }}"></i>
-          <span>{{ item.label }}</span>
-        </a>
-      </li>
-    </ul>
+    <ng-container *ngIf="showNavigation; else sidebarLoadingState">
+      <ul class="menu-list" *ngIf="navigationItems.length > 0">
+        <li
+          *ngFor="let item of navigationItems"
+          class="menu-item"
+          [class.active]="isActive(item.route)"
+        >
+          <a class="menu-link" [routerLink]="item.route" (click)="closeSidebar()">
+            <i class="pi {{ item.icon }}"></i>
+            <span>{{ item.label }}</span>
+          </a>
+        </li>
+      </ul>
+    </ng-container>
+    <ng-template #sidebarLoadingState>
+      <plp-loading-skeleton [lines]="5" [showAvatar]="false" [cardLike]="true"></plp-loading-skeleton>
+    </ng-template>
   </p-sidebar>
 
-  <aside class="sidebar desktop-sidebar">
-    <ul class="menu-list">
+  <aside class="sidebar desktop-sidebar" *ngIf="showNavigation">
+    <ul class="menu-list" *ngIf="navigationItems.length > 0">
       <li
         *ngFor="let item of navigationItems"
         class="menu-item"
-        [class.active]="isActive(item.path)"
+        [class.active]="isActive(item.route)"
       >
-        <a class="menu-link" [routerLink]="item.path">
+        <a class="menu-link" [routerLink]="item.route">
           <i class="pi {{ item.icon }}"></i>
           <span>{{ item.label }}</span>
         </a>
       </li>
     </ul>
+    <plp-loading-skeleton
+      *ngIf="isNavigationLoading"
+      [lines]="5"
+      [showAvatar]="false"
+      [cardLike]="true"
+    ></plp-loading-skeleton>
   </aside>
 
   <main class="main-content">

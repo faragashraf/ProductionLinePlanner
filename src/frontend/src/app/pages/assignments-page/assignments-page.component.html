@@ -2,6 +2,7 @@
   <plp-page-header title="إدارة التعيينات" description="واجهة أولية لعرض التوزيع الحالي واستعراض التعديلات المقترحة باستخدام مكوّنات Factory UI." [compact]="true">
     <div header-actions>
       <button
+        *plpCan="'assignments.manage'"
         pButton
         pRipple
         class="p-button-sm p-button-help p-button-outlined"
@@ -114,6 +115,7 @@
 
             <div class="dz-actions">
               <button
+                *plpCan="'assignments.manage'"
                 pButton
                 pRipple
                 class="p-button-sm"
@@ -123,6 +125,7 @@
                 (click)="openTemporaryDialog(zone)"
               ></button>
               <button
+                *plpCan="'assignments.manage'"
                 pButton
                 pRipple
                 class="p-button-sm p-button-outlined"
@@ -154,6 +157,7 @@
 
             <div class="w-actions">
               <button
+                *plpCan="'assignments.manage'"
                 pButton
                 pRipple
                 class="p-button-sm p-button-text"
@@ -165,6 +169,7 @@
               ></button>
 
               <button
+                *plpCan="'assignments.manage'"
                 pButton
                 pRipple
                 class="p-button-sm p-button-text"

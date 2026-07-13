@@ -43,6 +43,7 @@ public class AppUser
 
     public List<AppRole> Roles { get; } = [];
     public List<RefreshToken> RefreshTokens { get; } = [];
+    public List<UserPermissionOverride> PermissionOverrides { get; } = [];
 
     public void AssignRole(AppRole role)
     {

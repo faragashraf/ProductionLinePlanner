@@ -34,6 +34,11 @@ namespace ProductionLinePlanner.Infrastructure.Data.Migrations
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
 
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
+
                     b.Property<bool>("IsSystemRole")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("bit")
@@ -45,7 +50,6 @@ namespace ProductionLinePlanner.Infrastructure.Data.Migrations
                         .HasColumnType("nvarchar(100)");
 
                     b.Property<string>("Role")
-                        .IsRequired()
                         .HasMaxLength(60)
                         .HasColumnType("nvarchar(60)");
 
@@ -54,8 +58,12 @@ namespace ProductionLinePlanner.Infrastructure.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("Role")
+                    b.HasIndex("Name")
                         .IsUnique();
+
+                    b.HasIndex("Role")
+                        .IsUnique()
+                        .HasFilter("[Role] IS NOT NULL");
 
                     b.ToTable("AppRoles", (string)null);
                 });
@@ -403,6 +411,48 @@ namespace ProductionLinePlanner.Infrastructure.Data.Migrations
                     b.ToTable("Notifications", (string)null);
                 });
 
+            modelBuilder.Entity("ProductionLinePlanner.Domain.Entities.Permission", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Capability")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("nvarchar(120)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DescriptionAr")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("DescriptionEn")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("nvarchar(160)");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.ToTable("Permissions", (string)null);
+                });
+
             modelBuilder.Entity("ProductionLinePlanner.Domain.Entities.ProductionLine", b =>
                 {
                     b.Property<Guid>("Id")
@@ -485,6 +535,27 @@ namespace ProductionLinePlanner.Infrastructure.Data.Migrations
                     b.HasIndex("AppUserId", "IsRevoked", "ExpiresAtUtc");
 
                     b.ToTable("RefreshTokens", (string)null);
+                });
+
+            modelBuilder.Entity("ProductionLinePlanner.Domain.Entities.RolePermission", b =>
+                {
+                    b.Property<Guid>("AppRoleId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("PermissionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("AppRoleId", "PermissionId");
+
+                    b.HasIndex("PermissionId");
+
+                    b.ToTable("RolePermissions", (string)null);
                 });
 
             modelBuilder.Entity("ProductionLinePlanner.Domain.Entities.StageReadinessSnapshot", b =>
@@ -589,6 +660,37 @@ namespace ProductionLinePlanner.Infrastructure.Data.Migrations
                         {
                             t.HasCheckConstraint("CK_SubStage_Capacity_NonNegative", "[Capacity] >= 0");
                         });
+                });
+
+            modelBuilder.Entity("ProductionLinePlanner.Domain.Entities.UserPermissionOverride", b =>
+                {
+                    b.Property<Guid>("AppUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("PermissionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Effect")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("AppUserId", "PermissionId");
+
+                    b.HasIndex("Effect");
+
+                    b.HasIndex("PermissionId");
+
+                    b.ToTable("UserPermissionOverrides", (string)null);
                 });
 
             modelBuilder.Entity("ProductionLinePlanner.Domain.Entities.Worker", b =>
@@ -856,6 +958,25 @@ namespace ProductionLinePlanner.Infrastructure.Data.Migrations
                     b.Navigation("AppUser");
                 });
 
+            modelBuilder.Entity("ProductionLinePlanner.Domain.Entities.RolePermission", b =>
+                {
+                    b.HasOne("ProductionLinePlanner.Domain.Entities.AppRole", "AppRole")
+                        .WithMany("Permissions")
+                        .HasForeignKey("AppRoleId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ProductionLinePlanner.Domain.Entities.Permission", "Permission")
+                        .WithMany("RolePermissions")
+                        .HasForeignKey("PermissionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("AppRole");
+
+                    b.Navigation("Permission");
+                });
+
             modelBuilder.Entity("ProductionLinePlanner.Domain.Entities.SubStage", b =>
                 {
                     b.HasOne("ProductionLinePlanner.Domain.Entities.MainStage", "MainStage")
@@ -865,6 +986,25 @@ namespace ProductionLinePlanner.Infrastructure.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("MainStage");
+                });
+
+            modelBuilder.Entity("ProductionLinePlanner.Domain.Entities.UserPermissionOverride", b =>
+                {
+                    b.HasOne("ProductionLinePlanner.Domain.Entities.AppUser", "AppUser")
+                        .WithMany("PermissionOverrides")
+                        .HasForeignKey("AppUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ProductionLinePlanner.Domain.Entities.Permission", "Permission")
+                        .WithMany("UserPermissionOverrides")
+                        .HasForeignKey("PermissionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("AppUser");
+
+                    b.Navigation("Permission");
                 });
 
             modelBuilder.Entity("ProductionLinePlanner.Domain.Entities.WorkerDefaultAssignment", b =>
@@ -928,8 +1068,15 @@ namespace ProductionLinePlanner.Infrastructure.Data.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("ProductionLinePlanner.Domain.Entities.AppRole", b =>
+                {
+                    b.Navigation("Permissions");
+                });
+
             modelBuilder.Entity("ProductionLinePlanner.Domain.Entities.AppUser", b =>
                 {
+                    b.Navigation("PermissionOverrides");
+
                     b.Navigation("RefreshTokens");
                 });
 
@@ -941,6 +1088,13 @@ namespace ProductionLinePlanner.Infrastructure.Data.Migrations
             modelBuilder.Entity("ProductionLinePlanner.Domain.Entities.MainStage", b =>
                 {
                     b.Navigation("SubStages");
+                });
+
+            modelBuilder.Entity("ProductionLinePlanner.Domain.Entities.Permission", b =>
+                {
+                    b.Navigation("RolePermissions");
+
+                    b.Navigation("UserPermissionOverrides");
                 });
 
             modelBuilder.Entity("ProductionLinePlanner.Domain.Entities.ProductionLine", b =>

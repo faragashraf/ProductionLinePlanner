@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Identity;
@@ -19,12 +20,16 @@ using ProductionLinePlanner.Application.Engines;
 using ProductionLinePlanner.Application.Services;
 using ProductionLinePlanner.Application.Requests;
 using ProductionLinePlanner.Api.Security;
+using ProductionLinePlanner.Api.Authorization;
 using ProductionLinePlanner.Domain.Entities;
 using ProductionLinePlanner.Domain.Enums;
+using ProductionLinePlanner.Domain.Authorization;
 using ProductionLinePlanner.Infrastructure;
 using ProductionLinePlanner.Infrastructure.Data;
 
 var builder = WebApplication.CreateBuilder(args);
+var isEfDesignTime = AppDomain.CurrentDomain.GetAssemblies()
+    .Any(assembly => string.Equals(assembly.GetName().Name, "Microsoft.EntityFrameworkCore.Design", StringComparison.Ordinal));
 var allowedCorsOrigins = builder.Configuration
     .GetSection("Cors:AllowedOrigins")
     .Get<string[]>()?
@@ -155,6 +160,8 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         };
     });
 
+builder.Services.AddScoped<IAuthorizationHandler, PermissionAuthorizationHandler>();
+
 builder.Services.AddAuthorization(options =>
 {
     options.AddPolicy("SuperAdmin", policy =>
@@ -166,9 +173,18 @@ builder.Services.AddAuthorization(options =>
     {
         policy.RequireRole(UserRole.Admin.ToString(), UserRole.SuperAdmin.ToString());
     });
+
+    options.AddPermissionPolicies();
 });
 
 var app = builder.Build();
+
+if (!isEfDesignTime)
+{
+    await using var seedScope = app.Services.CreateAsyncScope();
+    var permissionSeedService = seedScope.ServiceProvider.GetRequiredService<IRolePermissionSeedService>();
+    await permissionSeedService.EnsureSeedAsync();
+}
 
 if (app.Environment.IsDevelopment())
 {
@@ -199,15 +215,15 @@ app.Use(async (context, next) =>
 app.UseAuthentication();
 app.UseAuthorization();
 
-var factoriesApi = app.MapGroup("/api/factories").RequireAuthorization("Admin");
-var productionLinesApi = app.MapGroup("/api/production-lines").RequireAuthorization("Admin");
-var mainStagesApi = app.MapGroup("/api/main-stages").RequireAuthorization("Admin");
-var subStagesApi = app.MapGroup("/api/sub-stages").RequireAuthorization("Admin");
-var workersApi = app.MapGroup("/api/workers").RequireAuthorization("Admin");
-var assignmentsApi = app.MapGroup("/api/assignments").RequireAuthorization("Admin");
+var factoriesApi = app.MapGroup("/api/factories").RequireAuthorization();
+var productionLinesApi = app.MapGroup("/api/production-lines").RequireAuthorization();
+var mainStagesApi = app.MapGroup("/api/main-stages").RequireAuthorization().RequirePermission("stages.manage");
+var subStagesApi = app.MapGroup("/api/sub-stages").RequireAuthorization().RequirePermission("stages.manage");
+var workersApi = app.MapGroup("/api/workers").RequireAuthorization();
+var assignmentsApi = app.MapGroup("/api/assignments").RequireAuthorization();
 var attendanceApi = app.MapGroup("/api/attendance").RequireAuthorization();
-var notificationsApi = app.MapGroup("/api/notifications").RequireAuthorization("Admin");
-var readinessApi = app.MapGroup("/api/readiness").RequireAuthorization("Admin");
+var notificationsApi = app.MapGroup("/api/notifications").RequireAuthorization();
+var readinessApi = app.MapGroup("/api/readiness").RequireAuthorization();
 
 app.MapGet("/api/error", (HttpContext context) =>
 {
@@ -273,6 +289,7 @@ authApi.MapPost("/login", async (
     LoginRequest request,
     AppDbContext dbContext,
     IPasswordHasher<AppUser> passwordHasher,
+    IPermissionService permissionService,
     HttpContext httpContext,
     CancellationToken cancellationToken) =>
 {
@@ -332,7 +349,7 @@ authApi.MapPost("/login", async (
         after: new { Event = "AuthLogin", user.Email },
         httpContext: httpContext);
     var roles = user.Roles
-        .Select(role => role.Role.ToString())
+        .Select(role => role.Name)
         .Distinct(StringComparer.OrdinalIgnoreCase)
         .OrderBy(role => role)
         .ToArray();
@@ -343,8 +360,10 @@ authApi.MapPost("/login", async (
         RefreshToken = refreshToken,
         ExpiresAt = expiresAt,
         UserId = user.Id,
+        IsActive = user.IsActive,
+        PermissionsVersion = user.UpdatedAtUtc,
         Roles = roles,
-        Permissions = Array.Empty<string>()
+        Permissions = (await permissionService.GetEffectivePermissionsAsync(user.Id, cancellationToken)).ToArray()
     };
 
     return Results.Ok(ApiResponse.Success(response));
@@ -355,6 +374,7 @@ authApi.MapPost("/login", async (
 authApi.MapGet("/me", async (
     ICurrentUserService currentUserService,
     AppDbContext dbContext,
+    IPermissionService permissionService,
     CancellationToken cancellationToken) =>
 {
     if (!currentUserService.IsAuthenticated || currentUserService.UserId is null)
@@ -373,19 +393,20 @@ authApi.MapGet("/me", async (
     }
 
     var roles = user.Roles
-        .Select(role => role.Role.ToString())
+        .Select(role => role.Name)
         .Distinct(StringComparer.OrdinalIgnoreCase)
         .OrderBy(role => role)
         .ToArray();
 
-    var permissions = AuthTokenService.ResolvePermissionsForRoles(roles);
     return Results.Ok(ApiResponse.Success(new CurrentUserResponse
     {
         Id = user.Id,
         FullName = user.FullName,
         Email = user.Email,
+        IsActive = user.IsActive,
+        PermissionsVersion = user.UpdatedAtUtc,
         Roles = roles,
-        Permissions = permissions
+        Permissions = (await permissionService.GetEffectivePermissionsAsync(user.Id, cancellationToken)).ToArray()
     }));
 })
     .RequireAuthorization()
@@ -524,6 +545,7 @@ if (app.Environment.IsDevelopment())
 authApi.MapPost("/refresh", async (
     RefreshTokenRequest request,
     AppDbContext dbContext,
+    IPermissionService permissionService,
     HttpContext httpContext,
     CancellationToken cancellationToken) =>
 {
@@ -548,6 +570,25 @@ authApi.MapPost("/refresh", async (
 
     if (!storedToken.IsUsable(now))
     {
+        if (storedToken.IsRevoked)
+        {
+            await dbContext.RefreshTokens
+                .Where(token => token.AppUserId == storedToken.AppUserId && !token.IsRevoked)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(token => token.IsRevoked, true)
+                    .SetProperty(token => token.RevokedAtUtc, now)
+                    .SetProperty(token => token.RevokedReason, "RefreshTokenReuseDetected"), cancellationToken);
+            AssignmentHelpers.AddAuditLog(
+                dbContext,
+                storedToken.AppUserId,
+                AuditActionType.Revoke,
+                nameof(RefreshToken),
+                storedToken.Id.ToString(),
+                before: new { Result = "RefreshTokenReuseDetected" },
+                after: new { Result = "SessionRevoked" },
+                httpContext);
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
         if (!storedToken.IsRevoked)
         {
             storedToken.Revoke(now, "Expired");
@@ -559,7 +600,7 @@ authApi.MapPost("/refresh", async (
 
     var user = storedToken.AppUser;
     var roles = user.Roles
-        .Select(role => role.Role.ToString())
+        .Select(role => role.Name)
         .Distinct(StringComparer.OrdinalIgnoreCase)
         .OrderBy(role => role)
         .ToArray();
@@ -571,8 +612,34 @@ authApi.MapPost("/refresh", async (
     var newRefreshTokenHash = AuthTokenService.HashRefreshToken(newRefreshToken);
     var newRefreshTokenExpiresAt = now.AddDays(jwtRefreshTokenDays);
 
-    storedToken.Revoke(now, "Rotated");
-    storedToken.MarkAsUsed(now);
+    var rotationSucceeded = await dbContext.RefreshTokens
+        .Where(token => token.Id == storedToken.Id && !token.IsRevoked && token.ExpiresAtUtc > now)
+        .ExecuteUpdateAsync(setters => setters
+            .SetProperty(token => token.IsRevoked, true)
+            .SetProperty(token => token.RevokedAtUtc, now)
+            .SetProperty(token => token.RevokedReason, "Rotated")
+            .SetProperty(token => token.LastUsedAtUtc, now), cancellationToken);
+    if (rotationSucceeded != 1)
+    {
+        await dbContext.RefreshTokens
+            .Where(token => token.AppUserId == user.Id && !token.IsRevoked)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(token => token.IsRevoked, true)
+                .SetProperty(token => token.RevokedAtUtc, now)
+                .SetProperty(token => token.RevokedReason, "RefreshTokenReuseDetected"), cancellationToken);
+        AssignmentHelpers.AddAuditLog(
+            dbContext,
+            user.Id,
+            AuditActionType.Revoke,
+            nameof(RefreshToken),
+            storedToken.Id.ToString(),
+            before: new { Result = "ConcurrentRefreshReuseDetected" },
+            after: new { Result = "SessionRevoked" },
+            httpContext);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return ApiResponse.Failure("InvalidToken", "Invalid refresh token.", 401);
+    }
+
     dbContext.RefreshTokens.Add(new RefreshToken(
         id: Guid.NewGuid(),
         appUserId: user.Id,
@@ -598,8 +665,10 @@ authApi.MapPost("/refresh", async (
         RefreshToken = newRefreshToken,
         ExpiresAt = accessTokenExpiresAt,
         UserId = user.Id,
+        IsActive = user.IsActive,
+        PermissionsVersion = user.UpdatedAtUtc,
         Roles = roles,
-        Permissions = AuthTokenService.ResolvePermissionsForRoles(roles)
+        Permissions = (await permissionService.GetEffectivePermissionsAsync(user.Id, cancellationToken)).ToArray()
     };
 
     return Results.Ok(ApiResponse.Success(response));
@@ -652,6 +721,7 @@ authApi.MapPost("/logout", async (
     .WithTags("Auth")
     .WithName("AuthLogout");
 
+app.MapIamAdminEndpoints();
 factoriesApi.MapGet("", async (
     AppDbContext dbContext,
     CancellationToken cancellationToken,
@@ -689,7 +759,8 @@ factoriesApi.MapGet("", async (
     return Results.Ok(new { success = true, data = new { items = entities, totalCount, pageNumber = page, pageSize } });
 })
     .WithTags("Factories")
-    .WithName("GetFactories");
+    .WithName("GetFactories")
+    .RequirePermission(FactoryStructurePermissions.ForHttpMethod("GET"));
 
 factoriesApi.MapGet("/{factoryId:guid}", async (
     Guid factoryId,
@@ -715,7 +786,8 @@ factoriesApi.MapGet("/{factoryId:guid}", async (
     }));
 })
     .WithTags("Factories")
-    .WithName("GetFactory");
+    .WithName("GetFactory")
+    .RequirePermission(FactoryStructurePermissions.ForHttpMethod("GET"));
 
 factoriesApi.MapPost("", async (
     CreateFactoryRequest request,
@@ -778,9 +850,9 @@ factoriesApi.MapPost("", async (
         IsActive = entity.IsActive
     }));
 })
-    .RequireAuthorization("SuperAdmin")
     .WithTags("Factories")
-    .WithName("CreateFactory");
+    .WithName("CreateFactory")
+    .RequirePermission(FactoryStructurePermissions.ForHttpMethod("POST"));
 
 factoriesApi.MapPatch("/{factoryId:guid}", async (
     Guid factoryId,
@@ -866,9 +938,9 @@ factoriesApi.MapPatch("/{factoryId:guid}", async (
         IsActive = entity.IsActive
     }));
 })
-    .RequireAuthorization("SuperAdmin")
     .WithTags("Factories")
-    .WithName("UpdateFactory");
+    .WithName("UpdateFactory")
+    .RequirePermission(FactoryStructurePermissions.ForHttpMethod("PATCH"));
 
 factoriesApi.MapDelete("/{factoryId:guid}", async (
     Guid factoryId,
@@ -905,9 +977,9 @@ factoriesApi.MapDelete("/{factoryId:guid}", async (
 
     return Results.NoContent();
 })
-    .RequireAuthorization("SuperAdmin")
     .WithTags("Factories")
-    .WithName("DeleteFactory");
+    .WithName("DeleteFactory")
+    .RequirePermission(FactoryStructurePermissions.ForHttpMethod("DELETE"));
 
 factoriesApi.MapGet("/{factoryId:guid}/production-lines", async (
     AppDbContext dbContext,
@@ -957,7 +1029,8 @@ factoriesApi.MapGet("/{factoryId:guid}/production-lines", async (
     return Results.Ok(new { success = true, data = new { items = entities, totalCount, pageNumber = page, pageSize } });
 })
     .WithTags("ProductionLines")
-    .WithName("GetProductionLinesByFactory");
+    .WithName("GetProductionLinesByFactory")
+    .RequirePermission(FactoryStructurePermissions.ForHttpMethod("GET"));
 
 productionLinesApi.MapGet("/{lineId:guid}", async (
     Guid lineId,
@@ -984,7 +1057,8 @@ productionLinesApi.MapGet("/{lineId:guid}", async (
     }));
 })
     .WithTags("ProductionLines")
-    .WithName("GetProductionLine");
+    .WithName("GetProductionLine")
+    .RequirePermission(FactoryStructurePermissions.ForHttpMethod("GET"));
 
 productionLinesApi.MapPost("", async (
     CreateProductionLineRequest request,
@@ -1063,7 +1137,8 @@ productionLinesApi.MapPost("", async (
     }));
 })
     .WithTags("ProductionLines")
-    .WithName("CreateProductionLine");
+    .WithName("CreateProductionLine")
+    .RequirePermission(FactoryStructurePermissions.ForHttpMethod("POST"));
 
 productionLinesApi.MapPatch("/{lineId:guid}", async (
     Guid lineId,
@@ -1178,7 +1253,8 @@ productionLinesApi.MapPatch("/{lineId:guid}", async (
     }));
 })
     .WithTags("ProductionLines")
-    .WithName("UpdateProductionLine");
+    .WithName("UpdateProductionLine")
+    .RequirePermission(FactoryStructurePermissions.ForHttpMethod("PATCH"));
 
 productionLinesApi.MapDelete("/{lineId:guid}", async (
     Guid lineId,
@@ -1215,9 +1291,9 @@ productionLinesApi.MapDelete("/{lineId:guid}", async (
 
     return Results.NoContent();
 })
-    .RequireAuthorization("SuperAdmin")
     .WithTags("ProductionLines")
-    .WithName("DeleteProductionLine");
+    .WithName("DeleteProductionLine")
+    .RequirePermission(FactoryStructurePermissions.ForHttpMethod("DELETE"));
 
 productionLinesApi.MapGet("/{productionLineId:guid}/main-stages", async (
     AppDbContext dbContext,
@@ -1505,7 +1581,7 @@ mainStagesApi.MapDelete("/{mainStageId:guid}", async (
 
     return Results.NoContent();
 })
-    .RequireAuthorization("SuperAdmin")
+    .RequirePermission("stages.manage")
     .WithTags("MainStages")
     .WithName("DeleteMainStage");
 
@@ -1808,7 +1884,7 @@ subStagesApi.MapDelete("/{subStageId:guid}", async (
 
     return Results.NoContent();
 })
-    .RequireAuthorization("SuperAdmin")
+    .RequirePermission("stages.manage")
     .WithTags("SubStages")
     .WithName("DeleteSubStage");
 
@@ -1879,6 +1955,7 @@ workersApi.MapGet("", async (
 
     return Results.Ok(new { success = true, data = new { items = dtos, totalCount, pageNumber = page, pageSize } });
 })
+    .RequirePermission("workers.view")
     .WithTags("Workers")
     .WithName("GetWorkers");
 
@@ -1915,6 +1992,7 @@ workersApi.MapGet("/{workerId:guid}", async (
         DefaultSubStageId = defaultSubStageId
     }));
 })
+    .RequirePermission("workers.view")
     .WithTags("Workers")
     .WithName("GetWorker");
 
@@ -1989,6 +2067,7 @@ workersApi.MapPost("", async (
         DefaultSubStageId = defaultSubStageId
     }));
 })
+    .RequirePermission("workers.manage")
     .WithTags("Workers")
     .WithName("CreateWorker");
 
@@ -2123,6 +2202,7 @@ workersApi.MapPatch("/{workerId:guid}", async (
         DefaultSubStageId = defaultSubStageId
     }));
 })
+    .RequirePermission("workers.manage")
     .WithTags("Workers")
     .WithName("UpdateWorker");
 
@@ -2161,7 +2241,7 @@ workersApi.MapDelete("/{workerId:guid}", async (
 
     return Results.NoContent();
 })
-    .RequireAuthorization("SuperAdmin")
+    .RequirePermission("workers.manage")
     .WithTags("Workers")
     .WithName("DeleteWorker");
 
@@ -2182,6 +2262,7 @@ workersApi.MapGet("/{workerId:guid}/current-assignment", async (
 
     return Results.Ok(ApiResponse.Success(result.Value!));
 })
+    .RequirePermission("workers.view")
     .WithTags("Workers")
     .WithName("GetWorkerCurrentAssignment");
 
@@ -2233,6 +2314,7 @@ assignmentsApi.MapPost("/default", async (
         ? Results.Created($"/api/assignments/default/{value.AssignmentId}", ApiResponse.Success(response))
         : Results.Ok(ApiResponse.Success(response));
 })
+    .RequirePermission("assignments.manage")
     .WithTags("Assignments")
     .WithName("CreateOrUpdateDefaultAssignment");
 
@@ -2285,6 +2367,7 @@ assignmentsApi.MapPost("/temporary", async (
 
     return Results.Created($"/api/assignments/temporary/{value.AssignmentId}", ApiResponse.Success(response));
 })
+    .RequirePermission("assignments.manage")
     .WithTags("Assignments")
     .WithName("CreateTemporaryAssignment");
 
@@ -2338,6 +2421,7 @@ assignmentsApi.MapPost("/replacement", async (
 
     return Results.Created($"/api/assignments/temporary/{value.AssignmentId}", ApiResponse.Success(response));
 })
+    .RequirePermission("assignments.manage")
     .WithTags("Assignments")
     .WithName("CreateReplacementAssignment");
 
@@ -2384,6 +2468,7 @@ assignmentsApi.MapGet("/recommendations", async (
 
     return Results.Ok(ApiResponse.Success(result.Value!));
 })
+    .RequirePermission("assignments.view")
     .WithTags("Assignments")
     .WithName("GetAssignmentRecommendations");
 
@@ -2430,6 +2515,7 @@ assignmentsApi.MapDelete("/temporary/{assignmentId:guid}", async (
         status = value.Status
     }));
 })
+    .RequirePermission("assignments.manage")
     .WithTags("Assignments")
     .WithName("CancelTemporaryAssignment");
 
@@ -2470,6 +2556,7 @@ assignmentsApi.MapGet("/{workerId:guid}/timeline", async (
         }
     });
 })
+    .RequirePermission("assignments.view")
     .WithTags("Assignments")
     .WithName("GetWorkerAssignmentTimeline");
 
@@ -2490,6 +2577,7 @@ assignmentsApi.MapGet("/sub-stages/{subStageId:guid}/workers", async (
 
     return Results.Ok(ApiResponse.Success(result.Value!));
 })
+    .RequirePermission("assignments.view")
     .WithTags("Assignments")
     .WithName("GetWorkersInSubStage");
 
@@ -2635,7 +2723,7 @@ attendanceApi.MapPost("/sync/today", async (
 
     return Results.Ok(ApiResponse.Success(result.Value));
 })
-    .RequireAuthorization("Admin")
+    .RequirePermission("attendance.sync")
     .WithTags("Attendance")
     .WithName("SyncAttendanceToday");
 
@@ -2666,6 +2754,7 @@ attendanceApi.MapGet("/today", async (
         items = result.Value ?? Array.Empty<AttendanceWorkerStateDto>()
     }));
 })
+    .RequirePermission("attendance.view")
     .WithTags("Attendance")
     .WithName("GetTodayAttendance");
 
@@ -2698,6 +2787,7 @@ attendanceApi.MapGet("/workers/{workerId:guid}", async (
         items = result.Value ?? Array.Empty<AttendanceRecordDto>()
     }));
 })
+    .RequirePermission("attendance.view")
     .WithTags("Attendance")
     .WithName("GetWorkerAttendance");
 
@@ -2718,6 +2808,7 @@ attendanceApi.MapGet("/stages/{subStageId:guid}", async (
 
     return Results.Ok(ApiResponse.Success(result.Value));
 })
+    .RequirePermission("attendance.view")
     .WithTags("Attendance")
     .WithName("GetSubStageAttendance");
 

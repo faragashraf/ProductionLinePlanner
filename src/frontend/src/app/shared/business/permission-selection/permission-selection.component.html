@@ -1,0 +1,13 @@
+<section class="permission-selection">
+  <article *ngFor="let group of groups" class="permission-selection__group">
+    <h4>{{ group.capability }}</h4>
+    <label *ngFor="let permission of group.permissions" class="permission-selection__item">
+      <input type="checkbox" [checked]="isSelected(permission.name)" [disabled]="disabled" (change)="toggle(permission.name, $any($event.target).checked)" />
+      <span>
+        <strong>{{ permission.name }}</strong>
+        <small>{{ permission.descriptionAr || permission.descriptionEn || 'غير موصوف' }}</small>
+      </span>
+      <em *ngIf="permission.isCritical">حساسة</em>
+    </label>
+  </article>
+</section>

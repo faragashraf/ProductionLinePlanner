@@ -49,6 +49,12 @@
 - User Deny أعلى أولوية من role grants.
 - SuperAdmin يمكنه إدارة صلاحيات `permissions.assign` و`users.manage`:
   - لا يمكن حذف آخر superadmin.
+- System Roles المعرفة من المنتج product-controlled: لا يمكن تعديل الاسم أو الوصف أو الحالة أو الصلاحيات من Admin UI/API؛ لإنشاء مجموعة مختلفة تستخدم Custom Role data-driven.
+- System Role permission assignments authoritative وتتم reconciliation لها مع product catalog عند الـseed؛ legacy extra grants تزال، بينما Custom Roles وUserPermissionOverrides لا تتغير.
+- يمكن إسناد أو إزالة المستخدمين من System Roles أو Custom Roles وفق صلاحيات إدارة المستخدمين الحالية.
+- Delegation policy تمنع self-promotion وتمنع تفويض role أو permission خارج سلطة actor؛ SuperAdmin والصلاحيات الحساسة مفوضة فقط من SuperAdmin آخر.
+- استبدال Authorization للمستخدم يتم كـtransaction واحدة تشمل roles وdirect grants/denies وAuditLog، مع حماية concurrent لآخر SuperAdmin.
+- IAM seed/reconciliation fail-closed عند startup، وrefresh token rotation ذري؛ إعادة استخدام token مدوّر تلغي refresh session النشطة.
 - لا يسمح بإنشاء permission ad-hoc من UI.
 
 ## Validation
@@ -69,6 +75,8 @@
 - `departments.manage`
 - `attendance.view`
 - `attendance.sync`
+- `factory-structure.view`
+- `factory-structure.manage`
 - `compensation.view`
 - `compensation.manage`
 - `compensation.import`
@@ -88,6 +96,8 @@
 - `roles.manage`
 - `permissions.assign`
 - `audit.view`
+
+`factory-structure.*` تخص المصانع وخطوط الإنتاج وبنية المصنع، وهي مختلفة عن `production.*` الخاصة بالتنفيذ اليومي. قراءة factories/production lines تستخدم `factory-structure.view`، بينما POST/PUT/PATCH/DELETE تستخدم `factory-structure.manage`.
 
 ## Audit
 

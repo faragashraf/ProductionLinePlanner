@@ -1,0 +1,42 @@
+<section class="page-frame">
+  <header class="page-header">
+    <h1>كتالوج الصلاحيات</h1>
+    <p>عرض ثابت للـPermissions المعرفة في الكتالوج ومنخفض إلى مرتفع.</p>
+  </header>
+
+  <div class="catalog-controls">
+    <input
+      type="text"
+      class="catalog-search"
+      [value]="searchTerm"
+      (input)="onSearchTermChanged($any($event.target).value)"
+      placeholder="ابحث بالمعرف أو الوصف…"
+      aria-label="بحث في الصلاحيات"
+    />
+    <button pButton pRipple class="p-button-sm" type="button" icon="pi pi-refresh" (click)="loadCatalog(true)">تحديث</button>
+  </div>
+
+  <plp-iam-list-skeleton *ngIf="isLoading" [rows]="6" [dense]="true"></plp-iam-list-skeleton>
+
+  <p class="plp-inline-state plp-inline-state--warning" *ngIf="hasError && !isLoading">
+    {{ errorMessage }}
+  </p>
+
+  <section class="permission-groups" *ngIf="!isLoading && !hasError">
+    <article class="permission-group" *ngFor="let group of filtered">
+      <h2>{{ group.capability }}</h2>
+      <ul>
+        <li *ngFor="let permission of group.permissions" class="permission-item">
+          <strong>{{ permission.name }}</strong>
+          <span class="permission-desc">{{ permission.descriptionAr || permission.descriptionEn || 'غير موصوف' }}</span>
+          <span class="permission-active">{{ permission.isActive ? 'نشطة' : 'غير نشطة' }}</span>
+          <span class="permission-critical" *ngIf="permission.isCritical">حساسة</span>
+        </li>
+      </ul>
+    </article>
+
+    <p class="plp-inline-state" *ngIf="filtered.length === 0">
+      لا توجد نتائج مطابقة لمصطلح البحث.
+    </p>
+  </section>
+</section>

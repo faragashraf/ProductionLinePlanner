@@ -20,6 +20,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<AppRole> AppRoles => Set<AppRole>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
+    public DbSet<Permission> Permissions => Set<Permission>();
+    public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
+    public DbSet<UserPermissionOverride> UserPermissionOverrides => Set<UserPermissionOverride>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

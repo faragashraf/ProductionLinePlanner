@@ -32,6 +32,8 @@
 
 ## Phase 1: Identity and Access Management Foundation
 
+Enterprise hardening work deferred from this V1 checkpoint is tracked in [IAM Enterprise Hardening Backlog](22-iam-enterprise-hardening-backlog.md).
+
 - Scope:
   - Permission catalog + domain entities.
   - role permissions.

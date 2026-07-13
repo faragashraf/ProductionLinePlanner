@@ -1,0 +1,56 @@
+<section class="page-frame">
+  <header class="page-header">
+    <h1>تفاصيل صلاحيات المستخدم</h1>
+    <p>راجع المصدر الفعلي للصلاحيات قبل تطبيق أي تعديل.</p>
+  </header>
+
+  <div class="page-actions">
+    <button pButton pRipple class="p-button-sm" type="button" icon="pi pi-refresh" [disabled]="isLoading || isRefreshing || isSaving" (click)="refresh()">تحديث</button>
+    <button *plpCan="{ requireAny: [permissions.users.manage, permissions.permissions.assign] }" pButton pRipple class="p-button-sm p-button-outlined" type="button" [disabled]="isSaving || pendingChangeCount === 0" (click)="saveChanges()">{{ isSaving ? 'جارٍ الحفظ…' : ('حفظ التغييرات (' + pendingChangeCount + ')') }}</button>
+  </div>
+
+  <plp-iam-list-skeleton *ngIf="isLoading" [rows]="5"></plp-iam-list-skeleton>
+  <p class="plp-inline-state plp-inline-state--warning" *ngIf="hasError && !isLoading">{{ errorMessage }}</p>
+
+  <div class="auth-grid" *ngIf="!isLoading && authorization">
+    <article class="summary-card">
+      <h2>{{ authorization.fullName }}</h2>
+      <p>{{ authorization.email }}</p>
+      <p class="muted">الحالة: {{ authorization.isActive ? 'مفعل' : 'معطل' }}</p>
+      <p>آخر تحديث للصلاحيات: {{ authorization.permissionsVersion | date:'medium' }}</p>
+      <p class="warning" *ngIf="!authorization.isActive">المستخدم معطل؛ لا يمكن للخادم إضافة overrides مباشرة له.</p>
+      <p class="warning" *ngIf="hasCriticalEffectivePermissions">توجد صلاحيات حساسة؛ راجع مصدرها قبل الحفظ.</p>
+    </article>
+
+    <article class="list-card" *plpCan="permissions.users.manage">
+      <h3>الأدوار</h3>
+      <p class="muted" *ngIf="roles.length === 0">لا يمكن تحميل قائمة الأدوار دون صلاحية عرض الأدوار.</p>
+      <label *ngFor="let role of roles" class="role-choice">
+        <input type="checkbox" [checked]="selectedRoles.includes(role.role)" [disabled]="isSaving || roles.length === 0" (change)="toggleRole(role.role, $any($event.target).checked)" />
+        <span>{{ role.name }} <small>({{ role.role }})</small></span>
+      </label>
+    </article>
+
+    <article class="list-card" *plpCan="permissions.permissions.assign">
+      <h3>المنح والرفض المباشر</h3>
+      <p class="warning" *ngIf="catalog.length === 0">لا يمكن تحميل كتالوج الصلاحيات المتاح للتعديل.</p>
+      <h4>منح مباشر</h4>
+      <plp-permission-selection [groups]="catalog" [selected]="selectedDirectGrants" [disabled]="!authorization.isActive || isSaving" (selectedChange)="onGrantsChanged($event)"></plp-permission-selection>
+      <h4>رفض مباشر</h4>
+      <plp-permission-selection [groups]="catalog" [selected]="selectedDirectDenies" [disabled]="!authorization.isActive || isSaving" (selectedChange)="onDeniesChanged($event)"></plp-permission-selection>
+    </article>
+
+    <article class="list-card list-card--wide">
+      <h3>الصلاحيات الفعلية حسب القدرة</h3>
+      <section *ngFor="let group of effectivePermissionGroups" class="effective-group">
+        <h4>{{ group.capability }}</h4>
+        <div class="permission-row header"><span>الصلاحية</span><span>النتيجة</span><span>المصدر</span></div>
+        <div class="permission-row" *ngFor="let item of group.permissions">
+          <strong>{{ item.permission }} <em *ngIf="item.isCritical">حساسة</em></strong>
+          <span [class.ok]="item.granted" [class.bad]="!item.granted">{{ item.granted ? 'ممنوحة' : 'مرفوضة' }}</span>
+          <span>{{ sourceLabel(item.sources) }}</span>
+        </div>
+      </section>
+    </article>
+  </div>
+</section>

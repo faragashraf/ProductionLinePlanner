@@ -26,7 +26,7 @@ public static class AuthTokenService
         return Convert.ToBase64String(hash);
     }
 
-    public static string CreateAccessToken(
+public static string CreateAccessToken(
         AppUser user,
         DateTime issuedAtUtc,
         DateTime expiresAtUtc,
@@ -35,7 +35,12 @@ public static class AuthTokenService
         SymmetricSecurityKey signingKey)
     {
         var tokenId = Guid.NewGuid().ToString("N");
-        var roles = user.Roles.Select(r => new Claim(ClaimTypes.Role, r.Role.ToString())).ToArray();
+        var roles = user.Roles
+            .Select(role => role.Role?.ToString() ?? role.Name)
+            .Where(role => !string.IsNullOrWhiteSpace(role))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Select(role => new Claim(ClaimTypes.Role, role))
+            .ToArray();
         var claims = new List<Claim>
         {
             new(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
@@ -63,14 +68,5 @@ public static class AuthTokenService
         var handler = new JwtSecurityTokenHandler();
         var token = handler.CreateToken(tokenDescriptor);
         return handler.WriteToken(token);
-    }
-
-    public static string[] ResolvePermissionsForRoles(string[] roles)
-    {
-        return roles.Contains(UserRole.SuperAdmin.ToString(), StringComparer.OrdinalIgnoreCase)
-            ? ["users.read", "users.write", "system.read", "system.write"]
-            : roles.Contains(UserRole.Admin.ToString(), StringComparer.OrdinalIgnoreCase)
-                ? ["users.read", "system.read", "dashboard.read", "readiness.read"]
-                : Array.Empty<string>();
     }
 }

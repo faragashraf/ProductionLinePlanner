@@ -1,0 +1,42 @@
+.admin-table {
+  display: grid;
+  gap: var(--plp-spacing-1);
+}
+
+.admin-table__row {
+  border: 1px solid var(--plp-border-color, #d7dae3);
+  border-radius: 0.6rem;
+  padding: 0.8rem;
+  background: var(--plp-surface-2, #fff);
+  display: grid;
+  gap: 0.35rem;
+}
+
+.admin-table__row h2 {
+  margin: 0;
+}
+
+.roles-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  color: #334155;
+}
+
+.role-perms {
+  margin: 0.2rem 0 0;
+  color: #334155;
+  overflow-wrap: anywhere;
+}
+
+.muted {
+  color: #64748b;
+}
+
+.role-actions { display:flex; gap:.35rem; flex-wrap:wrap; }
+.role-editor { display:grid; gap:.7rem; max-width:52rem; margin-top:1rem; padding:.9rem; border:1px solid var(--plp-border-color, #d7dae3); border-radius:.65rem; background:var(--plp-surface-2, #fff); }
+.role-editor h2, .role-editor h3 { margin:0; }
+.role-editor label { display:grid; gap:.25rem; font-weight:600; }
+.role-editor input[type='text'] { border:1px solid var(--plp-border-color, #d7dae3); border-radius:.45rem; padding:.55rem .65rem; font:inherit; }
+.role-editor .toggle { display:flex; align-items:center; gap:.45rem; }
+.description-count { color:#64748b; font-size:.82rem; }
