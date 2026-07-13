@@ -91,13 +91,16 @@ public sealed class FakeAttendanceEmployeeReader : IAttendanceEmployeeReader
 {
     private readonly Dictionary<string, AttendanceEmployeeRecord?> _employees;
     private readonly Func<string, CancellationToken, Task<Result<AttendanceEmployeeRecord?>>> _getByAttendanceUserIdAsync;
+    private readonly Func<CancellationToken, Task<Result<AttendanceEmployeeRecord[]>>> _getAllAsync;
 
     public FakeAttendanceEmployeeReader(
         Dictionary<string, AttendanceEmployeeRecord?>? employees = null,
-        Func<string, CancellationToken, Task<Result<AttendanceEmployeeRecord?>>>? getByAttendanceUserIdAsync = null)
+        Func<string, CancellationToken, Task<Result<AttendanceEmployeeRecord?>>>? getByAttendanceUserIdAsync = null,
+        Func<CancellationToken, Task<Result<AttendanceEmployeeRecord[]>>>? getAllAsync = null)
     {
         _employees = employees ?? [];
         _getByAttendanceUserIdAsync = getByAttendanceUserIdAsync ?? DefaultGetByAttendanceUserIdAsync;
+        _getAllAsync = getAllAsync ?? DefaultGetAllAsync;
     }
 
     public Task<Result<AttendanceEmployeeRecord?>> GetByAttendanceUserIdAsync(
@@ -105,6 +108,11 @@ public sealed class FakeAttendanceEmployeeReader : IAttendanceEmployeeReader
         CancellationToken cancellationToken = default)
     {
         return _getByAttendanceUserIdAsync(attendanceUserId, cancellationToken);
+    }
+
+    public Task<Result<AttendanceEmployeeRecord[]>> GetAllAsync(CancellationToken cancellationToken = default)
+    {
+        return _getAllAsync(cancellationToken);
     }
 
     private Task<Result<AttendanceEmployeeRecord?>> DefaultGetByAttendanceUserIdAsync(
@@ -117,6 +125,15 @@ public sealed class FakeAttendanceEmployeeReader : IAttendanceEmployeeReader
         return Task.FromResult(_employees.TryGetValue(attendanceUserId, out var record)
             ? Result<AttendanceEmployeeRecord?>.Success(record)
             : Result<AttendanceEmployeeRecord?>.Success(null));
+    }
+
+    private Task<Result<AttendanceEmployeeRecord[]>> DefaultGetAllAsync(CancellationToken cancellationToken)
+    {
+        _ = cancellationToken;
+        return Task.FromResult(
+            Result<AttendanceEmployeeRecord[]>.Success(_employees.Values
+                .OfType<AttendanceEmployeeRecord>()
+                .ToArray()));
     }
 }
 

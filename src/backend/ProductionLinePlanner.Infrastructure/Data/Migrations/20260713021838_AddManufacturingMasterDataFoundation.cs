@@ -79,7 +79,7 @@ namespace ProductionLinePlanner.Infrastructure.Data.Migrations
                 (
                     SELECT
                         [MainStageId],
-                        MAX([SequenceOrder]) AS [CurrentMaxOrder]
+                        MAX(CASE WHEN [SequenceOrder] > 0 THEN [SequenceOrder] ELSE 0 END) AS [CurrentMaxOrder]
                     FROM [dbo].[SubStages]
                     GROUP BY [MainStageId]
                 ),
@@ -100,14 +100,17 @@ namespace ProductionLinePlanner.Infrastructure.Data.Migrations
                 FROM [dbo].[SubStages] s
                 INNER JOIN InvalidOrders i ON i.[Id] = s.[Id];
 
-                ;WITH SequenceOrderCollisionCheck AS
+                IF EXISTS
                 (
-                    SELECT [MainStageId], [SequenceOrder], COUNT(*) AS [RowsPerOrder]
-                    FROM [dbo].[SubStages]
-                    GROUP BY [MainStageId], [SequenceOrder]
-                    HAVING COUNT(*) > 1
+                    SELECT 1
+                    FROM
+                    (
+                        SELECT [MainStageId], [SequenceOrder]
+                        FROM [dbo].[SubStages]
+                        GROUP BY [MainStageId], [SequenceOrder]
+                        HAVING COUNT(*) > 1
+                    ) AS [SequenceOrderCollisionCheck]
                 )
-                IF EXISTS (SELECT 1 FROM SequenceOrderCollisionCheck)
                     THROW 51002, 'SubStage SequenceOrder remediation produced duplicate order values within a MainStage.', 1;
 
                 IF EXISTS

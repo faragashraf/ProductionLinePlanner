@@ -4,12 +4,13 @@ using ProductionLinePlanner.Application.Abstractions;
 using ProductionLinePlanner.Application.Common;
 using ProductionLinePlanner.Infrastructure.Attendance;
 using ProductionLinePlanner.Infrastructure.Attendance.Entities;
+using Microsoft.Extensions.Options;
 
 namespace ProductionLinePlanner.Infrastructure.Attendance.Services;
 
 public sealed class AttendanceDirectoryService(
     AttendanceDbContext attendanceDbContext,
-    AttendanceSourceOptions sourceOptions) : IAttendanceEmployeeReader, IAttendanceEmployeeWriter, IAttendanceDepartmentReader, IAttendanceDepartmentWriter
+    IOptions<AttendanceSourceOptions> sourceOptions) : IAttendanceEmployeeReader, IAttendanceEmployeeWriter, IAttendanceDepartmentReader, IAttendanceDepartmentWriter
 {
     public async Task<Result<AttendanceEmployeeRecord?>> GetByAttendanceUserIdAsync(
         string attendanceUserId,
@@ -35,6 +36,24 @@ public sealed class AttendanceDirectoryService(
             BadgeNumber: entity.BadgeNumber,
             Name: entity.Name,
             IsActive: true));
+    }
+
+    public async Task<Result<AttendanceEmployeeRecord[]>> GetAllAsync(CancellationToken cancellationToken = default)
+    {
+        var sourceUsers = await attendanceDbContext.UserInfos
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
+
+        var records = sourceUsers
+            .Select(x => new AttendanceEmployeeRecord(
+                AttendanceUserId: x.UserId?.ToString(),
+                DepartmentId: x.DepartmentId,
+                BadgeNumber: x.BadgeNumber,
+                Name: x.Name,
+                IsActive: true))
+            .ToArray();
+
+        return Result<AttendanceEmployeeRecord[]>.Success(records);
     }
 
     public async Task<Result<AttendanceDepartmentRecord[]>> GetAllDepartmentsAsync(CancellationToken cancellationToken = default)
@@ -216,7 +235,7 @@ public sealed class AttendanceDirectoryService(
         return int.TryParse(attendanceUserId, out userId);
     }
 
-    private string GetUserInfoTableName() => sourceOptions.UserInfoTable ?? "USERINFO";
+    private string GetUserInfoTableName() => sourceOptions.Value.UserInfoTable ?? "USERINFO";
 
-    private string GetDepartmentsTableName() => sourceOptions.DepartmentsTable ?? "DEPARTMENTS";
+    private string GetDepartmentsTableName() => sourceOptions.Value.DepartmentsTable ?? "DEPARTMENTS";
 }
