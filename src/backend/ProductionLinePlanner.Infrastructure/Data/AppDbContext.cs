@@ -23,6 +23,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Permission> Permissions => Set<Permission>();
     public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
     public DbSet<UserPermissionOverride> UserPermissionOverrides => Set<UserPermissionOverride>();
+    public DbSet<ProductModel> ProductModels => Set<ProductModel>();
+    public DbSet<ProductModelStage> ProductModelStages => Set<ProductModelStage>();
+    public DbSet<WorkerSalaryHistory> WorkerSalaryHistories => Set<WorkerSalaryHistory>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

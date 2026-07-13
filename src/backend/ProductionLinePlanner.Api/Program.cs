@@ -217,9 +217,12 @@ app.UseAuthorization();
 
 var factoriesApi = app.MapGroup("/api/factories").RequireAuthorization();
 var productionLinesApi = app.MapGroup("/api/production-lines").RequireAuthorization();
-var mainStagesApi = app.MapGroup("/api/main-stages").RequireAuthorization().RequirePermission("stages.manage");
-var subStagesApi = app.MapGroup("/api/sub-stages").RequireAuthorization().RequirePermission("stages.manage");
+var departmentsApi = app.MapGroup("/api/departments").RequireAuthorization();
+var mainStagesApi = app.MapGroup("/api/main-stages").RequireAuthorization();
+var subStagesApi = app.MapGroup("/api/sub-stages").RequireAuthorization();
 var workersApi = app.MapGroup("/api/workers").RequireAuthorization();
+var productModelsApi = app.MapGroup("/api/product-models").RequireAuthorization();
+var workerCompensationApi = app.MapGroup("/api/workers/{workerId:guid}/compensation").RequireAuthorization();
 var assignmentsApi = app.MapGroup("/api/assignments").RequireAuthorization();
 var attendanceApi = app.MapGroup("/api/attendance").RequireAuthorization();
 var notificationsApi = app.MapGroup("/api/notifications").RequireAuthorization();
@@ -1342,618 +1345,325 @@ productionLinesApi.MapGet("/{productionLineId:guid}/main-stages", async (
     .WithTags("MainStages")
     .WithName("GetMainStagesByLine");
 
-mainStagesApi.MapGet("/{mainStageId:guid}", async (
-    Guid mainStageId,
-    AppDbContext dbContext,
-    CancellationToken cancellationToken) =>
-{
-    var entity = await dbContext.MainStages.AsNoTracking().FirstOrDefaultAsync(x => x.Id == mainStageId && x.IsActive, cancellationToken);
-    if (entity is null)
-    {
-        return ApiResponse.Failure("NotFound", "Main stage not found.", 404);
-    }
-
-    return Results.Ok(ApiResponse.Success(new MainStageDto
-    {
-        Id = entity.Id,
-        ProductionLineId = entity.ProductionLineId,
-        Name = entity.Name,
-        SequenceOrder = entity.SequenceOrder,
-        IsCritical = entity.IsCritical,
-        IsActive = entity.IsActive
-    }));
-})
-    .WithTags("MainStages")
-    .WithName("GetMainStage");
-
-mainStagesApi.MapPost("", async (
-    CreateMainStageRequest request,
-    AppDbContext dbContext,
-    ICurrentUserService currentUserService,
-    HttpContext httpContext,
-    CancellationToken cancellationToken) =>
-{
-    var actorUserId = currentUserService.UserId;
-    if (actorUserId is null)
-    {
-        return ApiResponse.Failure("Unauthorized", "User context is required.");
-    }
-
-    if (request.ProductionLineId == Guid.Empty)
-    {
-        return ApiResponse.Failure("ValidationError", "ProductionLineId is required.");
-    }
-
-    if (string.IsNullOrWhiteSpace(request.Name))
-    {
-        return ApiResponse.Failure("ValidationError", "Name is required.");
-    }
-
-    if (request.SequenceOrder < 0)
-    {
-        return ApiResponse.Failure("ValidationError", "SequenceOrder must be zero or greater.");
-    }
-
-    var lineExists = await dbContext.ProductionLines.AnyAsync(x => x.Id == request.ProductionLineId && x.IsActive, cancellationToken);
-    if (!lineExists)
-    {
-        return ApiResponse.Failure("ValidationError", "ProductionLineId does not exist.", 404);
-    }
-
-    var hasConflict = await dbContext.MainStages.AnyAsync(
-        x => x.ProductionLineId == request.ProductionLineId && x.SequenceOrder == request.SequenceOrder && x.IsActive,
-        cancellationToken);
-    if (hasConflict)
-    {
-        return ApiResponse.Failure("Conflict", "SequenceOrder must be unique for this production line.", statusCode: 409);
-    }
-
-    var entity = new MainStage(
-        id: Guid.NewGuid(),
-        productionLineId: request.ProductionLineId,
-        name: request.Name,
-        isCritical: request.IsCritical,
-        sequenceOrder: request.SequenceOrder,
-        isActive: request.IsActive);
-
-    dbContext.MainStages.Add(entity);
-    await dbContext.SaveChangesAsync(cancellationToken);
-    AssignmentHelpers.AddAuditLog(
-        dbContext,
-        actorUserId.Value,
-        AuditActionType.Create,
-        nameof(MainStage),
-        entity.Id.ToString(),
-        before: null,
-        after: new { entity.Id, entity.ProductionLineId, entity.Name, entity.IsCritical, entity.SequenceOrder, entity.IsActive },
-        httpContext);
-
-    return Results.Created($"/api/main-stages/{entity.Id}", ApiResponse.Success(new MainStageDto
-    {
-        Id = entity.Id,
-        ProductionLineId = entity.ProductionLineId,
-        Name = entity.Name,
-        SequenceOrder = entity.SequenceOrder,
-        IsCritical = entity.IsCritical,
-        IsActive = entity.IsActive
-    }));
-})
-    .WithTags("MainStages")
-    .WithName("CreateMainStage");
-
-mainStagesApi.MapPatch("/{mainStageId:guid}", async (
-    Guid mainStageId,
-    UpdateMainStageRequest request,
-    AppDbContext dbContext,
-    ICurrentUserService currentUserService,
-    HttpContext httpContext,
-    CancellationToken cancellationToken) =>
-{
-    var actorUserId = currentUserService.UserId;
-    if (actorUserId is null)
-    {
-        return ApiResponse.Failure("Unauthorized", "User context is required.");
-    }
-
-    var entity = await dbContext.MainStages.FirstOrDefaultAsync(x => x.Id == mainStageId && x.IsActive, cancellationToken);
-    if (entity is null)
-    {
-        return ApiResponse.Failure("NotFound", "Main stage not found.", 404);
-    }
-
-    if (request.Name is null && request.IsCritical is null && request.SequenceOrder is null && request.IsActive is null)
-    {
-        return ApiResponse.Failure("ValidationError", "No updatable fields were provided.");
-    }
-
-    var updatedAt = DateTime.UtcNow;
-    var hasChanges = false;
-    if (request.Name is { } name && !string.IsNullOrWhiteSpace(name))
-    {
-        entity.Rename(name, updatedAt);
-        hasChanges = true;
-    }
-    else if (request.Name is not null && string.IsNullOrWhiteSpace(request.Name))
-    {
-        return ApiResponse.Failure("ValidationError", "Name cannot be empty.");
-    }
-
-    if (request.IsCritical is not null)
-    {
-        dbContext.Entry(entity).Property(nameof(MainStage.IsCritical)).CurrentValue = request.IsCritical.Value;
-        hasChanges = true;
-    }
-
-    if (request.SequenceOrder is not null)
-    {
-        if (request.SequenceOrder.Value < 0)
-        {
-            return ApiResponse.Failure("ValidationError", "SequenceOrder must be zero or greater.");
-        }
-
-        if (entity.SequenceOrder != request.SequenceOrder.Value)
-        {
-            var sequenceConflict = await dbContext.MainStages.AnyAsync(
-                x => x.Id != mainStageId && x.ProductionLineId == entity.ProductionLineId && x.SequenceOrder == request.SequenceOrder.Value,
-                cancellationToken);
-            if (sequenceConflict)
-            {
-                return ApiResponse.Failure("Conflict", "SequenceOrder must be unique within this production line.", 409);
-            }
-
-            dbContext.Entry(entity).Property(nameof(MainStage.SequenceOrder)).CurrentValue = request.SequenceOrder.Value;
-            hasChanges = true;
-        }
-    }
-
-    if (request.IsActive is not null)
-    {
-        if (entity.IsActive != request.IsActive.Value)
-        {
-            dbContext.Entry(entity).Property(nameof(MainStage.IsActive)).CurrentValue = request.IsActive.Value;
-            hasChanges = true;
-        }
-    }
-
-    if (!hasChanges)
-    {
-        return ApiResponse.Failure("ValidationError", "No valid changes detected.");
-    }
-
-    var beforeMainStage = new { entity.Id, entity.ProductionLineId, entity.Name, entity.IsCritical, entity.SequenceOrder, entity.IsActive };
-    dbContext.Entry(entity).Property(nameof(MainStage.UpdatedAtUtc)).CurrentValue = updatedAt;
-    await dbContext.SaveChangesAsync(cancellationToken);
-    AssignmentHelpers.AddAuditLog(
-        dbContext,
-        actorUserId.Value,
-        AuditActionType.Update,
-        nameof(MainStage),
-        entity.Id.ToString(),
-        before: beforeMainStage,
-        after: new { entity.Id, entity.ProductionLineId, entity.Name, entity.IsCritical, entity.SequenceOrder, entity.IsActive },
-        httpContext);
-
-    return Results.Ok(ApiResponse.Success(new MainStageDto
-    {
-        Id = entity.Id,
-        ProductionLineId = entity.ProductionLineId,
-        Name = entity.Name,
-        SequenceOrder = entity.SequenceOrder,
-        IsCritical = entity.IsCritical,
-        IsActive = entity.IsActive
-    }));
-})
-    .WithTags("MainStages")
-    .WithName("UpdateMainStage");
-
-mainStagesApi.MapDelete("/{mainStageId:guid}", async (
-    Guid mainStageId,
-    AppDbContext dbContext,
-    ICurrentUserService currentUserService,
-    HttpContext httpContext,
-    CancellationToken cancellationToken) =>
-{
-    var actorUserId = currentUserService.UserId;
-    if (actorUserId is null)
-    {
-        return ApiResponse.Failure("Unauthorized", "User context is required.");
-    }
-
-    var entity = await dbContext.MainStages.FirstOrDefaultAsync(x => x.Id == mainStageId && x.IsActive, cancellationToken);
-    if (entity is null)
-    {
-        return ApiResponse.Failure("NotFound", "Main stage not found.", 404);
-    }
-
-    var beforeMainStage = new { entity.Id, entity.ProductionLineId, entity.Name, entity.IsCritical, entity.SequenceOrder, entity.IsActive };
-    dbContext.Entry(entity).Property(nameof(MainStage.IsActive)).CurrentValue = false;
-    dbContext.Entry(entity).Property(nameof(MainStage.UpdatedAtUtc)).CurrentValue = DateTime.UtcNow;
-    await dbContext.SaveChangesAsync(cancellationToken);
-    AssignmentHelpers.AddAuditLog(
-        dbContext,
-        actorUserId.Value,
-        AuditActionType.Delete,
-        nameof(MainStage),
-        entity.Id.ToString(),
-        before: beforeMainStage,
-        after: new { entity.Id, entity.ProductionLineId, entity.Name, entity.IsCritical, entity.SequenceOrder, entity.IsActive },
-        httpContext);
-
-    return Results.NoContent();
-})
-    .RequirePermission("stages.manage")
-    .WithTags("MainStages")
-    .WithName("DeleteMainStage");
-
 mainStagesApi.MapGet("/{mainStageId:guid}/sub-stages", async (
-    AppDbContext dbContext,
+    IProductionStageCatalogService stageCatalogService,
     Guid mainStageId,
     CancellationToken cancellationToken,
-    bool includeInactive = false,
-    int page = 1,
-    int pageSize = 50) =>
-{
-    if (page < 1 || pageSize < 1 || pageSize > 200)
-    {
-        return ApiResponse.Failure("ValidationError", "page and pageSize must be positive, pageSize max 200.");
-    }
-
-    var mainStageExists = await dbContext.MainStages.AnyAsync(x => x.Id == mainStageId && x.IsActive, cancellationToken);
-    if (!mainStageExists)
-    {
-        return ApiResponse.Failure("NotFound", "Main stage not found.", 404);
-    }
-
-    var query = dbContext.SubStages.AsNoTracking().Where(x => x.MainStageId == mainStageId);
-    if (!includeInactive)
-    {
-        query = query.Where(x => x.IsActive);
-    }
-
-    var totalCount = await query.CountAsync(cancellationToken);
-    var entities = await query
-        .OrderBy(x => x.SequenceOrder)
-        .ThenBy(x => x.Name)
-        .Skip((page - 1) * pageSize)
-        .Take(pageSize)
-        .Select(x => new SubStageDto
-        {
-            Id = x.Id,
-            MainStageId = x.MainStageId,
-            Name = x.Name,
-            Capacity = x.Capacity,
-            SequenceOrder = x.SequenceOrder,
-            IsActive = x.IsActive
-        })
-        .ToArrayAsync(cancellationToken);
-
-    return Results.Ok(new { success = true, data = new { items = entities, totalCount, pageNumber = page, pageSize } });
-})
-    .WithTags("SubStages")
-    .WithName("GetSubStagesByMainStage");
-
-subStagesApi.MapGet("/{subStageId:guid}", async (
-    Guid subStageId,
-    AppDbContext dbContext,
-    CancellationToken cancellationToken) =>
-{
-    var entity = await dbContext.SubStages.AsNoTracking().FirstOrDefaultAsync(x => x.Id == subStageId && x.IsActive, cancellationToken);
-    if (entity is null)
-    {
-        return ApiResponse.Failure("NotFound", "Sub stage not found.", 404);
-    }
-
-    return Results.Ok(ApiResponse.Success(new SubStageDto
-    {
-        Id = entity.Id,
-        MainStageId = entity.MainStageId,
-        Name = entity.Name,
-        Capacity = entity.Capacity,
-        SequenceOrder = entity.SequenceOrder,
-        IsActive = entity.IsActive
-    }));
-})
-    .WithTags("SubStages")
-    .WithName("GetSubStage");
-
-subStagesApi.MapPost("", async (
-    CreateSubStageRequest request,
-    AppDbContext dbContext,
-    ICurrentUserService currentUserService,
-    HttpContext httpContext,
-    CancellationToken cancellationToken) =>
-{
-    var actorUserId = currentUserService.UserId;
-    if (actorUserId is null)
-    {
-        return ApiResponse.Failure("Unauthorized", "User context is required.");
-    }
-
-    if (request.MainStageId == Guid.Empty)
-    {
-        return ApiResponse.Failure("ValidationError", "MainStageId is required.");
-    }
-
-    if (string.IsNullOrWhiteSpace(request.Name))
-    {
-        return ApiResponse.Failure("ValidationError", "Name is required.");
-    }
-
-    if (request.Capacity < 0)
-    {
-        return ApiResponse.Failure("ValidationError", "Capacity must be zero or greater.");
-    }
-
-    if (request.SequenceOrder < 0)
-    {
-        return ApiResponse.Failure("ValidationError", "SequenceOrder must be zero or greater.");
-    }
-
-    var mainStageExists = await dbContext.MainStages.AnyAsync(x => x.Id == request.MainStageId && x.IsActive, cancellationToken);
-    if (!mainStageExists)
-    {
-        return ApiResponse.Failure("ValidationError", "MainStageId does not exist.", 404);
-    }
-
-    var hasConflict = await dbContext.SubStages.AnyAsync(
-        x => x.MainStageId == request.MainStageId && x.SequenceOrder == request.SequenceOrder && x.IsActive,
-        cancellationToken);
-    if (hasConflict)
-    {
-        return ApiResponse.Failure("Conflict", "SequenceOrder must be unique within this main stage.", 409);
-    }
-
-    var entity = new SubStage(
-        id: Guid.NewGuid(),
-        mainStageId: request.MainStageId,
-        name: request.Name,
-        capacity: request.Capacity,
-        sequenceOrder: request.SequenceOrder,
-        isActive: request.IsActive);
-
-    dbContext.SubStages.Add(entity);
-    await dbContext.SaveChangesAsync(cancellationToken);
-    AssignmentHelpers.AddAuditLog(
-        dbContext,
-        actorUserId.Value,
-        AuditActionType.Create,
-        nameof(SubStage),
-        entity.Id.ToString(),
-        before: null,
-        after: new { entity.Id, entity.MainStageId, entity.Name, entity.Capacity, entity.SequenceOrder, entity.IsActive },
-        httpContext);
-
-    return Results.Created($"/api/sub-stages/{entity.Id}", ApiResponse.Success(new SubStageDto
-    {
-        Id = entity.Id,
-        MainStageId = entity.MainStageId,
-        Name = entity.Name,
-        Capacity = entity.Capacity,
-        SequenceOrder = entity.SequenceOrder,
-        IsActive = entity.IsActive
-    }));
-})
-    .WithTags("SubStages")
-    .WithName("CreateSubStage");
-
-subStagesApi.MapPatch("/{subStageId:guid}", async (
-    Guid subStageId,
-    UpdateSubStageRequest request,
-    AppDbContext dbContext,
-    ICurrentUserService currentUserService,
-    HttpContext httpContext,
-    CancellationToken cancellationToken) =>
-{
-    var actorUserId = currentUserService.UserId;
-    if (actorUserId is null)
-    {
-        return ApiResponse.Failure("Unauthorized", "User context is required.");
-    }
-
-    var entity = await dbContext.SubStages.FirstOrDefaultAsync(x => x.Id == subStageId && x.IsActive, cancellationToken);
-    if (entity is null)
-    {
-        return ApiResponse.Failure("NotFound", "Sub stage not found.", 404);
-    }
-
-    if (request.Name is null && request.Capacity is null && request.SequenceOrder is null && request.IsActive is null)
-    {
-        return ApiResponse.Failure("ValidationError", "No updatable fields were provided.");
-    }
-
-    var updatedAt = DateTime.UtcNow;
-    var hasChanges = false;
-
-    if (request.Name is { } name && !string.IsNullOrWhiteSpace(name))
-    {
-        dbContext.Entry(entity).Property(nameof(SubStage.Name)).CurrentValue = name.Trim();
-        hasChanges = true;
-    }
-    else if (request.Name is not null && string.IsNullOrWhiteSpace(request.Name))
-    {
-        return ApiResponse.Failure("ValidationError", "Name cannot be empty.");
-    }
-
-    if (request.Capacity is not null)
-    {
-        try
-        {
-            entity.UpdateCapacity(request.Capacity.Value, updatedAt);
-            hasChanges = true;
-        }
-        catch (ArgumentOutOfRangeException ex)
-        {
-            return ApiResponse.Failure("ValidationError", ex.Message);
-        }
-    }
-
-    if (request.SequenceOrder is not null)
-    {
-        if (request.SequenceOrder.Value < 0)
-        {
-            return ApiResponse.Failure("ValidationError", "SequenceOrder must be zero or greater.");
-        }
-
-        if (entity.SequenceOrder != request.SequenceOrder.Value)
-        {
-            var sequenceConflict = await dbContext.SubStages.AnyAsync(
-                x => x.Id != subStageId && x.MainStageId == entity.MainStageId && x.SequenceOrder == request.SequenceOrder.Value,
-                cancellationToken);
-            if (sequenceConflict)
-            {
-                return ApiResponse.Failure("Conflict", "SequenceOrder must be unique within this main stage.", 409);
-            }
-
-            dbContext.Entry(entity).Property(nameof(SubStage.SequenceOrder)).CurrentValue = request.SequenceOrder.Value;
-            hasChanges = true;
-        }
-    }
-
-    if (request.IsActive is not null)
-    {
-        if (entity.IsActive != request.IsActive.Value)
-        {
-            dbContext.Entry(entity).Property(nameof(SubStage.IsActive)).CurrentValue = request.IsActive.Value;
-            hasChanges = true;
-        }
-    }
-
-    if (!hasChanges)
-    {
-        return ApiResponse.Failure("ValidationError", "No valid changes detected.");
-    }
-
-    var beforeSubStage = new { entity.Id, entity.MainStageId, entity.Name, entity.Capacity, entity.SequenceOrder, entity.IsActive };
-    dbContext.Entry(entity).Property(nameof(SubStage.UpdatedAtUtc)).CurrentValue = updatedAt;
-    await dbContext.SaveChangesAsync(cancellationToken);
-    AssignmentHelpers.AddAuditLog(
-        dbContext,
-        actorUserId.Value,
-        AuditActionType.Update,
-        nameof(SubStage),
-        entity.Id.ToString(),
-        before: beforeSubStage,
-        after: new { entity.Id, entity.MainStageId, entity.Name, entity.Capacity, entity.SequenceOrder, entity.IsActive },
-        httpContext);
-
-    return Results.Ok(ApiResponse.Success(new SubStageDto
-    {
-        Id = entity.Id,
-        MainStageId = entity.MainStageId,
-        Name = entity.Name,
-        Capacity = entity.Capacity,
-        SequenceOrder = entity.SequenceOrder,
-        IsActive = entity.IsActive
-    }));
-})
-    .WithTags("SubStages")
-    .WithName("UpdateSubStage");
-
-subStagesApi.MapDelete("/{subStageId:guid}", async (
-    Guid subStageId,
-    AppDbContext dbContext,
-    ICurrentUserService currentUserService,
-    HttpContext httpContext,
-    CancellationToken cancellationToken) =>
-{
-    var actorUserId = currentUserService.UserId;
-    if (actorUserId is null)
-    {
-        return ApiResponse.Failure("Unauthorized", "User context is required.");
-    }
-
-    var entity = await dbContext.SubStages.FirstOrDefaultAsync(x => x.Id == subStageId && x.IsActive, cancellationToken);
-    if (entity is null)
-    {
-        return ApiResponse.Failure("NotFound", "Sub stage not found.", 404);
-    }
-
-    var beforeSubStage = new { entity.Id, entity.MainStageId, entity.Name, entity.Capacity, entity.SequenceOrder, entity.IsActive };
-    dbContext.Entry(entity).Property(nameof(SubStage.IsActive)).CurrentValue = false;
-    dbContext.Entry(entity).Property(nameof(SubStage.UpdatedAtUtc)).CurrentValue = DateTime.UtcNow;
-    await dbContext.SaveChangesAsync(cancellationToken);
-    AssignmentHelpers.AddAuditLog(
-        dbContext,
-        actorUserId.Value,
-        AuditActionType.Delete,
-        nameof(SubStage),
-        entity.Id.ToString(),
-        before: beforeSubStage,
-        after: new { entity.Id, entity.MainStageId, entity.Name, entity.Capacity, entity.SequenceOrder, entity.IsActive },
-        httpContext);
-
-    return Results.NoContent();
-})
-    .RequirePermission("stages.manage")
-    .WithTags("SubStages")
-    .WithName("DeleteSubStage");
-
-workersApi.MapGet("", async (
-    AppDbContext dbContext,
-    string? search,
-    CancellationToken cancellationToken,
+    string? search = null,
     bool? isActive = true,
     int page = 1,
     int pageSize = 50) =>
 {
-    if (page < 1 || pageSize < 1 || pageSize > 200)
+    var result = await stageCatalogService.GetSubStagesAsync(mainStageId, search, isActive, page, pageSize, cancellationToken);
+    if (result.IsFailure)
     {
-        return ApiResponse.Failure("ValidationError", "page and pageSize must be positive, pageSize max 200.");
+        return ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code));
     }
 
-    var searchPattern = string.IsNullOrWhiteSpace(search) ? null : $"%{search.Trim()}%";
-    var query = dbContext.Workers.AsNoTracking();
+    return Results.Ok(new { success = true, data = new { items = result.Value!, totalCount = result.TotalCount, pageNumber = result.PageNumber, pageSize = result.PageSize } });
+})
+    .WithTags("SubStages")
+    .WithName("GetSubStagesByMainStage")
+    .RequirePermission("stages.view");
 
-    if (isActive.HasValue)
+mainStagesApi.MapGet("", async (
+    IProductionStageCatalogService stageCatalogService,
+    Guid? productionLineId,
+    CancellationToken cancellationToken,
+    string? search = null,
+    bool? isActive = true,
+    int page = 1,
+    int pageSize = 50) =>
+{
+    var result = await stageCatalogService.GetMainStagesAsync(productionLineId, search, isActive, page, pageSize, cancellationToken);
+    if (result.IsFailure)
     {
-        query = query.Where(x => x.IsActive == isActive.Value);
+        return ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code));
     }
 
-    if (searchPattern is not null)
+    return Results.Ok(new { success = true, data = new { items = result.Value!, totalCount = result.TotalCount, pageNumber = result.PageNumber, pageSize = result.PageSize } });
+})
+    .WithTags("MainStages")
+    .WithName("GetMainStages")
+    .RequirePermission("stages.view");
+
+mainStagesApi.MapGet("/{mainStageId:guid}", async (
+    Guid mainStageId,
+    IProductionStageCatalogService stageCatalogService,
+    CancellationToken cancellationToken) =>
+{
+    var result = await stageCatalogService.GetMainStageAsync(mainStageId, cancellationToken);
+    if (result.IsFailure)
     {
-        query = query.Where(x => EF.Functions.Like(x.EmployeeCode, searchPattern) || EF.Functions.Like(x.FullName, searchPattern));
+        return ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code));
     }
 
-    var totalCount = await query.CountAsync(cancellationToken);
-    var entities = await query
-        .OrderBy(x => x.FullName)
-        .ThenBy(x => x.EmployeeCode)
-        .Skip((page - 1) * pageSize)
-        .Take(pageSize)
-        .ToArrayAsync(cancellationToken);
+    return Results.Ok(ApiResponse.Success(result.Value!));
+})
+    .WithTags("MainStages")
+    .WithName("GetMainStage")
+    .RequirePermission("stages.view");
 
-    var workerIds = entities.Select(x => x.Id).ToArray();
-    var activeDefaultAssignments = new List<(Guid WorkerId, DateTime AssignedAt, Guid Id, Guid SubStageId)>();
-    if (workerIds.Length > 0)
+mainStagesApi.MapPost("", async (
+    CreateMainStageRequest request,
+    IProductionStageCatalogService stageCatalogService,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
+    CancellationToken cancellationToken) =>
+{
+    var actorUserId = currentUserService.UserId;
+    if (actorUserId is null)
     {
-        activeDefaultAssignments = (await dbContext.WorkerDefaultAssignments
-                .AsNoTracking()
-                .Where(x => workerIds.Contains(x.WorkerId) && x.IsActive)
-                .Select(x => new { x.WorkerId, x.AssignedAt, x.Id, x.SubStageId })
-                .ToListAsync(cancellationToken))
-            .Select(x => (x.WorkerId, x.AssignedAt, x.Id, x.SubStageId))
-            .ToList();
+        return ApiResponse.Failure("Unauthorized", "User context is required.");
     }
 
-    var defaultSubStageByWorker = activeDefaultAssignments
-        .OrderByDescending(x => x.AssignedAt)
-        .ThenByDescending(x => x.Id)
-        .GroupBy(x => x.WorkerId)
-        .ToDictionary(g => g.Key, g => (Guid?)g.First().SubStageId);
+    var requestMeta = $"{httpContext.Request.Method} {httpContext.Request.Path}";
+    var result = await stageCatalogService.CreateMainStageAsync(
+        request.ProductionLineId,
+        request.Name,
+        request.IsCritical,
+        request.SequenceOrder,
+        request.IsActive,
+        actorUserId.Value,
+        requestMeta,
+        cancellationToken);
 
-    var dtos = entities.Select(x => new WorkerDto
+    if (result.IsFailure)
     {
-        Id = x.Id,
-        EmployeeCode = x.EmployeeCode,
-        FullName = x.FullName,
-        AttendanceUserId = x.AttendanceUserId,
-        BadgeNumber = x.BadgeNumber,
-        Phone = x.Phone,
-        IsActive = x.IsActive,
-        DefaultSubStageId = defaultSubStageByWorker.GetValueOrDefault(x.Id)
-    }).ToArray();
+        return ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code));
+    }
 
-    return Results.Ok(new { success = true, data = new { items = dtos, totalCount, pageNumber = page, pageSize } });
+    return Results.Created($"/api/main-stages/{result.Value!.Id}", ApiResponse.Success(result.Value));
+})
+    .WithTags("MainStages")
+    .WithName("CreateMainStage")
+    .RequirePermission("stages.manage");
+
+mainStagesApi.MapPatch("/{mainStageId:guid}", async (
+    Guid mainStageId,
+    UpdateMainStageRequest request,
+    IProductionStageCatalogService stageCatalogService,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
+    CancellationToken cancellationToken) =>
+{
+    var actorUserId = currentUserService.UserId;
+    if (actorUserId is null)
+    {
+        return ApiResponse.Failure("Unauthorized", "User context is required.");
+    }
+
+    var requestMeta = $"{httpContext.Request.Method} {httpContext.Request.Path}";
+    var result = await stageCatalogService.UpdateMainStageAsync(
+        mainStageId,
+        request.Name,
+        request.IsCritical,
+        request.SequenceOrder,
+        request.IsActive,
+        actorUserId.Value,
+        requestMeta,
+        cancellationToken);
+
+    if (result.IsFailure)
+    {
+        return ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code));
+    }
+
+    return Results.Ok(ApiResponse.Success(result.Value!));
+})
+    .WithTags("MainStages")
+    .WithName("UpdateMainStage")
+    .RequirePermission("stages.manage");
+
+mainStagesApi.MapDelete("/{mainStageId:guid}", async (
+    Guid mainStageId,
+    IProductionStageCatalogService stageCatalogService,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
+    CancellationToken cancellationToken) =>
+{
+    var actorUserId = currentUserService.UserId;
+    if (actorUserId is null)
+    {
+        return ApiResponse.Failure("Unauthorized", "User context is required.");
+    }
+
+    var requestMeta = $"{httpContext.Request.Method} {httpContext.Request.Path}";
+    var result = await stageCatalogService.DeactivateMainStageAsync(mainStageId, actorUserId.Value, requestMeta, cancellationToken);
+    if (result.IsFailure)
+    {
+        return ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code));
+    }
+
+    return Results.NoContent();
+})
+    .WithTags("MainStages")
+    .WithName("DeleteMainStage")
+    .RequirePermission("stages.manage");
+
+subStagesApi.MapGet("", async (
+    IProductionStageCatalogService stageCatalogService,
+    Guid? mainStageId,
+    CancellationToken cancellationToken,
+    string? search = null,
+    bool? isActive = true,
+    int page = 1,
+    int pageSize = 50) =>
+{
+    var result = await stageCatalogService.GetSubStagesAsync(mainStageId, search, isActive, page, pageSize, cancellationToken);
+    if (result.IsFailure)
+    {
+        return ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code));
+    }
+
+    return Results.Ok(new { success = true, data = new { items = result.Value!, totalCount = result.TotalCount, pageNumber = result.PageNumber, pageSize = result.PageSize } });
+})
+    .WithTags("SubStages")
+    .WithName("GetSubStages")
+    .RequirePermission("stages.view");
+
+subStagesApi.MapGet("/{subStageId:guid}", async (
+    Guid subStageId,
+    IProductionStageCatalogService stageCatalogService,
+    CancellationToken cancellationToken) =>
+{
+    var result = await stageCatalogService.GetSubStageAsync(subStageId, cancellationToken);
+    if (result.IsFailure)
+    {
+        return ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code));
+    }
+
+    return Results.Ok(ApiResponse.Success(result.Value!));
+})
+    .WithTags("SubStages")
+    .WithName("GetSubStage")
+    .RequirePermission("stages.view");
+
+subStagesApi.MapPost("", async (
+    CreateSubStageRequest request,
+    IProductionStageCatalogService stageCatalogService,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
+    CancellationToken cancellationToken) =>
+{
+    var actorUserId = currentUserService.UserId;
+    if (actorUserId is null)
+    {
+        return ApiResponse.Failure("Unauthorized", "User context is required.");
+    }
+
+    var requestMeta = $"{httpContext.Request.Method} {httpContext.Request.Path}";
+    var result = await stageCatalogService.CreateSubStageAsync(
+        request.MainStageId,
+        request.Code,
+        request.Name,
+        request.DefaultOrder,
+        request.Capacity,
+        request.IsActive,
+        actorUserId.Value,
+        requestMeta,
+        cancellationToken);
+
+    if (result.IsFailure)
+    {
+        return ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code));
+    }
+
+    return Results.Created($"/api/sub-stages/{result.Value!.Id}", ApiResponse.Success(result.Value));
+})
+    .WithTags("SubStages")
+    .WithName("CreateSubStage")
+    .RequirePermission("stages.manage");
+
+subStagesApi.MapPatch("/{subStageId:guid}", async (
+    Guid subStageId,
+    UpdateSubStageRequest request,
+    IProductionStageCatalogService stageCatalogService,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
+    CancellationToken cancellationToken) =>
+{
+    var actorUserId = currentUserService.UserId;
+    if (actorUserId is null)
+    {
+        return ApiResponse.Failure("Unauthorized", "User context is required.");
+    }
+
+    var requestMeta = $"{httpContext.Request.Method} {httpContext.Request.Path}";
+    var result = await stageCatalogService.UpdateSubStageAsync(
+        subStageId,
+        request.Code,
+        request.Name,
+        request.DefaultOrder,
+        request.Capacity,
+        request.IsActive,
+        actorUserId.Value,
+        requestMeta,
+        cancellationToken);
+
+    if (result.IsFailure)
+    {
+        return ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code));
+    }
+
+    return Results.Ok(ApiResponse.Success(result.Value!));
+})
+    .WithTags("SubStages")
+    .WithName("UpdateSubStage")
+    .RequirePermission("stages.manage");
+
+subStagesApi.MapDelete("/{subStageId:guid}", async (
+    Guid subStageId,
+    IProductionStageCatalogService stageCatalogService,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
+    CancellationToken cancellationToken) =>
+{
+    var actorUserId = currentUserService.UserId;
+    if (actorUserId is null)
+    {
+        return ApiResponse.Failure("Unauthorized", "User context is required.");
+    }
+
+    var requestMeta = $"{httpContext.Request.Method} {httpContext.Request.Path}";
+    var result = await stageCatalogService.DeactivateSubStageAsync(subStageId, actorUserId.Value, requestMeta, cancellationToken);
+    if (result.IsFailure)
+    {
+        return ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code));
+    }
+
+    return Results.NoContent();
+})
+    .WithTags("SubStages")
+    .WithName("DeleteSubStage")
+    .RequirePermission("stages.manage");
+
+workersApi.MapGet("", async (
+    IEmployeeMasterDataService employeeService,
+    CancellationToken cancellationToken,
+    string? search = null,
+    bool? isActive = true,
+    int page = 1,
+    int pageSize = 50) =>
+{
+    var result = await employeeService.GetWorkersAsync(search, isActive, page, pageSize, cancellationToken);
+    if (result.IsFailure)
+    {
+        return ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code));
+    }
+
+    var value = result.Value ?? [];
+    return Results.Ok(new
+    {
+        success = true,
+        data = new
+        {
+            items = value,
+            totalCount = result.TotalCount,
+            pageNumber = result.PageNumber,
+            pageSize = result.PageSize
+        }
+    });
 })
     .RequirePermission("workers.view")
     .WithTags("Workers")
@@ -1961,120 +1671,25 @@ workersApi.MapGet("", async (
 
 workersApi.MapGet("/{workerId:guid}", async (
     Guid workerId,
-    AppDbContext dbContext,
+    IEmployeeMasterDataService employeeService,
     CancellationToken cancellationToken) =>
 {
-    var entity = await dbContext.Workers
-        .AsNoTracking()
-        .FirstOrDefaultAsync(x => x.Id == workerId && x.IsActive, cancellationToken);
-    if (entity is null)
+    var result = await employeeService.GetWorkerAsync(workerId, cancellationToken);
+    if (result.IsFailure)
     {
-        return ApiResponse.Failure("NotFound", "Worker not found.", 404);
+        return ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code));
     }
 
-    var defaultSubStageId = await dbContext.WorkerDefaultAssignments
-        .AsNoTracking()
-        .Where(x => x.WorkerId == workerId && x.IsActive)
-        .OrderByDescending(x => x.AssignedAt)
-        .ThenByDescending(x => x.Id)
-        .Select(x => (Guid?)x.SubStageId)
-        .FirstOrDefaultAsync(cancellationToken);
-
-    return Results.Ok(ApiResponse.Success(new WorkerDto
-    {
-        Id = entity.Id,
-        EmployeeCode = entity.EmployeeCode,
-        FullName = entity.FullName,
-        AttendanceUserId = entity.AttendanceUserId,
-        BadgeNumber = entity.BadgeNumber,
-        Phone = entity.Phone,
-        IsActive = entity.IsActive,
-        DefaultSubStageId = defaultSubStageId
-    }));
+    return Results.Ok(ApiResponse.Success(result.Value!));
 })
     .RequirePermission("workers.view")
     .WithTags("Workers")
     .WithName("GetWorker");
 
-workersApi.MapPost("", async (
-    CreateWorkerRequest request,
-    AppDbContext dbContext,
-    ICurrentUserService currentUserService,
-    HttpContext httpContext,
-    CancellationToken cancellationToken) =>
-{
-    var actorUserId = currentUserService.UserId;
-    if (actorUserId is null)
-    {
-        return ApiResponse.Failure("Unauthorized", "User context is required.");
-    }
-
-    if (string.IsNullOrWhiteSpace(request.EmployeeCode))
-    {
-        return ApiResponse.Failure("ValidationError", "EmployeeCode is required.");
-    }
-
-    if (string.IsNullOrWhiteSpace(request.FullName))
-    {
-        return ApiResponse.Failure("ValidationError", "FullName is required.");
-    }
-
-    var employeeCode = request.EmployeeCode.Trim();
-    var hasConflict = await dbContext.Workers.AnyAsync(x => x.EmployeeCode == employeeCode, cancellationToken);
-    if (hasConflict)
-    {
-        return ApiResponse.Failure("Conflict", "EmployeeCode must be unique.", 409);
-    }
-
-    var entity = new Worker(
-        id: Guid.NewGuid(),
-        employeeCode: employeeCode,
-        fullName: request.FullName,
-        phone: request.Phone,
-        attendanceUserId: request.AttendanceUserId,
-        badgeNumber: request.BadgeNumber,
-        isActive: request.IsActive);
-
-    dbContext.Workers.Add(entity);
-    await dbContext.SaveChangesAsync(cancellationToken);
-    AssignmentHelpers.AddAuditLog(
-        dbContext,
-        actorUserId.Value,
-        AuditActionType.Create,
-        nameof(Worker),
-        entity.Id.ToString(),
-        before: null,
-        after: new { entity.Id, entity.EmployeeCode, entity.FullName, entity.AttendanceUserId, entity.BadgeNumber, entity.Phone, entity.IsActive },
-        httpContext);
-
-    var defaultSubStageId = await dbContext.WorkerDefaultAssignments
-        .AsNoTracking()
-        .Where(x => x.WorkerId == entity.Id && x.IsActive)
-        .OrderByDescending(x => x.AssignedAt)
-        .ThenByDescending(x => x.Id)
-        .Select(x => (Guid?)x.SubStageId)
-        .FirstOrDefaultAsync(cancellationToken);
-
-    return Results.Created($"/api/workers/{entity.Id}", ApiResponse.Success(new WorkerDto
-    {
-        Id = entity.Id,
-        EmployeeCode = entity.EmployeeCode,
-        FullName = entity.FullName,
-        AttendanceUserId = entity.AttendanceUserId,
-        BadgeNumber = entity.BadgeNumber,
-        Phone = entity.Phone,
-        IsActive = entity.IsActive,
-        DefaultSubStageId = defaultSubStageId
-    }));
-})
-    .RequirePermission("workers.manage")
-    .WithTags("Workers")
-    .WithName("CreateWorker");
-
 workersApi.MapPatch("/{workerId:guid}", async (
     Guid workerId,
     UpdateWorkerRequest request,
-    AppDbContext dbContext,
+    IEmployeeMasterDataService employeeService,
     ICurrentUserService currentUserService,
     HttpContext httpContext,
     CancellationToken cancellationToken) =>
@@ -2085,130 +1700,29 @@ workersApi.MapPatch("/{workerId:guid}", async (
         return ApiResponse.Failure("Unauthorized", "User context is required.");
     }
 
-    var entity = await dbContext.Workers.FirstOrDefaultAsync(x => x.Id == workerId && x.IsActive, cancellationToken);
-    if (entity is null)
-    {
-        return ApiResponse.Failure("NotFound", "Worker not found.", 404);
-    }
-
-    if (request.FullName is null && request.Phone is null && request.AttendanceUserId is null &&
-        request.BadgeNumber is null && request.IsActive is null)
-    {
-        return ApiResponse.Failure("ValidationError", "No updatable fields were provided.");
-    }
-
-    var updatedAt = DateTime.UtcNow;
-    var hasChanges = false;
-
-    if (request.FullName is { } fullName && !string.IsNullOrWhiteSpace(fullName))
-    {
-        entity.UpdateName(fullName, updatedAt);
-        hasChanges = true;
-    }
-    else if (request.FullName is not null && string.IsNullOrWhiteSpace(request.FullName))
-    {
-        return ApiResponse.Failure("ValidationError", "FullName cannot be empty.");
-    }
-
-    if (request.AttendanceUserId is not null)
-    {
-        var trimmedAttendanceUserId = request.AttendanceUserId.Trim();
-        if (string.IsNullOrWhiteSpace(trimmedAttendanceUserId))
-        {
-            return ApiResponse.Failure("ValidationError", "AttendanceUserId cannot be empty.");
-        }
-
-        if (entity.AttendanceUserId != trimmedAttendanceUserId)
-        {
-            dbContext.Entry(entity).Property(nameof(Worker.AttendanceUserId)).CurrentValue = trimmedAttendanceUserId;
-            hasChanges = true;
-        }
-    }
-
-    if (request.Phone is not null)
-    {
-        var trimmedPhone = request.Phone.Trim();
-        if (string.IsNullOrWhiteSpace(trimmedPhone))
-        {
-            return ApiResponse.Failure("ValidationError", "Phone cannot be empty.");
-        }
-
-        if (entity.Phone != trimmedPhone)
-        {
-            dbContext.Entry(entity).Property(nameof(Worker.Phone)).CurrentValue = trimmedPhone;
-            hasChanges = true;
-        }
-    }
-
-    if (request.BadgeNumber is not null)
-    {
-        var trimmedBadgeNumber = request.BadgeNumber.Trim();
-        if (string.IsNullOrWhiteSpace(trimmedBadgeNumber))
-        {
-            return ApiResponse.Failure("ValidationError", "BadgeNumber cannot be empty.");
-        }
-
-        if (entity.BadgeNumber != trimmedBadgeNumber)
-        {
-            dbContext.Entry(entity).Property(nameof(Worker.BadgeNumber)).CurrentValue = trimmedBadgeNumber;
-            hasChanges = true;
-        }
-    }
-
-    if (request.IsActive is not null)
-    {
-        if (entity.IsActive != request.IsActive.Value)
-        {
-            dbContext.Entry(entity).Property(nameof(Worker.IsActive)).CurrentValue = request.IsActive.Value;
-            hasChanges = true;
-        }
-    }
-
-    if (!hasChanges)
-    {
-        return ApiResponse.Failure("ValidationError", "No valid changes detected.");
-    }
-
-    var beforeWorker = new { entity.Id, entity.EmployeeCode, entity.FullName, entity.AttendanceUserId, entity.BadgeNumber, entity.Phone, entity.IsActive };
-    dbContext.Entry(entity).Property(nameof(Worker.UpdatedAtUtc)).CurrentValue = updatedAt;
-    await dbContext.SaveChangesAsync(cancellationToken);
-    AssignmentHelpers.AddAuditLog(
-        dbContext,
+    var requestMeta = $"{httpContext.Request.Method} {httpContext.Request.Path}";
+    var result = await employeeService.UpdateMasterIdentityAsync(
+        workerId,
+        request,
         actorUserId.Value,
-        AuditActionType.Update,
-        nameof(Worker),
-        entity.Id.ToString(),
-        before: beforeWorker,
-        after: new { entity.Id, entity.EmployeeCode, entity.FullName, entity.AttendanceUserId, entity.BadgeNumber, entity.Phone, entity.IsActive },
-        httpContext);
+        requestMeta,
+        cancellationToken);
 
-    var defaultSubStageId = await dbContext.WorkerDefaultAssignments
-        .AsNoTracking()
-        .Where(x => x.WorkerId == workerId && x.IsActive)
-        .OrderByDescending(x => x.AssignedAt)
-        .ThenByDescending(x => x.Id)
-        .Select(x => (Guid?)x.SubStageId)
-        .FirstOrDefaultAsync(cancellationToken);
-
-    return Results.Ok(ApiResponse.Success(new WorkerDto
+    if (result.IsFailure)
     {
-        Id = entity.Id,
-        EmployeeCode = entity.EmployeeCode,
-        FullName = entity.FullName,
-        AttendanceUserId = entity.AttendanceUserId,
-        BadgeNumber = entity.BadgeNumber,
-        Phone = entity.Phone,
-        IsActive = entity.IsActive,
-        DefaultSubStageId = defaultSubStageId
-    }));
+        return ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code));
+    }
+
+    return Results.Ok(ApiResponse.Success(result.Value!));
 })
     .RequirePermission("workers.manage")
     .WithTags("Workers")
     .WithName("UpdateWorker");
 
-workersApi.MapDelete("/{workerId:guid}", async (
+workersApi.MapPatch("/{workerId:guid}/employment-status", async (
     Guid workerId,
-    AppDbContext dbContext,
+    SetWorkerEmploymentStatusRequest request,
+    IEmployeeMasterDataService employeeService,
     ICurrentUserService currentUserService,
     HttpContext httpContext,
     CancellationToken cancellationToken) =>
@@ -2219,31 +1733,24 @@ workersApi.MapDelete("/{workerId:guid}", async (
         return ApiResponse.Failure("Unauthorized", "User context is required.");
     }
 
-    var entity = await dbContext.Workers.FirstOrDefaultAsync(x => x.Id == workerId && x.IsActive, cancellationToken);
-    if (entity is null)
+    var requestMeta = $"{httpContext.Request.Method} {httpContext.Request.Path}";
+    var result = await employeeService.SetEmploymentStatusAsync(
+        workerId,
+        request,
+        actorUserId.Value,
+        requestMeta,
+        cancellationToken);
+
+    if (result.IsFailure)
     {
-        return ApiResponse.Failure("NotFound", "Worker not found.", 404);
+        return ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code));
     }
 
-    var beforeWorker = new { entity.Id, entity.EmployeeCode, entity.FullName, entity.AttendanceUserId, entity.BadgeNumber, entity.Phone, entity.IsActive };
-    dbContext.Entry(entity).Property(nameof(Worker.IsActive)).CurrentValue = false;
-    dbContext.Entry(entity).Property(nameof(Worker.UpdatedAtUtc)).CurrentValue = DateTime.UtcNow;
-    await dbContext.SaveChangesAsync(cancellationToken);
-    AssignmentHelpers.AddAuditLog(
-        dbContext,
-        actorUserId.Value,
-        AuditActionType.Delete,
-        nameof(Worker),
-        entity.Id.ToString(),
-        before: beforeWorker,
-        after: new { entity.Id, entity.EmployeeCode, entity.FullName, entity.AttendanceUserId, entity.BadgeNumber, entity.Phone, entity.IsActive },
-        httpContext);
-
-    return Results.NoContent();
+    return Results.Ok(ApiResponse.Success(result.Value!));
 })
     .RequirePermission("workers.manage")
     .WithTags("Workers")
-    .WithName("DeleteWorker");
+    .WithName("SetWorkerEmploymentStatus");
 
 workersApi.MapGet("/{workerId:guid}/current-assignment", async (
     Guid workerId,
@@ -2265,6 +1772,532 @@ workersApi.MapGet("/{workerId:guid}/current-assignment", async (
     .RequirePermission("workers.view")
     .WithTags("Workers")
     .WithName("GetWorkerCurrentAssignment");
+
+departmentsApi.MapGet("", async (
+    IDepartmentAdministrationService departmentService,
+    CancellationToken cancellationToken) =>
+{
+    var result = await departmentService.GetDepartmentsAsync(cancellationToken);
+    if (result.IsFailure)
+    {
+        return ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code));
+    }
+
+    return Results.Ok(new
+    {
+        success = true,
+        data = new
+        {
+            items = result.Value ?? Array.Empty<AttendanceDepartmentRecord>()
+        }
+    });
+})
+    .RequirePermission("departments.view")
+    .WithTags("Departments")
+    .WithName("GetDepartments");
+
+departmentsApi.MapPost("", async (
+    CreateDepartmentRequest request,
+    IDepartmentAdministrationService departmentService,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
+    CancellationToken cancellationToken) =>
+{
+    var actorUserId = currentUserService.UserId;
+    if (actorUserId is null)
+    {
+        return ApiResponse.Failure("Unauthorized", "User context is required.");
+    }
+
+    var requestMeta = $"{httpContext.Request.Method} {httpContext.Request.Path}";
+    var result = await departmentService.CreateDepartmentAsync(request.Name, actorUserId.Value, requestMeta, cancellationToken);
+    if (result.IsFailure)
+    {
+        return ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code));
+    }
+
+    return Results.Created($"/api/departments/{result.Value!.DepartmentId}", ApiResponse.Success(result.Value));
+})
+    .RequirePermission("departments.manage")
+    .WithTags("Departments")
+    .WithName("CreateDepartment");
+
+departmentsApi.MapPatch("/{departmentId:int}", async (
+    int departmentId,
+    UpdateDepartmentRequest request,
+    IDepartmentAdministrationService departmentService,
+    ICurrentUserService currentUserService,
+    CancellationToken cancellationToken) =>
+{
+    var actorUserId = currentUserService.UserId;
+    if (actorUserId is null)
+    {
+        return ApiResponse.Failure("Unauthorized", "User context is required.");
+    }
+
+    var result = await departmentService.UpdateDepartmentNameAsync(departmentId, request.Name, actorUserId.Value, cancellationToken: cancellationToken);
+    if (result.IsFailure)
+    {
+        return ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code));
+    }
+
+    return Results.NoContent();
+})
+    .RequirePermission("departments.manage")
+    .WithTags("Departments")
+    .WithName("UpdateDepartment");
+
+departmentsApi.MapPost("/{departmentId:int}/move-worker", async (
+    int departmentId,
+    MoveWorkerToDepartmentRequest request,
+    IDepartmentAdministrationService departmentService,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
+    CancellationToken cancellationToken) =>
+{
+    var actorUserId = currentUserService.UserId;
+    if (actorUserId is null)
+    {
+        return ApiResponse.Failure("Unauthorized", "User context is required.");
+    }
+
+    var requestMeta = $"{httpContext.Request.Method} {httpContext.Request.Path}";
+    var result = await departmentService.MoveWorkerToDepartmentAsync(
+        request.WorkerId,
+        departmentId,
+        actorUserId.Value,
+        requestMeta,
+        cancellationToken);
+
+    if (result.IsFailure)
+    {
+        return ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code));
+    }
+
+    return Results.NoContent();
+})
+    .RequirePermission("departments.manage")
+    .WithTags("Departments")
+    .WithName("MoveWorkerToDepartment");
+
+departmentsApi.MapDelete("/{departmentId:int}", async (
+    int departmentId,
+    IDepartmentAdministrationService departmentService,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
+    CancellationToken cancellationToken) =>
+{
+    var actorUserId = currentUserService.UserId;
+    if (actorUserId is null)
+    {
+        return ApiResponse.Failure("Unauthorized", "User context is required.");
+    }
+
+    var requestMeta = $"{httpContext.Request.Method} {httpContext.Request.Path}";
+    var result = await departmentService.DeleteDepartmentAsync(departmentId, actorUserId.Value, requestMeta, cancellationToken);
+    if (result.IsFailure)
+    {
+        return ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code));
+    }
+
+    return Results.NoContent();
+})
+    .RequirePermission("departments.manage")
+    .WithTags("Departments")
+    .WithName("DeleteDepartment");
+
+productModelsApi.MapGet("", async (
+    IProductModelService productModelService,
+    CancellationToken cancellationToken,
+    string? search = null,
+    bool? isActive = true,
+    int page = 1,
+    int pageSize = 50) =>
+{
+    var result = await productModelService.GetModelsAsync(search, isActive, page, pageSize, cancellationToken);
+    if (result.IsFailure)
+    {
+        return ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code));
+    }
+
+    return Results.Ok(new
+    {
+        success = true,
+        data = new
+        {
+            items = result.Value ?? Array.Empty<ProductModelDto>(),
+            totalCount = result.TotalCount,
+            pageNumber = result.PageNumber,
+            pageSize = result.PageSize
+        }
+    });
+})
+    .RequirePermission("models.view")
+    .WithTags("ProductModels")
+    .WithName("GetProductModels");
+
+productModelsApi.MapGet("/{modelId:guid}", async (
+    Guid modelId,
+    IProductModelService productModelService,
+    CancellationToken cancellationToken) =>
+{
+    var result = await productModelService.GetModelAsync(modelId, cancellationToken);
+    if (result.IsFailure)
+    {
+        return ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code));
+    }
+
+    return Results.Ok(ApiResponse.Success(result.Value!));
+})
+    .RequirePermission("models.view")
+    .WithTags("ProductModels")
+    .WithName("GetProductModel");
+
+productModelsApi.MapPost("", async (
+    CreateProductModelRequest request,
+    IProductModelService productModelService,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
+    CancellationToken cancellationToken) =>
+{
+    var actorUserId = currentUserService.UserId;
+    if (actorUserId is null)
+    {
+        return ApiResponse.Failure("Unauthorized", "User context is required.");
+    }
+
+    var requestMeta = $"{httpContext.Request.Method} {httpContext.Request.Path}";
+    var result = await productModelService.CreateModelAsync(
+        request,
+        actorUserId.Value,
+        requestMeta,
+        cancellationToken);
+
+    if (result.IsFailure)
+    {
+        return ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code));
+    }
+
+    return Results.Created($"/api/product-models/{result.Value!.Id}", ApiResponse.Success(result.Value));
+})
+    .RequirePermission("models.manage")
+    .WithTags("ProductModels")
+    .WithName("CreateProductModel");
+
+productModelsApi.MapPatch("/{modelId:guid}", async (
+    Guid modelId,
+    UpdateProductModelRequest request,
+    IProductModelService productModelService,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
+    CancellationToken cancellationToken) =>
+{
+    var actorUserId = currentUserService.UserId;
+    if (actorUserId is null)
+    {
+        return ApiResponse.Failure("Unauthorized", "User context is required.");
+    }
+
+    var requestMeta = $"{httpContext.Request.Method} {httpContext.Request.Path}";
+    var result = await productModelService.UpdateModelAsync(
+        modelId,
+        request,
+        actorUserId.Value,
+        requestMeta,
+        cancellationToken);
+
+    if (result.IsFailure)
+    {
+        return ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code));
+    }
+
+    return Results.Ok(ApiResponse.Success(result.Value!));
+})
+    .RequirePermission("models.manage")
+    .WithTags("ProductModels")
+    .WithName("UpdateProductModel");
+
+productModelsApi.MapPatch("/{modelId:guid}/activation", async (
+    Guid modelId,
+    bool isActive,
+    IProductModelService productModelService,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
+    CancellationToken cancellationToken) =>
+{
+    var actorUserId = currentUserService.UserId;
+    if (actorUserId is null)
+    {
+        return ApiResponse.Failure("Unauthorized", "User context is required.");
+    }
+
+    var requestMeta = $"{httpContext.Request.Method} {httpContext.Request.Path}";
+    var result = await productModelService.SetModelActivationAsync(modelId, isActive, actorUserId.Value, requestMeta, cancellationToken);
+    if (result.IsFailure)
+    {
+        return ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code));
+    }
+
+    return Results.NoContent();
+})
+    .RequirePermission("models.manage")
+    .WithTags("ProductModels")
+    .WithName("SetModelActivation");
+
+productModelsApi.MapGet("/{modelId:guid}/stages", async (
+    Guid modelId,
+    IProductModelService productModelService,
+    CancellationToken cancellationToken) =>
+{
+    var result = await productModelService.GetModelStagesAsync(modelId, cancellationToken);
+    if (result.IsFailure)
+    {
+        return ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code));
+    }
+
+    return Results.Ok(new { success = true, data = result.Value ?? Array.Empty<ProductModelStageDto>() });
+})
+    .RequirePermission("models.view")
+    .WithTags("ProductModels")
+    .WithName("GetProductModelStages");
+
+productModelsApi.MapPost("/{modelId:guid}/stages", async (
+    Guid modelId,
+    UpsertProductModelStageRequest request,
+    IProductModelService productModelService,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
+    CancellationToken cancellationToken) =>
+{
+    var actorUserId = currentUserService.UserId;
+    if (actorUserId is null)
+    {
+        return ApiResponse.Failure("Unauthorized", "User context is required.");
+    }
+
+    var requestMeta = $"{httpContext.Request.Method} {httpContext.Request.Path}";
+    var result = await productModelService.AddModelStageAsync(
+        modelId,
+        request,
+        actorUserId.Value,
+        requestMeta,
+        cancellationToken);
+
+    if (result.IsFailure)
+    {
+        return ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code));
+    }
+
+    return Results.Created($"/api/product-models/{modelId}/stages/{result.Value!.Id}", ApiResponse.Success(result.Value));
+})
+    .RequirePermission("models.manage")
+    .WithTags("ProductModels")
+    .WithName("AddProductModelStage");
+
+productModelsApi.MapPatch("/{modelId:guid}/stages/{modelStageId:guid}", async (
+    Guid modelId,
+    Guid modelStageId,
+    UpsertProductModelStageRequest request,
+    IProductModelService productModelService,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
+    CancellationToken cancellationToken) =>
+{
+    var actorUserId = currentUserService.UserId;
+    if (actorUserId is null)
+    {
+        return ApiResponse.Failure("Unauthorized", "User context is required.");
+    }
+
+    var requestMeta = $"{httpContext.Request.Method} {httpContext.Request.Path}";
+    var result = await productModelService.UpdateModelStageAsync(
+        modelId,
+        modelStageId,
+        request,
+        actorUserId.Value,
+        requestMeta,
+        cancellationToken);
+
+    if (result.IsFailure)
+    {
+        return ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code));
+    }
+
+    return Results.Ok(ApiResponse.Success(result.Value!));
+})
+    .RequirePermission("models.manage")
+    .WithTags("ProductModels")
+    .WithName("UpdateProductModelStage");
+
+productModelsApi.MapDelete("/{modelId:guid}/stages/{modelStageId:guid}", async (
+    Guid modelId,
+    Guid modelStageId,
+    IProductModelService productModelService,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
+    CancellationToken cancellationToken) =>
+{
+    var actorUserId = currentUserService.UserId;
+    if (actorUserId is null)
+    {
+        return ApiResponse.Failure("Unauthorized", "User context is required.");
+    }
+
+    var requestMeta = $"{httpContext.Request.Method} {httpContext.Request.Path}";
+    var result = await productModelService.DeactivateModelStageAsync(
+        modelId,
+        modelStageId,
+        actorUserId.Value,
+        requestMeta,
+        cancellationToken);
+
+    if (result.IsFailure)
+    {
+        return ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code));
+    }
+
+    return Results.NoContent();
+})
+    .RequirePermission("models.manage")
+    .WithTags("ProductModels")
+    .WithName("DeactivateProductModelStage");
+
+productModelsApi.MapPost("/{modelId:guid}/stages/copy", async (
+    Guid modelId,
+    CopyProductModelStagesRequest request,
+    IProductModelService productModelService,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
+    CancellationToken cancellationToken) =>
+{
+    var actorUserId = currentUserService.UserId;
+    if (actorUserId is null)
+    {
+        return ApiResponse.Failure("Unauthorized", "User context is required.");
+    }
+
+    var requestMeta = $"{httpContext.Request.Method} {httpContext.Request.Path}";
+    var result = await productModelService.CopyModelStagesAsync(
+        modelId,
+        request,
+        actorUserId.Value,
+        requestMeta,
+        cancellationToken);
+
+    if (result.IsFailure)
+    {
+        return ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code));
+    }
+
+    return Results.NoContent();
+})
+    .RequirePermission("models.manage")
+    .WithTags("ProductModels")
+    .WithName("CopyModelStages");
+
+workerCompensationApi.MapGet("/current", async (
+    Guid workerId,
+    IWorkerCompensationService workerCompensationService,
+    CancellationToken cancellationToken) =>
+{
+    var result = await workerCompensationService.GetCurrentSalaryAsync(workerId, cancellationToken);
+    if (result.IsFailure)
+    {
+        return ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code));
+    }
+
+    return Results.Ok(ApiResponse.Success(result.Value!));
+})
+    .RequirePermission("compensation.view")
+    .WithTags("WorkerCompensation")
+    .WithName("GetCurrentSalary");
+
+workerCompensationApi.MapGet("/history", async (
+    Guid workerId,
+    IWorkerCompensationService workerCompensationService,
+    CancellationToken cancellationToken) =>
+{
+    var result = await workerCompensationService.GetSalaryHistoryAsync(workerId, cancellationToken);
+    if (result.IsFailure)
+    {
+        return ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code));
+    }
+
+    return Results.Ok(new
+    {
+        success = true,
+        data = new { items = result.Value ?? Array.Empty<WorkerSalaryHistoryDto>() }
+    });
+})
+    .RequirePermission("compensation.view")
+    .WithTags("WorkerCompensation")
+    .WithName("GetSalaryHistory");
+
+workerCompensationApi.MapPost("/current", async (
+    Guid workerId,
+    SetWorkerSalaryRequest request,
+    IWorkerCompensationService workerCompensationService,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
+    CancellationToken cancellationToken) =>
+{
+    var actorUserId = currentUserService.UserId;
+    if (actorUserId is null)
+    {
+        return ApiResponse.Failure("Unauthorized", "User context is required.");
+    }
+
+    var requestMeta = $"{httpContext.Request.Method} {httpContext.Request.Path}";
+    var result = await workerCompensationService.SetSalaryAsync(
+        workerId,
+        request,
+        actorUserId.Value,
+        requestMeta,
+        cancellationToken);
+
+    if (result.IsFailure)
+    {
+        return ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code));
+    }
+
+    return Results.Ok(ApiResponse.Success(result.Value!));
+})
+    .RequirePermission("compensation.manage")
+    .WithTags("WorkerCompensation")
+    .WithName("SetWorkerSalary");
+
+workerCompensationApi.MapPost("/historical", async (
+    Guid workerId,
+    SetWorkerSalaryHistoryRequest request,
+    IWorkerCompensationService workerCompensationService,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
+    CancellationToken cancellationToken) =>
+{
+    var actorUserId = currentUserService.UserId;
+    if (actorUserId is null)
+    {
+        return ApiResponse.Failure("Unauthorized", "User context is required.");
+    }
+
+    var requestMeta = $"{httpContext.Request.Method} {httpContext.Request.Path}";
+    var result = await workerCompensationService.AddHistoricalSalaryAsync(
+        workerId,
+        request,
+        actorUserId.Value,
+        requestMeta,
+        cancellationToken);
+
+    if (result.IsFailure)
+    {
+        return ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code));
+    }
+
+    return Results.Ok(ApiResponse.Success(result.Value!));
+})
+    .RequirePermission("compensation.manage")
+    .WithTags("WorkerCompensation")
+    .WithName("AddHistoricalSalary");
 
 assignmentsApi.MapPost("/default", async (
     CreateDefaultAssignmentRequest request,

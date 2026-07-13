@@ -17,6 +17,11 @@ public sealed class WorkerConfiguration : IEntityTypeConfiguration<Worker>
         builder.Property(x => x.AttendanceUserId).HasMaxLength(120);
         builder.Property(x => x.BadgeNumber).HasMaxLength(120);
         builder.Property(x => x.Phone).HasMaxLength(40);
+        builder.Property(x => x.EmploymentStatus).IsRequired();
+        builder.Property(x => x.EmploymentEndDate);
+        builder.Property(x => x.AttendanceDepartmentId);
+        builder.Property(x => x.PhotoReference).HasMaxLength(500);
+        builder.Property(x => x.LastExternalSyncAt);
         builder.Property(x => x.IsActive).HasDefaultValue(true);
         builder.Property(x => x.CreatedAtUtc).IsRequired();
         builder.Property(x => x.UpdatedAtUtc).IsRequired();

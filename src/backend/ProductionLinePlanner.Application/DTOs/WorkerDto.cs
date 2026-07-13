@@ -10,6 +10,10 @@ public sealed class WorkerDto
     /// <summary>External attendance identifiers from ZKTeco USERINFO.</summary>
     public string? BadgeNumber { get; init; }
     public string? Phone { get; init; }
+    public int? AttendanceDepartmentId { get; init; }
+    public string EmploymentStatus { get; init; } = string.Empty;
+    public DateTime? EmploymentEndDate { get; init; }
+    public string? PhotoReference { get; init; }
     public bool IsActive { get; init; }
     public Guid? DefaultSubStageId { get; init; }
 }
