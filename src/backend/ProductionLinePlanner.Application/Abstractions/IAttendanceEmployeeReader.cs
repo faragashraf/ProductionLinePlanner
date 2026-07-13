@@ -5,4 +5,6 @@ namespace ProductionLinePlanner.Application.Abstractions;
 public interface IAttendanceEmployeeReader
 {
     Task<Result<AttendanceEmployeeRecord?>> GetByAttendanceUserIdAsync(string attendanceUserId, CancellationToken cancellationToken = default);
+
+    Task<Result<AttendanceEmployeeRecord[]>> GetAllAsync(CancellationToken cancellationToken = default);
 }

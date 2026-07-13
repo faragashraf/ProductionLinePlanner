@@ -8,5 +8,6 @@ public enum AuditActionType
     Cancel,
     Resolve,
     Assign,
-    Revoke
+    Revoke,
+    WorkerInitialSync
 }
