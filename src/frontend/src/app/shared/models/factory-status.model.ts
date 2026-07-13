@@ -1,4 +1,9 @@
 import { clampPercent } from '../utils/number.utils';
+import {
+  ProductionVisualTone,
+  ProductionVisualToneMeta,
+  productionVisualToneFor
+} from '../design-system/status/production-status-map';
 
 export type FactoryStatus =
   | 'present'
@@ -15,17 +20,19 @@ export interface FactoryStatusMeta {
   labelAr: string;
   labelEn: string;
   icon: string;
+  tone: ProductionVisualTone;
   toneClass: FactoryStatus;
   ariaLabel: string;
 }
 
 const fallbackMeta: FactoryStatusMeta = {
   status: 'info',
-  labelAr: 'معلومة',
-  labelEn: 'info',
-  icon: 'pi-info-circle',
+  labelAr: 'غير معروف',
+  labelEn: 'Unknown',
+  icon: 'pi-minus-circle',
+  tone: 'neutral',
   toneClass: 'info',
-  ariaLabel: 'حالة معلومات'
+  ariaLabel: 'حالة غير معروفة'
 };
 
 export const FACTORY_STATUS_MAP: Record<FactoryStatus, FactoryStatusMeta> = {
@@ -34,6 +41,7 @@ export const FACTORY_STATUS_MAP: Record<FactoryStatus, FactoryStatusMeta> = {
     labelAr: 'حاضر',
     labelEn: 'Present',
     icon: 'pi-check',
+    tone: 'success',
     toneClass: 'present',
     ariaLabel: 'عامل حاضر'
   },
@@ -42,6 +50,7 @@ export const FACTORY_STATUS_MAP: Record<FactoryStatus, FactoryStatusMeta> = {
     labelAr: 'متأخر',
     labelEn: 'Late',
     icon: 'pi-clock',
+    tone: 'warning',
     toneClass: 'late',
     ariaLabel: 'عامل متأخر'
   },
@@ -50,6 +59,7 @@ export const FACTORY_STATUS_MAP: Record<FactoryStatus, FactoryStatusMeta> = {
     labelAr: 'غائب',
     labelEn: 'Absent',
     icon: 'pi-times',
+    tone: 'danger',
     toneClass: 'absent',
     ariaLabel: 'عامل غائب'
   },
@@ -58,6 +68,7 @@ export const FACTORY_STATUS_MAP: Record<FactoryStatus, FactoryStatusMeta> = {
     labelAr: 'غير مُعين',
     labelEn: 'Unassigned',
     icon: 'pi-user',
+    tone: 'neutral',
     toneClass: 'unassigned',
     ariaLabel: 'موظف غير مُعين'
   },
@@ -66,6 +77,7 @@ export const FACTORY_STATUS_MAP: Record<FactoryStatus, FactoryStatusMeta> = {
     labelAr: 'جاهز',
     labelEn: 'Ready',
     icon: 'pi-check-circle',
+    tone: 'info',
     toneClass: 'ready',
     ariaLabel: 'جاهز'
   },
@@ -74,6 +86,7 @@ export const FACTORY_STATUS_MAP: Record<FactoryStatus, FactoryStatusMeta> = {
     labelAr: 'تحذير',
     labelEn: 'Warning',
     icon: 'pi-exclamation-triangle',
+    tone: 'warning',
     toneClass: 'warning',
     ariaLabel: 'تحذير'
   },
@@ -82,6 +95,7 @@ export const FACTORY_STATUS_MAP: Record<FactoryStatus, FactoryStatusMeta> = {
     labelAr: 'حرج',
     labelEn: 'Critical',
     icon: 'pi-times-circle',
+    tone: 'danger',
     toneClass: 'critical',
     ariaLabel: 'حالة حرجة'
   },
@@ -90,6 +104,7 @@ export const FACTORY_STATUS_MAP: Record<FactoryStatus, FactoryStatusMeta> = {
     labelAr: 'معلومات',
     labelEn: 'Info',
     icon: 'pi-info-circle',
+    tone: 'info',
     toneClass: 'info',
     ariaLabel: 'معلومة'
   }
@@ -115,7 +130,12 @@ export function resolveFactoryStatus(input?: FactoryStatus | string | null): Fac
     info: 'info'
   };
 
-  return FACTORY_STATUS_MAP[legacyMap[normalized] ?? 'info'];
+  const legacyStatus = legacyMap[normalized];
+  return legacyStatus ? FACTORY_STATUS_MAP[legacyStatus] : fallbackMeta;
+}
+
+export function resolveFactoryStatusTone(input?: FactoryStatus | string | null): ProductionVisualToneMeta {
+  return productionVisualToneFor(resolveFactoryStatus(input).tone);
 }
 
 export function deriveStatusFromReadiness(percent: number): FactoryStatus {

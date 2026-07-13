@@ -1,0 +1,292 @@
+/* Shared product behavior. New screens consume these utilities instead of local copies. */
+
+:root {
+  direction: rtl;
+  font-family: var(--plp-font-family);
+  font-feature-settings: normal;
+  font-variation-settings: normal;
+  --font-family: var(--plp-font-family);
+  --font-feature-settings: normal;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  width: 100%;
+  overflow-x: hidden;
+}
+
+html {
+  background: var(--plp-color-background);
+  font-family: var(--plp-font-family);
+  text-size-adjust: 100%;
+}
+
+body {
+  background: var(--plp-color-background);
+  color: var(--plp-color-text);
+  font-family: var(--plp-font-family);
+  font-size: var(--plp-type-body);
+  line-height: var(--plp-line-height-base);
+}
+
+app-root {
+  display: block;
+  min-height: 100%;
+}
+
+a {
+  color: inherit;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button:disabled,
+input:disabled,
+select:disabled,
+textarea:disabled,
+[aria-disabled='true'] {
+  cursor: not-allowed;
+}
+
+input:read-only,
+textarea:read-only,
+[aria-readonly='true'] {
+  background: var(--plp-color-surface-soft);
+  color: var(--plp-color-text-soft);
+}
+
+:focus-visible,
+.plp-focus-visible:focus-visible {
+  outline: var(--plp-focus-outline);
+  outline-offset: var(--plp-focus-offset);
+}
+
+.plp-sr-only {
+  block-size: 1px;
+  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
+  inline-size: 1px;
+  margin: -1px;
+  overflow: hidden;
+  padding: 0;
+  position: absolute;
+  white-space: nowrap;
+}
+
+/* Explicit, opt-in contracts. They intentionally do not resize native page controls. */
+.plp-control,
+.plp-touch-target {
+  min-block-size: var(--plp-control-height-standard);
+}
+
+.plp-touch-target--icon {
+  align-items: center;
+  display: inline-flex;
+  justify-content: center;
+  min-inline-size: var(--plp-touch-target-min);
+}
+
+.plp-text-display,
+.plp-text-page-title,
+.plp-text-section-title,
+.plp-text-body,
+.plp-text-supporting,
+.plp-text-caption,
+.plp-text-dense {
+  margin: 0;
+}
+
+.plp-text-display {
+  font-size: var(--plp-type-display);
+  font-weight: var(--plp-font-weight-bold);
+  letter-spacing: var(--plp-letter-spacing-tight);
+  line-height: var(--plp-line-height-tight);
+}
+
+.plp-text-page-title {
+  font-size: var(--plp-type-page-title);
+  font-weight: var(--plp-font-weight-bold);
+  line-height: var(--plp-line-height-heading);
+}
+
+.plp-text-section-title {
+  font-size: var(--plp-type-section-title);
+  font-weight: var(--plp-font-weight-semibold);
+  line-height: var(--plp-line-height-heading);
+}
+
+.plp-text-body {
+  font-size: var(--plp-type-body);
+  line-height: var(--plp-line-height-base);
+}
+
+.plp-text-supporting {
+  color: var(--plp-color-text-soft);
+  font-size: var(--plp-type-supporting);
+  line-height: var(--plp-line-height-base);
+}
+
+.plp-text-caption {
+  color: var(--plp-color-text-subtle);
+  font-size: var(--plp-type-caption);
+  line-height: var(--plp-line-height-base);
+}
+
+.plp-text-dense {
+  font-size: var(--plp-type-dense);
+  line-height: var(--plp-line-height-heading);
+}
+
+.plp-code,
+.plp-id,
+.plp-quantity,
+.plp-price,
+.plp-date,
+.plp-value-ltr {
+  direction: ltr;
+  font-variant-numeric: var(--plp-font-variant-numeric);
+  text-align: start;
+  unicode-bidi: isolate;
+}
+
+.plp-code,
+.plp-id {
+  font-family: var(--plp-font-family-mono);
+  font-size: var(--plp-type-dense);
+}
+
+.plp-page-frame {
+  inline-size: min(100%, var(--plp-content-width-max));
+  margin-inline: auto;
+  padding-inline: max(var(--plp-page-padding), env(safe-area-inset-right));
+  padding-inline-end: max(var(--plp-page-padding), env(safe-area-inset-left));
+}
+
+.plp-page-section {
+  padding-block: var(--plp-space-24);
+}
+
+.plp-responsive-grid,
+.plp-form-grid {
+  display: grid;
+  gap: var(--plp-grid-gap);
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.plp-action-group {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--plp-toolbar-action-gap);
+}
+
+.plp-operational-table,
+.plp-data-region {
+  max-inline-size: 100%;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.plp-operational-table .p-datatable-wrapper {
+  min-inline-size: 100%;
+}
+
+.plp-motion-fade {
+  animation: plp-fade-in var(--plp-motion-base) var(--plp-motion-ease-standard) both;
+}
+
+.plp-sidebar-transition {
+  transition:
+    inline-size var(--plp-motion-base) var(--plp-motion-ease-emphasized),
+    transform var(--plp-motion-base) var(--plp-motion-ease-emphasized),
+    box-shadow var(--plp-motion-fast) var(--plp-motion-ease-standard);
+}
+
+@keyframes plp-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(var(--plp-space-4));
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (min-width: 600px) {
+  :root {
+    --plp-page-padding: var(--plp-space-20);
+    --plp-dialog-gutter: var(--plp-space-20);
+    --plp-grid-gap: var(--plp-space-20);
+  }
+}
+
+@media (min-width: 768px) {
+  :root {
+    --plp-page-padding: var(--plp-space-24);
+    --plp-dialog-gutter: var(--plp-space-24);
+    --plp-grid-gap: var(--plp-space-24);
+  }
+
+  .plp-form-grid--two-columns,
+  .plp-responsive-grid--two-columns {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1024px) {
+  :root {
+    --plp-page-padding: var(--plp-space-32);
+  }
+
+  .plp-responsive-grid--three-columns {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1280px) {
+  :root {
+    --plp-page-padding: var(--plp-space-40);
+  }
+}
+
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  .plp-density-compact .plp-control,
+  .plp-density-compact .plp-touch-target {
+    min-block-size: var(--plp-control-height-compact-desktop);
+  }
+}
+
+@media (prefers-contrast: more) {
+  :focus-visible,
+  .plp-focus-visible:focus-visible {
+    outline-color: CanvasText;
+    outline-width: 3px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-delay: 0ms !important;
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-delay: 0ms !important;
+    transition-duration: 1ms !important;
+  }
+}
