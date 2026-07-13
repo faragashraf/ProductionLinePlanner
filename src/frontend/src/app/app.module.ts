@@ -9,7 +9,6 @@ import { DashboardPageComponent } from './pages/dashboard-page/dashboard-page.co
 import { FactoryMapPageComponent } from './pages/factory-map-page/factory-map-page.component';
 import { ProductionLinesPageComponent } from './pages/production-lines-page/production-lines-page.component';
 import { StagesPageComponent } from './pages/stages-page/stages-page.component';
-import { WorkersPageComponent } from './pages/workers-page/workers-page.component';
 import { AssignmentsPageComponent } from './pages/assignments-page/assignments-page.component';
 import { NotificationsPageComponent } from './pages/notifications-page/notifications-page.component';
 import { LoginPageComponent } from './pages/login-page/login-page.component';
@@ -20,14 +19,11 @@ import { BreadcrumbModule } from 'primeng/breadcrumb';
 import { CardModule } from 'primeng/card';
 import { BadgeModule } from 'primeng/badge';
 import { ButtonModule } from 'primeng/button';
-import { TableModule } from 'primeng/table';
 import { SharedModule } from './shared/shared.module';
 import { FactoryRendererComponent } from './pages/factory-map-page/renderers/factory-renderer/factory-renderer.component';
 import { LineRendererComponent } from './pages/factory-map-page/renderers/line-renderer/line-renderer.component';
 import { StageRendererComponent } from './pages/factory-map-page/renderers/stage-renderer/stage-renderer.component';
 import { AuthTokenInterceptor } from './core/interceptors/auth-token.interceptor';
-import { ManufacturingWorkspaceLayoutComponent } from './pages/manufacturing-workspace/manufacturing-workspace-layout.component';
-import { ManufacturingPlaceholderPageComponent } from './pages/manufacturing-workspace/manufacturing-placeholder-page.component';
 
 @NgModule({
   declarations: [
@@ -37,13 +33,10 @@ import { ManufacturingPlaceholderPageComponent } from './pages/manufacturing-wor
     FactoryMapPageComponent,
     ProductionLinesPageComponent,
     StagesPageComponent,
-    WorkersPageComponent,
     AssignmentsPageComponent,
     NotificationsPageComponent,
     LoginPageComponent,
     AppShellComponent,
-    ManufacturingWorkspaceLayoutComponent,
-    ManufacturingPlaceholderPageComponent,
     FactoryRendererComponent,
     LineRendererComponent,
     StageRendererComponent
@@ -58,7 +51,6 @@ import { ManufacturingPlaceholderPageComponent } from './pages/manufacturing-wor
     CardModule,
     BadgeModule,
     ButtonModule,
-    TableModule,
     SharedModule
   ],
   providers: [

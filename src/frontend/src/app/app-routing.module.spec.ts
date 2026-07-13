@@ -52,4 +52,22 @@ describe('IAM routing', () => {
     expect(rolesRoute).toBeDefined();
     expect(permissionsRoute).toBeDefined();
   });
+
+  it('keeps manufacturing workspace lazy', () => {
+    const shell = APP_ROUTES.find((route) => route.path === '');
+    const manufacturing = shell?.children?.find((route) => route.path === 'manufacturing');
+
+    expect(manufacturing?.loadChildren).toBeDefined();
+    expect(manufacturing?.component).toBeUndefined();
+    expect(manufacturing?.canMatch).toContain(PermissionCanMatchGuard);
+    expect(manufacturing?.canActivate).toContain(PermissionCanActivateGuard);
+  });
+
+  it('keeps workers route lazy', () => {
+    const shell = APP_ROUTES.find((route) => route.path === '');
+    const workers = shell?.children?.find((route) => route.path === 'workers');
+
+    expect(workers?.loadChildren).toBeDefined();
+    expect(workers?.component).toBeUndefined();
+  });
 });

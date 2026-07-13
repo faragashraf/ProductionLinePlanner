@@ -1,0 +1,36 @@
+import { CommonModule } from '@angular/common';
+import { NgModule } from '@angular/core';
+import { RouterModule, Routes } from '@angular/router';
+import { ButtonModule } from 'primeng/button';
+import { RippleModule } from 'primeng/ripple';
+import { TableModule } from 'primeng/table';
+import { PermissionCanActivateGuard } from '../../core/guards/permission-can-activate.guard';
+import { PERMISSIONS } from '../../core/config/permission-identifiers';
+import { SharedModule } from '../../shared/shared.module';
+import { WorkersPageComponent } from './workers-page.component';
+
+const WORKERS_ROUTES: Routes = [
+  {
+    path: '',
+    component: WorkersPageComponent,
+    canActivate: [PermissionCanActivateGuard],
+    data: {
+      title: 'العاملون',
+      breadcrumb: 'العاملون',
+      permission: PERMISSIONS.workers.view
+    }
+  }
+];
+
+@NgModule({
+  declarations: [WorkersPageComponent],
+  imports: [
+    CommonModule,
+    SharedModule,
+    ButtonModule,
+    RippleModule,
+    TableModule,
+    RouterModule.forChild(WORKERS_ROUTES)
+  ]
+})
+export class WorkersPageModule {}
