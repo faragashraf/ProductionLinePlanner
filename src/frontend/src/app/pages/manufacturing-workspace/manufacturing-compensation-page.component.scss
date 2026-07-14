@@ -2,26 +2,71 @@
   direction: rtl;
 }
 
+.compensation-model-picker__field {
+  display: grid;
+  gap: var(--plp-space-8);
+  max-inline-size: 32rem;
+}
+
+.compensation-model-picker__field select {
+  min-block-size: var(--plp-control-height-standard);
+}
+
+.compensation-methods {
+  display: grid;
+  gap: var(--plp-space-8);
+}
+
+.compensation-methods h3,
+.compensation-methods p {
+  margin: 0;
+}
+
+.compensation-methods > div > p,
+.compensation-methods__item p {
+  color: var(--plp-color-text-soft);
+  font-size: var(--plp-type-supporting);
+  margin-block-start: var(--plp-space-4);
+}
+
+.compensation-methods__item {
+  background: var(--plp-color-surface-raised);
+  border: var(--plp-border-muted);
+  border-radius: var(--plp-radius-md);
+  padding: var(--plp-space-12);
+}
+
+.compensation-methods__item summary {
+  color: var(--plp-color-text);
+  cursor: pointer;
+  font-weight: var(--plp-font-weight-semibold);
+}
+
+:host ::ng-deep .compensation-table .compensation-table__method {
+  color: var(--plp-color-primary-active);
+  font-weight: var(--plp-font-weight-bold);
+}
+
 .compensation-edit-dialog__form {
   display: grid;
-  gap: 1rem;
+  gap: var(--plp-space-16);
 }
 
 .compensation-edit-dialog__form label {
   display: grid;
-  gap: .375rem;
+  gap: var(--plp-space-4);
 }
 
 .compensation-edit-dialog__form input,
 .compensation-edit-dialog__form select {
-  min-height: 2.75rem;
+  min-height: var(--plp-control-height-standard);
   width: 100%;
 }
 
 .compensation-edit-dialog__context {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: .75rem;
+  gap: var(--plp-space-12);
   margin: 0;
 }
 
@@ -35,23 +80,68 @@
 }
 
 .compensation-edit-dialog__context dd {
-  margin: .25rem 0 0;
+  margin: var(--plp-space-4) 0 0;
   overflow-wrap: anywhere;
 }
 
 .compensation-edit-dialog__form footer {
   display: flex;
   flex-wrap: wrap;
-  gap: .5rem;
+  gap: var(--plp-space-8);
   justify-content: flex-start;
 }
 
 .compensation-edit-dialog__error {
-  color: var(--red-600);
+  color: var(--plp-color-danger-strong);
   margin: 0;
 }
 
 @media (max-width: 640px) {
+  :host ::ng-deep .compensation-table .p-datatable-thead {
+    display: none;
+  }
+
+  :host ::ng-deep .compensation-table .p-datatable-tbody {
+    display: grid;
+    gap: var(--plp-space-12);
+    padding: var(--plp-space-8);
+  }
+
+  :host ::ng-deep .compensation-table .p-datatable-tbody > tr {
+    background: var(--plp-color-surface-raised);
+    border: var(--plp-border-default);
+    border-radius: var(--plp-radius-md);
+    display: grid;
+    overflow: hidden;
+  }
+
+  :host ::ng-deep .compensation-table .p-datatable-tbody > tr > td {
+    align-items: baseline;
+    display: grid;
+    gap: var(--plp-space-12);
+    grid-template-columns: minmax(7rem, 40%) minmax(0, 1fr);
+    min-block-size: 0;
+    padding: var(--plp-space-8) var(--plp-space-12);
+  }
+
+  :host ::ng-deep .compensation-table .p-datatable-tbody > tr > td::before {
+    color: var(--plp-color-text-subtle);
+    content: attr(data-plp-label);
+    font-size: var(--plp-type-caption);
+    font-weight: var(--plp-font-weight-semibold);
+  }
+
+  :host ::ng-deep .compensation-table .p-datatable-tbody > tr > .compensation-table__action {
+    align-items: center;
+    border-block-start: var(--plp-border-muted);
+    display: flex;
+    justify-content: flex-start;
+  }
+
+  :host ::ng-deep .compensation-table .p-datatable-tbody > tr > .compensation-table__action::before {
+    display: none;
+  }
+
   .compensation-edit-dialog__context {
     grid-template-columns: 1fr;
   }

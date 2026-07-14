@@ -5,7 +5,9 @@
 .manufacturing-workspace {
   display: grid;
   gap: var(--plp-spacing-4);
-  width: 100%;
+  inline-size: 100%;
+  max-inline-size: 100%;
+  min-inline-size: 0;
 }
 
 .manufacturing-workspace__header {
@@ -54,12 +56,25 @@
   font-weight: 700;
 }
 
+.manufacturing-workspace__navigation-shell {
+  max-inline-size: 100%;
+  min-inline-size: 0;
+  position: relative;
+}
+
 .manufacturing-workspace__navigation {
   display: flex;
   gap: var(--plp-spacing-2);
+  max-inline-size: 100%;
+  min-inline-size: 0;
   overflow-x: auto;
-  padding-bottom: var(--plp-spacing-1);
+  overscroll-behavior-inline: contain;
+  padding: 0 var(--plp-spacing-3) var(--plp-spacing-1);
+  scroll-padding-inline: var(--plp-spacing-3);
+  scroll-snap-type: inline proximity;
   scrollbar-width: thin;
+  touch-action: pan-x;
+  -webkit-overflow-scrolling: touch;
 }
 
 .manufacturing-workspace__nav-item {
@@ -75,6 +90,7 @@
   color: var(--plp-color-text-soft);
   font-size: var(--plp-font-size-sm);
   font-weight: 700;
+  scroll-snap-align: start;
   text-decoration: none;
   white-space: nowrap;
 }

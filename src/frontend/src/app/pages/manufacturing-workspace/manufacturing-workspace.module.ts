@@ -15,6 +15,10 @@ import { ManufacturingDepartmentsPageComponent } from './manufacturing-departmen
 import { FactoryStructureFoundationPageComponent } from './factory-structure-foundation-page.component';
 import { ManufacturingCompensationPageComponent } from './manufacturing-compensation-page.component';
 import { ManufacturingWorkspaceRoutingModule } from './manufacturing-workspace-routing.module';
+import { PlpResponsiveTableDirective } from '../../shared/product/plp-responsive-table.directive';
+import { PlpTablePaginationDirective } from '../../shared/product/plp-table-pagination.directive';
+import { PlpOverflowRailDirective } from '../../shared/product/plp-horizontal-overflow';
+import { PlpExpandableFormComponent } from '../../shared/product/plp-expandable-form.component';
 
 @NgModule({
   declarations: [
@@ -36,6 +40,10 @@ import { ManufacturingWorkspaceRoutingModule } from './manufacturing-workspace-r
     DialogModule,
     FormsModule,
     ReactiveFormsModule,
+    PlpResponsiveTableDirective,
+    PlpTablePaginationDirective,
+    PlpOverflowRailDirective,
+    PlpExpandableFormComponent,
     ManufacturingWorkspaceRoutingModule
   ]
 })

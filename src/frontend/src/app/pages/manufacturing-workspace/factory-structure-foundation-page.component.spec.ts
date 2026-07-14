@@ -10,6 +10,9 @@ import { AssignmentsApiService } from '../../core/services/assignments-api.servi
 import { ManufacturingMasterDataApiService, SubStageOption } from '../../core/services/manufacturing-master-data-api.service';
 import { WorkersApiService } from '../../core/services/workers-api.service';
 import { SharedModule } from '../../shared/shared.module';
+import { PlpResponsiveTableDirective } from '../../shared/product/plp-responsive-table.directive';
+import { PlpTablePaginationDirective } from '../../shared/product/plp-table-pagination.directive';
+import { PlpExpandableFormComponent } from '../../shared/product/plp-expandable-form.component';
 import { FactoryStructureFoundationPageComponent } from './factory-structure-foundation-page.component';
 
 describe('FactoryStructureFoundationPageComponent', () => {
@@ -96,7 +99,7 @@ describe('FactoryStructureFoundationPageComponent', () => {
 
     TestBed.configureTestingModule({
       declarations: [FactoryStructureFoundationPageComponent],
-      imports: [FormsModule, SharedModule, ButtonModule, TableModule],
+      imports: [FormsModule, SharedModule, ButtonModule, TableModule, PlpResponsiveTableDirective, PlpTablePaginationDirective, PlpExpandableFormComponent],
       providers: [
         { provide: ManufacturingMasterDataApiService, useValue: masterData },
         { provide: AssignmentsApiService, useValue: assignments },
@@ -111,6 +114,15 @@ describe('FactoryStructureFoundationPageComponent', () => {
   }
 
   afterEach(() => TestBed.resetTestingModule());
+
+  function openAssignmentForm(fixture: ComponentFixture<FactoryStructureFoundationPageComponent>): void {
+    const trigger = fixture.debugElement.queryAll(By.css('plp-expandable-form button'))
+      .find(button => button.nativeElement.textContent.trim() === 'تعيين عامل');
+
+    expect(trigger).toBeDefined();
+    trigger!.nativeElement.click();
+    fixture.detectChanges();
+  }
 
   it('loads and renders the factory, line, stage, sub-stage, and worker relationships', () => {
     const fixture = configure({ manage: true });
@@ -302,6 +314,7 @@ describe('FactoryStructureFoundationPageComponent', () => {
     component.selectMainStage('main-1');
     component.selectSubStage('sub-1');
     fixture.detectChanges();
+    openAssignmentForm(fixture);
 
     const option = fixture.debugElement.query(By.css('select[name="workerId"] option[value="worker-1"]'));
     expect(option?.nativeElement.textContent).toContain('عامل تجريبي');
@@ -315,6 +328,7 @@ describe('FactoryStructureFoundationPageComponent', () => {
     component.selectMainStage('main-1');
     component.selectSubStage('sub-1');
     fixture.detectChanges();
+    openAssignmentForm(fixture);
 
     const workerSelect = fixture.debugElement.query(By.css('select[name="workerId"]')).nativeElement as HTMLSelectElement;
     const assignButton = fixture.debugElement.query(By.css('#factoryStructureAssignWorkerButton')).nativeElement as HTMLButtonElement;
@@ -358,6 +372,7 @@ describe('FactoryStructureFoundationPageComponent', () => {
     component.selectMainStage('main-1');
     component.selectSubStage('sub-1');
     fixture.detectChanges();
+    openAssignmentForm(fixture);
 
     const workerSelect = fixture.debugElement.query(By.css('select[name="workerId"]')).nativeElement as HTMLSelectElement;
     workerSelect.value = 'worker-1';

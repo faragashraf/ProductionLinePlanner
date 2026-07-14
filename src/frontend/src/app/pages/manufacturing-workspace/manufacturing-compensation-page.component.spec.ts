@@ -5,6 +5,9 @@ import { ButtonModule } from 'primeng/button';
 import { CardModule } from 'primeng/card';
 import { TableModule } from 'primeng/table';
 import { DialogModule } from 'primeng/dialog';
+import { Table } from 'primeng/table';
+import { PlpResponsiveTableDirective } from '../../shared/product/plp-responsive-table.directive';
+import { PlpTablePaginationDirective } from '../../shared/product/plp-table-pagination.directive';
 import { ReactiveFormsModule } from '@angular/forms';
 import { NoopAnimationsModule } from '@angular/platform-browser/animations';
 import { PERMISSIONS } from '../../core/config/permission-identifiers';
@@ -59,7 +62,7 @@ describe('ManufacturingCompensationPageComponent', () => {
 
     TestBed.configureTestingModule({
       declarations: [ManufacturingCompensationPageComponent],
-      imports: [ReactiveFormsModule, SharedModule, CardModule, ButtonModule, TableModule, DialogModule, NoopAnimationsModule],
+      imports: [ReactiveFormsModule, SharedModule, CardModule, ButtonModule, TableModule, DialogModule, PlpResponsiveTableDirective, PlpTablePaginationDirective, NoopAnimationsModule],
       providers: [
         { provide: ManufacturingMasterDataApiService, useValue: api },
         { provide: PermissionService, useValue: permissionService }
@@ -88,6 +91,25 @@ describe('ManufacturingCompensationPageComponent', () => {
     expect(text).toContain('توزيع نسبي');
     expect(text).toContain('سعر كامل لكل عامل');
     expect(text).toContain('قيمة ثابتة');
+  });
+
+  it('uses the shared viewport-safe stack presentation for mobile cards while preserving the PrimeNG table and paginator', () => {
+    const fixture = createComponent({ manage: true });
+    const component = fixture.componentInstance;
+    component.onModelChange({ target: { value: 'model-grm001' } } as unknown as Event);
+    fixture.detectChanges();
+
+    const tableHost = fixture.nativeElement.querySelector('p-table') as HTMLElement;
+    const table = fixture.debugElement.query(By.directive(Table)).componentInstance as Table;
+    const editAction = fixture.nativeElement.querySelector('td[data-plp-label="الإجراء"] button') as HTMLButtonElement;
+
+    expect(tableHost.classList.contains('plp-operational-table--stack')).toBeTrue();
+    expect(tableHost.classList.contains('plp-operational-table--scroll')).toBeFalse();
+    expect(tableHost.getAttribute('data-plp-table-presentation')).toBe('stack');
+    expect(table.responsiveLayout).toBe('scroll');
+    expect(fixture.nativeElement.querySelector('.p-paginator')).not.toBeNull();
+    expect(editAction).not.toBeNull();
+    expect(editAction.textContent).toContain('تعديل');
   });
 
   it('opens the rendered PrimeNG dialog with the selected stage context and values', () => {

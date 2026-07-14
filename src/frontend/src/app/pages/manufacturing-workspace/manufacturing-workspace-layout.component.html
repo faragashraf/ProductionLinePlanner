@@ -8,22 +8,33 @@
     <span class="manufacturing-workspace__status"><i class="pi pi-shield"></i> عرض حسب الصلاحيات</span>
   </header>
 
-  <nav class="manufacturing-workspace__navigation" aria-label="تنقل مساحة التصنيع">
-    <ng-container *ngIf="!isNavigationLoading; else navigationLoading">
-      <a
-        *ngFor="let item of visibleItems"
-        class="manufacturing-workspace__nav-item"
-        [class.manufacturing-workspace__nav-item--active]="isActive(item)"
-        [routerLink]="item.route"
-      >
-        <i class="pi" [ngClass]="item.icon"></i>
-        <span>{{ item.label }}</span>
-      </a>
-    </ng-container>
-    <ng-template #navigationLoading>
-      <plp-loading-skeleton [lines]="2" [showAvatar]="false" [cardLike]="true"></plp-loading-skeleton>
-    </ng-template>
-  </nav>
+  <div #workspaceNavigationShell class="manufacturing-workspace__navigation-shell">
+    <nav
+      class="manufacturing-workspace__navigation"
+      aria-label="تنقل مساحة التصنيع"
+      plpOverflowRail
+      [plpOverflowRailPresentation]="workspaceNavigationShell"
+      [plpOverflowRailActiveId]="activeRoute"
+    >
+      <ng-container *ngIf="!isNavigationLoading; else navigationLoading">
+        <a
+          *ngFor="let item of visibleItems"
+          class="manufacturing-workspace__nav-item"
+          [class.manufacturing-workspace__nav-item--active]="isActive(item)"
+          [routerLink]="item.route"
+          [attr.data-workspace-route]="item.route"
+          [attr.data-plp-overflow-rail-item]="item.route"
+          [attr.aria-current]="isActive(item) ? 'page' : null"
+        >
+          <i class="pi" [ngClass]="item.icon"></i>
+          <span>{{ item.label }}</span>
+        </a>
+      </ng-container>
+      <ng-template #navigationLoading>
+        <plp-loading-skeleton [lines]="2" [showAvatar]="false" [cardLike]="true"></plp-loading-skeleton>
+      </ng-template>
+    </nav>
+  </div>
 
   <router-outlet></router-outlet>
 </section>

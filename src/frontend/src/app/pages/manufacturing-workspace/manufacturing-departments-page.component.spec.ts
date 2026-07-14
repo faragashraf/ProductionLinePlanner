@@ -5,6 +5,8 @@ import { TableModule } from 'primeng/table';
 import { Observable, of, throwError } from 'rxjs';
 import { DepartmentItem, ManufacturingMasterDataApiService } from '../../core/services/manufacturing-master-data-api.service';
 import { SharedModule } from '../../shared/shared.module';
+import { PlpResponsiveTableDirective } from '../../shared/product/plp-responsive-table.directive';
+import { PlpTablePaginationDirective } from '../../shared/product/plp-table-pagination.directive';
 import { ManufacturingDepartmentsPageComponent } from './manufacturing-departments-page.component';
 
 describe('ManufacturingDepartmentsPageComponent', () => {
@@ -17,7 +19,7 @@ describe('ManufacturingDepartmentsPageComponent', () => {
 
     TestBed.configureTestingModule({
       declarations: [ManufacturingDepartmentsPageComponent],
-      imports: [SharedModule, ButtonModule, TableModule],
+      imports: [SharedModule, ButtonModule, TableModule, PlpResponsiveTableDirective, PlpTablePaginationDirective],
       providers: [{ provide: ManufacturingMasterDataApiService, useValue: api }]
     });
 

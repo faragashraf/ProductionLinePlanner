@@ -58,14 +58,18 @@
 
   <section class="workers-table-shell" *ngIf="!isLoading && !hasAnyError && workers.length > 0">
     <p-table
+      plpResponsiveTable="scroll"
+      plpTablePagination
+      [plpStickyActions]="true"
       [value]="workers"
       dataKey="code"
       [rows]="rows"
-      [paginator]="isServerSidePagination"
       [totalRecords]="totalRecords"
       [first]="first"
       [lazy]="isServerSidePagination"
       [loading]="isTableLoading"
+      [plpPaginationPageSize]="rows"
+      [plpPaginationResetKey]="searchTerm"
       (onLazyLoad)="onLazyLoad($event)"
       responsiveLayout="scroll"
       [scrollHeight]="'auto'"

@@ -8,10 +8,10 @@ export type PlpMotionKind = 'fade' | 'none';
   standalone: true
 })
 export class PlpMotionDirective {
-  @Input('plpMotion') motion: PlpMotionKind = 'fade';
+  @Input('plpMotion') motion: PlpMotionKind | '' = 'fade';
 
   @HostBinding('class.plp-motion-fade')
   get usesFadeMotion(): boolean {
-    return this.motion === 'fade';
+    return this.motion !== 'none';
   }
 }

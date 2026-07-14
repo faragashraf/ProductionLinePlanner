@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 64" role="img" aria-labelledby="plp-brand-title">
+  <title id="plp-brand-title">منصة تخطيط خطوط الإنتاج</title>
+  <defs>
+    <style>.plp-wordmark{fill:#0f172a;font-family:Cairo,Tahoma,Arial,sans-serif;font-size:16px;font-weight:700}.plp-drive{fill:#dbeafe;stroke:#2563eb;stroke-width:1.5}.plp-teeth,.plp-rail{fill:none;stroke:#2563eb;stroke-linecap:round}.plp-teeth{stroke-width:1.5}.plp-rail{stroke-width:3}.plp-stage-a{fill:#2563eb}.plp-stage-b{fill:#1e40af}.plp-signal{fill:none;stroke:#16a34a;stroke-linecap:round;stroke-linejoin:round;stroke-width:3}</style>
+    <g id="plp-flowline-mark">
+      <circle class="plp-drive" cx="13" cy="42" r="6"/>
+      <path class="plp-teeth" d="M13 33v3M22 42h-3M13 51v-3M4 42h3"/>
+      <path class="plp-rail" d="M7 45h49"/>
+      <rect class="plp-stage-a" x="19" y="34" width="8" height="8" rx="2"/>
+      <rect class="plp-stage-b" x="31" y="29" width="8" height="13" rx="2"/>
+      <rect class="plp-stage-a" x="43" y="24" width="8" height="18" rx="2"/>
+      <path class="plp-signal" d="m15 35.5 8-6.5 12 3 13-14h7m-4-4 4 4-4 4"/>
+    </g>
+  </defs>
+  <use href="#plp-flowline-mark" x="256"/>
+  <text class="plp-wordmark" x="240" y="29" text-anchor="end">منصة تخطيط</text>
+  <text class="plp-wordmark" x="240" y="48" text-anchor="end">خطوط الإنتاج</text>
+</svg>

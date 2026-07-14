@@ -56,7 +56,7 @@
   </section>
 
   <section class="departments-table-shell" *ngIf="!isLoading && !hasError && filteredDepartments.length > 0">
-    <p-table [value]="filteredDepartments" dataKey="departmentId" responsiveLayout="scroll" [scrollHeight]="'auto'">
+    <p-table plpResponsiveTable="scroll" plpTablePagination [plpPaginationPageSize]="10" [plpPaginationResetKey]="searchTerm" [value]="filteredDepartments" dataKey="departmentId" responsiveLayout="scroll" [scrollHeight]="'auto'">
       <ng-template pTemplate="header">
         <tr>
           <th>كود القسم</th>

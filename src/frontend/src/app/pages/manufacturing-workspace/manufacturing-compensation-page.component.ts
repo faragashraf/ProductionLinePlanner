@@ -18,6 +18,33 @@ const COMPENSATION_MODES: readonly CompensationMode[] = [
   'FixedAmount'
 ];
 
+interface CompensationMethodDefinition {
+  mode: CompensationMode;
+  title: string;
+  description: string;
+}
+
+interface CompensationStageField {
+  key: 'code' | 'name' | 'piecePrice' | 'standardSeconds' | 'method' | 'status';
+  label: string;
+  emphasis?: 'method';
+}
+
+const COMPENSATION_METHODS: readonly CompensationMethodDefinition[] = [
+  { mode: 'SharedPercentage', title: 'توزيع نسبي', description: 'تُسجّل كمية المرحلة مرة واحدة ثم توزّع المستحقات بحسب نسب العاملين.' },
+  { mode: 'FullRatePerWorker', title: 'سعر كامل لكل عامل', description: 'يحصل كل عامل معيّن على قيمة الكمية المقبولة كاملة من دون مضاعفة الإنتاج.' },
+  { mode: 'FixedAmount', title: 'قيمة ثابتة', description: 'يتلقى العامل مبلغًا ثابتًا مستقلًا عن كمية الإنتاج المسجّلة.' }
+];
+
+const COMPENSATION_STAGE_FIELDS: readonly CompensationStageField[] = [
+  { key: 'code', label: 'الكود' },
+  { key: 'name', label: 'المرحلة' },
+  { key: 'piecePrice', label: 'سعر القطعة' },
+  { key: 'standardSeconds', label: 'الثواني' },
+  { key: 'method', label: 'طريقة التعويض', emphasis: 'method' },
+  { key: 'status', label: 'الحالة' }
+];
+
 @Component({
   selector: 'app-manufacturing-compensation-page',
   templateUrl: './manufacturing-compensation-page.component.html',
@@ -26,6 +53,8 @@ const COMPENSATION_MODES: readonly CompensationMode[] = [
 export class ManufacturingCompensationPageComponent implements OnInit {
   readonly permissions = PERMISSIONS;
   readonly compensationModes = COMPENSATION_MODES;
+  readonly compensationMethods = COMPENSATION_METHODS;
+  readonly stageFields = COMPENSATION_STAGE_FIELDS;
   readonly showDialogDiagnostics = !environment.production;
 
   models: ProductModelItem[] = [];
@@ -164,6 +193,21 @@ export class ManufacturingCompensationPageComponent implements OnInit {
       case 'FullRatePerWorker': return 'سعر كامل لكل عامل';
       case 'FixedAmount': return 'قيمة ثابتة';
     }
+  }
+
+  stageFieldValue(stage: ModelStageItem, field: CompensationStageField): string | number {
+    switch (field.key) {
+      case 'code': return stage.subStageCode || '-';
+      case 'name': return stage.subStageName || stage.subStageId;
+      case 'piecePrice': return stage.piecePrice;
+      case 'standardSeconds': return stage.standardSeconds ?? '-';
+      case 'method': return this.modeLabel(stage.compensationMode);
+      case 'status': return stage.isActive ? 'نشطة' : 'معطلة';
+    }
+  }
+
+  trackByStageId(_: number, stage: ModelStageItem): string {
+    return stage.id;
   }
 
   private loadModels(): void {

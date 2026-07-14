@@ -10,7 +10,7 @@ import { ChangeDetectionStrategy, Component, EventEmitter, Input, Output } from 
       [class.plp-density-compact]="density === 'compact'"
       [attr.aria-busy]="busy || null"
       novalidate
-      (ngSubmit)="submitted.emit()"
+      (submit)="onSubmit($event)"
     >
       <ng-content></ng-content>
     </form>
@@ -22,4 +22,9 @@ export class PlpFormComponent {
   @Input() density: 'standard' | 'compact' = 'standard';
   @Input() busy = false;
   @Output() submitted = new EventEmitter<void>();
+
+  onSubmit(event: SubmitEvent): void {
+    event.preventDefault();
+    this.submitted.emit();
+  }
 }

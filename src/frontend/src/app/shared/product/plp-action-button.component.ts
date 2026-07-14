@@ -11,7 +11,7 @@ import { PlpActionKind, plpActionDefinitionFor, plpActionIconFor } from './produ
   template: `
     <button
       pButton
-      type="button"
+      [attr.type]="buttonType"
       [label]="label || definition.labelAr"
       [icon]="icon || iconName"
       [ngClass]="buttonClass"
@@ -29,6 +29,7 @@ export class PlpActionButtonComponent {
   @Input() disabled = false;
   @Input() loading = false;
   @Input() iconOnly = false;
+  @Input() buttonType: 'button' | 'submit' | 'reset' = 'button';
   @Output() triggered = new EventEmitter<void>();
 
   get definition() {

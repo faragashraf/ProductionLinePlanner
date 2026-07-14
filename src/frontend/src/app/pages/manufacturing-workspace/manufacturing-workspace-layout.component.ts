@@ -42,4 +42,8 @@ export class ManufacturingWorkspaceLayoutComponent implements OnInit, OnDestroy 
   get isNavigationLoading(): boolean {
     return this.permissionHydrationState === 'idle' || this.permissionHydrationState === 'loading';
   }
+
+  get activeRoute(): string {
+    return this.router.url.split('?')[0];
+  }
 }
