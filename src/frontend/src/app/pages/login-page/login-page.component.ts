@@ -3,6 +3,7 @@ import { HttpErrorResponse } from '@angular/common/http';
 import { Router } from '@angular/router';
 import { TimeoutError, finalize } from 'rxjs';
 import { AuthService } from '../../core/services/auth.service';
+import { PRODUCT_IDENTITY } from '../../core/config/product-identity.config';
 
 @Component({
   selector: 'app-login-page',
@@ -10,6 +11,8 @@ import { AuthService } from '../../core/services/auth.service';
   styleUrls: ['./login-page.component.scss']
 })
 export class LoginPageComponent {
+  readonly productIdentity = PRODUCT_IDENTITY;
+
   email = '';
   password = '';
   isLoading = false;

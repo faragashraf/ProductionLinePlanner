@@ -1,5 +1,9 @@
 <section class="amp-page">
   <plp-page-header title="إدارة التعيينات" description="واجهة أولية لعرض التوزيع الحالي واستعراض التعديلات المقترحة باستخدام مكوّنات Factory UI." [compact]="true">
+    <plp-product-metadata-row header-metadata plp-page-metadata label="ملخص التعيينات">
+      <plp-product-metadata-item label="العاملون" [value]="workers.length"></plp-product-metadata-item>
+      <plp-product-metadata-item label="التعيينات الحالية" [value]="assignments.length"></plp-product-metadata-item>
+    </plp-product-metadata-row>
     <div header-actions>
       <button
         *plpCan="'assignments.manage'"

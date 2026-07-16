@@ -21,11 +21,9 @@
   overflow-wrap: anywhere;
 }
 
-.plp-worker-card__details p {
-  margin: 0.1rem 0 0;
-  color: var(--plp-color-text-subtle);
-  font-size: var(--plp-font-size-xs);
-  line-height: 1.35;
+.plp-worker-card__details plp-product-metadata-row {
+  display: block;
+  margin-block-start: var(--plp-space-8);
 }
 
 .plp-worker-card plp-status-badge {

@@ -48,6 +48,25 @@
   min-inline-size: var(--plp-touch-target-min);
 }
 
+.p-button .p-button-icon {
+  font-size: var(--plp-icon-size-md);
+  line-height: 1;
+}
+
+.p-button.p-button-sm .p-button-icon {
+  font-size: var(--plp-icon-size-sm);
+}
+
+.p-button .p-button-icon-left {
+  margin-inline-end: var(--plp-icon-label-gap);
+  margin-right: 0;
+}
+
+.p-button .p-button-icon-right {
+  margin-inline-start: var(--plp-icon-label-gap);
+  margin-left: 0;
+}
+
 .p-button:not(:disabled):not(.p-disabled):hover {
   background: var(--plp-color-primary-hover);
   border-color: var(--plp-color-primary-hover);
@@ -240,13 +259,13 @@ p-radiobutton,
  * must be globally scoped to this unique class rather than to app-shell. */
 .p-sidebar.plp-app-shell-overlay-nav {
   background: var(--plp-color-surface-raised);
-  block-size: calc(100dvh - (var(--plp-control-height-standard) + var(--plp-space-20)));
+  block-size: calc(100dvh - var(--plp-app-header-height));
   border-inline-start: var(--plp-border-default);
   box-shadow: var(--plp-shadow-4);
   color: var(--plp-color-text);
   direction: rtl;
   inline-size: min(88vw, 21rem);
-  inset-block-start: calc(var(--plp-control-height-standard) + var(--plp-space-20));
+  inset-block-start: var(--plp-app-header-height);
   inset-inline-end: auto;
   inset-inline-start: 0;
   max-inline-size: calc(100vw - (var(--plp-dialog-gutter) * 2));
@@ -451,6 +470,12 @@ p-radiobutton,
   scroll-padding-inline: var(--plp-space-12);
 }
 
+.plp-app-shell__breadcrumb.p-breadcrumb {
+  background: transparent;
+  border: 0;
+  padding: var(--plp-space-8) 0;
+}
+
 .plp-app-shell__breadcrumb .p-breadcrumb-list {
   inline-size: max-content;
   min-inline-size: 100%;
@@ -541,6 +566,24 @@ p-radiobutton,
 .p-calendar-panel {
   border: var(--plp-border-default);
   border-radius: var(--plp-radius-md);
+}
+
+.p-card {
+  box-shadow: var(--plp-elevation-1);
+  overflow: hidden;
+}
+
+.p-card .p-card-title {
+  color: var(--plp-color-text);
+  font-size: var(--plp-type-section-title);
+  font-weight: var(--plp-font-weight-semibold);
+  line-height: var(--plp-line-height-heading);
+}
+
+.p-card .p-card-subtitle {
+  color: var(--plp-color-text-subtle);
+  font-size: var(--plp-type-supporting);
+  line-height: var(--plp-line-height-base);
 }
 
 .p-card .p-card-body,

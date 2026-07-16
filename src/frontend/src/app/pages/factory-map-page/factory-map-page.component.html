@@ -1,5 +1,14 @@
 <section class="page-frame factory-visualization-page">
   <plp-page-header title="مؤشر التمثيل البصري للمصنع" description="هيكلية بياناتية تفاعلية تدعم التنقل بين مستويات المصنع دون استدعاء backend." [compact]="true">
+    <plp-product-metadata-row
+      *ngIf="!isLoading"
+      header-metadata
+      plp-page-metadata
+      label="ملخص خريطة المصنع"
+    >
+      <plp-product-metadata-item label="المصنع" [value]="layout.name"></plp-product-metadata-item>
+      <plp-product-metadata-item label="خطوط التشغيل" [value]="layout.lines.length"></plp-product-metadata-item>
+    </plp-product-metadata-row>
     <div header-actions>
       <button
         type="button"
@@ -86,10 +95,10 @@
             <plp-status-badge [status]="layout.status ?? 'info'" [compact]="true"></plp-status-badge>
           </div>
           <p class="factory-map-summary__description">{{ layout.description }}</p>
-          <div class="factory-map-summary__meta">
-            <span>العاملون: {{ layout.workersCurrent ?? 0 }} / {{ layout.workersRequired ?? 0 }}</span>
-            <span>خطوط التشغيل: {{ layout.lines.length }}</span>
-          </div>
+          <plp-product-metadata-row class="factory-map-summary__meta" [label]="'بيانات مصنع ' + layout.name">
+            <plp-product-metadata-item label="العاملون" [value]="(layout.workersCurrent ?? 0) + ' / ' + (layout.workersRequired ?? 0)"></plp-product-metadata-item>
+            <plp-product-metadata-item label="خطوط التشغيل" [value]="layout.lines.length"></plp-product-metadata-item>
+          </plp-product-metadata-row>
         </div>
 
         <div class="factory-map-summary__readiness" aria-label="جاهزية المصنع">
@@ -112,10 +121,7 @@
           [attr.aria-label]="'فتح ' + line.name"
         >
           <header class="factory-map-line-card__header">
-            <div>
-              <h3>{{ line.name }}</h3>
-              <p>{{ line.statusText }}</p>
-            </div>
+            <h3>{{ line.name }}</h3>
             <plp-status-badge [status]="line.status ?? 'info'" [label]="line.statusText" [compact]="true"></plp-status-badge>
           </header>
 
@@ -128,10 +134,10 @@
             ></plp-completion-bar>
           </div>
 
-          <div class="factory-map-line-card__details">
-            <span>العاملون: {{ line.workersCurrent ?? 0 }} / {{ line.workersRequired ?? 0 }}</span>
-            <span>النشطة: {{ line.activeStageName }}</span>
-          </div>
+          <plp-product-metadata-row class="factory-map-line-card__details" [label]="'بيانات خط ' + line.name">
+            <plp-product-metadata-item label="العاملون" [value]="(line.workersCurrent ?? 0) + ' / ' + (line.workersRequired ?? 0)"></plp-product-metadata-item>
+            <plp-product-metadata-item label="المرحلة النشطة" [value]="line.activeStageName || 'غير محدد'"></plp-product-metadata-item>
+          </plp-product-metadata-row>
 
           <div class="factory-map-line-card__stages" aria-label="مراحل الخط">
             <span

@@ -1,9 +1,11 @@
 <article class="plp-assignment-card">
   <div>
     <h3>{{ worker }}</h3>
-    <p>من: {{ fromStage || '—' }}</p>
-    <p>إلى: {{ toStage || '—' }}</p>
-    <p>النوع: {{ assignmentType }}</p>
+    <plp-product-metadata-row [label]="'بيانات تعيين ' + worker">
+      <plp-product-metadata-item label="من" [value]="fromStage || '—'"></plp-product-metadata-item>
+      <plp-product-metadata-item label="إلى" [value]="toStage || '—'"></plp-product-metadata-item>
+      <plp-product-metadata-item label="النوع" [value]="assignmentType"></plp-product-metadata-item>
+    </plp-product-metadata-row>
   </div>
   <plp-status-badge [status]="status"></plp-status-badge>
 </article>

@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, EventEmitter, Input, Output } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ButtonModule } from 'primeng/button';
+import { normalizePrimeIconClass } from '../design-system/icons/production-icon-map';
 
 export interface PlpSectionNavigationItem {
   id: string;
@@ -25,7 +26,7 @@ export interface PlpSectionNavigationItem {
         type="button"
         class="p-button-sm p-button-text plp-section-navigation__item"
         [class.plp-section-navigation__item--active]="section.id === activeId"
-        [icon]="section.icon || ''"
+        [icon]="section.icon ? iconClass(section.icon) : ''"
         [label]="section.label"
         [attr.aria-current]="section.id === activeId ? 'location' : null"
         (click)="requested.emit(section.id)"
@@ -41,5 +42,9 @@ export class PlpSectionNavigationComponent {
 
   trackById(_: number, section: PlpSectionNavigationItem): string {
     return section.id;
+  }
+
+  iconClass(icon: string): string {
+    return normalizePrimeIconClass(icon);
   }
 }

@@ -9,13 +9,16 @@
   justify-content: space-between;
 }
 
+.plp-assignment-card > div {
+  min-inline-size: 0;
+}
+
 .plp-assignment-card h3 {
   margin: 0 0 0.3rem;
   font-size: var(--plp-font-size-sm);
 }
 
-.plp-assignment-card p {
-  margin: 0.08rem 0;
-  color: var(--plp-color-text-subtle);
-  font-size: var(--plp-font-size-xs);
+.plp-assignment-card plp-product-metadata-row {
+  display: block;
+  margin-block-start: var(--plp-space-8);
 }

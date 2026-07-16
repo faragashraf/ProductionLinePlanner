@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, EventEmitter, Input, Output } from 
 import { CommonModule } from '@angular/common';
 import { PlpActionButtonComponent } from './plp-action-button.component';
 import { PlpActionKind } from './product-action';
+import { normalizePrimeIconClass } from '../design-system/icons/production-icon-map';
 
 /** Shared visual shell used by empty, error, and unauthorized states. */
 @Component({
@@ -10,7 +11,7 @@ import { PlpActionKind } from './product-action';
   imports: [CommonModule, PlpActionButtonComponent],
   template: `
     <section class="plp-product-state" [class]="'plp-product-state plp-product-state--' + tone" [attr.role]="role">
-      <i class="plp-product-state__icon" [ngClass]="['pi', icon]" aria-hidden="true"></i>
+      <i class="plp-product-state__icon" [ngClass]="iconClass" aria-hidden="true"></i>
       <div class="plp-product-state__content">
         <h2 class="plp-text-section-title">{{ title }}</h2>
         <p *ngIf="description" class="plp-text-supporting">{{ description }}</p>
@@ -35,4 +36,8 @@ export class PlpStateShellComponent {
   @Input() actionLabel = '';
   @Input() actionKind: PlpActionKind = 'refresh';
   @Output() action = new EventEmitter<void>();
+
+  get iconClass(): string {
+    return normalizePrimeIconClass(this.icon);
+  }
 }

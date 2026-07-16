@@ -1,35 +1,47 @@
 <div class="plp-app-shell" [attr.data-navigation-mode]="navigationMode" plpMotion>
+  <a class="plp-app-shell__skip-link" href="#app-shell-main-content">الانتقال إلى المحتوى</a>
+
   <header class="plp-app-shell__topbar">
     <button
       *ngIf="isOverlayNavigation"
       #menuTrigger
       pButton
       type="button"
-      icon="pi pi-bars"
+      [icon]="menuIcon"
       class="p-button-text plp-app-shell__menu-trigger"
       aria-label="فتح القائمة"
+      title="فتح القائمة"
       [attr.aria-expanded]="sidebarOpen"
       aria-controls="app-shell-overlay-navigation"
       (click)="toggleSidebar()"
     ></button>
 
-    <a class="plp-app-shell__brand" routerLink="/dashboard" aria-label="العودة إلى الرئيسية">
-      <plp-brand-logo class="plp-app-shell__brand-mark" variant="header" size="28px" [inverse]="true"></plp-brand-logo>
+    <a class="plp-app-shell__brand" routerLink="/dashboard" [attr.aria-label]="productIdentity.homeLabelAr">
+      <plp-brand-logo class="plp-app-shell__brand-mark" variant="header" size="30px"></plp-brand-logo>
       <span class="plp-app-shell__brand-copy">
-        <span class="plp-text-supporting">منصة تخطيط خطوط الإنتاج</span>
-        <span class="plp-text-caption">مساحة العمليات</span>
+        <span class="plp-app-shell__brand-name">{{ productIdentity.nameAr }}</span>
+        <span class="plp-text-caption">{{ productIdentity.platformLabelAr }}</span>
       </span>
     </a>
 
+    <span class="plp-app-shell__workspace-context" aria-live="polite">
+      <i class="pi pi-compass" aria-hidden="true"></i>
+      {{ currentPageLabel }}
+    </span>
+
     <div class="plp-app-shell__account">
-      <span class="plp-app-shell__account-name plp-text-supporting">{{ currentUserName }}</span>
+      <span class="plp-app-shell__account-copy">
+        <span class="plp-app-shell__account-name">{{ currentUserName }}</span>
+        <span class="plp-text-caption">حساب التشغيل</span>
+      </span>
       <span class="plp-app-shell__account-initial" [attr.aria-label]="'الحساب: ' + currentUserName">{{ currentUserInitial }}</span>
       <button
         pButton
         type="button"
-        icon="pi pi-sign-out"
+        [icon]="signOutIcon"
         class="p-button-text plp-app-shell__logout-trigger"
         aria-label="تسجيل الخروج"
+        title="تسجيل الخروج"
         (click)="logout()"
       ></button>
     </div>
@@ -57,17 +69,18 @@
         <div class="plp-app-shell__sidebar-identity">
           <plp-brand-logo class="plp-app-shell__brand-mark" variant="header" size="28px"></plp-brand-logo>
           <span>
-            <span class="plp-text-supporting">منصة تخطيط خطوط الإنتاج</span>
-            <span class="plp-text-caption">مساحة العمليات</span>
+            <span class="plp-text-supporting">{{ productIdentity.nameAr }}</span>
+            <span class="plp-text-caption">{{ productIdentity.workspaceNameAr }}</span>
           </span>
         </div>
         <button
           #overlayCloseButton
           pButton
           type="button"
-          icon="pi pi-times"
+          [icon]="closeIcon"
           class="p-button-text p-button-rounded plp-app-shell__close-trigger"
           aria-label="إغلاق القائمة"
+          title="إغلاق القائمة"
           (click)="closeSidebar()"
         ></button>
       </div>
@@ -77,14 +90,21 @@
 
   <aside id="app-shell-navigation" class="plp-app-shell__desktop-nav">
     <div class="plp-app-shell__sidebar-header">
-      <plp-brand-logo class="plp-app-shell__brand-lockup" variant="horizontal" size="28px"></plp-brand-logo>
+      <plp-brand-logo class="plp-app-shell__brand-lockup" variant="horizontal" size="30px" [inverse]="true"></plp-brand-logo>
+      <span class="plp-text-caption">{{ productIdentity.workspaceNameAr }}</span>
     </div>
     <ng-container *ngTemplateOutlet="navigationMenu; context: { closeAfterNavigation: false }"></ng-container>
   </aside>
 
-  <main class="plp-app-shell__main">
-    <p-breadcrumb [model]="breadcrumbItems" styleClass="plp-app-shell__breadcrumb"></p-breadcrumb>
-    <section class="plp-app-shell__content plp-page-frame">
+  <main id="app-shell-main-content" class="plp-app-shell__main" tabindex="-1">
+    <div class="plp-app-shell__context-bar plp-page-frame">
+      <p-breadcrumb [model]="breadcrumbItems" styleClass="plp-app-shell__breadcrumb"></p-breadcrumb>
+      <span class="plp-app-shell__workspace-label">
+        <i class="pi pi-building" aria-hidden="true"></i>
+        {{ productIdentity.workspaceNameAr }}
+      </span>
+    </div>
+    <section class="plp-app-shell__content plp-page-frame" [attr.aria-label]="currentPageLabel">
       <router-outlet />
     </section>
   </main>

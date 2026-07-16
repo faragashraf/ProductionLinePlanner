@@ -40,17 +40,22 @@
     </div>
   </p-card>
 
-  <p class="daily-production-operations__message daily-production-operations__message--error" *ngIf="error" role="alert">{{ error }}</p>
-  <p class="daily-production-operations__message daily-production-operations__message--success" *ngIf="successMessage">{{ successMessage }}</p>
+  <p class="daily-production-operations__message plp-inline-feedback plp-inline-feedback--error" *ngIf="error" role="alert">{{ error }}</p>
+  <p class="daily-production-operations__message plp-inline-feedback plp-inline-feedback--success" *ngIf="successMessage">{{ successMessage }}</p>
 
   <ng-container *ngIf="operations; else initialState">
     <p-card>
       <div class="daily-production-operations__summary">
         <div>
-          <h2>{{ operations.productModelCode }} — {{ operations.productModelName }}</h2>
-          <p>تاريخ الإنتاج: <span class="plp-date">{{ operations.productionDate }}</span> · {{ operations.factoryName }} · {{ operations.productionLineName }}</p>
+          <h2 class="plp-text-section-title">{{ operations.productModelName }}</h2>
+          <plp-product-metadata-row label="سياق تشغيل اليوم">
+            <plp-product-metadata-item label="كود الموديل" [value]="operations.productModelCode" icon="pi pi-box"></plp-product-metadata-item>
+            <plp-product-metadata-item label="التاريخ" [value]="operations.productionDate" icon="pi pi-calendar"></plp-product-metadata-item>
+            <plp-product-metadata-item label="المصنع" [value]="operations.factoryName" icon="pi pi-building"></plp-product-metadata-item>
+            <plp-product-metadata-item label="الخط" [value]="operations.productionLineName" icon="pi pi-sitemap"></plp-product-metadata-item>
+          </plp-product-metadata-row>
         </div>
-        <div class="daily-production-operations__metrics" aria-label="ملخص حالات المراحل">
+        <div class="daily-production-operations__metrics plp-action-group" aria-label="ملخص حالات المراحل">
           <span>كل المراحل {{ operations.totalStages }}</span>
           <span class="is-ready">جاهزة {{ operations.readyStages }}</span>
           <span>غياب {{ operations.stagesWithAbsentWorkers }}</span>
@@ -62,8 +67,8 @@
       <p class="daily-production-operations__refresh-note" *ngIf="operationsLoading">جارٍ تحديث حالة الحضور والتسكين في الخلفية؛ تبقى بياناتك الحالية ظاهرة.</p>
     </p-card>
 
-    <section class="daily-production-operations__workspace plp-bounded-workspace plp-bounded-workspace--tablet">
-      <p-card class="plp-bounded-workspace__panel" header="كل مراحل الموديل">
+    <section class="daily-production-operations__workspace plp-bounded-workspace plp-bounded-workspace--tablet plp-bounded-workspace--viewport">
+      <p-card class="plp-bounded-workspace__panel plp-bounded-workspace__panel--viewport" header="كل مراحل الموديل">
         <div class="daily-production-operations__filters">
           <input pInputText type="search" [(ngModel)]="stageSearch" placeholder="ابحث باسم أو كود المرحلة">
           <select [(ngModel)]="stageFilter" aria-label="فلتر حالة المرحلة">
@@ -75,10 +80,20 @@
             <option value="cost-review">مراجعة تكلفة</option>
           </select>
         </div>
-        <div class="daily-production-operations__stage-list plp-bounded-workspace__scroll-region" aria-live="polite">
-          <button type="button" *ngFor="let stage of filteredStages; trackBy: trackById" class="daily-production-operations__stage" [class.is-selected]="stage.productModelStageId === selectedStageId" (click)="selectStage(stage.productModelStageId)">
-            <span><strong>{{ stage.stageOrder }}. {{ stage.stageCode }} — {{ stage.stageName }}</strong><small>{{ stage.mainStageName }} · {{ stage.workers.length }} عامل</small></span>
-            <span class="daily-production-operations__stage-badges"><small>{{ stageStatusLabel(stage) }}</small><small *ngIf="stage.isFinancialReviewPending">تكلفة</small></span>
+        <div class="daily-production-operations__stage-list plp-bounded-workspace__scroll-region plp-structured-list plp-structured-list--spacious plp-contained-scroll-list" aria-live="polite">
+          <button type="button" *ngFor="let stage of filteredStages; trackBy: trackById" class="daily-production-operations__stage plp-structured-card plp-structured-card--content-sized" [class.is-selected]="stage.productModelStageId === selectedStageId" (click)="selectStage(stage.productModelStageId)">
+            <plp-responsive-entity-row [title]="stage.stageName" [code]="stage.stageCode" icon="pi pi-sitemap">
+              <span plp-entity-metadata class="plp-entity-secondary-row">
+                <plp-product-metadata-row label="بيانات المرحلة">
+                  <plp-product-metadata-item label="المرحلة الرئيسية" [value]="stage.mainStageName" icon="pi pi-folder"></plp-product-metadata-item>
+                  <plp-product-metadata-item label="العمال" [value]="stage.workers.length" icon="pi pi-users"></plp-product-metadata-item>
+                </plp-product-metadata-row>
+                <span class="daily-production-operations__stage-badges plp-action-group">
+                  <plp-status-badge [status]="stageStatusTone(stage)" [label]="stageStatusLabel(stage)" [compact]="true"></plp-status-badge>
+                  <plp-status-badge [status]="stageCostStatusTone(stage)" [label]="stageCostStatusLabel(stage)" [compact]="true"></plp-status-badge>
+                </span>
+              </span>
+            </plp-responsive-entity-row>
           </button>
           <plp-empty-state *ngIf="!filteredStages.length" title="لا توجد مراحل مطابقة" description="غيّر البحث أو فلتر الحالة لإظهار مراحل أخرى."></plp-empty-state>
         </div>
@@ -87,38 +102,51 @@
       <ng-container *ngIf="selectedStage as stage; else stageGuidance">
         <p-card class="plp-bounded-workspace__panel">
           <div class="daily-production-operations__stage-header plp-bounded-workspace__sticky-header">
-            <div>
-              <h2>{{ stage.stageCode }} — {{ stage.stageName }}</h2>
-              <p>{{ stage.mainStageName }} · {{ stage.compensationMode }} · سعر المرحلة {{ stage.piecePrice | number:'1.2-4' }}</p>
-            </div>
-            <div class="daily-production-operations__stage-badges"><span>{{ stage.staffingStatus === 'NoStaffing' ? 'دون تسكين' : 'مسكّنة' }}</span><span>{{ stage.attendanceStatus }}</span><span *ngIf="stage.isFinancialReviewPending">مراجعة تكلفة</span></div>
+            <plp-responsive-entity-row [title]="stage.stageName" [code]="stage.stageCode" icon="pi pi-sitemap">
+              <plp-product-metadata-row plp-entity-metadata label="تفاصيل المرحلة المختارة">
+                <plp-product-metadata-item label="المرحلة الرئيسية" [value]="stage.mainStageName" icon="pi pi-folder"></plp-product-metadata-item>
+                <plp-product-metadata-item label="طريقة الاحتساب" [value]="compensationModeLabel(stage.compensationMode)" icon="pi pi-calculator"></plp-product-metadata-item>
+                <plp-product-metadata-item label="سعر المرحلة" [value]="stage.piecePrice | number:'1.2-4'" icon="pi pi-wallet"></plp-product-metadata-item>
+                <plp-product-metadata-item label="العمال" [value]="stage.workers.length" icon="pi pi-users"></plp-product-metadata-item>
+              </plp-product-metadata-row>
+              <span plp-entity-status class="daily-production-operations__stage-badges plp-action-group">
+                <plp-status-badge [status]="stage.staffingStatus === 'NoStaffing' ? 'critical' : 'ready'" [label]="staffingStatusLabel(stage.staffingStatus)" [compact]="true"></plp-status-badge>
+                <plp-status-badge [status]="stageStatusTone(stage)" [label]="stageStatusLabel(stage)" [compact]="true"></plp-status-badge>
+                <plp-status-badge *ngIf="stage.isFinancialReviewPending" status="warning" label="مراجعة تكلفة" [compact]="true"></plp-status-badge>
+              </span>
+            </plp-responsive-entity-row>
           </div>
 
-          <p class="daily-production-operations__warning" *ngIf="stage.staffingStatus === 'NoStaffing'">لا يوجد عامل فعّال لهذه المرحلة في تاريخ الإنتاج. أضف بديلًا/تجاوزًا مع سبب معتمد قبل الاحتساب.</p>
-          <p class="daily-production-operations__warning" *ngIf="stage.hasAbsentWorkers">يوجد عامل غائب في هذا التاريخ؛ الحضور لا يغيّر حالة العمل أو التعيين، والتجاوز يتطلب سببًا وصلاحية.</p>
-          <p class="daily-production-operations__warning" *ngIf="stage.hasNoSourceCheckInWorkers">لا يوجد تسجيل بصمة مصدر لبعض العمال؛ هذه ليست حالة غياب تلقائية.</p>
+          <p class="daily-production-operations__warning plp-inline-feedback plp-inline-feedback--warning" *ngIf="stage.staffingStatus === 'NoStaffing'">لا يوجد عامل فعّال لهذه المرحلة في تاريخ الإنتاج. أضف بديلًا/تجاوزًا مع سبب معتمد قبل الاحتساب.</p>
+          <p class="daily-production-operations__warning plp-inline-feedback plp-inline-feedback--warning" *ngIf="stage.hasAbsentWorkers">يوجد عامل غائب في هذا التاريخ؛ الحضور لا يغيّر حالة العمل أو التعيين، والتجاوز يتطلب سببًا وصلاحية.</p>
+          <p class="daily-production-operations__warning plp-inline-feedback plp-inline-feedback--warning" *ngIf="stage.hasNoSourceCheckInWorkers">لا يوجد تسجيل بصمة مصدر لبعض العمال؛ هذه ليست حالة غياب تلقائية.</p>
 
-          <div class="daily-production-operations__worker-list plp-bounded-workspace__scroll-region">
-            <article *ngFor="let worker of stage.workers; trackBy: trackById" class="daily-production-operations__worker">
-              <div>
-                <strong>{{ worker.workerCode }} — {{ worker.workerName }}</strong>
-                <small>{{ worker.effectiveAssignmentType || 'بديل / تجاوز تشغيلي' }} · {{ attendanceLabel(worker) }} · {{ worker.isOnActiveService ? 'على رأس العمل' : 'خارج الخدمة' }}</small>
-              </div>
-              <label *ngIf="stage.compensationMode === 'SharedPercentage'">النسبة %
-                <input type="number" min="0.0001" max="100" step="0.0001" [(ngModel)]="worker.percentage" (ngModelChange)="stageChanged()">
-              </label>
-              <label *ngIf="stage.compensationMode === 'FixedAmount'">قيمة ثابتة
-                <input type="number" min="0" step="0.0001" [(ngModel)]="worker.fixedAmount" (ngModelChange)="stageChanged()">
-              </label>
-              <label *ngIf="workerNeedsOverride(stage, worker)">سبب التجاوز المعتمد
-                <input pInputText [(ngModel)]="worker.manualOverrideReason" maxlength="500" [disabled]="!canOverrideParticipants" placeholder="الغياب أو البديل يحتاج سببًا واضحًا" (ngModelChange)="stageChanged()">
-              </label>
-              <button pButton type="button" class="p-button-text p-button-danger" label="إزالة" [disabled]="!canOverrideParticipants" (click)="removeWorker(stage, worker.workerId)"></button>
+          <div class="daily-production-operations__worker-list plp-bounded-workspace__scroll-region plp-structured-list plp-contained-scroll-list">
+            <article *ngFor="let worker of stage.workers; trackBy: trackById" class="daily-production-operations__worker plp-structured-card">
+              <plp-responsive-entity-row [title]="worker.workerName" [code]="worker.workerCode" icon="pi pi-user">
+                <plp-product-metadata-row plp-entity-metadata label="حالة العامل">
+                  <plp-product-metadata-item label="التعيين" [value]="assignmentTypeLabel(worker.effectiveAssignmentType)" icon="pi pi-link"></plp-product-metadata-item>
+                  <plp-product-metadata-item label="الحضور" [value]="attendanceLabel(worker)" icon="pi pi-check-square"></plp-product-metadata-item>
+                  <plp-product-metadata-item label="الخدمة" [value]="workerServiceLabel(worker)" icon="pi pi-briefcase"></plp-product-metadata-item>
+                </plp-product-metadata-row>
+                <label plp-entity-value *ngIf="stage.compensationMode === 'SharedPercentage'">النسبة %
+                  <input type="number" min="0.0001" max="100" step="0.0001" [(ngModel)]="worker.percentage" (ngModelChange)="stageChanged()">
+                </label>
+                <label plp-entity-value *ngIf="stage.compensationMode === 'FixedAmount'">قيمة ثابتة
+                  <input type="number" min="0" step="0.0001" [(ngModel)]="worker.fixedAmount" (ngModelChange)="stageChanged()">
+                </label>
+                <span plp-entity-actions>
+                  <label *ngIf="workerNeedsOverride(stage, worker)">سبب التجاوز المعتمد
+                    <input pInputText [(ngModel)]="worker.manualOverrideReason" maxlength="500" [disabled]="!canOverrideParticipants" placeholder="الغياب أو البديل يحتاج سببًا واضحًا" (ngModelChange)="stageChanged()">
+                  </label>
+                  <button pButton type="button" class="p-button-text p-button-danger" label="إزالة" icon="pi pi-times" [disabled]="!canOverrideParticipants" (click)="removeWorker(stage, worker.workerId)"></button>
+                </span>
+              </plp-responsive-entity-row>
             </article>
             <plp-empty-state *ngIf="!stage.workers.length" title="لا يوجد عامل في المرحلة" description="استخدم بديلًا/تجاوزًا معتمدًا أو عالج التسكين في مساحة تسكين الخط."></plp-empty-state>
           </div>
 
-          <div class="daily-production-operations__stage-actions">
+          <div class="daily-production-operations__stage-actions plp-action-group">
             <button pButton type="button" class="p-button-outlined" label="توزيع متساوٍ مقترح" icon="pi pi-percentage" *ngIf="stage.compensationMode === 'SharedPercentage'" [disabled]="!stage.workers.length" (click)="applyEqualDistribution(stage)"></button>
             <select [(ngModel)]="replacementWorkerId" [disabled]="!canOverrideParticipants">
               <option value="">اختر بديلًا / عامل تجاوز</option>
@@ -126,8 +154,15 @@
             </select>
             <button pButton type="button" class="p-button-outlined" label="إضافة بديل / تجاوز" icon="pi pi-user-plus" [disabled]="!replacementWorkerId || !canOverrideParticipants" (click)="addReplacementWorker()"></button>
           </div>
-          <p class="daily-production-operations__permission-note" *ngIf="!canOverrideParticipants">تغيير المشاركين أو تسجيل تجاوز يتطلب صلاحية إدارة التعيينات؛ لا يغيّر هذا الإجراء سجلات تشغيل تاريخية.</p>
-          <p class="daily-production-operations__stage-preview" *ngIf="stagePreview(stage.productModelStageId) as stagePreview">معاينة المرحلة: كمية {{ stagePreview.stageQuantity | number:'1.0-3' }} · تكلفة {{ stagePreview.stageCost | number:'1.2-4' }} · مستحقات العمال {{ stagePreview.workers.length }}</p>
+          <p class="daily-production-operations__permission-note plp-inline-feedback plp-inline-feedback--warning" *ngIf="!canOverrideParticipants">تغيير المشاركين أو تسجيل تجاوز يتطلب صلاحية إدارة التعيينات؛ لا يغيّر هذا الإجراء سجلات تشغيل تاريخية.</p>
+          <div class="daily-production-operations__stage-preview plp-inline-feedback plp-inline-feedback--warning" *ngIf="stagePreview(stage.productModelStageId) as stagePreview">
+            <strong>معاينة المرحلة</strong>
+            <plp-product-metadata-row label="ملخص معاينة المرحلة">
+              <plp-product-metadata-item label="الكمية" [value]="stagePreview.stageQuantity | number:'1.0-3'" icon="pi pi-box"></plp-product-metadata-item>
+              <plp-product-metadata-item label="التكلفة" [value]="stagePreview.stageCost | number:'1.2-4'" icon="pi pi-wallet"></plp-product-metadata-item>
+              <plp-product-metadata-item label="العمال" [value]="stagePreview.workers.length" icon="pi pi-users"></plp-product-metadata-item>
+            </plp-product-metadata-row>
+          </div>
         </p-card>
       </ng-container>
       <ng-template #stageGuidance><p-card class="plp-bounded-workspace__panel" header="تفاصيل المرحلة"><p>اختر مرحلة من القائمة لمراجعة العمال والتوزيع.</p></p-card></ng-template>
@@ -141,29 +176,56 @@
         <label>ملاحظات المسودة
           <input pInputText [(ngModel)]="notes" maxlength="1000" (ngModelChange)="stageChanged()" placeholder="اختياري">
         </label>
-        <div class="daily-production-operations__final-actions plp-sticky-action-bar">
+        <div class="daily-production-operations__final-actions plp-sticky-action-bar plp-action-group">
           <span>{{ operations.totalStages }} مرحلة · {{ totalEnteredWorkers }} صف عامل. لا يضاعف أي صف كمية الخط أو المرحلة.</span>
           <button pButton type="button" class="p-button-outlined" label="حساب معاينة موحّدة" icon="pi pi-calculator" [loading]="previewing" [disabled]="previewing || saving" (click)="calculatePreview()"></button>
           <button pButton type="button" label="حفظ مسودة اليوم" icon="pi pi-save" [loading]="saving" [disabled]="!isPreviewCurrent || saving" (click)="saveDailyDraft()"></button>
         </div>
       </div>
-      <ul class="daily-production-operations__validation" *ngIf="validationMessages.length" role="alert"><li *ngFor="let message of validationMessages">{{ message }}</li></ul>
-      <section class="daily-production-operations__preview" *ngIf="preview as calculatedPreview">
-        <div><strong>إجمالي المستحقات</strong><span class="plp-price">{{ calculatedPreview.totalWorkerEntitlements | number:'1.2-4' }}</span></div>
-        <div><strong>حالة المعاينة</strong><span>{{ isPreviewCurrent ? 'صالحة للحفظ' : 'قديمة — أعد الحساب' }}</span></div>
-        <div><strong>تحذيرات تشغيلية</strong><span>{{ calculatedPreview.warnings.length || 'لا يوجد' }}</span></div>
-        <article *ngFor="let stage of calculatedPreview.stages; trackBy: trackById" class="daily-production-operations__preview-stage">
-          <strong>{{ stage.stageCode }} — {{ stage.stageName }}</strong>
-          <span>كمية المرحلة {{ stage.stageQuantity | number:'1.0-3' }}</span>
-          <span>تكلفة المرحلة {{ stage.stageCost | number:'1.2-4' }}</span>
-          <span *ngFor="let worker of stage.workers">{{ worker.workerCode }}: {{ worker.calculatedEarning | number:'1.2-4' }}</span>
-        </article>
-        <article class="daily-production-operations__preview-stage" *ngIf="calculatedPreview.workerTotals.length">
-          <strong>إجمالي مستحقات العامل عبر كل المراحل</strong>
-          <span *ngFor="let worker of calculatedPreview.workerTotals">{{ worker.workerCode }} — {{ worker.workerName }}: {{ worker.totalEntitlement | number:'1.2-4' }}</span>
-        </article>
+      <ul class="daily-production-operations__validation plp-inline-feedback plp-inline-feedback--error" *ngIf="validationMessages.length" role="alert"><li *ngFor="let message of validationMessages">{{ message }}</li></ul>
+      <section class="daily-production-operations__preview plp-structured-list plp-structured-list--spacious" *ngIf="preview as calculatedPreview">
+        <div class="daily-production-operations__preview-summary plp-summary-stat-grid">
+          <plp-statistic-card title="إجمالي المستحقات" [value]="(calculatedPreview.totalWorkerEntitlements | number:'1.2-4') || '—'" icon="pi pi-wallet"></plp-statistic-card>
+          <plp-statistic-card title="حالة المعاينة" [value]="isPreviewCurrent ? 'صالحة للحفظ' : 'قديمة — أعد الحساب'" icon="pi pi-check-circle"></plp-statistic-card>
+          <plp-statistic-card title="تحذيرات تشغيلية" [value]="calculatedPreview.warnings.length ? calculatedPreview.warnings.length.toString() : 'لا يوجد'" icon="pi pi-exclamation-triangle"></plp-statistic-card>
+        </div>
+
+        <section class="daily-production-operations__preview-stages plp-structured-list" aria-label="تفاصيل معاينة المراحل">
+          <article *ngFor="let stage of calculatedPreview.stages; trackBy: trackById" class="daily-production-operations__preview-stage plp-structured-card">
+            <plp-responsive-entity-row [title]="stage.stageName" [code]="stage.stageCode" icon="pi pi-sitemap">
+              <plp-product-metadata-row plp-entity-metadata label="ملخص المرحلة">
+                <plp-product-metadata-item label="الكمية" [value]="stage.stageQuantity | number:'1.0-3'" icon="pi pi-box"></plp-product-metadata-item>
+                <plp-product-metadata-item label="عدد العمال" [value]="stage.workers.length" icon="pi pi-users"></plp-product-metadata-item>
+                <plp-product-metadata-item label="التوزيع" [value]="compensationModeLabel(stage.compensationMode)" icon="pi pi-calculator"></plp-product-metadata-item>
+              </plp-product-metadata-row>
+              <span plp-entity-value><small>إجمالي المرحلة</small><strong class="plp-price">{{ stageEntitlement(stage) | number:'1.2-4' }}</strong></span>
+            </plp-responsive-entity-row>
+          </article>
+        </section>
+
+        <section class="daily-production-operations__worker-totals plp-structured-surface" *ngIf="calculatedPreview.workerTotals.length" aria-labelledby="daily-worker-totals-title">
+          <plp-product-section-header id="daily-worker-totals-title" title="إجمالي مستحقات العاملين" description="ملخص قابل للمسح السريع عبر كل مراحل الموديل."></plp-product-section-header>
+          <p-table
+            plpResponsiveTable="scroll"
+            plpTablePagination
+            [plpPaginationPageSize]="10"
+            [plpPaginationResetKey]="calculatedPreview.previewToken"
+            [value]="calculatedPreview.workerTotals"
+            dataKey="workerId"
+            responsiveLayout="scroll"
+            styleClass="daily-production-operations__worker-totals-table"
+          >
+            <ng-template pTemplate="header"><tr><th>العامل</th><th>إجمالي المستحق</th></tr></ng-template>
+            <ng-template pTemplate="body" let-worker>
+              <tr>
+                <td><plp-responsive-entity-row [title]="worker.workerName" [code]="worker.workerCode" icon="pi pi-user"></plp-responsive-entity-row></td>
+                <td class="daily-production-operations__entitlement plp-entity-amount plp-price">{{ worker.totalEntitlement | number:'1.2-4' }}</td>
+              </tr>
+            </ng-template>
+          </p-table>
+        </section>
       </section>
-      <section class="daily-production-operations__saved" *ngIf="savedDraft">
+      <section class="daily-production-operations__saved plp-inline-feedback plp-inline-feedback--success plp-action-group" *ngIf="savedDraft">
         <strong>المسودة {{ savedDraft.orderNumber }} محفوظة.</strong>
         <span>تاريخ الإنتاج {{ savedDraft.productionDate }} · وقت التسجيل {{ savedDraft.recordedAtUtc | date:'medium' }}</span>
         <span>{{ savedDraft.stages.length }} سجل مرحلة محفوظ مع لقطات مستقلة للعمال والتكلفة.</span>

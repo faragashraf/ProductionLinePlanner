@@ -23,6 +23,13 @@ import { NotificationCardComponent } from './business/notification-card/notifica
 import { PermissionDirective } from '../core/directives/permission.directive';
 import { IamListSkeletonComponent } from './ui/iam-list-skeleton/iam-list-skeleton.component';
 import { PermissionSelectionComponent } from './business/permission-selection/permission-selection.component';
+import { PlpProductEmptyStateComponent } from './product/plp-empty-state.component';
+import { PlpProductErrorStateComponent } from './product/plp-error-state.component';
+import { PlpProductLoadingStateComponent } from './product/plp-loading-state.component';
+import { PlpProductPageHeaderComponent } from './product/plp-page-header.component';
+import { PlpProductSectionHeaderComponent } from './product/plp-section-header.component';
+import { PlpProductMetadataItemComponent, PlpProductMetadataRowComponent } from './product/plp-metadata-row.component';
+import { PlpResponsiveEntityRowComponent } from './product/plp-responsive-entity-row.component';
 
 @NgModule({
   declarations: [
@@ -50,7 +57,17 @@ import { PermissionSelectionComponent } from './business/permission-selection/pe
     IamListSkeletonComponent,
     PermissionSelectionComponent
   ],
-  imports: [CommonModule],
+  imports: [
+    CommonModule,
+    PlpProductEmptyStateComponent,
+    PlpProductErrorStateComponent,
+    PlpProductLoadingStateComponent,
+    PlpProductMetadataItemComponent,
+    PlpProductMetadataRowComponent,
+    PlpResponsiveEntityRowComponent,
+    PlpProductPageHeaderComponent,
+    PlpProductSectionHeaderComponent
+  ],
   exports: [
     EmptyStateComponent,
     ErrorStateComponent,
@@ -74,7 +91,11 @@ import { PermissionSelectionComponent } from './business/permission-selection/pe
     NotificationCardComponent,
     PermissionDirective,
     IamListSkeletonComponent,
-    PermissionSelectionComponent
+    PermissionSelectionComponent,
+    PlpProductMetadataItemComponent,
+    PlpProductMetadataRowComponent,
+    PlpResponsiveEntityRowComponent,
+    PlpProductSectionHeaderComponent
   ]
 })
 export class SharedModule {}

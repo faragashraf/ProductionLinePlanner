@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, EventEmitter, Input, Output } from '@angular/core';
 import { MainStageLayout, ProductionLineLayout } from '../../../../shared/models/factory-visualization.model';
+import { productionNavigationIconFor } from '../../../../shared/design-system/icons/production-icon-map';
 
 @Component({
   selector: 'plp-line-renderer',
@@ -8,6 +9,8 @@ import { MainStageLayout, ProductionLineLayout } from '../../../../shared/models
   changeDetection: ChangeDetectionStrategy.OnPush
 })
 export class LineRendererComponent {
+  readonly backIcon = productionNavigationIconFor('back', 'rtl');
+
   @Input() line!: ProductionLineLayout;
   @Output() backToFactory = new EventEmitter<void>();
   @Output() mainStageSelected = new EventEmitter<string>();

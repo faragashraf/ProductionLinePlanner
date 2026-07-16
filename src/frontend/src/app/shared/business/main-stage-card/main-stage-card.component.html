@@ -4,6 +4,8 @@
     <plp-status-badge [status]="status" [compact]="true"></plp-status-badge>
   </header>
   <plp-completion-bar [value]="readinessPercent" [status]="status" label="اكتفاء"></plp-completion-bar>
-  <p class="plp-main-stage-card__workers">العاملون: {{ workersCurrent }} / {{ workersRequired }}</p>
+  <plp-product-metadata-row [label]="'بيانات مرحلة ' + name">
+    <plp-product-metadata-item label="العاملون" [value]="workersCurrent + ' / ' + workersRequired"></plp-product-metadata-item>
+  </plp-product-metadata-row>
   <p class="plp-main-stage-card__note" *ngIf="note">{{ note }}</p>
 </article>

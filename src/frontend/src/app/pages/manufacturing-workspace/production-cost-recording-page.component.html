@@ -1,5 +1,5 @@
 <section class="production-page" [attr.aria-busy]="loading || saving || assignmentSaving">
-  <plp-page-header title="تشغيل وتسجيل الإنتاج" subtitle="اختر مسار العمل مرة واحدة، ثم عيّن العمال وسجّل الدفعات الفعلية دون مغادرة الصفحة."></plp-page-header>
+  <plp-page-header title="تشغيل وتسجيل الإنتاج" description="اختر مسار العمل مرة واحدة، ثم عيّن العمال وسجّل الدفعات الفعلية دون مغادرة الصفحة."></plp-page-header>
   <p class="production-page__error" *ngIf="error" role="alert">{{ error }}</p>
   <p class="production-page__success" *ngIf="recordActionSuccess" role="status">{{ recordActionSuccess }}</p>
 
@@ -35,12 +35,16 @@
     <p class="production-page__context-note" *ngIf="selectedProductionLineId && !selectedMainStageId">اختر المرحلة الرئيسية لعرض مراحلها الفرعية.</p>
     <p class="production-page__context-note" *ngIf="selectedMainStageId && !selectedSubStageId">اختر المرحلة الفرعية لفتح تعيين العمال وتسجيل الإنتاج.</p>
     <div class="production-page__selected-context" *ngIf="selectedFactoryId || selectedProductionLineId || selectedProductModelId || selectedMainStageId || selectedSubStageId">
-      <span>المصنع: <strong>{{ selectedFactoryLabel }}</strong></span>
-      <span>الخط: <strong>{{ selectedProductionLineLabel }}</strong></span>
-      <span>المنتج: <strong>{{ selectedProductLabel }}</strong></span>
-      <span>المرحلة الرئيسية: <strong>{{ selectedMainStageLabel }}</strong></span>
-      <span>المرحلة الفرعية: <strong>{{ selectedSubStageLabel }}</strong></span>
-      <span>تاريخ الإنتاج: <strong>{{ selectedProductionDate }}</strong></span>
+      <plp-product-metadata-row label="مسار الإنتاج المحدد">
+        <plp-product-metadata-item label="المصنع" [value]="selectedFactoryLabel"></plp-product-metadata-item>
+        <plp-product-metadata-item label="الخط" [value]="selectedProductionLineLabel"></plp-product-metadata-item>
+        <plp-product-metadata-item label="المرحلة الرئيسية" [value]="selectedMainStageLabel"></plp-product-metadata-item>
+        <plp-product-metadata-item label="المرحلة الفرعية" [value]="selectedSubStageLabel"></plp-product-metadata-item>
+      </plp-product-metadata-row>
+      <plp-product-metadata-row label="بيانات تشغيل الإنتاج">
+        <plp-product-metadata-item label="المنتج" [value]="selectedProductLabel"></plp-product-metadata-item>
+        <plp-product-metadata-item label="تاريخ الإنتاج" [value]="selectedProductionDate"></plp-product-metadata-item>
+      </plp-product-metadata-row>
     </div>
   </p-card>
 
@@ -132,11 +136,14 @@
           <article *ngFor="let worker of currentWorkers; trackBy: trackByWorkerId">
             <div class="production-page__worker-identity">
               <plp-worker-avatar [fullName]="worker.fullName" [code]="worker.employeeCode" [photoReference]="worker.photoReference" size="md"></plp-worker-avatar>
-              <strong>{{ worker.employeeCode }} — {{ worker.fullName }}</strong>
+              <strong>{{ worker.fullName }}</strong>
             </div>
-            <span>{{ workerAttendanceLabel(worker) }}</span>
-            <small *ngIf="worker.departmentName">{{ worker.departmentName }}</small>
-            <small>{{ worker.assignmentType === 'Temporary' ? 'نقل مؤقت ساري' : worker.assignmentType === 'Replacement' ? 'بديل مؤقت' : 'تعيين حالي' }}</small>
+            <plp-product-metadata-row [label]="'بيانات العامل ' + worker.fullName">
+              <plp-product-metadata-item label="الكود" [value]="worker.employeeCode"></plp-product-metadata-item>
+              <plp-product-metadata-item label="الحضور" [value]="workerAttendanceLabel(worker)"></plp-product-metadata-item>
+              <plp-product-metadata-item *ngIf="worker.departmentName" label="القسم" [value]="worker.departmentName"></plp-product-metadata-item>
+              <plp-product-metadata-item label="التعيين" [value]="worker.assignmentType === 'Temporary' ? 'نقل مؤقت ساري' : worker.assignmentType === 'Replacement' ? 'بديل مؤقت' : 'تعيين حالي'"></plp-product-metadata-item>
+            </plp-product-metadata-row>
             <div class="production-page__inline-actions">
               <button pButton type="button" class="p-button-text" [label]="isRecordableWorker(worker) ? 'إضافته لدفعة الإنتاج' : 'غير متاح للإنتاج بسبب الحضور'" (click)="addWorker(worker)" [disabled]="!isRecordableWorker(worker) || isRecordReadOnly || saving"></button>
               <button pButton type="button" *ngIf="canManageAssignments && worker.assignmentId" class="p-button-text" label="نقل العامل" (click)="openMoveDialog(worker)" [disabled]="assignmentSaving"></button>
@@ -153,7 +160,14 @@
           <div class="production-page__wide production-page__candidate-list" aria-label="العمال الحاضرون المؤهلون للتعيين">
             <button type="button" *ngFor="let worker of assignmentCandidates; trackBy: trackByWorkerId" [class.is-selected]="assignmentForm.controls.workerId.value === worker.workerId" (click)="selectReplacementWorker(worker)">
               <plp-worker-avatar [fullName]="worker.fullName" [code]="worker.employeeCode" [photoReference]="worker.photoReference" size="sm" [decorative]="true"></plp-worker-avatar>
-              <span><strong>{{ worker.employeeCode }} — {{ worker.fullName }}</strong><small *ngIf="worker.departmentName">{{ worker.departmentName }}</small><small>{{ workerAvailabilityLabel(worker) }}</small></span>
+              <span>
+                <strong>{{ worker.fullName }}</strong>
+                <plp-product-metadata-row [label]="'بيانات المرشح ' + worker.fullName">
+                  <plp-product-metadata-item label="الكود" [value]="worker.employeeCode"></plp-product-metadata-item>
+                  <plp-product-metadata-item *ngIf="worker.departmentName" label="القسم" [value]="worker.departmentName"></plp-product-metadata-item>
+                  <plp-product-metadata-item label="الإتاحة" [value]="workerAvailabilityLabel(worker)"></plp-product-metadata-item>
+                </plp-product-metadata-row>
+              </span>
             </button>
             <p class="production-page__context-note" *ngIf="!assignmentCandidates.length">لا يوجد عامل حاضر مؤهل للإضافة في تاريخ الإنتاج المحدد. راجع عدد البصمات المؤكدة أعلاه ثم حدّث الحضور إذا كانت لديك الصلاحية.</p>
           </div>
@@ -240,7 +254,7 @@
           <p>الكمية تُحفظ مرة واحدة للدفعة. أضف فقط العمال المعينين حاليًا لهذه المرحلة؛ حساب الاستحقاق النهائي يأتي من الخادم والإعدادات الفعلية.</p>
           <div *ngFor="let worker of workers.controls; let i = index" [formGroupName]="i" class="production-page__worker">
             <select formControlName="workerId"><option value="">اختر العامل من التعيين الحالي</option><option *ngFor="let option of recordingWorkers; trackBy: trackByWorkerId" [value]="option.workerId" [disabled]="!canSelectWorker(option.workerId, i)">{{ option.employeeCode }} — {{ option.fullName }}</option></select>
-            <input *ngIf="selectedStage()?.compensationMode === 'SharedPercentage'" type="number" placeholder="النسبة %" formControlName="percentage"><input *ngIf="selectedStage()?.compensationMode === 'FixedAmount'" type="number" placeholder="قيمة ثابتة" formControlName="fixedAmount"><span *ngIf="selectedStage()?.compensationMode === 'FullRatePerWorker'">سعر كامل لكل عامل</span><button pButton type="button" icon="pi pi-times" class="p-button-danger p-button-text" (click)="removeWorker(i)" [disabled]="isRecordReadOnly"></button>
+            <input *ngIf="selectedStage()?.compensationMode === 'SharedPercentage'" type="number" placeholder="النسبة %" formControlName="percentage"><input *ngIf="selectedStage()?.compensationMode === 'FixedAmount'" type="number" placeholder="قيمة ثابتة" formControlName="fixedAmount"><span *ngIf="selectedStage()?.compensationMode === 'FullRatePerWorker'">سعر كامل لكل عامل</span><button pButton type="button" icon="pi pi-times" class="p-button-danger p-button-text" aria-label="إزالة العامل من التوزيع" title="إزالة العامل من التوزيع" (click)="removeWorker(i)" [disabled]="isRecordReadOnly"></button>
           </div>
         </section>
         <ul class="production-page__validation-summary production-page__wide" *ngIf="recordMissingRequirements.length" role="status">

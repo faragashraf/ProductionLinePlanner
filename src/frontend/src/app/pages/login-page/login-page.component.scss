@@ -6,7 +6,7 @@
 .plp-login {
   align-items: center;
   background:
-    linear-gradient(160deg, var(--plp-color-surface-selected), transparent 48%),
+    var(--plp-gradient-login),
     var(--plp-color-background);
   display: grid;
   gap: var(--plp-space-24);

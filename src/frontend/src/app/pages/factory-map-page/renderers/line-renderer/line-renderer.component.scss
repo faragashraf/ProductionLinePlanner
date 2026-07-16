@@ -62,16 +62,8 @@
   font-size: var(--plp-font-size-md);
 }
 
-.plp-line-renderer__summary p,
 .plp-line-renderer__summary-meta {
-  color: var(--plp-color-text-subtle);
-  font-size: var(--plp-font-size-xs);
-}
-
-.plp-line-renderer__summary-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem var(--plp-spacing-2);
+  min-inline-size: 0;
 }
 
 .plp-line-renderer__stage-button {

@@ -2,8 +2,10 @@
   <div class="plp-factory-card__head">
     <div class="plp-factory-card__info">
       <h3>{{ title }}</h3>
-      <p *ngIf="subtitle" class="plp-factory-card__subtitle">{{ subtitle }}</p>
-      <p class="plp-factory-card__meta">العاملون: {{ workersCurrent }} / {{ workersRequired }}</p>
+      <plp-status-badge *ngIf="subtitle" [status]="resolvedStatus" [label]="subtitle" [compact]="true"></plp-status-badge>
+      <plp-product-metadata-row [label]="'بيانات ' + title">
+        <plp-product-metadata-item [label]="metadataLabel" [value]="resolvedMetadataValue"></plp-product-metadata-item>
+      </plp-product-metadata-row>
     </div>
 
     <div class="plp-factory-card__readiness">

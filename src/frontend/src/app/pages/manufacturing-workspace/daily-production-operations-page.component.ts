@@ -7,6 +7,7 @@ import {
   DailyProductionOperations,
   DailyProductionPreview,
   DailyProductionStage,
+  DailyProductionStagePreview,
   DailyProductionStageInput,
   DailyProductionWorker,
   DailyProductionWorkerInput,
@@ -16,6 +17,7 @@ import { FactoryItem, ManufacturingMasterDataApiService, ProductModelItem, Produ
 import { PermissionService } from '../../core/services/permission.service';
 import { createClientRequestId } from '../../core/utils/client-request-id';
 import { FormSubmissionValidationService } from '../../shared/forms/form-submission-validation.service';
+import { productionDisplayLabel } from '../../shared/product/production-display-labels';
 
 type StageFilter = 'all' | 'ready' | 'absent' | 'no-check-in' | 'no-staffing' | 'cost-review';
 type EditableDailyStage = Omit<DailyProductionStage, 'workers'> & {
@@ -358,10 +360,42 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
     return stage.isReady ? 'جاهزة' : 'تحتاج مراجعة';
   }
 
+  stageStatusTone(stage: EditableDailyStage): string {
+    if (stage.staffingStatus === 'NoStaffing' || stage.hasAbsentWorkers) return 'critical';
+    if (stage.hasNoSourceCheckInWorkers || !stage.isReady) return 'warning';
+    return 'ready';
+  }
+
+  stageCostStatusLabel(stage: EditableDailyStage): string {
+    return stage.isFinancialReviewPending ? 'تحتاج مراجعة تكلفة' : 'تكلفة جاهزة';
+  }
+
+  stageCostStatusTone(stage: EditableDailyStage): string {
+    return stage.isFinancialReviewPending ? 'warning' : 'ready';
+  }
+
+  compensationModeLabel(value: string | null | undefined): string {
+    return productionDisplayLabel(value, 'طريقة الاحتساب غير محدة');
+  }
+
+  assignmentTypeLabel(value: string | null | undefined): string {
+    return productionDisplayLabel(value, 'بديل / تجاوز تشغيلي');
+  }
+
+  staffingStatusLabel(value: string | null | undefined): string {
+    return productionDisplayLabel(value, 'حالة التسكين غير محدة');
+  }
+
+  workerServiceLabel(worker: DailyProductionWorker): string {
+    return worker.isOnActiveService ? 'على رأس العمل' : 'خارج الخدمة';
+  }
+
+  stageEntitlement(stage: DailyProductionStagePreview): number {
+    return stage.workers.reduce((total, worker) => total + worker.calculatedEarning, 0);
+  }
+
   attendanceLabel(worker: DailyProductionWorker): string {
-    if (worker.attendanceStatus === 'Present') return 'حاضر';
-    if (worker.attendanceStatus === 'Absent') return 'غائب';
-    return 'لا توجد بصمة مصدر';
+    return productionDisplayLabel(worker.attendanceStatus, 'لا توجد بصمة مصدر');
   }
 
   trackById(_: number, item: { productModelStageId?: string; workerId?: string; id?: string }): string {

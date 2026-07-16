@@ -2,9 +2,11 @@
   <plp-worker-avatar [fullName]="safeFullName" [code]="safeCode" [status]="status"></plp-worker-avatar>
   <div class="plp-worker-card__details">
     <h3>{{ safeFullName || 'عامل غير محدد' }}</h3>
-    <p>كود: {{ safeCode || '؟' }}</p>
-    <p>{{ safeAssignmentType || 'غير محدد' }}</p>
-    <p *ngIf="safeLastActivity">{{ safeLastActivity }}</p>
+    <plp-product-metadata-row [label]="'بيانات العامل ' + (safeFullName || 'غير محدد')">
+      <plp-product-metadata-item label="الكود" [value]="safeCode || 'غير محدد'"></plp-product-metadata-item>
+      <plp-product-metadata-item label="التعيين" [value]="safeAssignmentType || 'غير محدد'"></plp-product-metadata-item>
+      <plp-product-metadata-item *ngIf="safeLastActivity" label="آخر نشاط" [value]="safeLastActivity"></plp-product-metadata-item>
+    </plp-product-metadata-row>
   </div>
   <plp-status-badge [status]="status"></plp-status-badge>
 </article>

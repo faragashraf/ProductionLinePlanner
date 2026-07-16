@@ -9,6 +9,7 @@ import { AuthLoginResponse } from '../../core/models/auth.models';
 import { AuthService } from '../../core/services/auth.service';
 import { ProductExperienceModule } from '../../shared/product/product-experience.module';
 import { LoginPageComponent } from './login-page.component';
+import { PRODUCT_IDENTITY } from '../../core/config/product-identity.config';
 
 describe('LoginPageComponent', () => {
   let fixture: ComponentFixture<LoginPageComponent>;
@@ -55,6 +56,8 @@ describe('LoginPageComponent', () => {
     expect(logo).not.toBeNull();
     expect(logo.classList.contains('plp-brand-logo--animated')).toBeTrue();
     expect(login.querySelectorAll(':scope > svg')).toHaveSize(0);
+    expect(login.textContent).toContain(PRODUCT_IDENTITY.nameAr);
+    expect(logo.getAttribute('aria-label')).toBe(PRODUCT_IDENTITY.logoLabelAr);
   });
 
   it('submits the existing authentication service exactly once from the rendered form', () => {

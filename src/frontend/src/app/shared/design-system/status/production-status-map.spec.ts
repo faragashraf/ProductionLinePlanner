@@ -23,7 +23,7 @@ describe('Production status language', () => {
   it('provides one shared tone, PrimeNG severity, and PrimeIcon for every standard status', () => {
     requiredStatuses.forEach((status) => {
       const meta = PRODUCTION_STATUS_MAP[status];
-      expect(meta.icon).toMatch(/^pi-/);
+      expect(meta.icon).toMatch(/^pi pi-/);
       expect(PRODUCTION_VISUAL_TONE_MAP[meta.tone].token).toMatch(/^--plp-color-/);
       expect(PRODUCTION_VISUAL_TONE_MAP[meta.tone].primeSeverity).toBeTruthy();
     });

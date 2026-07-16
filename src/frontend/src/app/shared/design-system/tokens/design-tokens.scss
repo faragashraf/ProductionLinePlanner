@@ -30,6 +30,11 @@
   --plp-type-supporting: var(--plp-font-size-14);
   --plp-type-caption: var(--plp-font-size-12);
   --plp-type-dense: var(--plp-font-size-14);
+  --plp-icon-size-sm: var(--plp-font-size-14);
+  --plp-icon-size-md: var(--plp-font-size-16);
+  --plp-icon-size-lg: var(--plp-font-size-20);
+  --plp-icon-size-xl: var(--plp-font-size-24);
+  --plp-icon-label-gap: var(--plp-space-8);
 
   /* Approved spacing scale: 4, 8, 12, 16, 20, 24, 32, 40, 48. */
   --plp-space-4: 0.25rem;
@@ -99,10 +104,16 @@
   --plp-content-width-wide: 80rem;
   --plp-content-width-max: 90rem;
   --plp-page-padding: var(--plp-space-16);
+  --plp-page-stack-gap: var(--plp-space-24);
+  --plp-section-stack-gap: var(--plp-space-16);
+  --plp-surface-padding: var(--plp-space-16);
   --plp-dialog-gutter: var(--plp-space-16);
   --plp-dialog-width: var(--plp-content-width-compact);
   --plp-dialog-width-wide: var(--plp-content-width-narrow);
   --plp-grid-gap: var(--plp-space-16);
+  --plp-app-header-height: 4rem;
+  --plp-app-sidebar-width-tablet: 13.5rem;
+  --plp-app-sidebar-width-desktop: 15rem;
 
   --plp-breakpoint-phone-max: 599px;
   --plp-breakpoint-tablet-portrait-min: 600px;
@@ -160,6 +171,13 @@
   --plp-color-disabled-text: #94a3b8;
   --plp-color-disabled-border: #d7e0ed;
   --plp-color-overlay: rgba(15, 23, 42, 0.48);
+  --plp-color-shell-navigation: #111c35;
+  --plp-color-shell-navigation-soft: #1a2a4d;
+  --plp-color-shell-navigation-text: #dbe7ff;
+  --plp-color-shell-navigation-muted: #9fb0d0;
+  --plp-color-shell-navigation-active: #ffffff;
+  --plp-gradient-workspace: linear-gradient(180deg, #f4f7ff 0%, #f8faff 38%, #f5f7fb 100%);
+  --plp-gradient-login: linear-gradient(155deg, #e8f0ff 0%, rgba(232, 240, 255, 0.2) 46%, transparent 72%);
 
   --plp-brand-flow-primary: var(--plp-color-primary);
   --plp-brand-flow-ink: var(--plp-color-primary-active);
@@ -214,7 +232,7 @@
 
 .plp-shell-bg {
   min-height: 100dvh;
-  background: linear-gradient(180deg, #f4f8ff 0%, #eef3ff 35%, #f7f8fd 100%);
+  background: var(--plp-gradient-workspace);
 }
 
 .plp-card {

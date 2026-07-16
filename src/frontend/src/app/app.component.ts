@@ -1,4 +1,6 @@
 import { Component } from '@angular/core';
+import { Title } from '@angular/platform-browser';
+import { PRODUCT_IDENTITY } from './core/config/product-identity.config';
 
 @Component({
   selector: 'app-root',
@@ -6,5 +8,7 @@ import { Component } from '@angular/core';
   styleUrl: './app.component.scss'
 })
 export class AppComponent {
-  title = 'Production Line Planner';
+  constructor(title: Title) {
+    title.setTitle(PRODUCT_IDENTITY.nameAr);
+  }
 }

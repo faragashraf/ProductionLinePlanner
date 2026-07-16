@@ -10,7 +10,7 @@ import { productionIconFor } from '../design-system/icons/production-icon-map';
   template: `
     <section class="plp-product-toolbar" [class.plp-density-compact]="density === 'compact'">
       <div class="plp-product-toolbar__search" *ngIf="searchEnabled">
-        <i [ngClass]="['pi', searchIcon]" aria-hidden="true"></i>
+        <i [ngClass]="searchIcon" aria-hidden="true"></i>
         <label class="plp-sr-only" [attr.for]="searchInputId">{{ searchLabel }}</label>
         <input
           pInputText

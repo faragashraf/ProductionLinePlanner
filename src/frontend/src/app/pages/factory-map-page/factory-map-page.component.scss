@@ -20,8 +20,6 @@
 }
 
 .factory-visualization-page__path,
-.factory-map-summary__meta,
-.factory-map-line-card__details,
 .factory-map-line-card__stages {
   display: flex;
   flex-wrap: wrap;
@@ -118,8 +116,7 @@
 
 .factory-map-summary__meta,
 .factory-map-line-card__details {
-  gap: 0.45rem var(--plp-spacing-2);
-  font-size: var(--plp-font-size-xs);
+  min-inline-size: 0;
 }
 
 .factory-map-summary__meta {

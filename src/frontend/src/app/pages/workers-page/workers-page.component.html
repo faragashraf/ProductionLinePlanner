@@ -1,5 +1,14 @@
 <section class="page-frame workers-page">
   <plp-page-header title="العاملون" description="عرض وعرض تفاصيل بيانات العاملين مع بحث فوري." [compact]="true">
+    <plp-product-metadata-row
+      *ngIf="hasLoadedOnce"
+      header-metadata
+      plp-page-metadata
+      label="ملخص قائمة العاملين"
+    >
+      <plp-product-metadata-item label="إجمالي العاملين" [value]="totalRecords"></plp-product-metadata-item>
+      <plp-product-metadata-item label="المعروض الآن" [value]="workers.length"></plp-product-metadata-item>
+    </plp-product-metadata-row>
     <div header-actions>
       <button
         pButton
@@ -92,9 +101,6 @@
       <ng-template pTemplate="header">
         <tr>
           <th>العامل</th>
-          <th>الكود</th>
-          <th>القسم</th>
-          <th>الحالة</th>
           <th>التواصل</th>
           <th>الإجراءات</th>
         </tr>
@@ -104,13 +110,15 @@
           <td data-plp-label="العامل">
             <div class="workers-identity">
               <plp-worker-avatar [fullName]="worker.fullName" [code]="worker.code" [photoReference]="worker.photoReference" [hasPhoto]="worker.hasPhoto" [photoVersion]="worker.photoVersion" size="sm"></plp-worker-avatar>
-              <span>{{ worker.fullName }}</span>
+              <div class="workers-identity__content">
+                <strong class="workers-identity__name">{{ worker.fullName }}</strong>
+                <plp-product-metadata-row [label]="'بيانات العامل ' + worker.fullName">
+                  <plp-product-metadata-item label="الكود" [value]="worker.code"></plp-product-metadata-item>
+                  <plp-product-metadata-item label="القسم" [value]="worker.department || 'غير محدد'"></plp-product-metadata-item>
+                  <plp-product-metadata-item label="الحالة" [value]="worker.state"></plp-product-metadata-item>
+                </plp-product-metadata-row>
+              </div>
             </div>
-          </td>
-          <td data-plp-label="الكود"><span class="plp-code">{{ worker.code }}</span></td>
-          <td data-plp-label="القسم">{{ worker.department || '-' }}</td>
-          <td data-plp-label="الحالة">
-            <span class="workers-state">{{ worker.state }}</span>
           </td>
           <td data-plp-label="التواصل">
             <div class="workers-contact">
@@ -146,7 +154,7 @@
       </ng-template>
       <ng-template pTemplate="emptymessage">
         <tr>
-          <td colspan="6">لا يوجد عناصر لعرضها.</td>
+          <td colspan="3">لا يوجد عناصر لعرضها.</td>
         </tr>
       </ng-template>
     </p-table>

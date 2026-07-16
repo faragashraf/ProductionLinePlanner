@@ -69,7 +69,7 @@
               <td>
                 <button pButton type="button" class="p-button-sm p-button-text" label="اختيار" (click)="selectFactory(factory.id)"></button>
                 <ng-container *plpCan="permissions.factoryStructure.manage">
-                  <button pButton type="button" class="p-button-sm p-button-text" icon="pi pi-pencil" aria-label="تعديل المصنع" (click)="editFactory(factory)"></button>
+                  <button pButton type="button" class="p-button-sm p-button-text" icon="pi pi-pencil" aria-label="تعديل المصنع" title="تعديل المصنع" (click)="editFactory(factory)"></button>
                 </ng-container>
               </td>
             </tr>
@@ -113,7 +113,7 @@
               <td>
                 <button pButton type="button" class="p-button-sm p-button-text" label="اختيار" (click)="selectLine(line.id)"></button>
                 <ng-container *plpCan="permissions.factoryStructure.manage">
-                  <button pButton type="button" class="p-button-sm p-button-text" icon="pi pi-pencil" aria-label="تعديل الخط" (click)="editLine(line)"></button>
+                  <button pButton type="button" class="p-button-sm p-button-text" icon="pi pi-pencil" aria-label="تعديل الخط" title="تعديل الخط" (click)="editLine(line)"></button>
                   <button pButton type="button" class="p-button-sm p-button-text" [label]="line.isActive ? 'تعطيل' : 'تفعيل'" [disabled]="isSaving" (click)="setLineActive(line, !line.isActive)"></button>
                 </ng-container>
               </td>
@@ -160,7 +160,7 @@
               <td>
                 <button pButton type="button" class="p-button-sm p-button-text" label="اختيار" (click)="selectMainStage(stage.id)"></button>
                 <ng-container *plpCan="permissions.factoryStructure.manage">
-                  <button pButton type="button" class="p-button-sm p-button-text" icon="pi pi-pencil" aria-label="تعديل المرحلة الرئيسية" (click)="editMainStage(stage)"></button>
+                  <button pButton type="button" class="p-button-sm p-button-text" icon="pi pi-pencil" aria-label="تعديل المرحلة الرئيسية" title="تعديل المرحلة الرئيسية" (click)="editMainStage(stage)"></button>
                   <button pButton type="button" class="p-button-sm p-button-text" [label]="stage.isActive ? 'تعطيل' : 'تفعيل'" [disabled]="isSaving" (click)="setMainStageActive(stage, !stage.isActive)"></button>
                 </ng-container>
               </td>
@@ -207,7 +207,7 @@
               <td>
                 <button pButton type="button" class="p-button-sm p-button-text" label="اختيار" (click)="selectSubStage(stage.id)"></button>
                 <ng-container *plpCan="permissions.factoryStructure.manage">
-                  <button pButton type="button" class="p-button-sm p-button-text" icon="pi pi-pencil" aria-label="تعديل المرحلة الفرعية" (click)="editSubStage(stage)"></button>
+                  <button pButton type="button" class="p-button-sm p-button-text" icon="pi pi-pencil" aria-label="تعديل المرحلة الفرعية" title="تعديل المرحلة الفرعية" (click)="editSubStage(stage)"></button>
                   <button pButton type="button" class="p-button-sm p-button-text" [label]="stage.isActive ? 'تعطيل' : 'تفعيل'" [disabled]="isSaving" (click)="setSubStageActive(stage, !stage.isActive)"></button>
                 </ng-container>
               </td>

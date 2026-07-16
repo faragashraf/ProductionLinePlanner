@@ -1,13 +1,17 @@
 <plp-factory-card
   [title]="lineName"
-  [subtitle]="statusText"
+  subtitle=""
   [readinessPercent]="readinessPercent"
   [workersCurrent]="0"
   [workersRequired]="totalStages"
+  metadataLabel="عدد المراحل"
+  [metadataValue]="totalStages"
   [status]="status"
 >
   <footer class="plp-production-line-card__footer">
-    <span>المرحلة النشطة: {{ activeStage || 'غير محدد' }}</span>
+    <plp-product-metadata-row label="بيانات خط الإنتاج">
+      <plp-product-metadata-item label="المرحلة النشطة" [value]="activeStage || 'غير محدد'"></plp-product-metadata-item>
+    </plp-product-metadata-row>
     <plp-status-badge [status]="status" [label]="statusText"></plp-status-badge>
   </footer>
 </plp-factory-card>

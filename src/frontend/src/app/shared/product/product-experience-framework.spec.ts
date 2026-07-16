@@ -2,6 +2,7 @@ import { Component, NgZone, Type } from '@angular/core';
 import { ComponentFixture, TestBed, fakeAsync, flushMicrotasks } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { NoopAnimationsModule } from '@angular/platform-browser/animations';
+import { HttpClientTestingModule } from '@angular/common/http/testing';
 import { ConfirmationService, PrimeNGConfig } from 'primeng/api';
 import { Table, TableModule } from 'primeng/table';
 import { PlpActionButtonComponent } from './plp-action-button.component';
@@ -9,6 +10,9 @@ import { PlpConfirmationService } from './plp-confirmation.service';
 import { PlpDialogComponent } from './plp-dialog.component';
 import { PlpFormFieldComponent } from './plp-form-field.component';
 import { PlpProductLoadingStateComponent } from './plp-loading-state.component';
+import { PlpProductEmptyStateComponent } from './plp-empty-state.component';
+import { PlpProductErrorStateComponent } from './plp-error-state.component';
+import { PlpProductPageHeaderComponent } from './plp-page-header.component';
 import { PlpTableComponent } from './plp-table.component';
 import { PlpProductToolbarComponent } from './plp-toolbar.component';
 import { PlpResponsiveTableDirective } from './plp-responsive-table.directive';
@@ -16,6 +20,8 @@ import { PlpTablePaginationDirective } from './plp-table-pagination.directive';
 import { PLP_ACTION_DEFINITIONS, plpActionIconFor } from './product-action';
 import { PLP_DIALOG_SIZE_CLASS, PLP_RESPONSIVE_CONTRACT } from './product-responsive';
 import { configureProductionPrimeNg } from '../design-system/layering/production-z-index';
+import { SharedModule } from '../shared.module';
+import { PlpProductMetadataItemComponent, PlpProductMetadataRowComponent } from './plp-metadata-row.component';
 
 @Component({
   standalone: true,
@@ -81,9 +87,54 @@ class PaginatedTableHostComponent {
   }
 }
 
+@Component({
+  standalone: true,
+  imports: [HttpClientTestingModule, SharedModule],
+  template: `
+    <plp-page-header title="العاملون" description="دليل القوة العاملة">
+      <plp-product-metadata-row header-metadata plp-page-metadata label="ملخص العاملين">
+        <plp-product-metadata-item label="الإجمالي" value="120"></plp-product-metadata-item>
+      </plp-product-metadata-row>
+      <button header-actions type="button">إضافة</button>
+    </plp-page-header>
+    <plp-loading-skeleton [lines]="2" [showAvatar]="true"></plp-loading-skeleton>
+    <plp-empty-state actionText="تحديث"></plp-empty-state>
+    <plp-error-state></plp-error-state>
+  `
+})
+class LegacyFoundationHostComponent {}
+
+@Component({
+  standalone: true,
+  imports: [HttpClientTestingModule, SharedModule],
+  template: `
+    <plp-factory-card title="مصنع القاهرة" metadataLabel="العاملون" metadataValue="90"></plp-factory-card>
+    <plp-production-line-card lineName="خط التجميع" statusText="جاهز" [totalStages]="8" activeStage="الخياطة"></plp-production-line-card>
+    <plp-main-stage-card name="التجميع" [workersCurrent]="8" [workersRequired]="10"></plp-main-stage-card>
+    <plp-sub-stage-card name="الخياطة" [workersCurrent]="4" [workersRequired]="5"></plp-sub-stage-card>
+    <plp-worker-card fullName="أحمد علي" code="W-100" assignmentType="تعيين حالي" lastActivity="اليوم"></plp-worker-card>
+    <plp-assignment-card worker="أحمد علي" fromStage="القص" toStage="الخياطة" assignmentType="مؤقت"></plp-assignment-card>
+  `
+})
+class BusinessHierarchyHostComponent {}
+
+@Component({
+  standalone: true,
+  imports: [PlpProductPageHeaderComponent, PlpProductMetadataItemComponent, PlpProductMetadataRowComponent],
+  template: `
+    <plp-product-page-header title="بيانات العامل">
+      <plp-product-metadata-row plp-page-metadata label="بيانات العامل الإضافية">
+        <plp-product-metadata-item label="الكود" value="W-100"></plp-product-metadata-item>
+        <plp-product-metadata-item label="القسم" value="التجميع"></plp-product-metadata-item>
+      </plp-product-metadata-row>
+    </plp-product-page-header>
+  `
+})
+class MetadataHierarchyHostComponent {}
+
 describe('Product Experience Framework', () => {
   beforeEach(() => {
-    TestBed.configureTestingModule({ imports: [NoopAnimationsModule] });
+    TestBed.configureTestingModule({ imports: [HttpClientTestingModule, NoopAnimationsModule] });
     configureProductionPrimeNg(TestBed.inject(PrimeNGConfig));
   });
 
@@ -101,15 +152,18 @@ describe('Product Experience Framework', () => {
       'import',
       'export'
     ]);
-    expect(plpActionIconFor('delete')).toBe('pi-trash');
+    expect(plpActionIconFor('delete')).toBe('pi pi-trash');
   });
 
   it('emits the reusable action event exactly once from the rendered button', () => {
     const fixture = createComponent(ActionHostComponent);
+    const icon = fixture.nativeElement.querySelector('.p-button-icon') as HTMLElement;
 
     fixture.nativeElement.querySelector('button').click();
 
     expect(fixture.componentInstance.saves).toBe(1);
+    expect(icon.classList.contains('pi')).toBeTrue();
+    expect(icon.classList.contains('pi-save')).toBeTrue();
   });
 
   it('uses token-aligned phone and Android-tablet dialog gutters', () => {
@@ -139,6 +193,63 @@ describe('Product Experience Framework', () => {
     fixture.detectChanges();
 
     expect(fixture.debugElement.query(By.directive(PlpProductLoadingStateComponent))).not.toBeNull();
+  });
+
+  it('keeps loading geometry stable across equivalent change-detection passes', () => {
+    const fixture = createComponent(PlpProductLoadingStateComponent);
+    fixture.componentRef.setInput('lines', 5);
+    fixture.detectChanges();
+    const rows = fixture.componentInstance.rows;
+
+    fixture.detectChanges();
+
+    expect(fixture.componentInstance.rows).toBe(rows);
+    expect(fixture.nativeElement.querySelectorAll('.plp-product-loading__row')).toHaveSize(5);
+  });
+
+  it('routes legacy page and state selectors through the shared Product Experience foundation', () => {
+    const fixture = createComponent(LegacyFoundationHostComponent);
+
+    expect(fixture.debugElement.query(By.directive(PlpProductPageHeaderComponent))).not.toBeNull();
+    expect(fixture.debugElement.query(By.directive(PlpProductLoadingStateComponent))).not.toBeNull();
+    expect(fixture.debugElement.query(By.directive(PlpProductEmptyStateComponent))).not.toBeNull();
+    expect(fixture.debugElement.query(By.directive(PlpProductErrorStateComponent))).not.toBeNull();
+    expect(fixture.nativeElement.textContent).toContain('دليل القوة العاملة');
+    expect(fixture.nativeElement.textContent).toContain('إضافة');
+    expect(fixture.nativeElement.querySelector('.plp-product-metadata__tag')?.textContent).toContain('الإجمالي: 120');
+  });
+
+  it('keeps entity names primary and secondary facts in the shared PrimeNG metadata pattern', () => {
+    const fixture = createComponent(MetadataHierarchyHostComponent);
+    const title = fixture.nativeElement.querySelector('h1') as HTMLHeadingElement;
+    const metadata = fixture.nativeElement.querySelector('[role="list"]') as HTMLElement;
+    const tags = fixture.nativeElement.querySelectorAll('.plp-product-metadata__tag');
+
+    expect(title.textContent).toContain('بيانات العامل');
+    expect(metadata.getAttribute('aria-label')).toBe('بيانات العامل الإضافية');
+    expect(tags).toHaveSize(2);
+    expect(tags[0].classList.contains('p-tag')).toBeTrue();
+    expect(tags[0].textContent).toContain('الكود: W-100');
+    expect(tags[1].textContent).toContain('القسم: التجميع');
+  });
+
+  it('renders the shared metadata hierarchy inside the actual reusable business cards', () => {
+    const fixture = createComponent(BusinessHierarchyHostComponent);
+    const headings = fixture.nativeElement.querySelectorAll('h3, h4') as NodeListOf<Element>;
+    const metadataTags = fixture.nativeElement.querySelectorAll('.plp-product-metadata__tag') as NodeListOf<Element>;
+    const primaryNames = Array.from(headings, heading => heading.textContent?.trim());
+    const tags = Array.from(metadataTags, tag => tag.textContent?.trim());
+
+    expect(primaryNames).toContain('مصنع القاهرة');
+    expect(primaryNames).toContain('خط التجميع');
+    expect(primaryNames).toContain('التجميع');
+    expect(primaryNames).toContain('الخياطة');
+    expect(primaryNames).toContain('أحمد علي');
+    expect(tags).toContain('العاملون: 90');
+    expect(tags).toContain('عدد المراحل: 8');
+    expect(tags).toContain('الكود: W-100');
+    expect(tags).toContain('من: القص');
+    expect(tags).toContain('إلى: الخياطة');
   });
 
   it('applies the shared contained-scroll and sticky-actions contract without duplicating table templates', () => {
@@ -255,7 +366,7 @@ describe('Product Experience Framework', () => {
     expect(confirmationService.confirm).toHaveBeenCalledWith(
       jasmine.objectContaining({
         key: 'plp-confirm',
-        icon: 'pi-trash',
+        icon: 'pi pi-trash',
         acceptButtonStyleClass: 'p-button-danger',
         accept
       })

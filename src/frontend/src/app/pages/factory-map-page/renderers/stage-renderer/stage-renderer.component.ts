@@ -5,6 +5,7 @@ import {
   assignmentContextToQueryParams,
   createFactoryMapAssignmentContext
 } from '../../../../shared/models/assignment-context.model';
+import { productionNavigationIconFor } from '../../../../shared/design-system/icons/production-icon-map';
 
 type StageRenderMode = 'stage' | 'worker';
 type StageRendererBack = 'line' | 'stage';
@@ -16,6 +17,9 @@ type StageRendererBack = 'line' | 'stage';
   changeDetection: ChangeDetectionStrategy.OnPush
 })
 export class StageRendererComponent {
+  readonly backIcon = productionNavigationIconFor('back', 'rtl');
+  readonly forwardIcon = productionNavigationIconFor('forward', 'rtl');
+
   @Input() line!: ProductionLineLayout;
   @Input() mainStage!: MainStageLayout;
   @Input() mode: StageRenderMode = 'stage';

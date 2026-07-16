@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, Input, booleanAttribute } from '@angular/core';
+import { PRODUCT_IDENTITY } from '../../core/config/product-identity.config';
 
 export type PlpBrandLogoVariant = 'mark' | 'horizontal' | 'header' | 'login' | 'monochrome';
 
@@ -31,7 +32,7 @@ export type PlpBrandLogoVariant = 'mark' | 'horizontal' | 'header' | 'login' | '
         <rect class="plp-brand-logo__stage plp-brand-logo__stage--three" x="43" y="24" width="8" height="18" rx="2"/>
         <path class="plp-brand-logo__signal" d="m15 35.5 8-6.5 12 3 13-14h7m-4-4 4 4-4 4"/>
       </svg>
-      <span class="plp-brand-logo__wordmark plp-text-supporting" dir="rtl" [hidden]="!isHorizontal" [attr.aria-hidden]="label ? 'true' : null">منصة تخطيط خطوط الإنتاج</span>
+      <span class="plp-brand-logo__wordmark plp-text-supporting" dir="rtl" [hidden]="!isHorizontal" [attr.aria-hidden]="label ? 'true' : null">{{ productIdentity.nameAr }}</span>
     </span>
   `,
   styles: [`
@@ -62,6 +63,8 @@ export type PlpBrandLogoVariant = 'mark' | 'horizontal' | 'header' | 'login' | '
   changeDetection: ChangeDetectionStrategy.OnPush
 })
 export class PlpBrandLogoComponent {
+  readonly productIdentity = PRODUCT_IDENTITY;
+
   @Input() variant: PlpBrandLogoVariant = 'mark';
   @Input() label = '';
   @Input() size = '';

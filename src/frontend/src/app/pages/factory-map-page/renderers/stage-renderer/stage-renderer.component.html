@@ -7,7 +7,7 @@
       (click)="onBackToLine()"
       aria-label="عودة إلى المراحل الرئيسية"
     >
-      <i class="pi pi-arrow-right" aria-hidden="true"></i>
+      <i [class]="backIcon" aria-hidden="true"></i>
       العودة للخط {{ line.name }}
     </button>
 
@@ -18,12 +18,14 @@
       (click)="onBackToStage()"
       aria-label="عودة إلى تفاصيل المرحلة"
     >
-      <i class="pi pi-arrow-right" aria-hidden="true"></i>
+      <i [class]="backIcon" aria-hidden="true"></i>
       العودة لمستوى المرحلة
     </button>
 
     <h2 class="plp-stage-renderer__title">{{ mainStage.name }}</h2>
-    <p class="plp-stage-renderer__context">خط {{ line.name }}</p>
+    <plp-product-metadata-row class="plp-stage-renderer__context" label="سياق المرحلة الرئيسية">
+      <plp-product-metadata-item label="خط الإنتاج" [value]="line.name"></plp-product-metadata-item>
+    </plp-product-metadata-row>
   </header>
 
   <plp-main-stage-card
@@ -43,7 +45,7 @@
       aria-label="بدء توصية لهذه المرحلة"
     >
       بدء التوصية من هذه المرحلة
-      <i class="pi pi-arrow-left" aria-hidden="true"></i>
+      <i [class]="forwardIcon" aria-hidden="true"></i>
     </a>
     <plp-responsive-grid class="plp-stage-renderer__substages-grid" [minItemWidth]="240" [gap]="'var(--plp-spacing-2)'">
       <button
@@ -79,7 +81,7 @@
       [attr.aria-label]="'فتح التعيينات لمرحلة ' + subStage.name"
     >
       فتح التعيينات لهذه المرحلة
-      <i class="pi pi-arrow-left" aria-hidden="true"></i>
+      <i [class]="forwardIcon" aria-hidden="true"></i>
     </a>
 
     <p class="plp-stage-renderer__workers-title">العاملون في {{ subStage.name }}</p>

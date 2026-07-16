@@ -4,5 +4,7 @@
     <plp-status-badge [status]="status" [compact]="true"></plp-status-badge>
   </header>
   <plp-completion-bar [value]="percentage" [status]="status" label="نسبة تغطية"></plp-completion-bar>
-  <p>{{ workersCurrent }} / {{ workersRequired }} عامل</p>
+  <plp-product-metadata-row [label]="'بيانات مرحلة ' + name">
+    <plp-product-metadata-item label="العاملون" [value]="workersCurrent + ' / ' + workersRequired"></plp-product-metadata-item>
+  </plp-product-metadata-row>
 </article>

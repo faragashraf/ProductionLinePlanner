@@ -20,7 +20,6 @@
 .production-page__orders button { margin-inline-start: auto; }
 .production-page__current-workers { display: grid; gap: .5rem; }
 .production-page__current-workers article { display: grid; gap: .2rem; padding: .65rem; border-inline-start: 3px solid #175cd3; background: #f8fafc; }
-.production-page__current-workers small, .production-page__current-workers span { color: #667085; }
 .production-page__assignment-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .7rem; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #eaecf0; }
 .production-page__assignment-form h3, .production-page__assignment-form button { grid-column: 1 / -1; margin: 0; }
 .production-page__inline-actions { display: flex; gap: .4rem; flex-wrap: wrap; }

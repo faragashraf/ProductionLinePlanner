@@ -10,8 +10,4 @@ export class LoadingSkeletonComponent {
   @Input() lines = 3;
   @Input() showAvatar = true;
   @Input() cardLike = true;
-
-  get items(): number[] {
-    return Array.from({ length: Math.max(1, this.lines) });
-  }
 }

@@ -42,9 +42,24 @@
 }
 
 .workers-identity {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.55rem;
+  align-items: flex-start;
+  display: grid;
+  gap: var(--plp-space-12);
+  grid-template-columns: auto minmax(0, 1fr);
+  min-inline-size: min(100%, 22rem);
+}
+
+.workers-identity__content {
+  display: grid;
+  gap: var(--plp-space-8);
+  min-inline-size: 0;
+}
+
+.workers-identity__name {
+  color: var(--plp-color-text);
+  font-size: var(--plp-type-body);
+  line-height: var(--plp-line-height-heading);
+  overflow-wrap: anywhere;
 }
 
 .workers-table-shell,
@@ -54,18 +69,6 @@
 
 .workers-table-shell :host {
   width: 100%;
-}
-
-.workers-state {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 1.75rem;
-  min-width: 2.75rem;
-  padding: 0 0.55rem;
-  border-radius: var(--plp-radius-pill);
-  border: 1px solid color-mix(in oklab, var(--plp-color-border) 70%, transparent);
-  background: color-mix(in oklab, var(--plp-color-surface-soft) 75%, var(--plp-color-surface));
 }
 
 .workers-contact {

@@ -23,12 +23,13 @@ describe('Production icon language', () => {
     'approve',
     'reject',
     'close',
-    'menu'
+    'menu',
+    'signOut'
   ];
 
   it('maps every standard action to a PrimeIcon', () => {
     requiredActions.forEach((action) => {
-      expect(productionIconFor(action)).toMatch(/^pi-/);
+      expect(productionIconFor(action)).toMatch(/^pi pi-/);
     });
   });
 
@@ -37,8 +38,8 @@ describe('Production icon language', () => {
   });
 
   it('uses reading-direction-aware navigation arrows', () => {
-    expect(productionNavigationIconFor('back', 'rtl')).toBe('pi-arrow-right');
-    expect(productionNavigationIconFor('forward', 'rtl')).toBe('pi-arrow-left');
-    expect(productionNavigationIconFor('back', 'ltr')).toBe('pi-arrow-left');
+    expect(productionNavigationIconFor('back', 'rtl')).toBe('pi pi-arrow-right');
+    expect(productionNavigationIconFor('forward', 'rtl')).toBe('pi pi-arrow-left');
+    expect(productionNavigationIconFor('back', 'ltr')).toBe('pi pi-arrow-left');
   });
 });

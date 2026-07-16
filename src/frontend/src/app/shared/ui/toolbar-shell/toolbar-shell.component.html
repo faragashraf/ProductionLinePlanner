@@ -1,9 +1,3 @@
-<section class="plp-toolbar-shell">
-  <div class="plp-toolbar-shell__start">
-    <h1 *ngIf="title">{{ title }}</h1>
-    <p *ngIf="description">{{ description }}</p>
-  </div>
-  <div class="plp-toolbar-shell__actions">
-    <ng-content select="[toolbar-actions]" />
-  </div>
-</section>
+<plp-product-section-header [title]="title" [description]="description">
+  <ng-content select="[toolbar-actions]" />
+</plp-product-section-header>

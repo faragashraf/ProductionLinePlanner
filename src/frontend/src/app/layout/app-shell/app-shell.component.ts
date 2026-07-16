@@ -1,5 +1,5 @@
 import { Component, ElementRef, HostListener, OnDestroy, OnInit, ViewChild } from '@angular/core';
-import { ActivatedRoute, ActivationEnd, NavigationEnd, Router } from '@angular/router';
+import { ActivatedRoute, NavigationEnd, Router } from '@angular/router';
 import { MenuItem } from 'primeng/api';
 import { Subject, filter, takeUntil, map } from 'rxjs';
 import { APP_NAVIGATION_ITEMS, AppNavigationItem } from '../../core/config/navigation.config';
@@ -7,6 +7,8 @@ import { PermissionHydrationState, PermissionService } from '../../core/services
 import { AuthService } from '../../core/services/auth.service';
 import { PRODUCTION_RUNTIME_Z_INDEX } from '../../shared/design-system/layering/production-z-index';
 import { PLP_ANGULAR_MOTION } from '../../shared/product/product-motion';
+import { PRODUCT_IDENTITY } from '../../core/config/product-identity.config';
+import { productionIconFor } from '../../shared/design-system/icons/production-icon-map';
 
 export type ShellNavigationMode = 'phone' | 'tablet-portrait' | 'tablet-landscape' | 'desktop';
 
@@ -24,9 +26,16 @@ export class AppShellComponent implements OnInit, OnDestroy {
   breadcrumbItems: MenuItem[] = [];
   readonly overlaySidebarBaseZIndex = PRODUCTION_RUNTIME_Z_INDEX.modal;
   readonly sidebarTransitionOptions = PLP_ANGULAR_MOTION.sidebar;
+  readonly productIdentity = PRODUCT_IDENTITY;
+  readonly menuIcon = productionIconFor('menu');
+  readonly closeIcon = productionIconFor('close');
+  readonly signOutIcon = productionIconFor('signOut');
 
   navigationItems: AppNavigationItem[] = [];
+  workspaceNavigationItems: AppNavigationItem[] = [];
+  administrationNavigationItems: AppNavigationItem[] = [];
   permissionHydrationState: PermissionHydrationState = 'idle';
+  currentPageLabel = 'لوحة التحكم';
 
   private destroy$ = new Subject<void>();
 
@@ -53,23 +62,25 @@ export class AppShellComponent implements OnInit, OnDestroy {
       )
       .subscribe((items) => {
         this.navigationItems = items;
+        this.workspaceNavigationItems = items.filter((item) => item.group === 'workspace');
+        this.administrationNavigationItems = items.filter((item) => item.group === 'administration');
       });
 
     this.hydrateNavigation();
 
     this.router.events
       .pipe(
-        filter(event => event instanceof NavigationEnd || event instanceof ActivationEnd),
+        filter((event): event is NavigationEnd => event instanceof NavigationEnd),
         takeUntil(this.destroy$)
       )
-      .subscribe((event) => {
-        this.breadcrumbItems = this.buildBreadcrumbs(this.activatedRoute.root.snapshot);
-        if (event instanceof NavigationEnd && this.isOverlayNavigation) {
+      .subscribe(() => {
+        this.updateBreadcrumbs();
+        if (this.isOverlayNavigation) {
           this.closeSidebar();
         }
       });
 
-    this.breadcrumbItems = this.buildBreadcrumbs(this.activatedRoute.root.snapshot);
+    this.updateBreadcrumbs();
   }
 
   ngOnDestroy(): void {
@@ -149,14 +160,6 @@ export class AppShellComponent implements OnInit, OnDestroy {
     return this.navigationMode === 'tablet-landscape' || this.navigationMode === 'desktop';
   }
 
-  get workspaceNavigationItems(): AppNavigationItem[] {
-    return this.navigationItems.filter((item) => item.group === 'workspace');
-  }
-
-  get administrationNavigationItems(): AppNavigationItem[] {
-    return this.navigationItems.filter((item) => item.group === 'administration');
-  }
-
   get currentUserName(): string {
     return this.authService.userName || 'الحساب';
   }
@@ -180,11 +183,17 @@ export class AppShellComponent implements OnInit, OnDestroy {
     const stack = this.collectBreadcrumb(routeSnapshot);
 
     for (const item of stack) {
-      if (item.label && item.routerLink) {
+      const previous = items[items.length - 1];
+      if (item.label && item.routerLink && (item.label !== previous?.label || item.routerLink !== previous?.routerLink)) {
         items.push(item);
       }
     }
     return items;
+  }
+
+  private updateBreadcrumbs(): void {
+    this.breadcrumbItems = this.buildBreadcrumbs(this.activatedRoute.root.snapshot);
+    this.currentPageLabel = this.breadcrumbItems[this.breadcrumbItems.length - 1]?.label || 'لوحة التحكم';
   }
 
   private collectBreadcrumb(snapshot: any, url = ''): MenuItem[] {

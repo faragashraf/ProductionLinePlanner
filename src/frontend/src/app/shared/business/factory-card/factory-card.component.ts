@@ -14,6 +14,8 @@ export class FactoryCardComponent {
   @Input() readinessPercent = 0;
   @Input() workersCurrent = 0;
   @Input() workersRequired = 0;
+  @Input() metadataLabel = 'العاملون';
+  @Input() metadataValue: string | number | null = null;
   @Input() status: FactoryStatus | string = 'info';
 
   get clampedReadiness(): number {
@@ -22,5 +24,9 @@ export class FactoryCardComponent {
 
   get resolvedStatus(): FactoryStatus | string {
     return this.status || deriveStatusFromReadiness(this.clampedReadiness);
+  }
+
+  get resolvedMetadataValue(): string | number {
+    return this.metadataValue ?? `${this.workersCurrent} / ${this.workersRequired}`;
   }
 }

@@ -29,9 +29,7 @@
 }
 
 .plp-stage-renderer__context {
-  margin: 0;
-  color: var(--plp-color-text-subtle);
-  font-size: var(--plp-font-size-xs);
+  min-inline-size: 0;
 }
 
 .plp-stage-renderer__subtitle,

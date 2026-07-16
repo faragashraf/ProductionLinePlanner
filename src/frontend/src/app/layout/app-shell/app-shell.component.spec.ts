@@ -11,6 +11,7 @@ import { AuthService } from '../../core/services/auth.service';
 import { PermissionHydrationState, PermissionService } from '../../core/services/permission.service';
 import { ProductExperienceModule } from '../../shared/product/product-experience.module';
 import { AppShellComponent, ShellNavigationMode } from './app-shell.component';
+import { PRODUCT_IDENTITY } from '../../core/config/product-identity.config';
 
 describe('AppShellComponent', () => {
   let fixture: ComponentFixture<AppShellComponent>;
@@ -82,7 +83,26 @@ describe('AppShellComponent', () => {
     const lockup = fixture.nativeElement.querySelector('.plp-app-shell__desktop-nav plp-brand-logo [data-plp-brand-variant="horizontal"]') as HTMLElement;
 
     expect(lockup).not.toBeNull();
-    expect(lockup.textContent).toContain('منصة تخطيط خطوط الإنتاج');
+    expect(lockup.textContent).toContain(PRODUCT_IDENTITY.nameAr);
+  });
+
+  it('renders the centralized static product identity across the enterprise shell', () => {
+    const text = fixture.nativeElement.textContent as string;
+
+    expect(text).toContain(PRODUCT_IDENTITY.nameAr);
+    expect(text).toContain(PRODUCT_IDENTITY.platformLabelAr);
+    expect(text).toContain(PRODUCT_IDENTITY.workspaceNameAr);
+  });
+
+  it('keeps permission-filtered navigation group references stable between render passes', () => {
+    const workspaceItems = component.workspaceNavigationItems;
+    const administrationItems = component.administrationNavigationItems;
+
+    fixture.detectChanges();
+    fixture.detectChanges();
+
+    expect(component.workspaceNavigationItems).toBe(workspaceItems);
+    expect(component.administrationNavigationItems).toBe(administrationItems);
   });
 
   it('renders the active navigation state from the existing route contract', () => {
@@ -281,6 +301,42 @@ describe('AppShellComponent', () => {
     expect(fixture.nativeElement.querySelector('.plp-app-shell__desktop-nav')).not.toBeNull();
     expect(fixture.nativeElement.querySelector('[aria-label="فتح القائمة"]')).toBeNull();
     expect(component.isOverlayNavigation).toBeFalse();
+  });
+
+  it('keeps scrolling inside page content and persistent navigation across tablet and desktop modes', () => {
+    const scenarios: Array<[number, ShellNavigationMode, boolean]> = [
+      [700, 'tablet-portrait', false],
+      [800, 'tablet-landscape', true],
+      [1280, 'desktop', true]
+    ];
+
+    for (const [width, expectedMode, hasPersistentSidebar] of scenarios) {
+      setViewport(width);
+      component.onResize();
+      fixture.detectChanges();
+
+      const shell = fixture.nativeElement.querySelector('.plp-app-shell') as HTMLElement;
+      const main = fixture.nativeElement.querySelector('.plp-app-shell__main') as HTMLElement;
+      const sidebar = fixture.nativeElement.querySelector('.plp-app-shell__desktop-nav') as HTMLElement;
+      const shellStyle = window.getComputedStyle(shell);
+      const mainStyle = window.getComputedStyle(main);
+      const sidebarStyle = window.getComputedStyle(sidebar);
+
+      expect(component.navigationMode).withContext(`width ${width}`).toBe(expectedMode);
+      expect(shellStyle.overflowY).withContext(`shell width ${width}`).toBe('hidden');
+      expect(mainStyle.overflowY).withContext(`content width ${width}`).toBe('auto');
+      expect(sidebarStyle.position).withContext(`sidebar width ${width}`).not.toBe('fixed');
+
+      if (hasPersistentSidebar) {
+        expect(sidebarStyle.display).withContext(`sidebar width ${width}`).toBe('block');
+        expect(sidebarStyle.overflowY).withContext(`sidebar width ${width}`).toBe('auto');
+        expect(fixture.nativeElement.querySelector('[aria-label="فتح القائمة"]')).toBeNull();
+      } else {
+        expect(sidebarStyle.display).withContext(`sidebar width ${width}`).toBe('none');
+        expect(fixture.debugElement.query(By.directive(Sidebar))).not.toBeNull();
+        expect(fixture.nativeElement.querySelector('[aria-label="فتح القائمة"]')).not.toBeNull();
+      }
+    }
   });
 
   it('keeps a navigation mode available at every required breakpoint boundary', () => {

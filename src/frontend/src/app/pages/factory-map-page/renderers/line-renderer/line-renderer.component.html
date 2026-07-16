@@ -1,7 +1,7 @@
 <section class="plp-line-renderer">
   <header class="plp-line-renderer__header">
     <button type="button" class="plp-line-renderer__back" (click)="onBackToFactory()" aria-label="عودة إلى المصنع">
-      <i class="pi pi-arrow-right" aria-hidden="true"></i>
+      <i [class]="backIcon" aria-hidden="true"></i>
       العودة للمصنع
     </button>
     <p class="plp-line-renderer__subtitle">عرض المراحل الرئيسية للخط المختار.</p>
@@ -9,17 +9,14 @@
 
   <article class="plp-line-renderer__summary">
     <header>
-      <div>
-        <h2>{{ line.name }}</h2>
-        <p>{{ line.statusText }}</p>
-      </div>
+      <h2>{{ line.name }}</h2>
       <plp-status-badge [status]="line.status ?? 'info'" [label]="line.statusText" [compact]="true"></plp-status-badge>
     </header>
-    <div class="plp-line-renderer__summary-meta">
-      <span>جاهزية: {{ line.readinessPercent ?? 0 }}%</span>
-      <span>المراحل: {{ line.stages.length }}</span>
-      <span>النشطة: {{ line.activeStageName }}</span>
-    </div>
+    <plp-product-metadata-row class="plp-line-renderer__summary-meta" [label]="'بيانات خط ' + line.name">
+      <plp-product-metadata-item label="الجاهزية" [value]="(line.readinessPercent ?? 0) + '%'"></plp-product-metadata-item>
+      <plp-product-metadata-item label="المراحل" [value]="line.stages.length"></plp-product-metadata-item>
+      <plp-product-metadata-item label="المرحلة النشطة" [value]="line.activeStageName || 'غير محدد'"></plp-product-metadata-item>
+    </plp-product-metadata-row>
     <plp-completion-bar [value]="line.readinessPercent ?? 0" [status]="line.status ?? 'info'" label="جاهزية الخط"></plp-completion-bar>
   </article>
 
