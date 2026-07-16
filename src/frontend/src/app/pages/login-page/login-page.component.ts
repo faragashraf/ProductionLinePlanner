@@ -1,7 +1,7 @@
 import { Component } from '@angular/core';
 import { HttpErrorResponse } from '@angular/common/http';
 import { Router } from '@angular/router';
-import { finalize } from 'rxjs';
+import { TimeoutError, finalize } from 'rxjs';
 import { AuthService } from '../../core/services/auth.service';
 
 @Component({
@@ -76,6 +76,10 @@ export class LoginPageComponent {
   }
 
   private resolveLoginErrorMessage(error: unknown): string {
+    if (error instanceof TimeoutError || (error instanceof Error && error.name === 'TimeoutError')) {
+      return 'انتهت مهلة الاتصال بالخادم. تأكد من تشغيل الواجهة الخلفية ثم حاول مرة أخرى.';
+    }
+
     if (error instanceof HttpErrorResponse) {
       if (error.status === 0) {
         return 'تعذر الاتصال بالخادم. تأكد من تشغيل الواجهة الخلفية ثم حاول مرة أخرى.';

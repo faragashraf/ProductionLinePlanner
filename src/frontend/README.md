@@ -4,7 +4,14 @@ This project was generated with [Angular CLI](https://github.com/angular/angular
 
 ## Development server
 
-Run `ng serve` for a dev server. Navigate to `http://localhost:4200/`. The application will automatically reload if you change any of the source files.
+Run `npm start` for the Angular development server. It listens on all network
+interfaces at port 4200, supports live reload and Angular route fallback, and
+proxies `/api` and `/hubs` to the local API at `127.0.0.1:5169`.
+
+For the full local stack, run `npm run start:full`. Open the application at
+`http://localhost:4200`, `http://127.0.0.1:4200`, or the Mac's LAN address at
+`http://<mac-lan-ip>:4200`. Browser requests remain relative to that origin;
+do not use `http-server` as the normal development server.
 
 ## Code scaffolding
 

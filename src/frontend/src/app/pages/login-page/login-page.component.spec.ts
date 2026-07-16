@@ -2,7 +2,7 @@ import { HttpErrorResponse } from '@angular/common/http';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { NoopAnimationsModule } from '@angular/platform-browser/animations';
 import { Router } from '@angular/router';
-import { Subject, of, throwError } from 'rxjs';
+import { Subject, TimeoutError, of, throwError } from 'rxjs';
 import { ButtonModule } from 'primeng/button';
 import { APP_ROUTES } from '../../app-routing.module';
 import { AuthLoginResponse } from '../../core/models/auth.models';
@@ -108,6 +108,28 @@ describe('LoginPageComponent', () => {
 
     expect(fixture.nativeElement.textContent).toContain('بيانات الدخول غير صحيحة');
     expect(router.navigateByUrl).not.toHaveBeenCalled();
+  });
+
+  it('distinguishes an unavailable backend from invalid credentials', () => {
+    authService.login.and.returnValue(throwError(() => new HttpErrorResponse({ status: 0 })));
+    setInputValue('#login-email', 'operator@example.com');
+    setInputValue('#login-password', 'correct-horse');
+
+    submitLoginForm();
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.textContent).toContain('تعذر الاتصال بالخادم');
+  });
+
+  it('renders a clear Arabic timeout message without exposing transport details', () => {
+    authService.login.and.returnValue(throwError(() => new TimeoutError()));
+    setInputValue('#login-email', 'operator@example.com');
+    setInputValue('#login-password', 'correct-horse');
+
+    submitLoginForm();
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.textContent).toContain('انتهت مهلة الاتصال بالخادم');
   });
 
   it('toggles the rendered password input accessibly without mutating its value', () => {

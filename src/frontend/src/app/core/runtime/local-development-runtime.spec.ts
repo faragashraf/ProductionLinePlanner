@@ -15,6 +15,12 @@ describe('local development runtime', () => {
     expect(isLocalDevelopmentOrigin({ hostname: 'production.example', port: '4200' } as Location, lanApiBaseUrl)).toBeFalse();
   });
 
+  it('supports every host served by the same-origin development proxy', () => {
+    expect(isLocalDevelopmentOrigin({ hostname: '192.168.1.6', port: '4200' } as Location, '/api')).toBeTrue();
+    expect(isLocalDevelopmentOrigin({ hostname: 'localhost', port: '4200' } as Location, '/api')).toBeTrue();
+    expect(isLocalDevelopmentOrigin({ hostname: '192.168.1.6', port: '4300' } as Location, '/api')).toBeFalse();
+  });
+
   it('publishes the current build marker and unregisters only stale local registrations', async () => {
     const unregister = jasmine.createSpy('unregister').and.resolveTo(true);
     const target: Record<string, unknown> = {};
