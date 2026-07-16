@@ -13,6 +13,25 @@ public sealed class UserStatusRequest
     public bool IsActive { get; init; }
 }
 
+public sealed class AdminUserCreateRequest
+{
+    public string FullName { get; init; } = string.Empty;
+    // Email is the legacy technical contract name; its functional meaning is the login identifier.
+    public string Email { get; init; } = string.Empty;
+    public string Password { get; init; } = string.Empty;
+    public Guid[] RoleIds { get; init; } = [];
+    public bool IsActive { get; init; } = true;
+}
+
+public sealed class AdminUserUpdateRequest
+{
+    public string FullName { get; init; } = string.Empty;
+    // Email is the legacy technical contract name; its functional meaning is the login identifier.
+    public string Email { get; init; } = string.Empty;
+    public Guid[] RoleIds { get; init; } = [];
+    public bool IsActive { get; init; }
+}
+
 public sealed class UserPermissionOverrideRequest
 {
     public string Permission { get; init; } = string.Empty;

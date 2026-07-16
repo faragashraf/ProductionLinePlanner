@@ -23,10 +23,11 @@ describe('AuthService', () => {
   });
 
   it('uses the centralized relative login URL and never duplicates the API prefix', () => {
-    service.login('operator@example.com', 'correct-horse').subscribe();
+    service.login('  FACTORY.MANAGER  ', 'correct-horse').subscribe();
 
     const login = http.expectOne('/api/auth/login');
     expect(login.request.method).toBe('POST');
+    expect(login.request.body.email).toBe('factory.manager');
     expect(login.request.url).not.toContain('/api/api/');
     login.flush({
       success: true,
@@ -47,7 +48,7 @@ describe('AuthService', () => {
       data: {
         id: 'user-1',
         fullName: 'Operator',
-        email: 'operator@example.com',
+        email: 'factory.manager',
         roles: [],
         permissions: []
       }

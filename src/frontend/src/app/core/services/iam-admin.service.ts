@@ -26,6 +26,36 @@ export interface AdminUserListItem {
   roles: string[];
 }
 
+export interface AdminUserDetails extends AdminUserListItem {
+  preferredLanguage: string;
+  createdAtUtc: string;
+  updatedAtUtc: string;
+  roleIds: string[];
+}
+
+export interface AdminUserCreateRequest {
+  fullName: string;
+  /** Legacy technical name; functionally this is the login identifier / username. */
+  email: string;
+  password: string;
+  roleIds: string[];
+  isActive: boolean;
+}
+
+export interface AdminUserUpdateRequest {
+  fullName: string;
+  /** Legacy technical name; functionally this is the login identifier / username. */
+  email: string;
+  roleIds: string[];
+  isActive: boolean;
+}
+
+export interface AdminUserRoleOption {
+  id: string;
+  name: string;
+  isActive: boolean;
+}
+
 export interface AdminUserAuthorization {
   id: string;
   fullName: string;
@@ -95,6 +125,30 @@ export class IamAdminService {
     return this.http
       .get<ApiResponse<AdminUserListItem[]>>(buildApiUrl('/api/admin/users'))
       .pipe(map((response) => this.extractData(response)));
+  }
+
+  getUser(userId: string): Observable<AdminUserDetails> {
+    return this.http
+      .get<ApiResponse<AdminUserDetails>>(buildApiUrl(`/api/admin/users/${userId}`))
+      .pipe(map((response) => this.extractData(response)), catchError((error) => this.toIamError(error)));
+  }
+
+  getUserRoleOptions(): Observable<AdminUserRoleOption[]> {
+    return this.http
+      .get<ApiResponse<AdminUserRoleOption[]>>(buildApiUrl('/api/admin/users/role-options'))
+      .pipe(map((response) => this.extractData(response)), catchError((error) => this.toIamError(error)));
+  }
+
+  createUser(request: AdminUserCreateRequest): Observable<AdminUserDetails> {
+    return this.http
+      .post<ApiResponse<AdminUserDetails>>(buildApiUrl('/api/admin/users'), request)
+      .pipe(map((response) => this.extractData(response)), catchError((error) => this.toIamError(error)));
+  }
+
+  updateUser(userId: string, request: AdminUserUpdateRequest): Observable<AdminUserDetails> {
+    return this.http
+      .put<ApiResponse<AdminUserDetails>>(buildApiUrl(`/api/admin/users/${userId}`), request)
+      .pipe(map((response) => this.extractData(response)), catchError((error) => this.toIamError(error)));
   }
 
   getUserAuthorization(userId: string): Observable<AdminUserAuthorization> {
@@ -170,6 +224,6 @@ export class IamAdminService {
   }
 
   private toIamError(error: { error?: { error?: { message?: string }; message?: string }; message?: string }): Observable<never> {
-    return throwError(() => new Error(error.error?.error?.message || error.error?.message || error.message || 'تعذر تنفيذ طلب إدارة الأدوار.'));
+    return throwError(() => new Error(error.error?.error?.message || error.error?.message || error.message || 'تعذر تنفيذ طلب إدارة المستخدمين.'));
   }
 }

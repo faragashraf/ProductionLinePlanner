@@ -1,8 +1,22 @@
 <section class="page-frame">
-  <header class="page-header">
-    <h1>تفاصيل صلاحيات المستخدم</h1>
-    <p>راجع المصدر الفعلي للصلاحيات قبل تطبيق أي تعديل.</p>
-  </header>
+  <plp-product-page-header
+    title="تفاصيل صلاحيات المستخدم"
+    subtitle="راجع النتيجة الفعلية ومصدرها قبل إنشاء استثناء مباشر."
+  >
+    <ol plp-breadcrumb class="page-breadcrumb">
+      <li><a [attr.href]="returnUrl" (click)="backToUsers(); $event.preventDefault()">إدارة المستخدمين</a></li>
+      <li aria-current="page">صلاحيات المستخدم</li>
+    </ol>
+    <button
+      plp-primary-action
+      pButton
+      pRipple
+      class="p-button-sm p-button-outlined"
+      type="button"
+      icon="pi pi-arrow-right"
+      (click)="backToUsers()"
+    >العودة إلى المستخدمين</button>
+  </plp-product-page-header>
 
   <div class="page-actions">
     <button pButton pRipple class="p-button-sm" type="button" icon="pi pi-refresh" [disabled]="isLoading || isRefreshing || isSaving" (click)="refresh()">تحديث</button>
@@ -14,41 +28,84 @@
 
   <div class="auth-grid" *ngIf="!isLoading && authorization">
     <article class="summary-card">
-      <h2>{{ authorization.fullName }}</h2>
-      <p>{{ authorization.email }}</p>
-      <p class="muted">الحالة: {{ authorization.isActive ? 'مفعل' : 'معطل' }}</p>
-      <p>آخر تحديث للصلاحيات: {{ authorization.permissionsVersion | date:'medium' }}</p>
-      <p class="warning" *ngIf="!authorization.isActive">المستخدم معطل؛ لا يمكن للخادم إضافة overrides مباشرة له.</p>
-      <p class="warning" *ngIf="hasCriticalEffectivePermissions">توجد صلاحيات حساسة؛ راجع مصدرها قبل الحفظ.</p>
+      <div class="summary-card__heading">
+        <div>
+          <h2>{{ authorization.fullName }}</h2>
+          <p>اسم المستخدم: <bdi dir="ltr">{{ authorization.email }}</bdi></p>
+        </div>
+        <p-tag [value]="authorization.isActive ? 'مفعل' : 'معطل'" [severity]="authorization.isActive ? 'success' : 'danger'"></p-tag>
+      </div>
+      <p class="muted">آخر تحديث للصلاحيات: {{ authorization.permissionsVersion | date:'medium' }}</p>
+      <p class="warning" *ngIf="!authorization.isActive">المستخدم معطل؛ لا يمكن للخادم إضافة استثناءات مباشرة له.</p>
+      <p class="critical-note" *ngIf="hasCriticalEffectivePermissions"><i class="pi pi-exclamation-triangle"></i> توجد صلاحيات حساسة؛ راجع مصدر كل صلاحية قبل الحفظ.</p>
     </article>
 
     <article class="list-card" *plpCan="permissions.users.manage">
       <h3>الأدوار</h3>
+      <p class="muted">تمنح الأدوار صلاحيات موروثة ولا تتحول إلى منح مباشر.</p>
       <p class="muted" *ngIf="roles.length === 0">لا يمكن تحميل قائمة الأدوار دون صلاحية عرض الأدوار.</p>
       <label *ngFor="let role of roles" class="role-choice">
         <input type="checkbox" [checked]="selectedRoles.includes(role.role)" [disabled]="isSaving || roles.length === 0" (change)="toggleRole(role.role, $any($event.target).checked)" />
-        <span>{{ role.name }} <small>({{ role.role }})</small></span>
+        <span>{{ roleLabel(role.role) }} <small dir="ltr">{{ role.role }}</small></span>
       </label>
     </article>
 
-    <article class="list-card" *plpCan="permissions.permissions.assign">
-      <h3>المنح والرفض المباشر</h3>
-      <p class="warning" *ngIf="catalog.length === 0">لا يمكن تحميل كتالوج الصلاحيات المتاح للتعديل.</p>
-      <h4>منح مباشر</h4>
-      <plp-permission-selection [groups]="catalog" [selected]="selectedDirectGrants" [disabled]="!authorization.isActive || isSaving" (selectedChange)="onGrantsChanged($event)"></plp-permission-selection>
-      <h4>رفض مباشر</h4>
-      <plp-permission-selection [groups]="catalog" [selected]="selectedDirectDenies" [disabled]="!authorization.isActive || isSaving" (selectedChange)="onDeniesChanged($event)"></plp-permission-selection>
-    </article>
+    <article class="list-card list-card--wide" *plpCan="permissions.permissions.assign">
+      <div class="override-heading">
+        <div>
+          <h3>الصلاحيات والاستثناءات المباشرة</h3>
+          <p class="inheritance-help">الصلاحيات الموروثة من الأدوار لا تظهر كمنح مباشر. استخدم المنح أو الرفض المباشر فقط لإنشاء استثناء لهذا المستخدم.</p>
+        </div>
+        <p-tag [value]="selectedDirectOverrideCount ? ('الاستثناءات المباشرة: ' + selectedDirectOverrideCount) : 'لا توجد استثناءات مباشرة'" severity="info"></p-tag>
+      </div>
 
-    <article class="list-card list-card--wide">
-      <h3>الصلاحيات الفعلية حسب القدرة</h3>
-      <section *ngFor="let group of effectivePermissionGroups" class="effective-group">
-        <h4>{{ group.capability }}</h4>
-        <div class="permission-row header"><span>الصلاحية</span><span>النتيجة</span><span>المصدر</span></div>
-        <div class="permission-row" *ngFor="let item of group.permissions">
-          <strong>{{ item.permission }} <em *ngIf="item.isCritical">حساسة</em></strong>
-          <span [class.ok]="item.granted" [class.bad]="!item.granted">{{ item.granted ? 'ممنوحة' : 'مرفوضة' }}</span>
-          <span>{{ sourceLabel(item.sources) }}</span>
+      <p class="warning" *ngIf="catalog.length === 0">لا يمكن تحميل كتالوج الصلاحيات المتاح للتعديل.</p>
+
+      <section *ngFor="let group of permissionGroups" class="permission-group">
+        <header class="permission-group__header">
+          <h4>{{ group.label }}</h4>
+          <span class="technical-key" dir="ltr">{{ group.capability }}</span>
+        </header>
+
+        <div class="permission-item" *ngFor="let item of group.permissions; trackBy: trackPermission">
+          <div class="permission-identity">
+            <div class="permission-title">
+              <strong>{{ item.label }}</strong>
+              <p-tag *ngIf="item.isCritical" value="صلاحية حساسة" severity="warning"></p-tag>
+            </div>
+            <span class="technical-key" dir="ltr">{{ item.permission }}</span>
+          </div>
+
+          <div class="permission-result" aria-live="polite">
+            <span class="field-caption">النتيجة الفعلية المتوقعة</span>
+            <p-tag [value]="previewGranted(item) ? 'ممنوحة' : 'مرفوضة'" [severity]="previewGranted(item) ? 'success' : 'danger'"></p-tag>
+            <div class="source-tags" aria-label="مصدر النتيجة">
+              <p-tag *ngFor="let role of item.inheritedRoles" [value]="'من الدور: ' + roleLabel(role)" severity="info"></p-tag>
+              <p-tag *ngIf="isDirectGrantSelected(item.permission)" value="منح مباشر" severity="success"></p-tag>
+              <p-tag *ngIf="isDirectDenySelected(item.permission)" value="رفض مباشر" severity="danger"></p-tag>
+              <p-tag *ngIf="item.inheritedRoles.length === 0 && !isDirectGrantSelected(item.permission) && !isDirectDenySelected(item.permission)" value="الافتراضي" severity="secondary"></p-tag>
+            </div>
+          </div>
+
+          <fieldset class="override-controls" [disabled]="!authorization.isActive || isSaving">
+            <legend>الاستثناء المباشر</legend>
+            <label>
+              <input
+                type="checkbox"
+                [checked]="isDirectGrantSelected(item.permission)"
+                (change)="toggleDirectGrant(item.permission, $any($event.target).checked)"
+              />
+              <span>منح مباشر</span>
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                [checked]="isDirectDenySelected(item.permission)"
+                (change)="toggleDirectDeny(item.permission, $any($event.target).checked)"
+              />
+              <span>رفض مباشر</span>
+            </label>
+          </fieldset>
         </div>
       </section>
     </article>

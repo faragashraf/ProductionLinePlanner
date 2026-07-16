@@ -76,6 +76,7 @@ public static class DependencyInjection
         services.AddScoped<IPermissionService, PermissionService>();
         services.AddScoped<IIamDelegationPolicy, IamDelegationPolicy>();
         services.AddScoped<IIamAuthorizationService, IamAuthorizationService>();
+        services.AddScoped<IUserManagementService, UserManagementService>();
         services.AddScoped<IRolePermissionSeedService, PermissionSeedService>();
 
         services.AddScoped<IAttendanceEmployeeReader, AttendanceDirectoryService>();

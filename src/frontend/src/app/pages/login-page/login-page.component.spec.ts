@@ -61,14 +61,24 @@ describe('LoginPageComponent', () => {
   });
 
   it('submits the existing authentication service exactly once from the rendered form', () => {
-    setInputValue('#login-email', 'operator@example.com');
+    setInputValue('#login-email', 'factory.manager');
     setInputValue('#login-password', 'correct-horse');
 
     submitLoginForm();
 
     expect(authService.login).toHaveBeenCalledTimes(1);
-    expect(authService.login).toHaveBeenCalledWith('operator@example.com', 'correct-horse');
+    expect(authService.login).toHaveBeenCalledWith('factory.manager', 'correct-horse');
     expect(router.navigateByUrl).toHaveBeenCalledOnceWith('/dashboard');
+  });
+
+  it('presents the technical email contract as a plain-text Arabic username field', () => {
+    const usernameInput = fixture.nativeElement.querySelector('#login-email') as HTMLInputElement;
+    const usernameField = usernameInput.closest('plp-form-field');
+
+    expect(usernameInput.type).toBe('text');
+    expect(usernameInput.getAttribute('inputmode')).toBeNull();
+    expect(usernameField?.textContent).toContain('اسم المستخدم');
+    expect(usernameField?.textContent).not.toContain('البريد الإلكتروني');
   });
 
   it('keeps the submit action disabled while the existing authentication request is pending', () => {

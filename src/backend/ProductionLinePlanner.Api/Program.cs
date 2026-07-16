@@ -161,6 +161,7 @@ builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUserService, CurrentUserService>();
 builder.Services.AddSingleton<IPasswordHasher<AppUser>, PasswordHasher<AppUser>>();
+builder.Services.AddSingleton<IUserPasswordHasher, UserPasswordHasher>();
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
@@ -451,27 +452,19 @@ authApi.MapPost("/login", async (
     HttpContext httpContext,
     CancellationToken cancellationToken) =>
 {
-    var email = request.Email?.Trim();
-    var password = request.Password?.Trim();
+    var loginIdentifier = request.Email?.Trim();
+    var password = request.Password;
 
-    if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password))
+    if (string.IsNullOrWhiteSpace(loginIdentifier) || string.IsNullOrWhiteSpace(password))
     {
-        return ApiResponse.Failure("ValidationError", "Email and password are required.");
+        return ApiResponse.Failure("ValidationError", "Login identifier and password are required.");
     }
 
-    var user = await dbContext.AppUsers
-        .Include(x => x.Roles)
-        .AsNoTracking()
-        .FirstOrDefaultAsync(x => x.IsActive && x.Email == email, cancellationToken);
+    var user = await AuthLoginVerifier.VerifyAsync(dbContext, passwordHasher, loginIdentifier, password, cancellationToken);
 
     if (user is null)
     {
-        return ApiResponse.Failure("InvalidCredentials", "Invalid email or password.", 401);
-    }
-
-    if (passwordHasher.VerifyHashedPassword(user, user.PasswordHash, password) is not (PasswordVerificationResult.Success or PasswordVerificationResult.SuccessRehashNeeded))
-    {
-        return ApiResponse.Failure("InvalidCredentials", "Invalid email or password.", 401);
+        return ApiResponse.Failure("InvalidCredentials", "Invalid login identifier or password.", 401);
     }
 
     var now = DateTime.UtcNow;
@@ -592,7 +585,7 @@ if (app.Environment.IsDevelopment())
             string.IsNullOrWhiteSpace(request.Email?.Trim()) ||
             string.IsNullOrWhiteSpace(request.Password))
         {
-            return ApiResponse.Failure("ValidationError", "FullName, Email, and Password are required.");
+            return ApiResponse.Failure("ValidationError", "FullName, Login identifier, and Password are required.");
         }
 
         var bootstrapSecretValidation = ValidateBootstrapSecret(request.BootstrapSecret, bootstrapSecret);
@@ -607,11 +600,7 @@ if (app.Environment.IsDevelopment())
         }
 
         var fullName = request.FullName.Trim();
-        var email = request.Email.Trim();
-        if (!email.Contains("@", StringComparison.Ordinal))
-        {
-            return ApiResponse.Failure("ValidationError", "Email is invalid.");
-        }
+        var email = AppUser.NormalizeLoginIdentifier(request.Email);
 
         if (await dbContext.AppRoles.AnyAsync(role => role.Role == UserRole.SuperAdmin, cancellationToken) is false)
         {
@@ -672,12 +661,14 @@ if (app.Environment.IsDevelopment())
         CancellationToken cancellationToken) =>
     {
         var email = request.Email?.Trim();
-        var newPassword = request.NewPassword?.Trim();
+        var newPassword = request.NewPassword;
 
         if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(newPassword))
         {
-            return ApiResponse.Failure("ValidationError", "Email and NewPassword are required.");
+            return ApiResponse.Failure("ValidationError", "Login identifier and NewPassword are required.");
         }
+
+        email = AppUser.NormalizeLoginIdentifier(email);
 
         var bootstrapSecretValidation = ValidateBootstrapSecret(request.BootstrapSecret, bootstrapSecret);
         if (bootstrapSecretValidation is not null)

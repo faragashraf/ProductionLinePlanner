@@ -1,60 +1,213 @@
-<section class="page-frame">
-  <header class="page-header">
-    <h1>إدارة المستخدمين</h1>
-    <p>عرض المستخدمين، الحالة، والأدوار الأساسية.</p>
+<section class="page-frame" dir="rtl">
+  <header class="page-header users-header">
+    <div>
+      <h1>إدارة المستخدمين</h1>
+      <p>إضافة الحسابات وتحديث بيانات الدخول والحالة والأدوار.</p>
+    </div>
+    <button
+      *plpCan="permissions.users.manage"
+      pButton
+      pRipple
+      type="button"
+      icon="pi pi-user-plus"
+      label="إضافة مستخدم"
+      (click)="openCreateDialog()"
+    ></button>
   </header>
 
-  <button
-    pButton
-    pRipple
-    class="p-button-sm"
-    type="button"
-    icon="pi pi-refresh"
-    [disabled]="isLoading || isRefreshing"
-    (click)="loadUsers(false)"
-  >تحديث</button>
-
-  <input
-    class="admin-search"
-    type="search"
-    [(ngModel)]="searchTerm"
-    placeholder="ابحث بالاسم أو البريد أو الدور…"
-    aria-label="بحث في المستخدمين"
-  />
+  <div class="users-toolbar">
+    <input
+      pInputText
+      class="admin-search"
+      type="search"
+      [ngModel]="searchTerm"
+      (ngModelChange)="onSearchTermChange($event)"
+      placeholder="ابحث بالاسم أو اسم المستخدم أو الدور…"
+      aria-label="بحث في المستخدمين"
+    />
+    <button
+      pButton
+      pRipple
+      class="p-button-outlined"
+      type="button"
+      icon="pi pi-refresh"
+      label="تحديث"
+      [loading]="isRefreshing"
+      [disabled]="isLoading || isRefreshing"
+      (click)="loadUsers(false)"
+    ></button>
+  </div>
 
   <plp-iam-list-skeleton *ngIf="isLoading" [rows]="5"></plp-iam-list-skeleton>
 
-  <p class="plp-inline-state plp-inline-state--warning" *ngIf="hasError && !isLoading">
-    {{ errorMessage }}
-  </p>
+  <plp-product-error-state
+    *ngIf="hasError && !isLoading"
+    title="تعذر تحميل المستخدمين"
+    [description]="errorMessage || 'حدثت مشكلة مؤقتة.'"
+    (retry)="loadUsers(false)"
+  ></plp-product-error-state>
 
-  <div class="admin-table" *ngIf="!isLoading && !hasError">
-    <article
-      class="admin-table__row"
-      *ngFor="let user of filteredUsers; trackBy: trackByUserId"
-      (click)="openAuthorization(user.id)"
-    >
-      <div>
+  <div class="admin-table" *ngIf="!isLoading && !hasError && filteredUsers.length">
+    <article class="admin-table__row" *ngFor="let user of filteredUsers; trackBy: trackByUserId">
+      <div class="user-identity">
         <h2>{{ user.fullName }}</h2>
-        <p>{{ user.email }}</p>
+        <p><span class="sr-only">اسم المستخدم: </span>{{ user.email }}</p>
       </div>
-      <div>
-        <span class="pill">{{ user.isActive ? 'مفعل' : 'معطل' }}</span>
+      <p-tag
+        [value]="user.isActive ? 'نشط' : 'غير نشط'"
+        [severity]="user.isActive ? 'success' : 'danger'"
+      ></p-tag>
+      <div class="roles" aria-label="أدوار المستخدم">
+        <p-tag *ngFor="let role of user.roles" [value]="roleLabel(role)" severity="info"></p-tag>
+        <span *ngIf="!user.roles.length">بدون دور</span>
       </div>
-      <div class="roles">{{ user.roles.join('، ') || 'بدون أدوار' }}</div>
-      <button
-        *plpCan="permissions.users.manage"
-        pButton
-        pRipple
-        class="p-button-sm p-button-outlined"
-        type="button"
-        [disabled]="savingUserId === user.id"
-        (click)="toggleStatus(user, $event)"
-      >{{ savingUserId === user.id ? 'جارٍ الحفظ…' : (user.isActive ? 'تعطيل' : 'تفعيل') }}</button>
+      <div class="user-actions">
+        <button
+          *plpCan="permissions.users.manage"
+          pButton
+          pRipple
+          class="p-button-sm p-button-outlined"
+          type="button"
+          icon="pi pi-pencil"
+          label="تعديل"
+          (click)="openEditDialog(user, $event)"
+        ></button>
+        <button
+          *plpCan="permissions.users.manage"
+          pButton
+          pRipple
+          class="p-button-sm p-button-text"
+          type="button"
+          icon="pi pi-shield"
+          label="الصلاحيات"
+          (click)="openAuthorization(user.id, $event)"
+        ></button>
+        <button
+          *plpCan="permissions.users.manage"
+          pButton
+          pRipple
+          class="p-button-sm p-button-text"
+          type="button"
+          [loading]="savingUserId === user.id"
+          [disabled]="savingUserId === user.id"
+          (click)="toggleStatus(user, $event)"
+        >{{ user.isActive ? 'تعطيل' : 'تفعيل' }}</button>
+      </div>
     </article>
-
-    <p class="plp-inline-state" *ngIf="filteredUsers.length === 0">
-      لا يوجد مستخدمون لعرضهم.
-    </p>
   </div>
+
+  <plp-product-empty-state
+    *ngIf="!isLoading && !hasError && !filteredUsers.length"
+    title="لا يوجد مستخدمون"
+    [description]="searchTerm ? 'لا توجد نتائج مطابقة للبحث.' : 'أضف أول مستخدم لبدء إدارة الوصول.'"
+    actionLabel=""
+    (action)="openCreateDialog()"
+  ></plp-product-empty-state>
 </section>
+
+<plp-dialog
+  [visible]="dialogVisible"
+  [title]="dialogMode === 'create' ? 'إضافة مستخدم' : 'تعديل المستخدم'"
+  [subtitle]="dialogMode === 'create' ? 'أدخل الحد الأدنى المطلوب لإنشاء الحساب.' : 'حدّث بيانات الحساب دون تغيير كلمة المرور.'"
+  size="wide"
+  [saving]="dialogSaving"
+  [saveDisabled]="dialogLoading"
+  [error]="dialogError"
+  [saveLabel]="dialogMode === 'create' ? 'إنشاء المستخدم' : 'حفظ التعديلات'"
+  successMessage="تم حفظ بيانات المستخدم بنجاح."
+  (visibleChange)="onDialogVisibleChange($event)"
+  (save)="saveUser()"
+  (cancel)="closeDialog()"
+>
+  <div *ngIf="dialogLoading" class="dialog-loading" aria-live="polite">
+    <i class="pi pi-spin pi-spinner" aria-hidden="true"></i>
+    <span>جارٍ تحميل بيانات المستخدم…</span>
+  </div>
+
+  <form *ngIf="!dialogLoading" class="user-form" [formGroup]="userForm" (ngSubmit)="saveUser()" novalidate>
+    <section class="user-form__section" aria-labelledby="user-basic-title">
+      <h3 id="user-basic-title">البيانات الأساسية</h3>
+      <div class="user-form__grid">
+        <plp-form-field label="الاسم الكامل" controlId="user-full-name" [required]="true" [error]="fieldError('fullName')">
+          <input
+            pInputText
+            id="user-full-name"
+            type="text"
+            formControlName="fullName"
+            autocomplete="name"
+            [attr.aria-invalid]="fieldError('fullName') ? 'true' : null"
+          />
+        </plp-form-field>
+
+        <plp-form-field
+          label="اسم المستخدم"
+          controlId="user-login-identifier"
+          [required]="true"
+          help="يُستخدم لتسجيل الدخول، مثل admin أو factory.manager."
+          [error]="fieldError('email')"
+        >
+          <input
+            pInputText
+            id="user-login-identifier"
+            type="text"
+            formControlName="email"
+            autocomplete="username"
+            [attr.aria-invalid]="fieldError('email') ? 'true' : null"
+          />
+        </plp-form-field>
+
+        <plp-form-field
+          *ngIf="dialogMode === 'create'"
+          label="كلمة المرور"
+          controlId="user-password"
+          [required]="true"
+          [error]="fieldError('password')"
+        >
+          <input
+            pInputText
+            id="user-password"
+            type="password"
+            formControlName="password"
+            autocomplete="new-password"
+            [attr.aria-invalid]="fieldError('password') ? 'true' : null"
+          />
+        </plp-form-field>
+      </div>
+    </section>
+
+    <section class="user-form__section" aria-labelledby="user-access-title">
+      <h3 id="user-access-title">الوصول والأدوار</h3>
+      <div class="user-form__grid">
+        <plp-form-field label="الأدوار" controlId="user-roles" [required]="true" [error]="fieldError('roleIds')">
+          <p-multiSelect
+            inputId="user-roles"
+            formControlName="roleIds"
+            [options]="roleOptions"
+            optionLabel="label"
+            optionValue="value"
+            optionDisabled="disabled"
+            placeholder="اختر دورًا واحدًا على الأقل"
+            display="chip"
+            appendTo="body"
+            [attr.aria-invalid]="fieldError('roleIds') ? 'true' : null"
+          ></p-multiSelect>
+        </plp-form-field>
+
+        <div class="active-control">
+          <p-checkbox inputId="user-active" formControlName="isActive" [binary]="true"></p-checkbox>
+          <label for="user-active">الحساب نشط ويمكنه تسجيل الدخول</label>
+        </div>
+      </div>
+    </section>
+
+    <section *ngIf="dialogMode === 'edit' && selectedUser" class="user-form__section user-system-info" aria-labelledby="user-system-title">
+      <h3 id="user-system-title">معلومات النظام</h3>
+      <dl>
+        <div><dt>معرّف المستخدم</dt><dd>{{ selectedUser.id }}</dd></div>
+        <div><dt>تاريخ الإنشاء</dt><dd>{{ selectedUser.createdAtUtc | date:'medium' }}</dd></div>
+        <div><dt>آخر تحديث</dt><dd>{{ selectedUser.updatedAtUtc | date:'medium' }}</dd></div>
+        <div><dt>اللغة المفضلة</dt><dd>{{ selectedUser.preferredLanguage === 'ar' ? 'العربية' : 'الإنجليزية' }}</dd></div>
+      </dl>
+    </section>
+  </form>
+</plp-dialog>

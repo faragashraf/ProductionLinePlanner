@@ -21,6 +21,19 @@ public sealed class PermissionServiceTests
     }
 
     [Fact]
+    public async Task Evaluating_an_inherited_role_grant_does_not_create_a_direct_override()
+    {
+        await using var fixture = await PermissionFixture.CreateAsync();
+        fixture.GrantRolePermission("workers.view");
+        await fixture.SaveAsync();
+
+        var permissions = await fixture.Service.GetEffectivePermissionsAsync(fixture.User.Id);
+
+        Assert.Contains("workers.view", permissions);
+        Assert.Equal(0, await fixture.DirectOverrideCountAsync());
+    }
+
+    [Fact]
     public async Task Direct_grant_adds_a_permission()
     {
         await using var fixture = await PermissionFixture.CreateAsync();
@@ -140,6 +153,8 @@ public sealed class PermissionServiceTests
         public UserPermissionOverride DenyUserPermission(string name) => AddOverride(name, PermissionEffect.Deny);
 
         public Task SaveAsync() => _db.SaveChangesAsync();
+
+        public Task<int> DirectOverrideCountAsync() => _db.UserPermissionOverrides.CountAsync();
 
         public ValueTask DisposeAsync() => _db.DisposeAsync();
 

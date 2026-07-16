@@ -36,7 +36,7 @@ export class LoginPageComponent {
     this.warningMessage = '';
 
     if (!this.email.trim() || !this.password) {
-      this.errorMessage = 'يرجى إدخال البريد الإلكتروني وكلمة المرور.';
+      this.errorMessage = 'يرجى إدخال اسم المستخدم وكلمة المرور.';
       return;
     }
 
@@ -71,7 +71,7 @@ export class LoginPageComponent {
   }
 
   get emailValidationMessage(): string {
-    return this.submitted && !this.email.trim() ? 'البريد الإلكتروني مطلوب.' : '';
+    return this.submitted && !this.email.trim() ? 'اسم المستخدم مطلوب.' : '';
   }
 
   get passwordValidationMessage(): string {
@@ -89,7 +89,7 @@ export class LoginPageComponent {
       }
 
       if (error.status === 401) {
-        return 'بيانات الدخول غير صحيحة. تحقق من البريد الإلكتروني وكلمة المرور.';
+        return 'بيانات الدخول غير صحيحة. تحقق من اسم المستخدم وكلمة المرور.';
       }
 
       if (error.status === 400) {

@@ -39,6 +39,8 @@ public sealed class AuditEngine : IAuditEngine
         "ReadAtUtc",
         "IsActive",
         "Name",
+        "FullName",
+        "Email",
         "Description",
         "Code",
         "Location",

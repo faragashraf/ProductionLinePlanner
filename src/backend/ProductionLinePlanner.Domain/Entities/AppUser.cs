@@ -4,6 +4,9 @@ namespace ProductionLinePlanner.Domain.Entities;
 
 public class AppUser
 {
+    public const int MaxFullNameLength = 200;
+    public const int MaxLoginIdentifierLength = 200;
+
     private AppUser() { }
 
     public AppUser(
@@ -15,16 +18,14 @@ public class AppUser
         string preferredLanguage = "en",
         DateTime? createdAtUtc = null)
     {
-        if (string.IsNullOrWhiteSpace(fullName))
-            throw new ArgumentException("FullName is required.", nameof(fullName));
-        if (string.IsNullOrWhiteSpace(email) || !email.Contains("@"))
-            throw new ArgumentException("A valid email is required.", nameof(email));
+        var normalizedFullName = NormalizeFullName(fullName);
+        var normalizedLoginIdentifier = NormalizeLoginIdentifier(email);
         if (string.IsNullOrWhiteSpace(passwordHash))
             throw new ArgumentException("PasswordHash is required.", nameof(passwordHash));
 
         Id = id;
-        FullName = fullName.Trim();
-        Email = email.Trim();
+        FullName = normalizedFullName;
+        Email = normalizedLoginIdentifier;
         PasswordHash = passwordHash;
         IsActive = isActive;
         PreferredLanguage = preferredLanguage;
@@ -61,5 +62,35 @@ public class AppUser
 
         PasswordHash = passwordHash;
         UpdatedAtUtc = DateTime.UtcNow;
+    }
+
+    public void UpdateProfile(string fullName, string loginIdentifier, bool isActive)
+    {
+        FullName = NormalizeFullName(fullName);
+        Email = NormalizeLoginIdentifier(loginIdentifier);
+        IsActive = isActive;
+        UpdatedAtUtc = DateTime.UtcNow;
+    }
+
+    public static string NormalizeLoginIdentifier(string? value)
+    {
+        var normalized = value?.Trim().ToLowerInvariant() ?? string.Empty;
+        if (normalized.Length == 0)
+            throw new ArgumentException("Login identifier is required.", nameof(value));
+        if (normalized.Length > MaxLoginIdentifierLength)
+            throw new ArgumentException($"Login identifier cannot exceed {MaxLoginIdentifierLength} characters.", nameof(value));
+
+        return normalized;
+    }
+
+    private static string NormalizeFullName(string? value)
+    {
+        var normalized = value?.Trim() ?? string.Empty;
+        if (normalized.Length == 0)
+            throw new ArgumentException("FullName is required.", nameof(value));
+        if (normalized.Length > MaxFullNameLength)
+            throw new ArgumentException($"FullName cannot exceed {MaxFullNameLength} characters.", nameof(value));
+
+        return normalized;
     }
 }

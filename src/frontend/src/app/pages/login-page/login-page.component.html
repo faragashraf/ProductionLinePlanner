@@ -20,7 +20,7 @@
 
     <plp-form [busy]="isLoading" (submitted)="onLogin()">
       <plp-form-field
-        label="البريد الإلكتروني"
+        label="اسم المستخدم"
         controlId="login-email"
         [required]="true"
         [disabled]="isLoading"
@@ -31,9 +31,8 @@
           class="plp-control"
           id="login-email"
           name="email"
-          type="email"
+          type="text"
           autocomplete="username"
-          inputmode="email"
           [value]="email"
           [disabled]="isLoading"
           [attr.aria-invalid]="emailValidationMessage ? 'true' : null"

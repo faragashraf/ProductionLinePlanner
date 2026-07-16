@@ -31,6 +31,34 @@ describe('IamAdminService', () => {
     request.flush({ success: true, data: { userId: 'u-1', isActive: false } });
   });
 
+  it('loads details and sends create and edit contracts without a password on edit', () => {
+    const details = { id: 'u-1', fullName: 'Admin', email: 'admin', isActive: true, roleIds: ['r-1'], roles: ['Admin'], preferredLanguage: 'ar', createdAtUtc: '2026-07-17T00:00:00Z', updatedAtUtc: '2026-07-17T00:00:00Z' };
+
+    service.getUser('u-1').subscribe();
+    const detailsRequest = http.expectOne((candidate) => candidate.url.endsWith('/api/admin/users/u-1'));
+    expect(detailsRequest.request.method).toBe('GET');
+    detailsRequest.flush({ success: true, data: details });
+
+    service.createUser({ fullName: 'Admin', email: 'admin', password: 'secret', roleIds: ['r-1'], isActive: true }).subscribe();
+    const create = http.expectOne((candidate) => candidate.url.endsWith('/api/admin/users'));
+    expect(create.request.method).toBe('POST');
+    expect(create.request.body.email).toBe('admin');
+    create.flush({ success: true, data: details });
+
+    service.updateUser('u-1', { fullName: 'Admin Updated', email: 'admin', roleIds: ['r-1'], isActive: true }).subscribe();
+    const update = http.expectOne((candidate) => candidate.url.endsWith('/api/admin/users/u-1'));
+    expect(update.request.method).toBe('PUT');
+    expect(update.request.body.password).toBeUndefined();
+    update.flush({ success: true, data: { ...details, fullName: 'Admin Updated' } });
+  });
+
+  it('loads role options through the users.manage lookup endpoint', () => {
+    service.getUserRoleOptions().subscribe();
+    const request = http.expectOne((candidate) => candidate.url.endsWith('/api/admin/users/role-options'));
+    expect(request.request.method).toBe('GET');
+    request.flush({ success: true, data: [{ id: 'r-1', name: 'Admin', isActive: true }] });
+  });
+
   it('sends the custom role name and description on create', () => {
     service.createRole({ name: 'Shift Lead', description: 'Leads a shift' }).subscribe();
     const request = http.expectOne((candidate) => candidate.url.endsWith('/api/admin/roles'));

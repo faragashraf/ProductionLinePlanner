@@ -79,6 +79,82 @@ adminApi.MapGet("/users", async (
     .WithTags("IAM")
     .WithName("ListUsers");
 
+adminApi.MapGet("/users/role-options", async (
+    AppDbContext dbContext,
+    CancellationToken cancellationToken) =>
+{
+    var roles = await dbContext.AppRoles
+        .AsNoTracking()
+        .OrderBy(role => role.Name)
+        .Select(role => new AdminUserRoleOptionDto
+        {
+            Id = role.Id,
+            Name = role.Name,
+            IsActive = role.IsActive
+        })
+        .ToArrayAsync(cancellationToken);
+    return Results.Ok(ApiResponse.Success(roles));
+})
+    .RequirePermission("users.manage")
+    .WithTags("IAM")
+    .WithName("GetUserRoleOptions");
+
+adminApi.MapGet("/users/{userId:guid}", async (
+    Guid userId,
+    AppDbContext dbContext,
+    CancellationToken cancellationToken) =>
+{
+    var user = await dbContext.AppUsers
+        .AsNoTracking()
+        .Include(candidate => candidate.Roles)
+        .FirstOrDefaultAsync(candidate => candidate.Id == userId, cancellationToken);
+    if (user is null) return ApiResponse.Failure("NotFound", "User not found.", 404);
+
+    return Results.Ok(ApiResponse.Success(ToUserDetails(user)));
+})
+    .RequirePermission("users.view")
+    .WithTags("IAM")
+    .WithName("GetUserDetails");
+
+adminApi.MapPost("/users", async (
+    AdminUserCreateRequest request,
+    IUserManagementService userManagementService,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
+    CancellationToken cancellationToken) =>
+{
+    if (currentUserService.UserId is not Guid actorUserId)
+        return ApiResponse.Failure("Unauthorized", "User context is required.", 401);
+
+    var result = await userManagementService.CreateAsync(actorUserId, request, AuditRequestMetadata.From(httpContext), cancellationToken);
+    return result.Succeeded
+        ? Results.Created($"/api/admin/users/{result.User!.Id}", ApiResponse.Success(result.User))
+        : ApiResponse.Failure(result.Code, result.Message, result.StatusCode);
+})
+    .RequirePermission("users.manage")
+    .WithTags("IAM")
+    .WithName("CreateUser");
+
+adminApi.MapPut("/users/{userId:guid}", async (
+    Guid userId,
+    AdminUserUpdateRequest request,
+    IUserManagementService userManagementService,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
+    CancellationToken cancellationToken) =>
+{
+    if (currentUserService.UserId is not Guid actorUserId)
+        return ApiResponse.Failure("Unauthorized", "User context is required.", 401);
+
+    var result = await userManagementService.UpdateAsync(actorUserId, userId, request, AuditRequestMetadata.From(httpContext), cancellationToken);
+    return result.Succeeded
+        ? Results.Ok(ApiResponse.Success(result.User))
+        : ApiResponse.Failure(result.Code, result.Message, result.StatusCode);
+})
+    .RequirePermission("users.manage")
+    .WithTags("IAM")
+    .WithName("UpdateUser");
+
 adminApi.MapGet("/users/{userId:guid}/authorization", async (
     Guid userId,
     AppDbContext dbContext,
@@ -107,18 +183,24 @@ adminApi.MapGet("/users/{userId:guid}/authorization", async (
             select new { Name = permission.Name, permissionOverride.Effect })
         .ToArrayAsync(cancellationToken);
 
-    var rolePermissionNames = await (
+    var userRoleIds = user.Roles.Select(role => role.Id).ToArray();
+    var rolePermissionSources = await (
             from rolePermission in dbContext.RolePermissions.AsNoTracking()
             join permission in dbContext.Permissions.AsNoTracking()
                 on rolePermission.PermissionId equals permission.Id
-            where rolePermission.AppRoleId != Guid.Empty &&
-                  permission.IsActive &&
-                  dbContext.AppUsers.Any(user => user.Id == userId && user.Roles.Any(role => role.Id == rolePermission.AppRoleId))
-            select permission.Name)
-        .Distinct()
+            join role in dbContext.AppRoles.AsNoTracking()
+                on rolePermission.AppRoleId equals role.Id
+            where userRoleIds.Contains(rolePermission.AppRoleId) && permission.IsActive
+            select new { PermissionName = permission.Name, RoleName = role.Name })
         .ToArrayAsync(cancellationToken);
 
-    var roleGrants = new HashSet<string>(rolePermissionNames, StringComparer.OrdinalIgnoreCase);
+    var roleGrants = new HashSet<string>(rolePermissionSources.Select(source => source.PermissionName), StringComparer.OrdinalIgnoreCase);
+    var roleNamesByPermission = rolePermissionSources
+        .GroupBy(source => source.PermissionName, StringComparer.OrdinalIgnoreCase)
+        .ToDictionary(
+            group => group.Key,
+            group => group.Select(source => source.RoleName).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(name => name).ToArray(),
+            StringComparer.OrdinalIgnoreCase);
     var directGrants = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
     var directDenies = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
@@ -149,7 +231,7 @@ adminApi.MapGet("/users/{userId:guid}/authorization", async (
             var sources = new List<string>();
             if (roleGrants.Contains(permissionName))
             {
-                sources.Add("Role Grant");
+                sources.AddRange(roleNamesByPermission[permissionName].Select(roleName => $"Role Grant:{roleName}"));
             }
 
             if (directGrants.Contains(permissionName))
@@ -964,4 +1046,17 @@ adminApi.MapPut("/roles/{roleId:guid}/permissions", async (
 
     private static bool TryParsePermissionEffect(string effect, out PermissionEffect permissionEffect) =>
         Enum.TryParse(effect?.Trim(), true, out permissionEffect);
+
+    private static AdminUserDetailsDto ToUserDetails(AppUser user) => new()
+    {
+        Id = user.Id,
+        FullName = user.FullName,
+        Email = user.Email,
+        IsActive = user.IsActive,
+        PreferredLanguage = user.PreferredLanguage,
+        CreatedAtUtc = user.CreatedAtUtc,
+        UpdatedAtUtc = user.UpdatedAtUtc,
+        RoleIds = user.Roles.OrderBy(role => role.Name).Select(role => role.Id).ToArray(),
+        Roles = user.Roles.OrderBy(role => role.Name).Select(role => role.Name).ToArray()
+    };
 }
