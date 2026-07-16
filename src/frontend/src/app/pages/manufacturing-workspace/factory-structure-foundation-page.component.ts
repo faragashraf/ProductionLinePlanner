@@ -1,6 +1,8 @@
 import { Component, OnDestroy, OnInit } from '@angular/core';
+import { Router } from '@angular/router';
 import { EMPTY, Observable, Subject, catchError, distinctUntilChanged, forkJoin, switchMap, takeUntil, tap, finalize } from 'rxjs';
 import { PERMISSIONS } from '../../core/config/permission-identifiers';
+import { PRODUCTION_RECORDING_ACCESS } from '../../core/config/manufacturing-workspace.config';
 import { AssignmentsApiService, AssignmentWorker } from '../../core/services/assignments-api.service';
 import {
   FactoryItem,
@@ -93,7 +95,8 @@ export class FactoryStructureFoundationPageComponent implements OnInit, OnDestro
     private readonly masterDataApi: ManufacturingMasterDataApiService,
     private readonly assignmentsApi: AssignmentsApiService,
     private readonly workersApi: WorkersApiService,
-    private readonly permissionService: PermissionService
+    private readonly permissionService: PermissionService,
+    private readonly router: Router
   ) {}
 
   ngOnInit(): void {
@@ -145,6 +148,21 @@ export class FactoryStructureFoundationPageComponent implements OnInit, OnDestro
     return this.permissionService.hasPermission(this.permissions.factoryStructure.manage);
   }
 
+  get productionRecordingContext(): { factoryId: string; productionLineId: string; mainStageId: string; subStageId: string } | null {
+    const factory = this.factories.find(item => item.id === this.selectedFactoryId && item.isActive);
+    const line = this.lines.find(item => item.id === this.selectedLineId && item.factoryId === factory?.id && item.isActive);
+    const mainStage = this.mainStages.find(item => item.id === this.selectedMainStageId && item.productionLineId === line?.id && item.isActive);
+    const subStage = this.subStages.find(item => item.id === this.selectedSubStageId && item.mainStageId === mainStage?.id && item.isActive);
+
+    return factory && line && mainStage && subStage
+      ? { factoryId: factory.id, productionLineId: line.id, mainStageId: mainStage.id, subStageId: subStage.id }
+      : null;
+  }
+
+  get canOpenProductionRecording(): boolean {
+    return !!this.productionRecordingContext && this.permissionService.hasAccess(PRODUCTION_RECORDING_ACCESS);
+  }
+
   onSearch(event: Event): void {
     this.searchTerm = ((event.target as HTMLInputElement).value ?? '').trim();
   }
@@ -155,6 +173,15 @@ export class FactoryStructureFoundationPageComponent implements OnInit, OnDestro
 
   onFormExpandedChange(formId: FactoryStructureFormId, expanded: boolean): void {
     this.activeForm = expanded ? formId : null;
+  }
+
+  openProductionRecording(): void {
+    const context = this.productionRecordingContext;
+    if (!context || !this.permissionService.hasAccess(PRODUCTION_RECORDING_ACCESS)) {
+      return;
+    }
+
+    void this.router.navigate(['/manufacturing/production-recording'], { queryParams: context });
   }
 
   reload(): void {

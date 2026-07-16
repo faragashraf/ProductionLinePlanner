@@ -11,6 +11,7 @@ namespace ProductionLinePlanner.Infrastructure.BusinessEngines;
 
 public sealed class AttendanceEngine : IAttendanceEngine
 {
+    private static readonly TimeZoneInfo EgyptTimeZone = TimeZoneInfo.FindSystemTimeZoneById("Africa/Cairo");
     private readonly IAttendanceReadService _attendanceReadService;
     private readonly IAttendanceSyncService _attendanceSyncService;
     private readonly AppDbContext _dbContext;
@@ -48,6 +49,9 @@ public sealed class AttendanceEngine : IAttendanceEngine
     public Task<Result<AttendanceSyncResultDto>> SyncTodayAsync(CancellationToken cancellationToken = default)
         => _attendanceSyncService.SyncTodayAsync(cancellationToken);
 
+    public Task<Result<AttendanceSyncResultDto>> SyncForProductionDateAsync(DateOnly productionDate, CancellationToken cancellationToken = default)
+        => _attendanceSyncService.SyncForProductionDateAsync(productionDate, cancellationToken);
+
     public async Task<Result<Dictionary<Guid, AttendanceStatusRecord>>> GetLatestAttendanceStatusByWorkerAsync(
         IEnumerable<Guid> workerIds,
         DateTime? asOfUtc = null,
@@ -60,12 +64,15 @@ public sealed class AttendanceEngine : IAttendanceEngine
         }
 
         var asOf = asOfUtc ?? DateTime.UtcNow;
-        var dateOnly = new DateTime(asOf.Year, asOf.Month, asOf.Day, 0, 0, 0, DateTimeKind.Utc);
+        var cairo = TimeZoneInfo.ConvertTimeFromUtc(asOf.Kind == DateTimeKind.Utc ? asOf : asOf.ToUniversalTime(), EgyptTimeZone);
+        var localStart = DateOnly.FromDateTime(cairo).ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified);
+        var dateStartUtc = TimeZoneInfo.ConvertTimeToUtc(localStart, EgyptTimeZone);
+        var dateEndUtc = TimeZoneInfo.ConvertTimeToUtc(localStart.AddDays(1), EgyptTimeZone);
 
         var query = await _dbContext.AttendanceRecords
             .AsNoTracking()
             .Where(x => workerIdArray.Contains(x.WorkerId)
-                        && x.AttendanceTimeUtc >= dateOnly
+                        && x.AttendanceTimeUtc >= dateStartUtc
                         && x.AttendanceTimeUtc <= asOf)
             .GroupBy(x => x.WorkerId)
             .Select(g => new
@@ -77,9 +84,8 @@ public sealed class AttendanceEngine : IAttendanceEngine
 
         var result = query.ToDictionary(
             x => x.WorkerId,
-            x => new AttendanceStatusRecord(x.WorkerId, x.Entry.AttendanceStatus, x.Entry.AttendanceTimeUtc, x.Entry.Source));
+            x => new AttendanceStatusRecord(x.WorkerId, x.Entry.AttendanceStatus, x.Entry.AttendanceTimeUtc, x.Entry.Source, x.Entry.SourceRawId));
 
         return Result<Dictionary<Guid, AttendanceStatusRecord>>.Success(result);
     }
 }
-

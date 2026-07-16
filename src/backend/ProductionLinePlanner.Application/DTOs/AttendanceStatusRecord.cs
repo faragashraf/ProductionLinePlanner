@@ -6,5 +6,5 @@ public sealed record AttendanceStatusRecord(
     Guid WorkerId,
     AttendanceStatus Status,
     DateTime AttendanceTimeUtc,
-    string? Source);
-
+    string? Source,
+    string? SourceRawId = null);

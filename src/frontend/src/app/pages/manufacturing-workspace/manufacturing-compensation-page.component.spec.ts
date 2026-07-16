@@ -93,6 +93,16 @@ describe('ManufacturingCompensationPageComponent', () => {
     expect(text).toContain('قيمة ثابتة');
   });
 
+  it('uses stage-cost terminology in the user-facing configuration workspace', () => {
+    const fixture = createComponent({ manage: true });
+    const text = fixture.nativeElement.textContent as string;
+
+    expect(text).toContain('إعدادات تكلفة المراحل');
+    expect(text).toContain('طريقة احتساب تكلفة المرحلة');
+    expect(text).not.toContain('إعدادات التعويض');
+    expect(text).not.toContain('طرق التعويض');
+  });
+
   it('uses the shared viewport-safe stack presentation for mobile cards while preserving the PrimeNG table and paginator', () => {
     const fixture = createComponent({ manage: true });
     const component = fixture.componentInstance;
@@ -241,7 +251,7 @@ describe('ManufacturingCompensationPageComponent', () => {
   it('renders the error state when compensation model loading fails', () => {
     const fixture = createComponent({ models$: throwError(() => new Error('Compensation models failed')) });
 
-    expect(fixture.nativeElement.textContent).toContain('تعذر تحميل إعدادات التعويض');
+    expect(fixture.nativeElement.textContent).toContain('تعذر تحميل إعدادات تكلفة المراحل');
     const errorFixture = fixture;
     expect(errorFixture.nativeElement.textContent).toContain('Compensation models failed');
   });

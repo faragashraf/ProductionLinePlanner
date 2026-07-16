@@ -50,6 +50,8 @@ public class Worker
     /// <summary>External attendance identifiers from ZKTeco USERINFO.</summary>
     public string? BadgeNumber { get; private set; }
     public string? Phone { get; private set; }
+    /// <summary>Planner-owned department text imported from the workbook. Never written back to ZKTime.</summary>
+    public string? LocalDepartmentName { get; private set; }
     public bool IsActive { get; private set; }
     public EmploymentStatus EmploymentStatus { get; private set; }
     public DateTime? EmploymentEndDate { get; private set; }
@@ -80,6 +82,12 @@ public class Worker
     public void SetPhone(string? phone, DateTime? atUtc = null)
     {
         Phone = string.IsNullOrWhiteSpace(phone) ? null : phone.Trim();
+        UpdatedAtUtc = atUtc ?? DateTime.UtcNow;
+    }
+
+    public void SetLocalDepartmentName(string? departmentName, DateTime? atUtc = null)
+    {
+        LocalDepartmentName = string.IsNullOrWhiteSpace(departmentName) ? null : departmentName.Trim();
         UpdatedAtUtc = atUtc ?? DateTime.UtcNow;
     }
 

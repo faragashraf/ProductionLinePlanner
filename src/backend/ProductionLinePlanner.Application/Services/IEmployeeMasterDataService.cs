@@ -8,7 +8,7 @@ public interface IEmployeeMasterDataService
 {
     Task<PagedResult<WorkerDto>> GetWorkersAsync(
         string? search,
-        bool? isActive = true,
+        bool? isActive = null,
         int page = 1,
         int pageSize = 50,
         CancellationToken cancellationToken = default);

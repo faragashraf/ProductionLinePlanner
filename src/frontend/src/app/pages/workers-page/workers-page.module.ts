@@ -1,5 +1,6 @@
 import { CommonModule } from '@angular/common';
 import { NgModule } from '@angular/core';
+import { FormsModule } from '@angular/forms';
 import { RouterModule, Routes } from '@angular/router';
 import { ButtonModule } from 'primeng/button';
 import { RippleModule } from 'primeng/ripple';
@@ -28,6 +29,7 @@ const WORKERS_ROUTES: Routes = [
   declarations: [WorkersPageComponent],
   imports: [
     CommonModule,
+    FormsModule,
     SharedModule,
     ButtonModule,
     RippleModule,

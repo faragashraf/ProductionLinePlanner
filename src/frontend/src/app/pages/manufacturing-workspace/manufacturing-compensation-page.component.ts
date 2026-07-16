@@ -4,6 +4,7 @@ import { finalize } from 'rxjs';
 import { PERMISSIONS } from '../../core/config/permission-identifiers';
 import { PermissionService } from '../../core/services/permission.service';
 import { environment } from '../../../environments/environment';
+import { STAGE_COST_TERMINOLOGY } from '../../core/config/stage-cost-terminology';
 import {
   CompensationMode,
   CompensationModelStageUpdate,
@@ -41,7 +42,7 @@ const COMPENSATION_STAGE_FIELDS: readonly CompensationStageField[] = [
   { key: 'name', label: 'المرحلة' },
   { key: 'piecePrice', label: 'سعر القطعة' },
   { key: 'standardSeconds', label: 'الثواني' },
-  { key: 'method', label: 'طريقة التعويض', emphasis: 'method' },
+  { key: 'method', label: STAGE_COST_TERMINOLOGY.calculationMethod, emphasis: 'method' },
   { key: 'status', label: 'الحالة' }
 ];
 
@@ -52,6 +53,7 @@ const COMPENSATION_STAGE_FIELDS: readonly CompensationStageField[] = [
 })
 export class ManufacturingCompensationPageComponent implements OnInit {
   readonly permissions = PERMISSIONS;
+  readonly stageCostTerminology = STAGE_COST_TERMINOLOGY;
   readonly compensationModes = COMPENSATION_MODES;
   readonly compensationMethods = COMPENSATION_METHODS;
   readonly stageFields = COMPENSATION_STAGE_FIELDS;
@@ -71,7 +73,7 @@ export class ManufacturingCompensationPageComponent implements OnInit {
   hasLoadedStages = false;
   isSaving = false;
   hasError = false;
-  errorMessage = 'تعذر تحميل إعدادات التعويض، يرجى المحاولة مرة أخرى.';
+  errorMessage = 'تعذر تحميل إعدادات تكلفة المراحل، يرجى المحاولة مرة أخرى.';
   successMessage = '';
 
   readonly stageForm = this.formBuilder.group({
@@ -170,11 +172,11 @@ export class ManufacturingCompensationPageComponent implements OnInit {
       .pipe(finalize(() => this.isSaving = false))
       .subscribe({
         next: () => {
-          this.successMessage = 'تم حفظ إعداد التعويض.';
+          this.successMessage = 'تم حفظ إعداد تكلفة المرحلة.';
           this.cancelEdit();
           this.loadStages(this.selectedModelId);
         },
-        error: error => this.setError(error, 'تعذر حفظ إعداد التعويض.')
+        error: error => this.setError(error, 'تعذر حفظ إعداد تكلفة المرحلة.')
       });
   }
 

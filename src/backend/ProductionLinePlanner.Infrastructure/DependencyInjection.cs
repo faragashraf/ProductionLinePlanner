@@ -6,11 +6,15 @@ using Microsoft.Extensions.Options;
 using ProductionLinePlanner.Application.Engines;
 using ProductionLinePlanner.Application.Services;
 using ProductionLinePlanner.Application.Abstractions;
+using ProductionLinePlanner.Application.Workers;
 using ProductionLinePlanner.Infrastructure.Data;
 using ProductionLinePlanner.Infrastructure.Attendance;
 using ProductionLinePlanner.Infrastructure.Attendance.Services;
+using ProductionLinePlanner.Infrastructure.Workers;
 using ProductionLinePlanner.Infrastructure.Authorization;
+using ProductionLinePlanner.Infrastructure.Bootstrap;
 using ProductionLinePlanner.Infrastructure.BusinessEngines;
+using ProductionLinePlanner.Infrastructure.Importing;
 
 namespace ProductionLinePlanner.Infrastructure;
 
@@ -69,6 +73,8 @@ public static class DependencyInjection
         services.AddScoped<IRolePermissionSeedService, PermissionSeedService>();
 
         services.AddScoped<IAttendanceEmployeeReader, AttendanceDirectoryService>();
+        services.AddScoped<IAttendanceWorkerPhotoReader, AttendanceDirectoryService>();
+        services.AddSingleton<IWorkerPhotoCache, LocalWorkerPhotoCache>();
         services.AddScoped<IAttendanceEmployeeWriter, AttendanceDirectoryService>();
         services.AddScoped<IAttendanceDepartmentReader, AttendanceDirectoryService>();
         services.AddScoped<IAttendanceDepartmentWriter, AttendanceDirectoryService>();
@@ -79,6 +85,12 @@ public static class DependencyInjection
         services.AddScoped<IProductModelService, ProductModelService>();
         services.AddScoped<IWorkerCompensationService, WorkerCompensationService>();
         services.AddScoped<IProductionCostRecordingService, ProductionCostRecordingService>();
+        services.AddScoped<IProductionReadinessEngine, ProductionReadinessEngine>();
+        services.AddScoped<ILineStaffingEngine, LineStaffingEngine>();
+        services.AddScoped<IImportNormalizationService, ImportNormalizationService>();
+        services.AddScoped<IPilotMasterDataBootstrapService, PilotMasterDataBootstrapService>();
+        services.AddScoped<IPilotMasterDataResetService, PilotMasterDataResetService>();
+        services.AddScoped<IRealDataIntakeService, RealDataIntakeService>();
 
         return services;
     }

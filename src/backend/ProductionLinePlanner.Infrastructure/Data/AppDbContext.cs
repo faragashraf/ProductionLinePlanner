@@ -26,6 +26,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<ProductModel> ProductModels => Set<ProductModel>();
     public DbSet<ProductModelStage> ProductModelStages => Set<ProductModelStage>();
     public DbSet<WorkerSalaryHistory> WorkerSalaryHistories => Set<WorkerSalaryHistory>();
+    public DbSet<ImportBatch> ImportBatches => Set<ImportBatch>();
+    public DbSet<ProductionDayStageResolution> ProductionDayStageResolutions => Set<ProductionDayStageResolution>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

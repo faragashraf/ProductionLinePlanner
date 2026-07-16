@@ -11,7 +11,9 @@ describe('WorkersPageComponent', () => {
         id: 'w-1',
         code: 'E-1',
         fullName: 'عامل تجريبي',
-        state: 'جاهز'
+        state: 'على رأس العمل',
+        employmentStatus: 'Active',
+        isActive: true
       }
     ],
     hasBackendData: true,
@@ -109,5 +111,39 @@ describe('WorkersPageComponent', () => {
 
     component.onRefresh();
     expect(workersApi.loadWorkers).toHaveBeenCalledTimes(3);
+  });
+
+  it('reloads all directory workers by the selected service-status filter', () => {
+    const { component, workersApi } = createComponent();
+
+    component.ngOnInit();
+    component.onServiceStatusChange('inactive');
+
+    expect(workersApi.loadWorkers).toHaveBeenCalledWith(jasmine.objectContaining({ serviceStatus: 'inactive' }));
+  });
+
+  it('switching Active or Former back to All clears the status constraint, resets pagination, and preserves search', () => {
+    const { component, workersApi } = createComponent();
+    component.ngOnInit();
+    component.searchTerm = 'علي';
+    component.first = 30;
+
+    component.onServiceStatusChange('active');
+    component.first = 20;
+    component.onServiceStatusChange('all');
+
+    expect(component.first).toBe(0);
+    expect(workersApi.loadWorkers).toHaveBeenCalledWith(jasmine.objectContaining({
+      page: 1,
+      search: 'علي',
+      serviceStatus: 'all'
+    }));
+
+    component.onServiceStatusChange('inactive');
+    component.first = 10;
+    component.onServiceStatusChange('all');
+
+    expect(component.first).toBe(0);
+    expect(workersApi.loadWorkers).toHaveBeenCalledTimes(5);
   });
 });

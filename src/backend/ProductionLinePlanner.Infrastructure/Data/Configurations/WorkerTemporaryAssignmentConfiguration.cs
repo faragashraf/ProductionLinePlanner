@@ -22,9 +22,11 @@ public sealed class WorkerTemporaryAssignmentConfiguration : IEntityTypeConfigur
         builder.Property(x => x.ReplacementForWorkerId);
         builder.Property(x => x.Status).IsRequired().HasMaxLength(50);
         builder.Property(x => x.CreatedAtUtc).IsRequired();
-        builder.Property(x => x.UpdatedAtUtc).IsRequired();
+        builder.Property(x => x.UpdatedAtUtc).IsRequired().IsConcurrencyToken();
 
         builder.HasIndex(x => x.WorkerId);
+        // Supports the serializable overlap predicate with a worker-specific key range.
+        builder.HasIndex(x => new { x.WorkerId, x.Status, x.StartAtUtc, x.EndAtUtc });
         builder.HasIndex(x => new { x.FromSubStageId, x.ToSubStageId });
 
         builder.HasOne(x => x.Worker)

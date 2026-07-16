@@ -210,6 +210,17 @@
     </section>
 
     <section class="factory-structure-panel factory-structure-panel--wide">
+      <div class="factory-structure-panel__actions" *ngIf="canOpenProductionRecording">
+        <button
+          id="factoryStructureRecordProductionButton"
+          pButton
+          type="button"
+          class="p-button-sm"
+          icon="pi pi-play"
+          label="تسجيل إنتاج المرحلة"
+          (click)="openProductionRecording()"
+        ></button>
+      </div>
       <plp-expandable-form
         title="العاملون المعينون للمرحلة الفرعية"
         [summary]="selectedSubStageId ? assignedWorkers.length + ' عاملًا معينًا' : 'اختر مرحلة فرعية أولًا'"

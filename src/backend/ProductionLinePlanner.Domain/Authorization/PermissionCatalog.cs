@@ -29,10 +29,10 @@ public static class PermissionCatalog
         new("assignments.view", "assignments", "عرض التعيينات", "View assignments", false),
         new("assignments.manage", "assignments", "إدارة التعيينات", "Manage assignments", true),
 
-        new("compensation.view", "compensation", "عرض التعويضات", "View compensation", false),
-        new("compensation.manage", "compensation", "إدارة التعويضات", "Manage compensation", true),
-        new("compensation.import", "compensation", "استيراد التعويضات", "Import compensation", true),
-        new("compensation.export", "compensation", "تصدير التعويضات", "Export compensation", true),
+        new("compensation.view", "compensation", "عرض تكلفة المراحل", "View compensation", false),
+        new("compensation.manage", "compensation", "إدارة تكلفة المراحل", "Manage compensation", true),
+        new("compensation.import", "compensation", "استيراد تكلفة المراحل", "Import compensation", true),
+        new("compensation.export", "compensation", "تصدير تكلفة المراحل", "Export compensation", true),
 
         new("stages.view", "stages", "عرض المراحل", "View stages", false),
         new("stages.manage", "stages", "إدارة المراحل", "Manage stages", true),

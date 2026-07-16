@@ -26,6 +26,7 @@ export class WorkersPageComponent implements OnInit, OnDestroy {
   workers: WorkerPageItem[] = [];
   selectedWorker: WorkerPageItem | null = null;
   searchTerm = '';
+  serviceStatus: 'all' | 'active' | 'inactive' = 'all';
   isLoading = false;
   hasLoadedOnce = false;
   hasError = false;
@@ -47,6 +48,7 @@ export class WorkersPageComponent implements OnInit, OnDestroy {
           page: 1,
           pageSize: this.rows,
           search,
+          serviceStatus: this.serviceStatus,
           force: false
         }))
       ),
@@ -58,6 +60,7 @@ export class WorkersPageComponent implements OnInit, OnDestroy {
           page: Math.max(Math.trunc(request.page ?? 1), 1),
           pageSize: Math.max(Math.trunc(request.pageSize ?? 20), 1),
           search: (request.search ?? '').trim(),
+          serviceStatus: request.serviceStatus ?? this.serviceStatus,
           force: request.force ?? false
         })),
         distinctUntilChanged((previous, current) => {
@@ -69,6 +72,7 @@ export class WorkersPageComponent implements OnInit, OnDestroy {
             previous.page === current.page &&
             previous.pageSize === current.pageSize &&
             previous.search === current.search &&
+            previous.serviceStatus === current.serviceStatus &&
             previous.force === current.force
           );
         }),
@@ -80,7 +84,8 @@ export class WorkersPageComponent implements OnInit, OnDestroy {
           this.workersApiService.loadWorkers({
             page: query.page,
             pageSize: query.pageSize,
-            search: query.search
+            search: query.search,
+            serviceStatus: query.serviceStatus
           })
             .pipe(
               map((payload) => ({ payload, query })),
@@ -105,7 +110,7 @@ export class WorkersPageComponent implements OnInit, OnDestroy {
         }
       });
 
-    this.loadQueue$.next({ page: 1, pageSize: this.rows });
+    this.loadQueue$.next({ page: 1, pageSize: this.rows, serviceStatus: this.serviceStatus });
   }
 
   ngOnDestroy(): void {
@@ -144,6 +149,19 @@ export class WorkersPageComponent implements OnInit, OnDestroy {
     this.searchTerm$.next('');
   }
 
+  onServiceStatusChange(status: 'all' | 'active' | 'inactive'): void {
+    this.serviceStatus = status;
+    this.first = 0;
+    this.selectedWorker = null;
+    this.loadQueue$.next({
+      page: 1,
+      pageSize: this.rows,
+      search: this.searchTerm,
+      serviceStatus: status,
+      force: false
+    });
+  }
+
   onLazyLoad(event: TableLazyLoadEvent): void {
     if (!this.isServerSidePagination || !this.hasLoadedOnce) {
       return;
@@ -162,6 +180,7 @@ export class WorkersPageComponent implements OnInit, OnDestroy {
       page,
       pageSize: rows,
       search: this.searchTerm,
+      serviceStatus: this.serviceStatus,
       force: false
     });
   }
@@ -184,6 +203,7 @@ export class WorkersPageComponent implements OnInit, OnDestroy {
       page: currentPage,
       pageSize: this.rows,
       search: this.searchTerm,
+      serviceStatus: this.serviceStatus,
       force: true
     });
   }

@@ -42,6 +42,11 @@
   width: 100%;
 }
 
+.factory-structure-panel__actions {
+  display: flex;
+  justify-content: flex-start;
+}
+
 .factory-structure-panel header {
   display: flex;
   justify-content: space-between;

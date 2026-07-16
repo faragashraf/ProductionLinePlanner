@@ -20,8 +20,12 @@ using ProductionLinePlanner.Application.DTOs;
 using ProductionLinePlanner.Application.Engines;
 using ProductionLinePlanner.Application.Services;
 using ProductionLinePlanner.Application.Requests;
+using ProductionLinePlanner.Application.Workers;
 using ProductionLinePlanner.Api.Security;
 using ProductionLinePlanner.Api.Authorization;
+using ProductionLinePlanner.Api.Bootstrap;
+using ProductionLinePlanner.Api.Diagnostics;
+using ProductionLinePlanner.Api.Endpoints;
 using ProductionLinePlanner.Domain.Entities;
 using ProductionLinePlanner.Domain.Enums;
 using ProductionLinePlanner.Domain.Authorization;
@@ -37,6 +41,7 @@ var allowedCorsOrigins = builder.Configuration
     .Where(origin => !string.IsNullOrWhiteSpace(origin))
     .Select(origin => origin.Trim())
     .Where(origin => builder.Environment.IsDevelopment() || origin.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+    .Distinct(StringComparer.OrdinalIgnoreCase)
     .ToArray() ?? Array.Empty<string>();
 var allowedMethods = builder.Configuration
     .GetSection("Cors:AllowedMethods")
@@ -47,6 +52,9 @@ var allowedHeaders = builder.Configuration
 var corsAllowCredentials = builder.Configuration.GetValue("Cors:AllowCredentials", false);
 var rateLimitWindowSeconds = Math.Max(15, builder.Configuration.GetValue("Security:RateLimit:WindowSeconds", 60));
 var rateLimitPermitLimit = Math.Max(1, builder.Configuration.GetValue("Security:RateLimit:PermitLimit", 120));
+var criticalProductionPermitLimit = Math.Max(1, builder.Configuration.GetValue("Security:RateLimit:CriticalProductionPermitLimit", rateLimitPermitLimit));
+var workerPhotoPermitLimit = Math.Max(1, builder.Configuration.GetValue("Security:RateLimit:WorkerPhotoPermitLimit", 120));
+var normalReadPermitLimit = Math.Max(1, builder.Configuration.GetValue("Security:RateLimit:NormalReadPermitLimit", 240));
 const string SecurityCorsPolicy = "ProductionLinePlannerCors";
 const string SecurityBootstrapEndpoint = "/api/admin/bootstrap";
 var jwtSection = builder.Configuration.GetSection("Authentication:Jwt");
@@ -80,10 +88,10 @@ builder.Services.AddCors(options =>
         SecurityCorsPolicy,
         policy =>
         {
-            if (allowedCorsOrigins.Length > 0)
-            {
-                policy.WithOrigins(allowedCorsOrigins);
-            }
+            // Echo only the exact requesting origin when it is explicitly
+            // configured. This keeps LAN and loopback development origins
+            // distinct and leaves production restricted to configured HTTPS origins.
+            policy.SetIsOriginAllowed(origin => allowedCorsOrigins.Contains(origin, StringComparer.OrdinalIgnoreCase));
 
             if (allowedMethods.Length > 0)
             {
@@ -103,25 +111,35 @@ builder.Services.AddCors(options =>
             {
                 policy.DisallowCredentials();
             }
+
+            if (builder.Environment.IsDevelopment())
+            {
+                // Lets a locally hosted browser correlate the Network entry
+                // with the Development-only endpoint routing evidence.
+                policy.WithExposedHeaders(
+                    PreviewRequestRoutingDiagnostics.RequestIdHeader,
+                    PreviewRequestRoutingDiagnostics.EndpointHeader,
+                    PreviewRequestRoutingDiagnostics.SelectedMethodsHeader,
+                    PreviewRequestRoutingDiagnostics.CandidateMethodsHeader);
+            }
         });
 });
 
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
-    options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
-    {
-        var partitionKey = context.Connection.RemoteIpAddress?.ToString() ?? "anonymous";
-        return RateLimitPartition.GetFixedWindowLimiter(
-            partitionKey,
-            _ => new FixedWindowRateLimiterOptions
-            {
-                PermitLimit = rateLimitPermitLimit,
-                QueueLimit = 0,
-                Window = TimeSpan.FromSeconds(rateLimitWindowSeconds),
-                QueueProcessingOrder = QueueProcessingOrder.OldestFirst
-            });
-    });
+    options.AddPolicy(ApiRateLimitPolicies.CriticalProductionWrite, context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            GetRateLimitPartitionKey(context),
+            _ => FixedWindowOptions(criticalProductionPermitLimit, rateLimitWindowSeconds)));
+    options.AddPolicy(ApiRateLimitPolicies.WorkerPhotoRead, context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            GetRateLimitPartitionKey(context),
+            _ => FixedWindowOptions(workerPhotoPermitLimit, rateLimitWindowSeconds)));
+    options.AddPolicy(ApiRateLimitPolicies.NormalRead, context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            GetRateLimitPartitionKey(context),
+            _ => FixedWindowOptions(normalReadPermitLimit, rateLimitWindowSeconds)));
     options.OnRejected = async (context, _) =>
     {
         var problem = new ProblemDetails
@@ -180,6 +198,51 @@ builder.Services.AddAuthorization(options =>
 
 var app = builder.Build();
 
+if (ZkTimeWorkerSchemaInspectionCommand.IsRequested(args))
+{
+    try
+    {
+        await ZkTimeWorkerSchemaInspectionCommand.ExecuteAsync(app);
+    }
+    catch (Exception exception)
+    {
+        Console.Error.WriteLine($"ZKTime worker schema inspection failed: {exception.Message}");
+        Environment.ExitCode = 1;
+    }
+    await app.DisposeAsync();
+    return;
+}
+
+if (WorkerActiveServiceSyncCommand.IsRequested(args))
+{
+    try
+    {
+        await WorkerActiveServiceSyncCommand.ExecuteAsync(app, args);
+    }
+    catch (Exception exception)
+    {
+        Console.Error.WriteLine($"Active-service worker synchronization failed: {exception.Message}");
+        Environment.ExitCode = 1;
+    }
+    await app.DisposeAsync();
+    return;
+}
+
+if (PilotMasterDataBootstrapCommand.IsRequested(args))
+{
+    try
+    {
+        await PilotMasterDataBootstrapCommand.ExecuteAsync(app, args);
+    }
+    catch (Exception exception)
+    {
+        Console.Error.WriteLine($"Pilot master-data command failed: {exception.Message}");
+        Environment.ExitCode = 1;
+    }
+    await app.DisposeAsync();
+    return;
+}
+
 if (!isEfDesignTime)
 {
     await using var seedScope = app.Services.CreateAsyncScope();
@@ -201,8 +264,10 @@ if (!app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
-app.UseRateLimiter();
 app.UseCors(SecurityCorsPolicy);
+app.UseAuthentication();
+app.UsePreviewRequestRoutingDiagnostics();
+app.UseRateLimiter();
 app.Use(async (context, next) =>
 {
     context.Response.Headers["X-Content-Type-Options"] = "nosniff";
@@ -213,23 +278,75 @@ app.Use(async (context, next) =>
     context.Response.Headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload";
     await next();
 });
-app.UseAuthentication();
 app.UseAuthorization();
 
-var factoriesApi = app.MapGroup("/api/factories").RequireAuthorization();
-var productionLinesApi = app.MapGroup("/api/production-lines").RequireAuthorization();
-var departmentsApi = app.MapGroup("/api/departments").RequireAuthorization();
-var mainStagesApi = app.MapGroup("/api/main-stages").RequireAuthorization();
-var subStagesApi = app.MapGroup("/api/sub-stages").RequireAuthorization();
-var workersApi = app.MapGroup("/api/workers").RequireAuthorization();
-var productModelsApi = app.MapGroup("/api/product-models").RequireAuthorization();
-var compensationApi = app.MapGroup("/api/compensation").RequireAuthorization();
-var workerCompensationApi = app.MapGroup("/api/workers/{workerId:guid}/compensation").RequireAuthorization();
-var assignmentsApi = app.MapGroup("/api/assignments").RequireAuthorization();
-var factoryStructureApi = app.MapGroup("/api/factory-structure").RequireAuthorization();
-var attendanceApi = app.MapGroup("/api/attendance").RequireAuthorization();
-var notificationsApi = app.MapGroup("/api/notifications").RequireAuthorization();
-var readinessApi = app.MapGroup("/api/readiness").RequireAuthorization();
+var factoriesApi = app.MapGroup("/api/factories").RequireAuthorization().RequireRateLimiting(ApiRateLimitPolicies.NormalRead);
+var productionLinesApi = app.MapGroup("/api/production-lines").RequireAuthorization().RequireRateLimiting(ApiRateLimitPolicies.NormalRead);
+var departmentsApi = app.MapGroup("/api/departments").RequireAuthorization().RequireRateLimiting(ApiRateLimitPolicies.NormalRead);
+var mainStagesApi = app.MapGroup("/api/main-stages").RequireAuthorization().RequireRateLimiting(ApiRateLimitPolicies.NormalRead);
+var subStagesApi = app.MapGroup("/api/sub-stages").RequireAuthorization().RequireRateLimiting(ApiRateLimitPolicies.NormalRead);
+var workersApi = app.MapGroup("/api/workers").RequireAuthorization().RequireRateLimiting(ApiRateLimitPolicies.NormalRead);
+var productModelsApi = app.MapGroup("/api/product-models").RequireAuthorization().RequireRateLimiting(ApiRateLimitPolicies.NormalRead);
+var compensationApi = app.MapGroup("/api/compensation").RequireAuthorization().RequireRateLimiting(ApiRateLimitPolicies.NormalRead);
+var workerCompensationApi = app.MapGroup("/api/workers/{workerId:guid}/compensation").RequireAuthorization().RequireRateLimiting(ApiRateLimitPolicies.NormalRead);
+var assignmentsApi = app.MapGroup("/api/assignments").RequireAuthorization().RequireRateLimiting(ApiRateLimitPolicies.CriticalProductionWrite);
+var lineStaffingApi = app.MapGroup("/api/line-staffing").RequireAuthorization().RequireRateLimiting(ApiRateLimitPolicies.NormalRead);
+var factoryStructureApi = app.MapGroup("/api/factory-structure").RequireAuthorization().RequireRateLimiting(ApiRateLimitPolicies.CriticalProductionWrite);
+var attendanceApi = app.MapGroup("/api/attendance").RequireAuthorization().RequireRateLimiting(ApiRateLimitPolicies.NormalRead);
+var notificationsApi = app.MapGroup("/api/notifications").RequireAuthorization().RequireRateLimiting(ApiRateLimitPolicies.NormalRead);
+var readinessApi = app.MapGroup("/api/readiness").RequireAuthorization().RequireRateLimiting(ApiRateLimitPolicies.NormalRead);
+
+lineStaffingApi.MapGet("", async (
+    Guid factoryId,
+    Guid productionLineId,
+    Guid productModelId,
+    DateOnly staffingReferenceDate,
+    ILineStaffingEngine lineStaffingEngine,
+    CancellationToken cancellationToken) =>
+{
+    var result = await lineStaffingEngine.GetLineStaffingPlanAsync(
+        factoryId,
+        productionLineId,
+        productModelId,
+        staffingReferenceDate,
+        cancellationToken);
+    if (result.IsFailure)
+    {
+        return ApiResponse.Failure(
+            result.Error?.Code ?? "LineStaffingReadFailed",
+            result.Error?.Message ?? "Unable to load the line staffing plan.",
+            MapFailureStatusCode(result.Error?.Code));
+    }
+
+    return Results.Ok(ApiResponse.Success(result.Value!));
+})
+    .RequirePermission("factory-structure.view")
+    .RequirePermission("models.view")
+    .RequirePermission("workers.view")
+    .RequirePermission("assignments.view")
+    .WithTags("Line staffing")
+    .WithName("GetLineStaffingPlan");
+
+lineStaffingApi.MapGet("/workers", async (
+    DateOnly staffingReferenceDate,
+    ILineStaffingEngine lineStaffingEngine,
+    CancellationToken cancellationToken) =>
+{
+    var result = await lineStaffingEngine.GetActiveStaffingWorkersAsync(staffingReferenceDate, cancellationToken);
+    if (result.IsFailure)
+    {
+        return ApiResponse.Failure(
+            result.Error?.Code ?? "LineStaffingWorkersReadFailed",
+            result.Error?.Message ?? "Unable to load active staffing workers.",
+            MapFailureStatusCode(result.Error?.Code));
+    }
+
+    return Results.Ok(ApiResponse.Success(result.Value!));
+})
+    .RequirePermission("workers.view")
+    .RequirePermission("assignments.view")
+    .WithTags("Line staffing")
+    .WithName("GetActiveLineStaffingWorkers");
 
 app.MapGet("/api/error", (HttpContext context) =>
 {
@@ -732,7 +849,7 @@ app.MapIamAdminEndpoints();
 factoriesApi.MapGet("", async (
     AppDbContext dbContext,
     CancellationToken cancellationToken,
-    bool? isActive = true,
+    bool? isActive = null,
     int page = 1,
     int pageSize = 50) =>
 {
@@ -1672,7 +1789,7 @@ workersApi.MapGet("", async (
     IEmployeeMasterDataService employeeService,
     CancellationToken cancellationToken,
     string? search = null,
-    bool? isActive = true,
+    bool? isActive = null,
     int page = 1,
     int pageSize = 50) =>
 {
@@ -1698,6 +1815,19 @@ workersApi.MapGet("", async (
     .RequirePermission("workers.view")
     .WithTags("Workers")
     .WithName("GetWorkers");
+
+app.MapGet("/api/workers/{workerId:guid}/photo", async (
+    Guid workerId,
+    AppDbContext dbContext,
+    IWorkerPhotoCache workerPhotoCache,
+    HttpContext httpContext,
+    CancellationToken cancellationToken) =>
+    await WorkerPhotoEndpoint.GetAsync(workerId, dbContext, workerPhotoCache, httpContext, cancellationToken))
+    .RequireAuthorization()
+    .RequirePermission("workers.view")
+    .RequireRateLimiting(ApiRateLimitPolicies.WorkerPhotoRead)
+    .WithTags("Workers")
+    .WithName("GetWorkerPhoto");
 
 workersApi.MapPost("/sync", async (
     IWorkerInitialSyncService syncService,
@@ -2509,6 +2639,48 @@ assignmentsApi.MapPost("/default", async (
     .WithTags("Assignments")
     .WithName("CreateOrUpdateDefaultAssignment");
 
+assignmentsApi.MapDelete("/default/{workerId:guid}", async (
+    Guid workerId,
+    Guid subStageId,
+    string reason,
+    IAssignmentEngine assignmentEngine,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
+    CancellationToken cancellationToken) =>
+{
+    var actorUserId = currentUserService.UserId;
+    if (actorUserId is null)
+    {
+        return ApiResponse.Failure("Unauthorized", "User context is required.");
+    }
+
+    var result = await assignmentEngine.RemoveDefaultAssignmentAsync(
+        workerId,
+        subStageId,
+        reason,
+        actorUserId.Value,
+        $"{httpContext.Request.Method} {httpContext.Request.Path}",
+        cancellationToken);
+    if (result.IsFailure)
+    {
+        return ApiResponse.Failure(
+            result.Error?.Code ?? "ValidationError",
+            result.Error?.Message ?? "Validation failed.",
+            MapFailureStatusCode(result.Error?.Code));
+    }
+
+    return Results.Ok(ApiResponse.Success(new
+    {
+        assignmentId = result.Value!.AssignmentId,
+        workerId = result.Value.WorkerId,
+        subStageId = result.Value.SubStageId,
+        assignmentType = result.Value.AssignmentType
+    }));
+})
+    .RequirePermission("assignments.manage")
+    .WithTags("Assignments")
+    .WithName("RemoveDefaultAssignment");
+
 assignmentsApi.MapPost("/temporary", async (
     CreateTemporaryAssignmentRequest request,
     IAssignmentEngine assignmentEngine,
@@ -2616,6 +2788,52 @@ assignmentsApi.MapPost("/replacement", async (
     .WithTags("Assignments")
     .WithName("CreateReplacementAssignment");
 
+assignmentsApi.MapPost("/move", async (
+    MoveCurrentWorkerAssignmentRequest request,
+    IAssignmentEngine assignmentEngine,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
+    CancellationToken cancellationToken) =>
+{
+    var actorUserId = currentUserService.UserId;
+    if (actorUserId is null)
+    {
+        return ApiResponse.Failure("Unauthorized", "User context is required.");
+    }
+
+    var requestMeta = $"{httpContext.Request.Method} {httpContext.Request.Path}";
+    if (!string.IsNullOrWhiteSpace(currentUserService.UserName))
+    {
+        requestMeta = $"{requestMeta} by {currentUserService.UserName}";
+    }
+
+    var result = await assignmentEngine.MoveCurrentAssignmentAsync(request, actorUserId.Value, requestMeta, cancellationToken);
+    if (result.IsFailure)
+    {
+        return ApiResponse.Failure(
+            result.Error?.Code ?? "ValidationError",
+            result.Error?.Message ?? "Validation failed.",
+            MapFailureStatusCode(result.Error?.Code));
+    }
+
+    var value = result.Value!;
+    return Results.Ok(ApiResponse.Success(new
+    {
+        assignmentId = value.AssignmentId,
+        workerId = value.WorkerId,
+        subStageId = value.SubStageId,
+        fromSubStageId = value.FromSubStageId,
+        toSubStageId = value.ToSubStageId,
+        assignmentType = value.AssignmentType,
+        status = value.Status,
+        startAtUtc = value.StartsAtUtc,
+        endAtUtc = value.EndsAtUtc
+    }));
+})
+    .RequirePermission("assignments.manage")
+    .WithTags("Assignments")
+    .WithName("MoveCurrentAssignment");
+
 assignmentsApi.MapGet("/recommendations", async (
     Guid subStageId,
     IAssignmentRecommendationEngine recommendationEngine,
@@ -2665,6 +2883,7 @@ assignmentsApi.MapGet("/recommendations", async (
 
 assignmentsApi.MapDelete("/temporary/{assignmentId:guid}", async (
     Guid assignmentId,
+    string reason,
     IAssignmentEngine assignmentEngine,
     ICurrentUserService currentUserService,
     HttpContext httpContext,
@@ -2688,7 +2907,7 @@ assignmentsApi.MapDelete("/temporary/{assignmentId:guid}", async (
         requestMeta = $"{requestMeta} by {currentUserService.UserName}";
     }
 
-    var result = await assignmentEngine.CancelTemporaryAssignmentAsync(assignmentId, actorUserId.Value, requestMeta, cancellationToken);
+    var result = await assignmentEngine.CancelTemporaryAssignmentAsync(assignmentId, reason, actorUserId.Value, requestMeta, cancellationToken);
 
     if (result.IsFailure)
     {
@@ -2772,6 +2991,104 @@ assignmentsApi.MapGet("/sub-stages/{subStageId:guid}/workers", async (
     .WithTags("Assignments")
     .WithName("GetWorkersInSubStage");
 
+assignmentsApi.MapGet("/sub-stages/{subStageId:guid}/worker-context", async (
+    Guid subStageId,
+    DateOnly productionDate,
+    AppDbContext dbContext,
+    IAssignmentEngine assignmentEngine,
+    IAttendanceEngine attendanceEngine,
+    CancellationToken cancellationToken) =>
+{
+    var subStageExists = await dbContext.SubStages
+        .AsNoTracking()
+        .AnyAsync(x => x.Id == subStageId && x.IsActive, cancellationToken);
+    if (!subStageExists)
+    {
+        return ApiResponse.Failure("NotFound", "SubStage not found or inactive.", 404);
+    }
+
+    var workers = await dbContext.Workers
+        .AsNoTracking()
+        .Where(x => x.IsActive && x.EmploymentStatus == EmploymentStatus.Active)
+        .OrderBy(x => x.EmployeeCode)
+        .Select(x => new { x.Id, x.EmployeeCode, x.FullName, x.PhotoReference, x.LocalDepartmentName })
+        .ToArrayAsync(cancellationToken);
+    var egyptTimeZone = TimeZoneInfo.FindSystemTimeZoneById("Africa/Cairo");
+    var localEndOfProductionDate = productionDate.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified).AddDays(1);
+    var asOfUtc = TimeZoneInfo.ConvertTimeToUtc(localEndOfProductionDate, egyptTimeZone).AddTicks(-1);
+    var assignments = await assignmentEngine.ResolveCurrentAssignmentsAsync(workers.Select(x => x.Id), asOfUtc, cancellationToken);
+    if (assignments.IsFailure)
+    {
+        return ApiResponse.Failure(assignments.Error?.Code ?? "AssignmentReadFailed", assignments.Error?.Message ?? "Unable to load worker assignments.", MapFailureStatusCode(assignments.Error?.Code));
+    }
+
+    var attendance = await attendanceEngine.GetLatestAttendanceStatusByWorkerAsync(workers.Select(x => x.Id), asOfUtc, cancellationToken);
+    if (attendance.IsFailure)
+    {
+        return ApiResponse.Failure(attendance.Error?.Code ?? "AttendanceReadFailed", attendance.Error?.Message ?? "Unable to load attendance state.", MapFailureStatusCode(attendance.Error?.Code));
+    }
+
+    var items = workers.Select(worker =>
+    {
+        assignments.Value!.TryGetValue(worker.Id, out var assignment);
+        attendance.Value!.TryGetValue(worker.Id, out var attendanceState);
+        var attendanceStatus = attendanceState?.Status ?? AttendanceStatus.Unassigned;
+        var isPresent = attendanceStatus is AttendanceStatus.Present or AttendanceStatus.Late;
+        var effectiveSubStageId = assignment?.EffectiveSubStageId;
+        var attendanceEvidence = attendanceState is null
+            ? "NoAttendanceData"
+            : isPresent
+                ? "ActualCheckInFound"
+                : attendanceStatus == AttendanceStatus.Absent && string.Equals(attendanceState.SourceRawId, "sync-no-source", StringComparison.OrdinalIgnoreCase)
+                    ? "NoSourceCheckIn"
+                    : attendanceStatus == AttendanceStatus.Absent
+                        ? "ConfirmedAbsent"
+                        : "NoAttendanceData";
+        return new
+        {
+            workerId = worker.Id,
+            employeeCode = worker.EmployeeCode,
+            fullName = worker.FullName,
+            photoReference = worker.PhotoReference,
+            hasPhoto = !string.IsNullOrWhiteSpace(worker.PhotoReference),
+            departmentName = worker.LocalDepartmentName,
+            attendanceStatus = attendanceStatus.ToString(),
+            attendanceTimeUtc = attendanceState?.AttendanceTimeUtc,
+            attendanceSource = attendanceState?.Source,
+            attendanceEvidence,
+            hasAttendanceData = attendanceState is not null,
+            actualCheckInFound = isPresent,
+            assignmentId = assignment?.AssignmentId,
+            assignmentType = assignment?.AssignmentType?.ToString(),
+            assignmentStartsAtUtc = assignment?.StartsAtUtc,
+            assignmentEndsAtUtc = assignment?.EndsAtUtc,
+            effectiveSubStageId,
+            isAvailable = isPresent && (!effectiveSubStageId.HasValue || effectiveSubStageId.Value == subStageId)
+        };
+    }).ToArray();
+
+    return Results.Ok(ApiResponse.Success(new
+    {
+        subStageId,
+        productionDate,
+        activeServiceWorkersCount = workers.Length,
+        workersWithAttendanceDataCount = items.Count(x => x.hasAttendanceData),
+        actualCheckInWorkersCount = items.Count(x => x.actualCheckInFound),
+        noSourceCheckInWorkersCount = items.Count(x => x.attendanceEvidence == "NoSourceCheckIn"),
+        currentWorkers = items.Where(x => x.effectiveSubStageId == subStageId).ToArray(),
+        // Keep the attendance source read-only.  The client needs all workers confirmed
+        // present (including workers currently effective on another stage) so an
+        // authorized manager can make a deliberate, time-bound move instead of
+        // treating a current assignment as an invisible exclusion.
+        presentWorkers = items.Where(x => x.attendanceStatus is "Present" or "Late").ToArray(),
+        availableWorkers = items.Where(x => x.isAvailable).ToArray(),
+        unavailableWorkersCount = items.Count(x => !x.isAvailable)
+    }));
+})
+    .RequirePermission("assignments.view")
+    .WithTags("Assignments")
+    .WithName("GetSubStageWorkerContext");
+
 factoryStructureApi.MapGet("/sub-stages/{subStageId:guid}/workers", async (
     Guid subStageId,
     IAssignmentEngine assignmentEngine,
@@ -2809,7 +3126,7 @@ factoryStructureApi.MapGet("/sub-stages/{subStageId:guid}/eligible-workers", asy
 
     var workers = await dbContext.Workers
         .AsNoTracking()
-        .Where(x => x.IsActive && x.EmploymentStatus != EmploymentStatus.LeftEmployment)
+        .Where(x => x.IsActive && x.EmploymentStatus == EmploymentStatus.Active)
         .OrderBy(x => x.EmployeeCode)
         .Select(x => new
         {
@@ -3020,6 +3337,26 @@ attendanceApi.MapPost("/sync/today", async (
     .WithTags("Attendance")
     .WithName("SyncAttendanceToday");
 
+attendanceApi.MapPost("/sync/production-date/{productionDate}", async (
+    DateOnly productionDate,
+    IAttendanceEngine attendanceEngine,
+    CancellationToken cancellationToken) =>
+{
+    var result = await attendanceEngine.SyncForProductionDateAsync(productionDate, cancellationToken);
+    if (result.IsFailure)
+    {
+        return ApiResponse.Failure(
+            result.Error?.Code ?? "AttendanceSyncFailed",
+            result.Error?.Message ?? "Unable to sync attendance data.",
+            MapFailureStatusCode(result.Error?.Code));
+    }
+
+    return Results.Ok(ApiResponse.Success(result.Value));
+})
+    .RequirePermission("attendance.sync")
+    .WithTags("Attendance")
+    .WithName("SyncAttendanceForProductionDate");
+
 attendanceApi.MapGet("/today", async (
     IAttendanceEngine attendanceEngine,
     DateTime? dateUtc = null,
@@ -3203,6 +3540,22 @@ static IResult? ValidateBootstrapSecret(string? requestBootstrapSecret, string? 
 
     return null;
 }
+
+static string GetRateLimitPartitionKey(HttpContext context)
+{
+    var userId = context.User.FindFirstValue(ClaimTypes.NameIdentifier);
+    return !string.IsNullOrWhiteSpace(userId)
+        ? $"user:{userId}"
+        : $"ip:{context.Connection.RemoteIpAddress?.ToString() ?? "anonymous"}";
+}
+
+static FixedWindowRateLimiterOptions FixedWindowOptions(int permitLimit, int windowSeconds) => new()
+{
+    PermitLimit = permitLimit,
+    QueueLimit = 0,
+    Window = TimeSpan.FromSeconds(windowSeconds),
+    QueueProcessingOrder = QueueProcessingOrder.OldestFirst
+};
 
 ProductionLinePlanner.Api.Endpoints.ProductionCostRecordingEndpoints.MapProductionCostRecordingEndpoints(app);
 

@@ -4,7 +4,10 @@ import { PermissionCanMatchGuard } from '../../core/guards/permission-can-match.
 import { FactoryStructureFoundationPageComponent } from './factory-structure-foundation-page.component';
 import { ManufacturingCompensationPageComponent } from './manufacturing-compensation-page.component';
 import { ManufacturingDepartmentsPageComponent } from './manufacturing-departments-page.component';
+import { LineStaffingWorkspacePageComponent } from './line-staffing-workspace-page.component';
+import { DailyProductionOperationsPageComponent } from './daily-production-operations-page.component';
 import { ManufacturingPlaceholderPageComponent } from './manufacturing-placeholder-page.component';
+import { ProductionCostRecordingPageComponent } from './production-cost-recording-page.component';
 import { MANUFACTURING_WORKSPACE_ROUTES } from './manufacturing-workspace-routing.module';
 
 describe('ManufacturingWorkspaceRoutingModule', () => {
@@ -46,5 +49,37 @@ describe('ManufacturingWorkspaceRoutingModule', () => {
     expect(route?.canMatch).toContain(PermissionCanMatchGuard);
     expect(route?.canActivate).toContain(PermissionCanActivateGuard);
     expect(route?.data?.['permission']).toBe(PERMISSIONS.compensation.view);
+  });
+
+  it('requires production view and recording permission for the Production Recording route', () => {
+    const route = childRoutes.find(item => item.path === 'production-recording');
+
+    expect(route?.component).toBe(ProductionCostRecordingPageComponent);
+    expect(route?.canMatch).toContain(PermissionCanMatchGuard);
+    expect(route?.canActivate).toContain(PermissionCanActivateGuard);
+    expect(route?.data?.['requireAll']).toEqual([PERMISSIONS.production.view, PERMISSIONS.production.record]);
+  });
+
+  it('routes line staffing to its dedicated attendance-free workspace with the required planning permissions', () => {
+    const route = childRoutes.find(item => item.path === 'line-staffing');
+
+    expect(route?.component).toBe(LineStaffingWorkspacePageComponent);
+    expect(route?.canMatch).toContain(PermissionCanMatchGuard);
+    expect(route?.canActivate).toContain(PermissionCanActivateGuard);
+    expect(route?.data?.['requireAll']).toEqual([
+      PERMISSIONS.factoryStructure.view,
+      PERMISSIONS.models.view,
+      PERMISSIONS.workers.view,
+      PERMISSIONS.assignments.view
+    ]);
+  });
+
+  it('routes daily production to the focused multi-stage workspace with production view and record access', () => {
+    const route = childRoutes.find(item => item.path === 'daily-production-operations');
+
+    expect(route?.component).toBe(DailyProductionOperationsPageComponent);
+    expect(route?.canMatch).toContain(PermissionCanMatchGuard);
+    expect(route?.canActivate).toContain(PermissionCanActivateGuard);
+    expect(route?.data?.['requireAll']).toEqual([PERMISSIONS.production.view, PERMISSIONS.production.record]);
   });
 });

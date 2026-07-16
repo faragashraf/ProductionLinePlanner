@@ -7,11 +7,13 @@ import { ManufacturingMasterDataPageComponent } from './manufacturing-master-dat
 import { ManufacturingDepartmentsPageComponent } from './manufacturing-departments-page.component';
 import { FactoryStructureFoundationPageComponent } from './factory-structure-foundation-page.component';
 import { ManufacturingCompensationPageComponent } from './manufacturing-compensation-page.component';
+import { LineStaffingWorkspacePageComponent } from './line-staffing-workspace-page.component';
+import { DailyProductionOperationsPageComponent } from './daily-production-operations-page.component';
 import { PermissionCanActivateGuard } from '../../core/guards/permission-can-activate.guard';
 import { PermissionCanMatchGuard } from '../../core/guards/permission-can-match.guard';
 import { MANUFACTURING_WORKSPACE_ITEMS } from '../../core/config/manufacturing-workspace.config';
 
-const [manufacturingDashboard, employees, departments, factoryStructure, stages, models, compensation] = MANUFACTURING_WORKSPACE_ITEMS;
+const [manufacturingDashboard, employees, departments, factoryStructure, stages, models, compensation, lineStaffing, dailyProductionOperations, productionRecording] = MANUFACTURING_WORKSPACE_ITEMS;
 
 function manufacturingRouteData(item: (typeof MANUFACTURING_WORKSPACE_ITEMS)[number]): Record<string, unknown> {
   const routeData: Record<string, unknown> = {
@@ -26,6 +28,10 @@ function manufacturingRouteData(item: (typeof MANUFACTURING_WORKSPACE_ITEMS)[num
 
   if (item.requireAny !== undefined) {
     routeData['requireAny'] = item.requireAny;
+  }
+
+  if (item.requireAll !== undefined) {
+    routeData['requireAll'] = item.requireAll;
   }
 
   return routeData;
@@ -50,8 +56,10 @@ export const MANUFACTURING_WORKSPACE_ROUTES: Routes = [
       { path: 'stages', component: ManufacturingMasterDataPageComponent, canMatch: [PermissionCanMatchGuard], canActivate: [PermissionCanActivateGuard], data: manufacturingRouteData(stages) },
       { path: 'models', component: ManufacturingMasterDataPageComponent, canMatch: [PermissionCanMatchGuard], canActivate: [PermissionCanActivateGuard], data: manufacturingRouteData(models) },
       { path: 'compensation', component: ManufacturingCompensationPageComponent, canMatch: [PermissionCanMatchGuard], canActivate: [PermissionCanActivateGuard], data: manufacturingRouteData(compensation) },
+      { path: 'line-staffing', component: LineStaffingWorkspacePageComponent, canMatch: [PermissionCanMatchGuard], canActivate: [PermissionCanActivateGuard], data: manufacturingRouteData(lineStaffing) },
+      { path: 'daily-production-operations', component: DailyProductionOperationsPageComponent, canMatch: [PermissionCanMatchGuard], canActivate: [PermissionCanActivateGuard], data: manufacturingRouteData(dailyProductionOperations) },
       { path: 'orders', component: ProductionCostRecordingPageComponent, canMatch: [PermissionCanMatchGuard], canActivate: [PermissionCanActivateGuard], data: { title: 'أوامر الإنتاج', breadcrumb: 'أوامر الإنتاج', permission: 'production.view' } },
-      { path: 'production-recording', component: ProductionCostRecordingPageComponent, canMatch: [PermissionCanMatchGuard], canActivate: [PermissionCanActivateGuard], data: { title: 'تسجيل تكلفة الإنتاج', breadcrumb: 'تسجيل تكلفة الإنتاج', permission: 'production.view' } },
+      { path: 'production-recording', component: ProductionCostRecordingPageComponent, canMatch: [PermissionCanMatchGuard], canActivate: [PermissionCanActivateGuard], data: manufacturingRouteData(productionRecording) },
       { path: '**', redirectTo: 'dashboard' }
     ]
   }

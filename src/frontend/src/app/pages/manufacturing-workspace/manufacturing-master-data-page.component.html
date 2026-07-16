@@ -1,7 +1,7 @@
 <section class="master-page" [attr.aria-busy]="loading || saving" dir="rtl">
   <header>
     <h2>{{ mode === 'stages' ? 'كتالوج مراحل الإنتاج' : 'الموديلات وإعدادات المراحل' }}</h2>
-    <p>{{ mode === 'stages' ? 'السعر والزمن لا ينتميان إلى الكتالوج العام.' : 'إعداد السعر والزمن والتعويض خاص بالموديل.' }}</p>
+    <p>{{ mode === 'stages' ? 'السعر والزمن لا ينتميان إلى الكتالوج العام.' : 'إعداد السعر والزمن وطريقة احتساب تكلفة المرحلة خاص بالموديل.' }}</p>
   </header>
   <p class="master-page__error" *ngIf="error">{{ error }}</p>
 
@@ -67,7 +67,7 @@
             <label>الترتيب<input type="number" formControlName="stageOrder"></label>
             <label>سعر القطعة<input type="number" formControlName="piecePrice"></label>
             <label>الثواني القياسية<input type="number" formControlName="standardSeconds"></label>
-            <label>التعويض<select formControlName="compensationMode"><option value="SharedPercentage">توزيع نسبي</option><option value="FullRatePerWorker">سعر كامل</option><option value="FixedAmount">قيمة ثابتة</option></select></label>
+            <label>طريقة احتساب تكلفة المرحلة<select formControlName="compensationMode"><option value="SharedPercentage">توزيع نسبي</option><option value="FullRatePerWorker">سعر كامل</option><option value="FixedAmount">قيمة ثابتة</option></select></label>
             <label><input type="checkbox" formControlName="isRequired"> مطلوبة</label>
             <button pButton type="submit" [label]="editModelStageId ? 'تحديث' : 'إضافة مرحلة'" [disabled]="saving"></button>
           </form>

@@ -1,7 +1,9 @@
 using ProductionLinePlanner.Application.Abstractions;
 using ProductionLinePlanner.Application.Common;
 using ProductionLinePlanner.Application.Engines;
+using ProductionLinePlanner.Application.Workers;
 using ProductionLinePlanner.Domain.Enums;
+using System.Security.Cryptography;
 
 namespace ProductionLinePlanner.Tests;
 
@@ -87,21 +89,32 @@ public sealed class FakeAttendanceEmployeeWriter : IAttendanceEmployeeWriter
     }
 }
 
-public sealed class FakeAttendanceEmployeeReader : IAttendanceEmployeeReader
+public sealed class FakeAttendanceEmployeeReader : IAttendanceEmployeeReader, IAttendanceWorkerPhotoReader
 {
     private readonly Dictionary<string, AttendanceEmployeeRecord?> _employees;
     private readonly Func<string, CancellationToken, Task<Result<AttendanceEmployeeRecord?>>> _getByAttendanceUserIdAsync;
     private readonly Func<CancellationToken, Task<Result<AttendanceEmployeeRecord[]>>> _getAllAsync;
+    private readonly Func<CancellationToken, Task<Result<AttendanceWorkerPhotoRecord[]>>> _getAllPhotosAsync;
+    private readonly Func<string, CancellationToken, Task<Result<AttendanceWorkerPhotoRecord?>>> _getPhotoByAttendanceUserIdAsync;
 
     public FakeAttendanceEmployeeReader(
         Dictionary<string, AttendanceEmployeeRecord?>? employees = null,
         Func<string, CancellationToken, Task<Result<AttendanceEmployeeRecord?>>>? getByAttendanceUserIdAsync = null,
-        Func<CancellationToken, Task<Result<AttendanceEmployeeRecord[]>>>? getAllAsync = null)
+        Func<CancellationToken, Task<Result<AttendanceEmployeeRecord[]>>>? getAllAsync = null,
+        AttendanceWorkerPhotoRecord[]? photos = null)
     {
         _employees = employees ?? [];
         _getByAttendanceUserIdAsync = getByAttendanceUserIdAsync ?? DefaultGetByAttendanceUserIdAsync;
         _getAllAsync = getAllAsync ?? DefaultGetAllAsync;
+        Photos = (photos ?? []).ToList();
+        _getAllPhotosAsync = _ => Task.FromResult(Result<AttendanceWorkerPhotoRecord[]>.Success(Photos.ToArray()));
+        _getPhotoByAttendanceUserIdAsync = (attendanceUserId, _) => Task.FromResult(
+            Photos.FirstOrDefault(photo => string.Equals(photo.AttendanceUserId, attendanceUserId, StringComparison.OrdinalIgnoreCase)) is { } photo
+                ? Result<AttendanceWorkerPhotoRecord?>.Success(photo)
+                : Result<AttendanceWorkerPhotoRecord?>.Success(null));
     }
+
+    public List<AttendanceWorkerPhotoRecord> Photos { get; }
 
     public Task<Result<AttendanceEmployeeRecord?>> GetByAttendanceUserIdAsync(
         string attendanceUserId,
@@ -114,6 +127,14 @@ public sealed class FakeAttendanceEmployeeReader : IAttendanceEmployeeReader
     {
         return _getAllAsync(cancellationToken);
     }
+
+    public Task<Result<AttendanceWorkerPhotoRecord[]>> GetAllCurrentPhotosAsync(CancellationToken cancellationToken = default) =>
+        _getAllPhotosAsync(cancellationToken);
+
+    public Task<Result<AttendanceWorkerPhotoRecord?>> GetPhotoByAttendanceUserIdAsync(
+        string attendanceUserId,
+        CancellationToken cancellationToken = default) =>
+        _getPhotoByAttendanceUserIdAsync(attendanceUserId, cancellationToken);
 
     private Task<Result<AttendanceEmployeeRecord?>> DefaultGetByAttendanceUserIdAsync(
         string attendanceUserId,
@@ -274,5 +295,48 @@ public sealed class RecordingAuditEngine : IAuditEngine
         _ = cancellationToken;
         Calls.Add(new AuditCall(actorUserId, actionType, entityType, entityId, before, after, requestMeta));
         return Task.FromResult(Result.Success());
+    }
+}
+
+public sealed class InMemoryWorkerPhotoCache : IWorkerPhotoCache
+{
+    private readonly Dictionary<Guid, WorkerPhotoCacheEntry> _entries = [];
+
+    public int GetCalls { get; private set; }
+    public int StoreCalls { get; private set; }
+    public int RemoveCalls { get; private set; }
+
+    public Task<WorkerPhotoCacheEntry?> GetAsync(Guid workerId, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        GetCalls++;
+        return Task.FromResult(_entries.TryGetValue(workerId, out var entry) ? entry : null);
+    }
+
+    public Task<WorkerPhotoCacheStoreResult> StoreAsync(Guid workerId, byte[] photo, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        StoreCalls++;
+        if (!WorkerPhotoFormat.TryGetContentType(photo, out var contentType))
+        {
+            throw new InvalidOperationException("Worker photo format is invalid or unsupported.");
+        }
+
+        var version = Convert.ToHexString(SHA256.HashData(photo)).ToLowerInvariant()[..16];
+        if (_entries.TryGetValue(workerId, out var current) && current.Version == version)
+        {
+            return Task.FromResult(new WorkerPhotoCacheStoreResult(contentType, version, false, false, true));
+        }
+
+        _entries[workerId] = new WorkerPhotoCacheEntry(photo.ToArray(), contentType, version);
+        return Task.FromResult(new WorkerPhotoCacheStoreResult(contentType, version, current is null, current is not null, false));
+    }
+
+    public Task RemoveAsync(Guid workerId, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        RemoveCalls++;
+        _entries.Remove(workerId);
+        return Task.CompletedTask;
     }
 }

@@ -19,7 +19,10 @@ public sealed class WorkerDefaultAssignmentConfiguration : IEntityTypeConfigurat
         builder.Property(x => x.IsActive).HasDefaultValue(true);
         builder.Property(x => x.Reason).HasMaxLength(250);
         builder.Property(x => x.CreatedAtUtc).IsRequired();
-        builder.Property(x => x.UpdatedAtUtc).IsRequired();
+        // Current assignment is operational state.  Treat its update timestamp as
+        // an optimistic concurrency token so two managers cannot silently
+        // overwrite or remove the same active assignment.
+        builder.Property(x => x.UpdatedAtUtc).IsRequired().IsConcurrencyToken();
 
         builder.HasIndex(x => x.WorkerId).IsUnique().HasFilter("[IsActive] = 1");
 

@@ -36,7 +36,7 @@ export class ManufacturingWorkspaceLayoutComponent implements OnInit, OnDestroy 
   }
 
   isActive(item: ManufacturingWorkspaceItem): boolean {
-    return this.router.url === item.route;
+    return this.activeRoute === item.route;
   }
 
   get isNavigationLoading(): boolean {

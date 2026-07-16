@@ -67,9 +67,9 @@ export class MockDataService {
 
   getWorkersMock(): WorkerPageItem[] {
     return [
-      { code: 'W-101', fullName: 'أحمد سعيد', state: 'جاهز' },
-      { code: 'W-102', fullName: 'سارة علي', state: 'متأخر' },
-      { code: 'W-109', fullName: 'محمود يونس', state: 'غائب' }
+      { code: 'W-101', fullName: 'أحمد سعيد', state: 'على رأس العمل', employmentStatus: 'Active', isActive: true },
+      { code: 'W-102', fullName: 'سارة علي', state: 'على رأس العمل', employmentStatus: 'Active', isActive: true },
+      { code: 'W-109', fullName: 'محمود يونس', state: 'خارج الخدمة', employmentStatus: 'LeftEmployment', isActive: false }
     ];
   }
 

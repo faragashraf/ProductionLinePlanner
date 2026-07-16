@@ -1,5 +1,5 @@
 <section class="page-frame" dir="rtl" [attr.aria-busy]="isLoadingModels || isLoadingStages || isSaving">
-  <plp-page-header title="إعدادات التعويض" description="تهيئة سعر وزمن وطريقة تعويض مراحل الموديل. الحساب المالي يتم حصراً في الخادم." [compact]="true">
+  <plp-page-header [title]="stageCostTerminology.configuration" [description]="'تهيئة سعر المرحلة وزمنها و' + stageCostTerminology.calculationMethod + ' للموديل. الحساب المالي يتم حصراً في الخادم.'" [compact]="true">
     <div header-actions>
       <button pButton type="button" class="p-button-sm p-button-outlined" icon="pi pi-refresh" label="تحديث" [disabled]="isLoadingModels || isLoadingStages || isSaving" (click)="onRetry()"></button>
     </div>
@@ -13,12 +13,12 @@
         <option *ngFor="let model of models" [value]="model.id">{{ model.code }} - {{ model.name }}</option>
       </select>
     </div>
-    <p *ngIf="!canManage">لديك صلاحية العرض فقط. التعديل يتطلب صلاحية إدارة التعويضات.</p>
+    <p *ngIf="!canManage">لديك صلاحية العرض فقط. التعديل يتطلب صلاحية إدارة تكلفة المراحل.</p>
   </p-card>
 
   <section class="compensation-methods" aria-labelledby="compensation-methods-title">
     <div>
-      <h3 id="compensation-methods-title">طرق التعويض</h3>
+      <h3 id="compensation-methods-title">{{ stageCostTerminology.calculationMethods }}</h3>
       <p>اختر الطريقة المناسبة عند تعديل إعداد المرحلة.</p>
     </div>
     <details *ngFor="let method of compensationMethods" class="compensation-methods__item" [open]="method.mode === 'SharedPercentage'">
@@ -29,12 +29,12 @@
 
   <plp-loading-skeleton *ngIf="(isLoadingModels && !hasLoadedModels) || (isLoadingStages && !hasLoadedStages)" [lines]="6" [showAvatar]="false"></plp-loading-skeleton>
 
-  <plp-error-state *ngIf="hasError && !isLoadingModels && !isLoadingStages" [title]="'تعذر تحميل إعدادات التعويض'" [description]="errorMessage" [actionText]="'إعادة المحاولة'" (action)="onRetry()"></plp-error-state>
+  <plp-error-state *ngIf="hasError && !isLoadingModels && !isLoadingStages" [title]="'تعذر تحميل إعدادات تكلفة المراحل'" [description]="errorMessage" [actionText]="'إعادة المحاولة'" (action)="onRetry()"></plp-error-state>
 
-  <plp-empty-state *ngIf="isModelsEmpty" title="لا توجد نماذج نشطة" description="لا توجد نماذج منتجات نشطة متاحة لإعداد التعويض." actionText="تحديث" (action)="onRetry()"></plp-empty-state>
+  <plp-empty-state *ngIf="isModelsEmpty" title="لا توجد نماذج نشطة" description="لا توجد نماذج منتجات نشطة متاحة لإعداد تكلفة المراحل." actionText="تحديث" (action)="onRetry()"></plp-empty-state>
 
   <ng-container *ngIf="selectedModelId && !hasError && !isLoadingStages">
-    <plp-empty-state *ngIf="isStagesEmpty" title="لا توجد مراحل مهيأة" description="لا توجد مراحل موديل لعرض إعدادات تعويضها." actionText="تحديث" (action)="onRetry()"></plp-empty-state>
+    <plp-empty-state *ngIf="isStagesEmpty" title="لا توجد مراحل مهيأة" description="لا توجد مراحل موديل لعرض إعدادات تكلفة مراحلها." actionText="تحديث" (action)="onRetry()"></plp-empty-state>
 
     <p-table
       *ngIf="stages.length > 0"
@@ -71,8 +71,8 @@
 
   <p *ngIf="successMessage && !hasError">{{ successMessage }}</p>
 
-  <aside *ngIf="showDialogDiagnostics" aria-label="تشخيص نافذة التعويض" data-testid="compensation-dialog-diagnostics">
-    <strong>تشخيص تطوير نافذة التعويض</strong>
+  <aside *ngIf="showDialogDiagnostics" aria-label="تشخيص نافذة تكلفة المرحلة" data-testid="compensation-dialog-diagnostics">
+    <strong>تشخيص تطوير نافذة تكلفة المرحلة</strong>
     <dl>
       <div><dt>المكوّن النشط</dt><dd>ManufacturingCompensationPageComponent</dd></div>
       <div><dt>تم دخول editStage</dt><dd>{{ editStageEntered }}</dd></div>
@@ -85,7 +85,7 @@
 
   <p-dialog
     [(visible)]="isEditDialogVisible"
-    header="تعديل إعداد التعويض"
+    header="تعديل إعداد تكلفة المرحلة"
     [modal]="true"
     appendTo="body"
     [baseZIndex]="1000"
@@ -108,7 +108,7 @@
 
       <p class="compensation-edit-dialog__error" *ngIf="hasError">{{ errorMessage }}</p>
 
-      <label>طريقة التعويض
+      <label>{{ stageCostTerminology.calculationMethod }}
         <select formControlName="compensationMode">
           <option *ngFor="let mode of compensationModes" [value]="mode">{{ modeLabel(mode) }}</option>
         </select>

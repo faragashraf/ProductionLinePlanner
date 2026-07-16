@@ -1,4 +1,4 @@
-export type WorkersPageState = 'جاهز' | 'متأخر' | 'غائب';
+export type WorkersPageState = 'على رأس العمل' | 'خارج الخدمة';
 
 export interface WorkerPageItem {
   id?: string;
@@ -8,4 +8,9 @@ export interface WorkerPageItem {
   email?: string;
   phone?: string;
   department?: string;
+  employmentStatus?: string;
+  isActive?: boolean;
+  photoReference?: string;
+  hasPhoto?: boolean;
+  photoVersion?: string;
 }

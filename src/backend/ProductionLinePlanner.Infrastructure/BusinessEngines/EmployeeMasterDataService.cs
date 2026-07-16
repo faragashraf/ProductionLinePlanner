@@ -20,7 +20,7 @@ public sealed class EmployeeMasterDataService(
 {
     public async Task<PagedResult<WorkerDto>> GetWorkersAsync(
         string? search,
-        bool? isActive = true,
+        bool? isActive = null,
         int page = 1,
         int pageSize = 50,
         CancellationToken cancellationToken = default)
@@ -347,21 +347,45 @@ public sealed class EmployeeMasterDataService(
         return Result.Success();
     }
 
-    private static WorkerDto MapWorker(Worker worker, Guid? defaultSubStageId = null) => new()
+    private static WorkerDto MapWorker(Worker worker, Guid? defaultSubStageId = null)
     {
-        Id = worker.Id,
-        EmployeeCode = worker.EmployeeCode,
-        FullName = worker.FullName,
-        AttendanceUserId = worker.AttendanceUserId,
-        BadgeNumber = worker.BadgeNumber,
-        Phone = worker.Phone,
-        AttendanceDepartmentId = worker.AttendanceDepartmentId,
-        EmploymentStatus = worker.EmploymentStatus.ToString(),
-        EmploymentEndDate = worker.EmploymentEndDate,
-        PhotoReference = worker.PhotoReference,
-        IsActive = worker.IsActive,
-        DefaultSubStageId = defaultSubStageId
-    };
+        var photoVersion = GetPhotoVersion(worker.PhotoReference);
+        var hasManagedPhoto = photoVersion is not null && IsManagedPhotoReference(worker.PhotoReference, worker.Id);
+        return new WorkerDto
+        {
+            Id = worker.Id,
+            EmployeeCode = worker.EmployeeCode,
+            FullName = worker.FullName,
+            AttendanceUserId = worker.AttendanceUserId,
+            BadgeNumber = worker.BadgeNumber,
+            Phone = worker.Phone,
+            AttendanceDepartmentId = worker.AttendanceDepartmentId,
+            LocalDepartmentName = worker.LocalDepartmentName,
+            EmploymentStatus = worker.EmploymentStatus.ToString(),
+            EmploymentEndDate = worker.EmploymentEndDate,
+            // Only synchronization-produced cache references are browser-visible.
+            // Legacy/manual strings cannot cause a live or arbitrary image request.
+            PhotoReference = hasManagedPhoto ? worker.PhotoReference : null,
+            HasPhoto = hasManagedPhoto,
+            PhotoVersion = hasManagedPhoto ? photoVersion : null,
+            IsActive = worker.IsActive,
+            DefaultSubStageId = defaultSubStageId
+        };
+    }
+
+    private static string? GetPhotoVersion(string? photoReference)
+    {
+        if (string.IsNullOrWhiteSpace(photoReference)) return null;
+        var marker = "?v=";
+        var index = photoReference.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        return index >= 0 && index + marker.Length < photoReference.Length
+            ? photoReference[(index + marker.Length)..]
+            : null;
+    }
+
+    private static bool IsManagedPhotoReference(string? photoReference, Guid workerId) =>
+        !string.IsNullOrWhiteSpace(photoReference) &&
+        photoReference.StartsWith($"/api/workers/{workerId:D}/photo?v=", StringComparison.OrdinalIgnoreCase);
 
     private async Task<WorkerDto[]> MapWorkersWithAssignmentsAsync(IEnumerable<Worker> workers, CancellationToken cancellationToken)
     {

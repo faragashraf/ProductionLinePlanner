@@ -23,6 +23,14 @@ public interface IAssignmentEngine
         string? requestMeta = null,
         CancellationToken cancellationToken = default);
 
+    Task<Result<AssignmentActionResultDto>> RemoveDefaultAssignmentAsync(
+        Guid workerId,
+        Guid subStageId,
+        string reason,
+        Guid actorUserId,
+        string? requestMeta = null,
+        CancellationToken cancellationToken = default);
+
     Task<Result<AssignmentActionResultDto>> CreateTemporaryAssignmentAsync(
         CreateTemporaryAssignmentRequest request,
         Guid actorUserId,
@@ -35,8 +43,15 @@ public interface IAssignmentEngine
         string? requestMeta = null,
         CancellationToken cancellationToken = default);
 
+    Task<Result<AssignmentActionResultDto>> MoveCurrentAssignmentAsync(
+        MoveCurrentWorkerAssignmentRequest request,
+        Guid actorUserId,
+        string? requestMeta = null,
+        CancellationToken cancellationToken = default);
+
     Task<Result<CancelTemporaryAssignmentResultDto>> CancelTemporaryAssignmentAsync(
         Guid assignmentId,
+        string reason,
         Guid actorUserId,
         string? requestMeta = null,
         CancellationToken cancellationToken = default);
@@ -56,6 +71,7 @@ public interface IAssignmentEngine
 }
 
 public sealed record WorkerAssignmentState(
+    Guid? AssignmentId,
     Guid WorkerId,
     AssignmentType? AssignmentType,
     DateTime? StartsAtUtc,
