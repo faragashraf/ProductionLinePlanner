@@ -19,14 +19,22 @@ export interface DefaultAssignmentRequest {
   reason?: string;
 }
 
+export interface StageDefaultAssignmentsUpdateResult {
+  subStageId: string;
+  addedWorkersCount: number;
+  removedWorkersCount: number;
+  activeWorkerIds: string[];
+}
+
 export interface TemporaryAssignmentRequest {
   workerId: string;
-  fromSubStageId: string;
+  fromSubStageId?: string | null;
   toSubStageId: string;
   startAtUtc: string;
   endAtUtc: string;
   reason: string;
   replacementForWorkerId?: string;
+  participationMode?: 'TemporaryMove' | 'AdditionalParticipation';
 }
 
 export interface MoveCurrentAssignmentRequest {
@@ -43,6 +51,7 @@ export interface ReplacementAssignmentRequest {
   replacementWorkerId: string;
   replacedWorkerId: string;
   subStageId: string;
+  fromSubStageId?: string | null;
   startAtUtc: string;
   endAtUtc: string;
   reason: string;
@@ -167,6 +176,20 @@ export interface LineStaffingWorker {
   temporaryStartsAtUtc: string | null;
   temporaryEndsAtUtc: string | null;
   replacementForWorkerId: string | null;
+  participations: LineStaffingParticipation[];
+}
+
+export interface LineStaffingParticipation {
+  assignmentId: string;
+  assignmentType: ApiAssignmentType;
+  subStageId: string;
+  subStageName: string | null;
+  fromSubStageId: string | null;
+  fromSubStageName: string | null;
+  startsAtUtc: string | null;
+  endsAtUtc: string | null;
+  replacementForWorkerId: string | null;
+  temporaryParticipationMode: 'TemporaryMove' | 'AdditionalParticipation' | null;
 }
 
 export interface LineStaffingStage {
@@ -213,6 +236,21 @@ export interface LineStaffingPlan {
   workers: LineStaffingWorker[];
 }
 
+/** Narrow authoritative payload used after one stage's staffing changes. */
+export interface LineStaffingStageRefresh {
+  stage: LineStaffingStage;
+  workers: LineStaffingWorker[];
+  stagesWithWorkers: number;
+  stagesWithoutWorkers: number;
+  stagesWithTemporaryAssignments: number;
+  stagesNeedingCompensationReview: number;
+  stagesNeedingStaffingReview: number;
+  overallStaffingStatus: string;
+  staffingPlanComplete: boolean;
+  operationalAttendanceChecked: boolean;
+  financialConfigurationPending: boolean;
+}
+
 @Injectable({
   providedIn: 'root'
 })
@@ -223,6 +261,13 @@ export class AssignmentsApiService {
     const query = new URLSearchParams({ factoryId, productionLineId, productModelId, staffingReferenceDate });
     return this.http
       .get<ApiResponse<LineStaffingPlan>>(buildApiUrl(`/api/line-staffing?${query.toString()}`))
+      .pipe(timeout(STANDARD_API_TIMEOUT_MS), map((response) => this.extractPayload(response)));
+  }
+
+  getLineStaffingStageRefresh(factoryId: string, productionLineId: string, productModelId: string, subStageId: string, staffingReferenceDate: string): Observable<LineStaffingStageRefresh> {
+    const query = new URLSearchParams({ factoryId, productionLineId, productModelId, staffingReferenceDate });
+    return this.http
+      .get<ApiResponse<LineStaffingStageRefresh>>(buildApiUrl(`/api/line-staffing/stages/${encodeURIComponent(subStageId)}?${query.toString()}`))
       .pipe(timeout(STANDARD_API_TIMEOUT_MS), map((response) => this.extractPayload(response)));
   }
 
@@ -338,6 +383,15 @@ export class AssignmentsApiService {
     return this.http
       .post<ApiResponse<unknown>>(buildApiUrl('/api/assignments/default'), request)
       .pipe(timeout(ASSIGNMENTS_WRITE_TIMEOUT_MS), map((response) => this.mapActionResult(this.extractPayload(response))));
+  }
+
+  updateStageDefaultAssignments(subStageId: string, workerIds: string[]): Observable<StageDefaultAssignmentsUpdateResult> {
+    return this.http
+      .put<ApiResponse<StageDefaultAssignmentsUpdateResult>>(
+        buildApiUrl(`/api/assignments/default/stages/${encodeURIComponent(subStageId)}`),
+        { workerIds }
+      )
+      .pipe(timeout(ASSIGNMENTS_WRITE_TIMEOUT_MS), map((response) => this.extractPayload(response)));
   }
 
   removeDefaultAssignment(workerId: string, subStageId: string, reason: string): Observable<AssignmentActionResult> {

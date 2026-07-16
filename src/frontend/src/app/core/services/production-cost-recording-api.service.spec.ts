@@ -1,5 +1,6 @@
 import { HttpClientTestingModule, HttpTestingController } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
+import { fakeAsync, tick } from '@angular/core/testing';
 import { PRODUCTION_RECORD_PREVIEW_ROUTE, ProductionCostRecordingApiService } from './production-cost-recording-api.service';
 
 describe('ProductionCostRecordingApiService', () => {
@@ -74,4 +75,27 @@ describe('ProductionCostRecordingApiService', () => {
     expect(previewed).toBeTrue();
     expect(saved).toBeTrue();
   });
+
+  it('keeps a full-day unified preview alive past the normal API timeout', fakeAsync(() => {
+    const payload = {
+      factoryId: 'factory-1', productionLineId: 'line-1', productModelId: 'model-1', productionDate: '2026-07-16',
+      lineQuantity: 500, clientRequestId: 'a94f0c35-89ac-4ed4-86b3-2cda09d55aaf', stages: Array.from({ length: 66 }, (_, index) => ({
+        productModelStageId: `stage-${index + 1}`,
+        workers: Array.from({ length: index < 9 ? 2 : 1 }, (_, workerIndex) => ({ workerId: workerIndex === 0 ? 'worker-repeated' : `worker-${index}`, percentage: workerIndex === 0 && index < 9 ? 50 : 100 }))
+      }))
+    };
+    let completed = false;
+
+    service.previewDailyOperations(payload).subscribe(() => completed = true);
+    const previewRequest = http.expectOne(request => request.url.endsWith('/api/production/daily-operations/preview'));
+    expect(previewRequest.request.method).toBe('POST');
+    expect(previewRequest.request.body).toEqual(payload);
+    expect(payload.stages.length).toBe(66);
+    expect(payload.stages.reduce((total, stage) => total + stage.workers.length, 0)).toBe(75);
+
+    tick(10_001);
+    previewRequest.flush({ success: true, data: { previewToken: 'preview-token', stages: [], workerTotals: [], warnings: [] } });
+
+    expect(completed).toBeTrue();
+  }));
 });

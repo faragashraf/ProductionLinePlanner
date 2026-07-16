@@ -307,6 +307,93 @@ public sealed class ProductionCostRecordingServiceTests
     }
 
     [Fact]
+    public async Task Daily_operations_preserve_every_stage_allocation_for_a_worker_with_multiple_participations()
+    {
+        await using var fixture = await Fixture.CreateAsync("SharedPercentage", 1m, 17m, useRealAudit: true);
+        var extraSubStage = new SubStage(Guid.NewGuid(), fixture.MainStage.Id, "Inspect", "INS", 1, 2);
+        var extraStage = new ProductModelStage(Guid.NewGuid(), fixture.Model.Id, extraSubStage.Id, 2, 1m, 17m, CompensationMode.SharedPercentage);
+        fixture.Db.AddRange(extraSubStage, extraStage, new WorkerDefaultAssignment(Guid.NewGuid(), fixture.WorkerA.Id, extraSubStage.Id, fixture.ActorId, DateTime.UtcNow));
+        await fixture.Db.SaveChangesAsync();
+        var productionDate = fixture.Today.AddDays(1);
+
+        var operations = await fixture.Service.LoadDailyOperationsAsync(fixture.Factory.Id, fixture.Line.Id, fixture.Model.Id, productionDate, default);
+        Assert.Equal(2, operations.Stages.Count);
+        Assert.Contains(operations.Stages.Single(stage => stage.ProductModelStageId == fixture.Stage.Id).Workers, worker => worker.WorkerId == fixture.WorkerA.Id);
+        Assert.Contains(operations.Stages.Single(stage => stage.ProductModelStageId == extraStage.Id).Workers, worker => worker.WorkerId == fixture.WorkerA.Id);
+
+        var request = new DailyProductionOperationRequest(
+            fixture.Factory.Id, fixture.Line.Id, fixture.Model.Id, productionDate, 500m, Guid.NewGuid(), null, null,
+            operations.Stages.Select(stage => new DailyProductionStageRequest(
+                stage.ProductModelStageId,
+                stage.Workers.Select(worker => new WorkerAllocationRequest(worker.WorkerId, worker.SuggestedPercentage, null, null)).ToArray())).ToArray());
+        var preview = await fixture.Service.PreviewDailyOperationsAsync(request, fixture.ActorId, default);
+        var workerStageAllocations = preview.Stages.SelectMany(stage => stage.Workers.Where(worker => worker.WorkerId == fixture.WorkerA.Id)).ToArray();
+        var workerTotal = preview.WorkerTotals.Single(total => total.WorkerId == fixture.WorkerA.Id);
+
+        Assert.Equal(2, workerStageAllocations.Length);
+        Assert.Equal(workerStageAllocations.Sum(allocation => allocation.CalculatedEarning), workerTotal.TotalEntitlement);
+        Assert.All(preview.Stages, stage => Assert.Equal(500m, stage.StageQuantity));
+        var saved = await fixture.Service.SaveDailyDraftAsync(request with { PreviewToken = preview.PreviewToken }, fixture.ActorId, default);
+        Assert.Equal(2, saved.Stages.Count);
+        Assert.Equal(workerTotal.TotalEntitlement, saved.Stages.SelectMany(stage => stage.Workers).Where(worker => worker.WorkerId == fixture.WorkerA.Id).Sum(worker => worker.CalculatedEarning));
+    }
+
+    [Fact]
+    public async Task Daily_operations_preview_handles_a_full_day_of_66_stages_and_75_allocations_without_dropping_repeated_workers()
+    {
+        await using var fixture = await Fixture.CreateAsync("SharedPercentage", 1m, 17m, useRealAudit: true);
+        var additionalStages = Enumerable.Range(1, 65)
+            .Select(index => new
+            {
+                SubStage = new SubStage(Guid.NewGuid(), fixture.MainStage.Id, $"Stage {index:00}", $"S{index:00}", index + 1, index + 1),
+            })
+            .ToArray();
+        var productStages = additionalStages.Select((item, index) => new ProductModelStage(
+            Guid.NewGuid(), fixture.Model.Id, item.SubStage.Id, index + 2, 1m, 17m, CompensationMode.SharedPercentage)).ToArray();
+        fixture.Db.AddRange(additionalStages.Select(item => item.SubStage));
+        fixture.Db.AddRange(productStages);
+        fixture.Db.AddRange(productStages.Select(stage => new WorkerDefaultAssignment(Guid.NewGuid(), fixture.WorkerA.Id, stage.SubStageId, fixture.ActorId, DateTime.UtcNow)));
+        // The original stage has three workers. Adding A to every additional stage
+        // plus B to seven stages produces 66 stages and exactly 75 allocations.
+        fixture.Db.AddRange(productStages.Take(7).Select(stage => new WorkerDefaultAssignment(Guid.NewGuid(), fixture.WorkerB.Id, stage.SubStageId, fixture.ActorId, DateTime.UtcNow)));
+        await fixture.Db.SaveChangesAsync();
+
+        var productionDate = fixture.Today.AddDays(1);
+        var operations = await fixture.Service.LoadDailyOperationsAsync(fixture.Factory.Id, fixture.Line.Id, fixture.Model.Id, productionDate, default);
+        Assert.Equal(66, operations.Stages.Count);
+
+        var request = new DailyProductionOperationRequest(
+            fixture.Factory.Id,
+            fixture.Line.Id,
+            fixture.Model.Id,
+            productionDate,
+            500m,
+            Guid.NewGuid(),
+            "full-day preview",
+            null,
+            operations.Stages.Select(stage => new DailyProductionStageRequest(
+                stage.ProductModelStageId,
+                stage.Workers.Select(worker => new WorkerAllocationRequest(worker.WorkerId, worker.SuggestedPercentage, null, null)).ToArray())).ToArray());
+
+        var preview = await fixture.Service.PreviewDailyOperationsAsync(request, fixture.ActorId, default);
+
+        Assert.Equal(66, preview.Stages.Count);
+        Assert.Equal(75, preview.Stages.Sum(stage => stage.Workers.Count));
+        Assert.All(preview.Stages, stage => Assert.Equal(500m, stage.StageQuantity));
+        Assert.Equal(preview.Stages.SelectMany(stage => stage.Workers).Sum(worker => worker.CalculatedEarning), preview.TotalWorkerEntitlements);
+        var repeatedWorkerAllocations = preview.Stages.SelectMany(stage => stage.Workers).Where(worker => worker.WorkerId == fixture.WorkerA.Id).ToArray();
+        Assert.Equal(66, repeatedWorkerAllocations.Length);
+        Assert.Equal(repeatedWorkerAllocations.Sum(worker => worker.CalculatedEarning), preview.WorkerTotals.Single(total => total.WorkerId == fixture.WorkerA.Id).TotalEntitlement);
+        Assert.Empty(await fixture.Db.Set<StageProductionRecord>().Where(record => record.ProductionDate == productionDate).ToArrayAsync());
+
+        var saved = await fixture.Service.SaveDailyDraftAsync(request with { PreviewToken = preview.PreviewToken }, fixture.ActorId, default);
+        Assert.Equal(66, saved.Stages.Count);
+        Assert.Equal(75, saved.Stages.Sum(stage => stage.Workers.Count));
+        Assert.All(saved.Stages, stage => Assert.Equal(500m, stage.ProducedQuantity));
+        Assert.Equal(preview.TotalWorkerEntitlements, saved.Stages.SelectMany(stage => stage.Workers).Sum(worker => worker.CalculatedEarning));
+    }
+
+    [Fact]
     public async Task Relational_clients_allow_first_mutation_reject_stale_requests_and_allow_retry_after_refresh()
     {
         await using var fixture = await Fixture.CreateAsync("SharedPercentage", 0.50m, 17m, useRealAudit: true);

@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using ProductionLinePlanner.Domain.Entities;
+using ProductionLinePlanner.Domain.Enums;
 
 namespace ProductionLinePlanner.Infrastructure.Data.Configurations;
 
@@ -13,13 +14,18 @@ public sealed class WorkerTemporaryAssignmentConfiguration : IEntityTypeConfigur
 
         builder.Property(x => x.Id).ValueGeneratedNever();
         builder.Property(x => x.WorkerId).IsRequired();
-        builder.Property(x => x.FromSubStageId).IsRequired();
+        builder.Property(x => x.FromSubStageId);
         builder.Property(x => x.ToSubStageId).IsRequired();
         builder.Property(x => x.StartAtUtc).IsRequired();
         builder.Property(x => x.EndAtUtc).IsRequired();
         builder.Property(x => x.AssignedByUserId).IsRequired();
         builder.Property(x => x.Reason).IsRequired().HasMaxLength(300);
         builder.Property(x => x.ReplacementForWorkerId);
+        // Existing rows were created under the original move-only behavior.
+        // The database default therefore preserves that behavior during the
+        // non-destructive migration, while new requests choose explicitly.
+        builder.Property(x => x.ParticipationMode).HasConversion<string>().IsRequired().HasMaxLength(40)
+            .HasDefaultValue(TemporaryAssignmentMode.TemporaryMove);
         builder.Property(x => x.Status).IsRequired().HasMaxLength(50);
         builder.Property(x => x.CreatedAtUtc).IsRequired();
         builder.Property(x => x.UpdatedAtUtc).IsRequired().IsConcurrencyToken();

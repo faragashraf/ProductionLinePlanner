@@ -33,6 +33,29 @@ namespace ProductionLinePlanner.Tests;
 public sealed class ProductionCostRecordingHttpIntegrationTests
 {
     [Fact]
+    public async Task Daily_preview_validation_failure_returns_readable_problem_details()
+    {
+        await using var fixture = await ProductionHttpFixture.CreateAsync();
+
+        var response = await fixture.SendAsync(HttpMethod.Post, "/api/production/daily-operations/preview", new
+        {
+            factoryId = fixture.FactoryId,
+            productionLineId = fixture.LineId,
+            productModelId = fixture.ModelId,
+            productionDate = "2026-07-16",
+            lineQuantity = 0m,
+            clientRequestId = Guid.NewGuid(),
+            stages = Array.Empty<object>()
+        }, permissions: ["production.record"]);
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal(409, problem.RootElement.GetProperty("status").GetInt32());
+        Assert.Contains("كمية تشغيل الخط", problem.RootElement.GetProperty("detail").GetString());
+    }
+
+    [Fact]
     public async Task Draft_preview_contract_is_post_only_and_returns_the_current_payload_calculation_for_new_and_reopened_drafts()
     {
         await using var fixture = await ProductionHttpFixture.CreateAsync(piecePrice: 0.38m);
@@ -236,9 +259,9 @@ public sealed class ProductionCostRecordingHttpIntegrationTests
         private readonly WebApplication _app;
         private readonly HttpClient _client;
         private readonly Guid _userId;
-        private ProductionHttpFixture(SqliteConnection connection, WebApplication app, HttpClient client, Guid userId, Guid modelId, Guid lineId, Guid modelStageId, Guid workerAId, Guid workerBId)
-        { _connection = connection; _app = app; _client = client; _userId = userId; ModelId = modelId; LineId = lineId; ModelStageId = modelStageId; WorkerAId = workerAId; WorkerBId = workerBId; }
-        public Guid ModelId { get; } public Guid LineId { get; } public Guid ModelStageId { get; } public Guid WorkerAId { get; } public Guid WorkerBId { get; }
+        private ProductionHttpFixture(SqliteConnection connection, WebApplication app, HttpClient client, Guid userId, Guid factoryId, Guid modelId, Guid lineId, Guid modelStageId, Guid workerAId, Guid workerBId)
+        { _connection = connection; _app = app; _client = client; _userId = userId; FactoryId = factoryId; ModelId = modelId; LineId = lineId; ModelStageId = modelStageId; WorkerAId = workerAId; WorkerBId = workerBId; }
+        public Guid FactoryId { get; } public Guid ModelId { get; } public Guid LineId { get; } public Guid ModelStageId { get; } public Guid WorkerAId { get; } public Guid WorkerBId { get; }
 
         public static async Task<ProductionHttpFixture> CreateAsync(decimal piecePrice = .50m)
         {
@@ -262,10 +285,13 @@ public sealed class ProductionCostRecordingHttpIntegrationTests
             var app = builder.Build(); app.UseExceptionHandler(error => error.Run(context =>
             {
                 var exception = context.Features.Get<IExceptionHandlerFeature>()?.Error;
-                context.Response.StatusCode = exception is ProductionConflictException or DbUpdateConcurrencyException ? StatusCodes.Status409Conflict : StatusCodes.Status500InternalServerError;
-                return Task.CompletedTask;
+                var status = exception is ProductionConflictException or DbUpdateConcurrencyException ? StatusCodes.Status409Conflict : StatusCodes.Status500InternalServerError;
+                return Results.Problem(
+                    title: status == StatusCodes.Status409Conflict ? "Conflict" : "Internal Server Error",
+                    detail: exception?.Message ?? "An unexpected error occurred.",
+                    statusCode: status).ExecuteAsync(context);
             })); app.UseAuthentication(); app.UseAuthorization(); app.MapProductionCostRecordingEndpoints(); await app.StartAsync();
-            var userId = Guid.NewGuid(); Guid modelId; Guid lineId; Guid modelStageId; Guid workerAId; Guid workerBId;
+            var userId = Guid.NewGuid(); Guid factoryId; Guid modelId; Guid lineId; Guid modelStageId; Guid workerAId; Guid workerBId;
             await using (var scope = app.Services.CreateAsyncScope())
             {
                 var db = scope.ServiceProvider.GetRequiredService<AppDbContext>(); await db.Database.EnsureCreatedAsync();
@@ -274,9 +300,9 @@ public sealed class ProductionCostRecordingHttpIntegrationTests
                 var workerA = new Worker(Guid.NewGuid(), "A", "Worker A"); var workerB = new Worker(Guid.NewGuid(), "B", "Worker B"); var user = new AppUser(userId, "Integration User", "integration@example.test", "hash");
                 db.AddRange(factory, line, main, sub, model, stage, workerA, workerB, user); await db.SaveChangesAsync();
                 db.AddRange(new WorkerDefaultAssignment(Guid.NewGuid(), workerA.Id, sub.Id, userId, DateTime.UtcNow.AddMinutes(-1), "Integration assignment"), new WorkerDefaultAssignment(Guid.NewGuid(), workerB.Id, sub.Id, userId, DateTime.UtcNow.AddMinutes(-1), "Integration assignment"));
-                await db.SaveChangesAsync(); modelId = model.Id; lineId = line.Id; modelStageId = stage.Id; workerAId = workerA.Id; workerBId = workerB.Id;
+                await db.SaveChangesAsync(); factoryId = factory.Id; modelId = model.Id; lineId = line.Id; modelStageId = stage.Id; workerAId = workerA.Id; workerBId = workerB.Id;
             }
-            return new ProductionHttpFixture(connection, app, app.GetTestClient(), userId, modelId, lineId, modelStageId, workerAId, workerBId);
+            return new ProductionHttpFixture(connection, app, app.GetTestClient(), userId, factoryId, modelId, lineId, modelStageId, workerAId, workerBId);
         }
 
         public object DraftPayload(Guid orderId, decimal quantity = 500m) => new { productionOrderId = orderId, productModelStageId = ModelStageId, productionDate = "2026-07-13", producedQuantity = quantity, acceptedQuantity = quantity, rejectedQuantity = 0m, clientRequestId = Guid.NewGuid(), workers = new[] { new { workerId = WorkerAId, percentage = 50m }, new { workerId = WorkerBId, percentage = 50m } } };

@@ -97,6 +97,27 @@ public sealed class LineStaffingEngineTests
         Assert.Equal("Default", after.Value!.Workers.Single(x => x.WorkerId == fixture.TemporarilyMovedWorker.Id).EffectiveAssignmentType);
     }
 
+    [Fact]
+    public async Task Staffing_plan_returns_one_worker_in_every_active_stage_participation()
+    {
+        await using var fixture = await StaffingFixture.CreateAsync();
+        fixture.Db.WorkerDefaultAssignments.Add(new WorkerDefaultAssignment(
+            Guid.NewGuid(), fixture.TemporarilyMovedWorker.Id, fixture.TemporarySubStage.Id, Guid.NewGuid(),
+            new DateTime(2026, 7, 10, 9, 0, 0, DateTimeKind.Utc)));
+        await fixture.Db.SaveChangesAsync();
+
+        var result = await fixture.Engine.GetLineStaffingPlanAsync(
+            fixture.Factory.Id, fixture.Line.Id, fixture.Model.Id, fixture.ReferenceDate.AddDays(2));
+
+        Assert.True(result.IsSuccess);
+        var worker = result.Value!.Workers.Single(candidate => candidate.WorkerId == fixture.TemporarilyMovedWorker.Id);
+        Assert.Equal(2, worker.Participations.Count);
+        Assert.Contains(worker.Participations, participation => participation.SubStageId == fixture.DefaultSubStage.Id);
+        Assert.Contains(worker.Participations, participation => participation.SubStageId == fixture.TemporarySubStage.Id);
+        Assert.Contains(result.Value.Stages.Single(stage => stage.SubStageId == fixture.DefaultSubStage.Id).EffectiveWorkerIds, id => id == fixture.TemporarilyMovedWorker.Id);
+        Assert.Contains(result.Value.Stages.Single(stage => stage.SubStageId == fixture.TemporarySubStage.Id).EffectiveWorkerIds, id => id == fixture.TemporarilyMovedWorker.Id);
+    }
+
     private sealed class StaffingFixture : IAsyncDisposable
     {
         private StaffingFixture(

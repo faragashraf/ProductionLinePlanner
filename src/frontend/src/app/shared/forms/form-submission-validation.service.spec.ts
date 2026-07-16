@@ -41,6 +41,8 @@ describe('FormSubmissionValidationService', () => {
 
     expect(service.serverMessage({ error: { error: { message: 'يجب إضافة عامل واحد على الأقل إلى دفعة الإنتاج.' } } }, 'تعذر حفظ المسودة.'))
       .toBe('يجب إضافة عامل واحد على الأقل إلى دفعة الإنتاج.');
+    expect(service.serverMessage({ error: { detail: 'تفاصيل مشكلة الخادم القابلة للقراءة.' } }, 'تعذر حفظ المسودة.'))
+      .toBe('تفاصيل مشكلة الخادم القابلة للقراءة.');
     expect(service.serverMessage({ message: 'Http failure response for /api/production/records: 400 Bad Request' }, 'تعذر حفظ المسودة.'))
       .toBe('تعذر حفظ المسودة.');
   });

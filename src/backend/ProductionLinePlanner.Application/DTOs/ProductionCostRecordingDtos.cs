@@ -74,7 +74,18 @@ public sealed record DailyProductionPreviewDto(
     string PreviewToken,
     decimal TotalWorkerEntitlements,
     IReadOnlyCollection<DailyProductionStagePreviewDto> Stages,
+    IReadOnlyCollection<DailyProductionWorkerTotalDto> WorkerTotals,
     IReadOnlyCollection<string> Warnings);
+
+/// <summary>
+/// Aggregate display total only. Stage allocations remain the source of truth
+/// so the same worker can retain an entitlement on multiple stages.
+/// </summary>
+public sealed record DailyProductionWorkerTotalDto(
+    Guid WorkerId,
+    string WorkerCode,
+    string WorkerName,
+    decimal TotalEntitlement);
 
 public sealed record DailyProductionDraftDto(
     Guid ProductionOrderId,

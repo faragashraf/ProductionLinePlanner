@@ -292,17 +292,55 @@ public sealed class ProductionCostRecordingService(
         ValidateDailyStages(request, context);
 
         var requestByStage = request.Stages.ToDictionary(stage => stage.ProductModelStageId);
+        // LoadDailyContextAsync has already resolved the authoritative active-worker,
+        // assignment, and attendance state for this exact production date. Reusing
+        // that immutable read context keeps a full production-day preview read-only
+        // and avoids repeating those source lookups once for every mapped stage.
+        var activeWorkers = context.ActiveWorkers.ToDictionary(worker => worker.WorkerId);
+        var requiresAuthorizedOverride = false;
         var stagePreviews = new List<DailyStagePreview>(context.Stages.Count);
         foreach (var stage in context.Stages)
         {
             var stageRequest = requestByStage[stage.Entity.Id];
-            var allocations = await BuildAllocationsAsync(
-                stage.Entity,
+            ValidateAllocationInputs(stage.Entity.CompensationMode, stageRequest.Workers);
+
+            var requestedWorkerIds = stageRequest.Workers.Select(worker => worker.WorkerId).ToArray();
+            if (requestedWorkerIds.Any(workerId => !activeWorkers.ContainsKey(workerId)))
+                throw new ProductionConflictException("يجب أن يكون كل عامل مشارك نشطًا وموجودًا في مصدر العمال المعتمد.");
+
+            var assignedWorkerIds = stage.Dto.Workers
+                .Select(worker => worker.WorkerId)
+                .ToHashSet();
+            var workersRequiringOverride = stageRequest.Workers
+                .Where(worker => !assignedWorkerIds.Contains(worker.WorkerId) || !activeWorkers[worker.WorkerId].IsPresent)
+                .ToArray();
+            if (workersRequiringOverride.Any(worker => string.IsNullOrWhiteSpace(worker.ManualOverrideReason)))
+                throw new ProductionConflictException("العامل غير الحاضر أو غير المعيّن للمرحلة يتطلب سبب تجاوز يدوي واضح.");
+            requiresAuthorizedOverride |= workersRequiringOverride.Length > 0;
+
+            var calculatedAmounts = CalculateAllocationAmounts(
+                stage.Entity.CompensationMode,
                 RoundQuantity(request.LineQuantity),
-                stageRequest.Workers,
-                actorId,
-                ProductionDateEvidenceAtUtc(request.ProductionDate),
-                ct);
+                stage.Entity.PiecePrice,
+                stageRequest.Workers)
+                .ToDictionary(amount => amount.WorkerId);
+            var allocations = stageRequest.Workers.Select(worker =>
+            {
+                var snapshot = activeWorkers[worker.WorkerId];
+                var calculated = calculatedAmounts[worker.WorkerId];
+                var allocation = new StageProductionWorkerAllocation(
+                    Guid.NewGuid(),
+                    worker.WorkerId,
+                    snapshot.WorkerCode,
+                    snapshot.WorkerName,
+                    worker.Percentage,
+                    worker.FixedAmount,
+                    worker.Notes,
+                    worker.ManualOverrideReason,
+                    worker.InputQuantity);
+                allocation.SetCalculatedAmounts(calculated.EquivalentQuantity, calculated.CalculatedEarning);
+                return allocation;
+            }).ToArray();
             var warnings = StageWarnings(stage.Dto);
             stagePreviews.Add(new DailyStagePreview(
                 stage,
@@ -310,6 +348,13 @@ public sealed class ProductionCostRecordingService(
                 RoundQuantity(request.LineQuantity),
                 RoundMoney(allocations.Sum(allocation => allocation.CalculatedEarning)),
                 warnings));
+        }
+
+        if (requiresAuthorizedOverride)
+        {
+            var permissions = await permissionService.GetEffectivePermissionsAsync(actorId, ct);
+            if (!permissions.Contains(ManualParticipantOverridePermission, StringComparer.OrdinalIgnoreCase))
+                throw new ProductionConflictException("لا تملك صلاحية التجاوز اليدوي لتعيين أو حضور العامل.");
         }
 
         return new DailyPreview(
@@ -362,7 +407,7 @@ public sealed class ProductionCostRecordingService(
             .ToArrayAsync(ct);
         var workerIds = workers.Select(worker => worker.Id).ToArray();
         var evidenceAtUtc = ProductionDateEvidenceAtUtc(productionDate);
-        var assignments = await assignmentEngine.ResolveCurrentAssignmentsAsync(workerIds, evidenceAtUtc, ct);
+        var assignments = await assignmentEngine.ResolveEffectiveAssignmentsAsync(workerIds, evidenceAtUtc, ct);
         if (assignments.IsFailure)
             throw new ProductionConflictException("تعذر احتساب التعيين الفعلي للعمال في تاريخ الإنتاج.");
         var attendance = await attendanceEngine.GetLatestAttendanceStatusByWorkerAsync(workerIds, evidenceAtUtc, ct);
@@ -371,7 +416,10 @@ public sealed class ProductionCostRecordingService(
 
         var workerContexts = workers.Select(worker =>
         {
-            var assignment = assignments.Value!.GetValueOrDefault(worker.Id);
+            var assignment = assignments.Value!.GetValueOrDefault(worker.Id)
+                ?.OrderByDescending(item => item.AssignmentType is AssignmentType.Temporary or AssignmentType.Replacement)
+                .ThenByDescending(item => item.StartsAtUtc)
+                .FirstOrDefault();
             var hasAttendance = attendance.Value!.TryGetValue(worker.Id, out var attendanceRecord);
             var attendanceStatus = hasAttendance
                 ? AttendanceLabel(attendanceRecord!.Status)
@@ -393,7 +441,14 @@ public sealed class ProductionCostRecordingService(
         var stageContexts = stages.Select(stage =>
         {
             var stageWorkers = workerContexts
-                .Where(worker => worker.EffectiveSubStageId == stage.SubStageId)
+                .SelectMany(worker => assignments.Value![worker.WorkerId]
+                    .Where(assignment => assignment.EffectiveSubStageId == stage.SubStageId)
+                    .Select(assignment => worker with
+                    {
+                        EffectiveSubStageId = assignment.EffectiveSubStageId,
+                        EffectiveAssignmentType = assignment.AssignmentType?.ToString(),
+                        AssignmentId = assignment.AssignmentId
+                    }))
                 .OrderBy(worker => worker.WorkerCode, StringComparer.Ordinal)
                 .ThenBy(worker => worker.WorkerId)
                 .ToArray();
@@ -555,7 +610,11 @@ public sealed class ProductionCostRecordingService(
         var builder = new StringBuilder();
         builder.Append(factory.Id).Append('|').Append(line.Id).Append('|').Append(product.Id).Append('|').Append(productionDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
         foreach (var stage in stages.OrderBy(stage => stage.Entity.StageOrder).ThenBy(stage => stage.Entity.Id))
+        {
             builder.Append('|').Append(stage.Entity.Id).Append('|').Append(stage.Entity.PiecePrice.ToString(CultureInfo.InvariantCulture)).Append('|').Append(stage.Entity.CompensationMode);
+            foreach (var worker in stage.Dto.Workers.OrderBy(worker => worker.WorkerId))
+                builder.Append('|').Append(stage.Entity.Id).Append('|').Append(worker.WorkerId).Append('|').Append(worker.EffectiveAssignmentType).Append('|').Append(worker.AttendanceStatus);
+        }
         foreach (var worker in workers.OrderBy(worker => worker.WorkerId))
             builder.Append('|').Append(worker.WorkerId).Append('|').Append(worker.EffectiveSubStageId).Append('|').Append(worker.AssignmentId).Append('|').Append(worker.AttendanceStatus).Append('|').Append(worker.AttendanceAtUtc?.Ticks);
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(builder.ToString())));
@@ -664,6 +723,16 @@ public sealed class ProductionCostRecordingService(
                 stage.Stage.Dto.CompensationMode,
                 stage.Allocations.Select(ToAllocationDto).ToArray(),
                 stage.Warnings)).ToArray(),
+            Stages.SelectMany(stage => stage.Allocations)
+                .GroupBy(allocation => new { allocation.WorkerId, allocation.SnapshotWorkerCode, allocation.SnapshotWorkerName })
+                .OrderBy(group => group.Key.SnapshotWorkerCode, StringComparer.Ordinal)
+                .ThenBy(group => group.Key.WorkerId)
+                .Select(group => new DailyProductionWorkerTotalDto(
+                    group.Key.WorkerId,
+                    group.Key.SnapshotWorkerCode,
+                    group.Key.SnapshotWorkerName,
+                    RoundMoney(group.Sum(allocation => allocation.CalculatedEarning))))
+                .ToArray(),
             Stages.SelectMany(stage => stage.Warnings).Distinct().ToArray());
     }
 
@@ -683,14 +752,14 @@ public sealed class ProductionCostRecordingService(
             .ToDictionaryAsync(x => x.Id, ct);
         if (workerSnapshots.Count != ids.Count) throw new ProductionConflictException("يجب أن يكون كل عامل مشارك نشطًا وموجودًا في مصدر العمال المعتمد.");
 
-        var assignments = await assignmentEngine.ResolveCurrentAssignmentsAsync(ids, eventAtUtc, ct);
+        var assignments = await assignmentEngine.ResolveEffectiveAssignmentsAsync(ids, eventAtUtc, ct);
         if (assignments.IsFailure) throw new ProductionConflictException("تعذر التحقق من تعيينات العمال الفعلية.");
         var attendance = await attendanceEngine.GetLatestAttendanceStatusByWorkerAsync(ids, eventAtUtc, ct);
         if (attendance.IsFailure) throw new ProductionConflictException("تعذر التحقق من حضور العمال من مصدر الحضور.");
 
         var workersRequiringOverride = workers.Where(worker =>
         {
-            var assignedToStage = assignments.Value!.TryGetValue(worker.WorkerId, out var assignment) && assignment.EffectiveSubStageId == stage.SubStageId;
+            var assignedToStage = assignments.Value!.TryGetValue(worker.WorkerId, out var workerAssignments) && workerAssignments.Any(assignment => assignment.EffectiveSubStageId == stage.SubStageId);
             var isPresent = attendance.Value!.TryGetValue(worker.WorkerId, out var state) && state.Status is AttendanceStatus.Present or AttendanceStatus.Late;
             return !assignedToStage || !isPresent;
         }).ToArray();

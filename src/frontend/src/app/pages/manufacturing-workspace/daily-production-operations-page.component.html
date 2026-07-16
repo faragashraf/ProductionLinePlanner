@@ -158,6 +158,10 @@
           <span>تكلفة المرحلة {{ stage.stageCost | number:'1.2-4' }}</span>
           <span *ngFor="let worker of stage.workers">{{ worker.workerCode }}: {{ worker.calculatedEarning | number:'1.2-4' }}</span>
         </article>
+        <article class="daily-production-operations__preview-stage" *ngIf="calculatedPreview.workerTotals.length">
+          <strong>إجمالي مستحقات العامل عبر كل المراحل</strong>
+          <span *ngFor="let worker of calculatedPreview.workerTotals">{{ worker.workerCode }} — {{ worker.workerName }}: {{ worker.totalEntitlement | number:'1.2-4' }}</span>
+        </article>
       </section>
       <section class="daily-production-operations__saved" *ngIf="savedDraft">
         <strong>المسودة {{ savedDraft.orderNumber }} محفوظة.</strong>

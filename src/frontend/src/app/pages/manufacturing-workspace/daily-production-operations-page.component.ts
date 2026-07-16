@@ -1,5 +1,5 @@
 import { Component, OnDestroy, OnInit } from '@angular/core';
-import { Subject, finalize, takeUntil } from 'rxjs';
+import { Subject, TimeoutError, finalize, takeUntil } from 'rxjs';
 import { PERMISSIONS } from '../../core/config/permission-identifiers';
 import { AttendanceApiService, AttendanceSyncResult } from '../../core/services/attendance-api.service';
 import {
@@ -313,7 +313,9 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
           this.previewRevision = revision;
           this.successMessage = 'تم احتساب معاينة موحّدة لكل المراحل والعمال. يمكنك الآن مراجعة المستحقات قبل حفظ المسودة.';
         },
-        error: error => this.error = this.formValidation.serverMessage(error, 'تعذر احتساب معاينة تشغيل اليوم.')
+        error: error => this.error = error instanceof TimeoutError
+          ? 'استغرق احتساب معاينة تشغيل اليوم وقتًا أطول من المسموح. بقيت بياناتك كما هي؛ أعد المحاولة.'
+          : this.formValidation.serverMessage(error, 'تعذر احتساب معاينة تشغيل اليوم.')
       });
   }
 

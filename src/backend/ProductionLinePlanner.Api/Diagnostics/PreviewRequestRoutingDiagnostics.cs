@@ -1,17 +1,22 @@
 using System.Security.Claims;
+using System.Diagnostics;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace ProductionLinePlanner.Api.Diagnostics;
 
 /// <summary>
-/// Development-only routing evidence for the draft-preview mutation. It is
-/// deliberately limited to route metadata: no authorization token or request
-/// body is captured.
+/// Development-only routing evidence for both preview operations. It is
+/// deliberately limited to request metadata: no authorization token or
+/// request body is captured.
 /// </summary>
 public static class PreviewRequestRoutingDiagnostics
 {
-    private const string PreviewPath = "/api/production/records/preview";
+    private static readonly string[] PreviewPaths =
+    [
+        "/api/production/records/preview",
+        "/api/production/daily-operations/preview"
+    ];
 
     public const string RequestIdHeader = "X-PLP-Request-Id";
     public const string EndpointHeader = "X-PLP-Endpoint";
@@ -29,7 +34,8 @@ public static class PreviewRequestRoutingDiagnostics
 
         return app.Use(async (context, next) =>
         {
-            if (!string.Equals(context.Request.Path.Value, PreviewPath, StringComparison.OrdinalIgnoreCase))
+            var requestPath = context.Request.Path.Value;
+            if (!PreviewPaths.Contains(requestPath ?? string.Empty, StringComparer.OrdinalIgnoreCase))
             {
                 await next();
                 return;
@@ -47,7 +53,7 @@ public static class PreviewRequestRoutingDiagnostics
             var candidateMethods = JoinMethods(context.RequestServices.GetServices<EndpointDataSource>()
                 .SelectMany(dataSource => dataSource.Endpoints)
                 .OfType<RouteEndpoint>()
-                .Where(candidate => string.Equals(candidate.RoutePattern.RawText, PreviewPath, StringComparison.OrdinalIgnoreCase))
+                .Where(candidate => string.Equals(candidate.RoutePattern.RawText, requestPath, StringComparison.OrdinalIgnoreCase))
                 .SelectMany(candidate => candidate.Metadata.GetMetadata<IHttpMethodMetadata>()?.HttpMethods ?? Array.Empty<string>()));
             var userMarker = context.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "anonymous";
             var origin = context.Request.Headers.Origin.ToString();
@@ -62,18 +68,37 @@ public static class PreviewRequestRoutingDiagnostics
             });
 
             app.Logger.LogInformation(
-                "Preview routing diagnostic {CorrelationId} {Method} {Path} {Origin} {EndpointName} {RoutePattern} {SelectedMethods} {CandidateMethods} {UserMarker}",
+                "Preview routing diagnostic started {CorrelationId} {Method} {Path} {Origin} {ContentType} {ContentLength} {EndpointName} {RoutePattern} {SelectedMethods} {CandidateMethods} {UserMarker}",
                 context.TraceIdentifier,
                 context.Request.Method,
                 context.Request.Path,
                 string.IsNullOrWhiteSpace(origin) ? "no-origin" : origin,
+                context.Request.ContentType ?? "none",
+                context.Request.ContentLength,
                 endpointName,
                 routePattern,
                 selectedMethods,
                 candidateMethods,
                 userMarker);
 
-            await next();
+            var stopwatch = Stopwatch.StartNew();
+            try
+            {
+                await next();
+            }
+            finally
+            {
+                app.Logger.LogInformation(
+                    "Preview routing diagnostic completed {CorrelationId} {Method} {Path} {StatusCode} {ResponseContentType} {ResponseContentLength} {RequestAborted} {ElapsedMilliseconds}",
+                    context.TraceIdentifier,
+                    context.Request.Method,
+                    context.Request.Path,
+                    context.Response.StatusCode,
+                    context.Response.ContentType ?? "none",
+                    context.Response.ContentLength,
+                    context.RequestAborted.IsCancellationRequested,
+                    stopwatch.ElapsedMilliseconds);
+            }
         });
     }
 

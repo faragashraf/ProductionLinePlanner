@@ -68,10 +68,31 @@ public static class ProductionCostRecordingEndpoints
             .RequirePermission("production.view")
             .RequireRateLimiting(ApiRateLimitPolicies.NormalRead)
             .WithName("LoadDailyProductionOperations");
-        dailyOperations.MapPost("/preview", async (DailyProductionOperationRequest request, IProductionCostRecordingService service, ICurrentUserService user, CancellationToken ct) =>
-            Results.Ok(ApiResponse.Success(await service.PreviewDailyOperationsAsync(request, RequireUser(user), ct))))
+        dailyOperations.MapPost("/preview", async (
+            DailyProductionOperationRequest request,
+            IProductionCostRecordingService service,
+            ICurrentUserService user,
+            HttpContext context,
+            IHostEnvironment environment,
+            ILoggerFactory loggerFactory,
+            CancellationToken ct) =>
+        {
+            if (environment.IsDevelopment())
+            {
+                loggerFactory.CreateLogger("ProductionLinePlanner.Api.DailyProductionPreview").LogInformation(
+                    "Daily preview payload {CorrelationId} {ClientRequestId} {StageCount} {WorkerAllocationCount}",
+                    context.TraceIdentifier,
+                    request.ClientRequestId,
+                    request.Stages?.Count ?? 0,
+                    request.Stages?.Sum(stage => stage.Workers?.Count ?? 0) ?? 0);
+            }
+
+            return Results.Ok(ApiResponse.Success(await service.PreviewDailyOperationsAsync(request, RequireUser(user), ct)));
+        })
             .RequirePermission("production.record")
-            .RequireRateLimiting(ApiRateLimitPolicies.CriticalProductionWrite)
+            // Preview is a read-only calculation. Keep it independent from the
+            // stricter write bucket used by the transactional Draft save.
+            .RequireRateLimiting(ApiRateLimitPolicies.NormalRead)
             .WithName("PreviewDailyProductionOperations");
         dailyOperations.MapPost("/drafts", async (DailyProductionOperationRequest request, IProductionCostRecordingService service, ICurrentUserService user, CancellationToken ct) =>
             Results.Created("/api/production/daily-operations/drafts", ApiResponse.Success(await service.SaveDailyDraftAsync(request, RequireUser(user), ct))))

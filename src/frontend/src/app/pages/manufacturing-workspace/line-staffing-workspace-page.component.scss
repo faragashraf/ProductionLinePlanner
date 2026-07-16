@@ -16,10 +16,8 @@
 .line-staffing-page__summary-notes span { padding-inline-start: .55rem; border-inline-start: 3px solid #98a2b3; }
 .line-staffing-page__summary-notes .is-ready { border-color: #12b76a; color: #067647; }
 .line-staffing-page__summary-notes .is-warning { border-color: #f79009; color: #9a6700; }
-.line-staffing-page__workspace { display: grid; grid-template-columns: minmax(17rem, .95fr) minmax(23rem, 1.35fr); gap: 1rem; align-items: start; }
 .line-staffing-page__filters { margin-bottom: .75rem; }
 .line-staffing-page__filters input { flex: 1 1 13rem; }
-.line-staffing-page__stage-list { display: grid; gap: .5rem; max-height: 44rem; overflow: auto; padding-inline-end: .15rem; }
 .line-staffing-page__stage { width: 100%; display: flex; justify-content: space-between; align-items: center; gap: .65rem; text-align: start; padding: .75rem; border: 1px solid #eaecf0; border-radius: .6rem; background: #fff; cursor: pointer; }
 .line-staffing-page__stage:hover, .line-staffing-page__stage.is-selected { border-color: #175cd3; background: #eff8ff; }
 .line-staffing-page__stage small { display: block; margin-top: .2rem; color: #667085; }
@@ -39,12 +37,6 @@
 .line-staffing-page__move-warning { color: #9a6700; background: #fffaeb; border-inline-start: 3px solid #f79009; }
 .line-staffing-page__validation-summary { display: grid; gap: .25rem; padding-inline-start: 1.4rem; color: #9a3412; background: #fff7ed; border-inline-start: 3px solid #f97316; }
 .line-staffing-page__wide { grid-column: 1 / -1; }
-
-@media (max-width: 1023px) {
-  .line-staffing-page__context { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .line-staffing-page__workspace { grid-template-columns: 1fr; }
-  .line-staffing-page__stage-list { max-height: 26rem; }
-}
 
 @media (max-width: 599px) {
   .line-staffing-page__context { grid-template-columns: 1fr; }

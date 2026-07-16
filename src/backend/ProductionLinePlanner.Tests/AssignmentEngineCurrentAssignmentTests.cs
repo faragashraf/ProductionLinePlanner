@@ -111,50 +111,90 @@ public sealed class AssignmentEngineCurrentAssignmentTests
     }
 
     [Fact]
-    public async Task Current_assignment_move_and_removal_require_a_reason_and_are_auditable_state_changes()
+    public async Task Permanent_stage_participations_allow_multiple_stages_without_a_reason_and_cancel_only_the_selected_stage()
     {
         await using var fixture = AssignmentFixture.Create();
         fixture.Db.WorkerDefaultAssignments.Add(new WorkerDefaultAssignment(
             Guid.NewGuid(), fixture.Worker.Id, fixture.DefaultSubStage.Id, fixture.ActorId, DateTime.UtcNow));
         await fixture.Db.SaveChangesAsync();
 
-        var withoutReason = await fixture.Engine.CreateOrUpdateDefaultAssignmentAsync(
+        var additionalParticipation = await fixture.Engine.CreateOrUpdateDefaultAssignmentAsync(
             new CreateDefaultAssignmentRequest { WorkerId = fixture.Worker.Id, SubStageId = fixture.TemporarySubStage.Id },
             fixture.ActorId);
-        Assert.True(withoutReason.IsFailure);
-        Assert.Equal("ValidationError", withoutReason.Error?.Code);
+        Assert.True(additionalParticipation.IsSuccess);
+        Assert.Equal(2, await fixture.Db.WorkerDefaultAssignments.CountAsync(x => x.WorkerId == fixture.Worker.Id && x.IsActive));
 
-        var moved = await fixture.Engine.CreateOrUpdateDefaultAssignmentAsync(
-            new CreateDefaultAssignmentRequest { WorkerId = fixture.Worker.Id, SubStageId = fixture.TemporarySubStage.Id, Reason = "Pilot move" },
+        var duplicate = await fixture.Engine.CreateOrUpdateDefaultAssignmentAsync(
+            new CreateDefaultAssignmentRequest { WorkerId = fixture.Worker.Id, SubStageId = fixture.TemporarySubStage.Id },
             fixture.ActorId);
-        Assert.True(moved.IsSuccess);
-        Assert.Equal(fixture.TemporarySubStage.Id, moved.Value?.SubStageId);
-        Assert.Single(await fixture.Db.WorkerDefaultAssignments.Where(x => x.WorkerId == fixture.Worker.Id && x.IsActive).ToListAsync());
+        Assert.True(duplicate.IsFailure);
+        Assert.Equal("Conflict", duplicate.Error?.Code);
 
         var missingRemovalReason = await fixture.Engine.RemoveDefaultAssignmentAsync(fixture.Worker.Id, fixture.TemporarySubStage.Id, "", fixture.ActorId);
         Assert.True(missingRemovalReason.IsFailure);
         var removed = await fixture.Engine.RemoveDefaultAssignmentAsync(fixture.Worker.Id, fixture.TemporarySubStage.Id, "Shift completed", fixture.ActorId);
         Assert.True(removed.IsSuccess);
-        Assert.Empty(await fixture.Db.WorkerDefaultAssignments.Where(x => x.WorkerId == fixture.Worker.Id && x.IsActive).ToListAsync());
+        var remaining = await fixture.Db.WorkerDefaultAssignments.Where(x => x.WorkerId == fixture.Worker.Id && x.IsActive).ToListAsync();
+        Assert.Single(remaining);
+        Assert.Equal(fixture.DefaultSubStage.Id, remaining.Single().SubStageId);
         Assert.Contains(await fixture.Db.AssignmentTimelineEntries.ToListAsync(), entry => entry.ActionType == "Cancel" && entry.Reason == "Shift completed");
     }
 
     [Fact]
-    public async Task First_default_assignment_allows_an_empty_reason_but_a_change_requires_one()
+    public async Task Permanent_assignment_without_reason_creates_an_additional_stage_participation()
     {
         await using var fixture = AssignmentFixture.Create();
 
         var first = await fixture.Engine.CreateOrUpdateDefaultAssignmentAsync(
             new CreateDefaultAssignmentRequest { WorkerId = fixture.Worker.Id, SubStageId = fixture.DefaultSubStage.Id },
             fixture.ActorId);
-        var changeWithoutReason = await fixture.Engine.CreateOrUpdateDefaultAssignmentAsync(
+        var additional = await fixture.Engine.CreateOrUpdateDefaultAssignmentAsync(
             new CreateDefaultAssignmentRequest { WorkerId = fixture.Worker.Id, SubStageId = fixture.TemporarySubStage.Id },
             fixture.ActorId);
 
         Assert.True(first.IsSuccess);
-        Assert.True(changeWithoutReason.IsFailure);
-        Assert.Equal("ValidationError", changeWithoutReason.Error?.Code);
-        Assert.Equal("سبب تغيير التعيين الدائم مطلوب عند نقل العامل من مرحلة دائمة قائمة.", changeWithoutReason.Error?.Message);
+        Assert.True(additional.IsSuccess);
+        Assert.Equal(2, await fixture.Db.WorkerDefaultAssignments.CountAsync(x => x.WorkerId == fixture.Worker.Id && x.IsActive));
+    }
+
+    [Fact]
+    public async Task Bulk_stage_selection_adds_and_removes_only_permanent_participations_for_the_selected_stage()
+    {
+        await using var fixture = AssignmentFixture.Create();
+        var otherWorker = new Worker(Guid.NewGuid(), "W-2", "Worker Two");
+        var now = DateTime.UtcNow;
+        fixture.Db.AddRange(
+            otherWorker,
+            new WorkerDefaultAssignment(Guid.NewGuid(), fixture.Worker.Id, fixture.DefaultSubStage.Id, fixture.ActorId, now.AddMinutes(-2)),
+            new WorkerDefaultAssignment(Guid.NewGuid(), fixture.Worker.Id, fixture.TemporarySubStage.Id, fixture.ActorId, now.AddMinutes(-1)));
+        await fixture.Db.SaveChangesAsync();
+
+        var duplicateRequest = await fixture.Engine.UpdateStageDefaultAssignmentsAsync(
+            fixture.DefaultSubStage.Id,
+            [otherWorker.Id, otherWorker.Id],
+            fixture.ActorId);
+        var result = await fixture.Engine.UpdateStageDefaultAssignmentsAsync(
+            fixture.DefaultSubStage.Id,
+            [otherWorker.Id],
+            fixture.ActorId);
+
+        Assert.True(duplicateRequest.IsFailure);
+        Assert.Equal("ValidationError", duplicateRequest.Error?.Code);
+        Assert.True(result.IsSuccess);
+        Assert.Equal(1, result.Value!.AddedWorkersCount);
+        Assert.Equal(1, result.Value.RemovedWorkersCount);
+        Assert.Equal([otherWorker.Id], result.Value.ActiveWorkerIds);
+
+        var activeAssignments = await fixture.Db.WorkerDefaultAssignments
+            .Where(assignment => assignment.IsActive)
+            .ToListAsync();
+        Assert.Contains(activeAssignments, assignment => assignment.WorkerId == otherWorker.Id && assignment.SubStageId == fixture.DefaultSubStage.Id);
+        Assert.Contains(activeAssignments, assignment => assignment.WorkerId == fixture.Worker.Id && assignment.SubStageId == fixture.TemporarySubStage.Id);
+        Assert.DoesNotContain(activeAssignments, assignment => assignment.WorkerId == fixture.Worker.Id && assignment.SubStageId == fixture.DefaultSubStage.Id);
+        Assert.Contains(await fixture.Db.AssignmentTimelineEntries.ToListAsync(), entry =>
+            entry.WorkerId == fixture.Worker.Id &&
+            entry.FromSubStageId == fixture.DefaultSubStage.Id &&
+            entry.ActionType == "Cancel");
     }
 
     [Fact]
@@ -222,6 +262,64 @@ public sealed class AssignmentEngineCurrentAssignmentTests
         Assert.Equal(fixture.DefaultSubStage.Id, endState.Value![fixture.Worker.Id].EffectiveSubStageId);
         Assert.True(overlapping.IsFailure);
         Assert.Equal("Conflict", overlapping.Error?.Code);
+    }
+
+    [Fact]
+    public async Task Additional_temporary_participation_preserves_all_permanent_stages_and_expiration_removes_only_the_temporary_stage()
+    {
+        await using var fixture = AssignmentFixture.Create();
+        var start = new DateTime(2026, 7, 13, 8, 0, 0, DateTimeKind.Utc);
+        var end = start.AddHours(2);
+        fixture.Db.WorkerDefaultAssignments.Add(new WorkerDefaultAssignment(Guid.NewGuid(), fixture.Worker.Id, fixture.DefaultSubStage.Id, fixture.ActorId, start.AddHours(-1)));
+        await fixture.Db.SaveChangesAsync();
+
+        var temporary = await fixture.Engine.CreateTemporaryAssignmentAsync(new CreateTemporaryAssignmentRequest
+        {
+            WorkerId = fixture.Worker.Id,
+            ToSubStageId = fixture.TemporarySubStage.Id,
+            StartAtUtc = start,
+            EndAtUtc = end,
+            Reason = "دعم مؤقت إضافي",
+            ParticipationMode = TemporaryAssignmentMode.AdditionalParticipation
+        }, fixture.ActorId);
+        var during = await fixture.Engine.ResolveEffectiveAssignmentsAsync([fixture.Worker.Id], start.AddMinutes(30));
+        var after = await fixture.Engine.ResolveEffectiveAssignmentsAsync([fixture.Worker.Id], end);
+
+        Assert.True(temporary.IsSuccess);
+        Assert.Equal(new[] { fixture.DefaultSubStage.Id, fixture.TemporarySubStage.Id }.Order(), during.Value![fixture.Worker.Id].Select(assignment => assignment.EffectiveSubStageId!.Value).Order());
+        Assert.Equal([fixture.DefaultSubStage.Id], after.Value![fixture.Worker.Id].Select(assignment => assignment.EffectiveSubStageId!.Value).ToArray());
+        Assert.True((await fixture.Db.WorkerDefaultAssignments.SingleAsync()).IsActive);
+        Assert.Equal("Completed", (await fixture.Db.WorkerTemporaryAssignments.SingleAsync()).Status);
+    }
+
+    [Fact]
+    public async Task Explicit_move_deactivates_only_the_selected_source_participation()
+    {
+        await using var fixture = AssignmentFixture.Create();
+        var destination = new SubStage(Guid.NewGuid(), fixture.DefaultSubStage.MainStageId, "Destination", "DST", 1, 3);
+        var sourceA = new WorkerDefaultAssignment(Guid.NewGuid(), fixture.Worker.Id, fixture.DefaultSubStage.Id, fixture.ActorId, DateTime.UtcNow.AddMinutes(-2));
+        var sourceB = new WorkerDefaultAssignment(Guid.NewGuid(), fixture.Worker.Id, fixture.TemporarySubStage.Id, fixture.ActorId, DateTime.UtcNow.AddMinutes(-1));
+        fixture.Db.AddRange(destination, sourceA, sourceB);
+        await fixture.Db.SaveChangesAsync();
+
+        var moved = await fixture.Engine.MoveCurrentAssignmentAsync(new MoveCurrentWorkerAssignmentRequest
+        {
+            WorkerId = fixture.Worker.Id,
+            SourceAssignmentId = sourceB.Id,
+            FromSubStageId = fixture.TemporarySubStage.Id,
+            ToSubStageId = destination.Id,
+            EffectiveAtUtc = DateTime.UtcNow,
+            Reason = "نقل مقصود لمشاركة واحدة"
+        }, fixture.ActorId);
+
+        Assert.True(moved.IsSuccess);
+        var activeStages = await fixture.Db.WorkerDefaultAssignments
+            .Where(assignment => assignment.WorkerId == fixture.Worker.Id && assignment.IsActive)
+            .Select(assignment => assignment.SubStageId)
+            .ToArrayAsync();
+        Assert.Contains(fixture.DefaultSubStage.Id, activeStages);
+        Assert.Contains(destination.Id, activeStages);
+        Assert.DoesNotContain(fixture.TemporarySubStage.Id, activeStages);
     }
 
     [Fact]

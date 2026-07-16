@@ -2,7 +2,7 @@ import { HttpClient } from '@angular/common/http';
 import { Injectable } from '@angular/core';
 import { Observable, map, timeout } from 'rxjs';
 import { buildApiUrl } from '../config/api.config';
-import { STANDARD_API_TIMEOUT_MS } from '../config/api-timeout.config';
+import { DAILY_PRODUCTION_OPERATION_TIMEOUT_MS, STANDARD_API_TIMEOUT_MS } from '../config/api-timeout.config';
 import { ApiResponse } from '../models/api-response.model';
 
 export type ProductionOrderStatus = 'Draft' | 'Active' | 'Completed' | 'Cancelled';
@@ -28,7 +28,8 @@ export interface DailyProductionWorkerInput { workerId: string; percentage?: num
 export interface DailyProductionStageInput { productModelStageId: string; workers: DailyProductionWorkerInput[]; }
 export interface DailyProductionOperationInput { factoryId: string; productionLineId: string; productModelId: string; productionDate: string; lineQuantity: number; clientRequestId: string; notes?: string | null; previewToken?: string | null; stages: DailyProductionStageInput[]; }
 export interface DailyProductionStagePreview { productModelStageId: string; stageCode: string; stageName: string; stageQuantity: number; stageCost: number; compensationMode: string; workers: ProductionWorkerAllocation[]; warnings: string[]; }
-export interface DailyProductionPreview { productionDate: string; lineQuantity: number; previewToken: string; totalWorkerEntitlements: number; stages: DailyProductionStagePreview[]; warnings: string[]; }
+export interface DailyProductionWorkerTotal { workerId: string; workerCode: string; workerName: string; totalEntitlement: number; }
+export interface DailyProductionPreview { productionDate: string; lineQuantity: number; previewToken: string; totalWorkerEntitlements: number; stages: DailyProductionStagePreview[]; workerTotals: DailyProductionWorkerTotal[]; warnings: string[]; }
 export interface DailyProductionDraft { productionOrderId: string; orderNumber: string; productionDate: string; recordedAtUtc: string; lineQuantity: number; wasAlreadySaved: boolean; stages: StageProductionRecord[]; }
 
 @Injectable({ providedIn: 'root' })
@@ -40,8 +41,8 @@ export class ProductionCostRecordingApiService {
   listWorkers(): Observable<WorkerOption[]> { return this.getItems<WorkerOption>('/api/production/lookups/workers'); }
   getProductReadiness(productModelId: string, productionLineId: string, productionDate: string): Observable<ProductProductionReadiness> { return this.get<ProductProductionReadiness>(`/api/production/readiness?productModelId=${encodeURIComponent(productModelId)}&productionLineId=${encodeURIComponent(productionLineId)}&productionDate=${encodeURIComponent(productionDate)}`); }
   loadDailyOperations(factoryId: string, productionLineId: string, productModelId: string, productionDate: string): Observable<DailyProductionOperations> { const query = new URLSearchParams({ factoryId, productionLineId, productModelId, productionDate }); return this.get<DailyProductionOperations>(`/api/production/daily-operations?${query.toString()}`); }
-  previewDailyOperations(value: DailyProductionOperationInput): Observable<DailyProductionPreview> { return this.post('/api/production/daily-operations/preview', value); }
-  saveDailyDraft(value: DailyProductionOperationInput): Observable<DailyProductionDraft> { return this.post('/api/production/daily-operations/drafts', value); }
+  previewDailyOperations(value: DailyProductionOperationInput): Observable<DailyProductionPreview> { return this.post('/api/production/daily-operations/preview', value, DAILY_PRODUCTION_OPERATION_TIMEOUT_MS); }
+  saveDailyDraft(value: DailyProductionOperationInput): Observable<DailyProductionDraft> { return this.post('/api/production/daily-operations/drafts', value, DAILY_PRODUCTION_OPERATION_TIMEOUT_MS); }
   createOrder(value: unknown): Observable<ProductionOrder> { return this.post('/api/production/orders', value); }
   updateOrder(id: string, value: unknown): Observable<ProductionOrder> { return this.http.put<ApiResponse<ProductionOrder>>(buildApiUrl(`/api/production/orders/${id}`), value).pipe(timeout(STANDARD_API_TIMEOUT_MS), map((response) => this.unwrap(response))); }
   transitionOrder(id: string, action: 'activate' | 'complete' | 'cancel'): Observable<ProductionOrder> { return this.post(`/api/production/orders/${id}/${action}`, {}); }
@@ -61,6 +62,6 @@ export class ProductionCostRecordingApiService {
   approveProductionDay(productionOrderId: string): Observable<ProductionDayReview> { return this.post(`/api/production/intake/days/${productionOrderId}/approve`, {}); }
   private get<T>(path: string): Observable<T> { return this.http.get<ApiResponse<T>>(buildApiUrl(path)).pipe(timeout(STANDARD_API_TIMEOUT_MS), map((response) => this.unwrap(response))); }
   private getItems<T>(path: string): Observable<T[]> { return this.get<{ items: T[] }>(path).pipe(map((page) => page.items ?? [])); }
-  private post<T>(path: string, body: unknown): Observable<T> { return this.http.post<ApiResponse<T>>(buildApiUrl(path), body).pipe(timeout(STANDARD_API_TIMEOUT_MS), map((response) => this.unwrap(response))); }
+  private post<T>(path: string, body: unknown, requestTimeoutMs = STANDARD_API_TIMEOUT_MS): Observable<T> { return this.http.post<ApiResponse<T>>(buildApiUrl(path), body).pipe(timeout(requestTimeoutMs), map((response) => this.unwrap(response))); }
   private unwrap<T>(response: ApiResponse<T>): T { if (!response.success || response.data === undefined || response.data === null) { throw new Error(response.error?.message || 'تعذر إتمام العملية.'); } return response.data; }
 }

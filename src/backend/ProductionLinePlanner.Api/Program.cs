@@ -327,6 +327,39 @@ lineStaffingApi.MapGet("", async (
     .WithTags("Line staffing")
     .WithName("GetLineStaffingPlan");
 
+lineStaffingApi.MapGet("/stages/{subStageId:guid}", async (
+    Guid factoryId,
+    Guid productionLineId,
+    Guid productModelId,
+    Guid subStageId,
+    DateOnly staffingReferenceDate,
+    ILineStaffingEngine lineStaffingEngine,
+    CancellationToken cancellationToken) =>
+{
+    var result = await lineStaffingEngine.GetLineStaffingStageRefreshAsync(
+        factoryId,
+        productionLineId,
+        productModelId,
+        subStageId,
+        staffingReferenceDate,
+        cancellationToken);
+    if (result.IsFailure)
+    {
+        return ApiResponse.Failure(
+            result.Error?.Code ?? "LineStaffingStageReadFailed",
+            result.Error?.Message ?? "Unable to load the selected staffing stage.",
+            MapFailureStatusCode(result.Error?.Code));
+    }
+
+    return Results.Ok(ApiResponse.Success(result.Value!));
+})
+    .RequirePermission("factory-structure.view")
+    .RequirePermission("models.view")
+    .RequirePermission("workers.view")
+    .RequirePermission("assignments.view")
+    .WithTags("Line staffing")
+    .WithName("GetLineStaffingStageRefresh");
+
 lineStaffingApi.MapGet("/workers", async (
     DateOnly staffingReferenceDate,
     ILineStaffingEngine lineStaffingEngine,
@@ -2638,6 +2671,40 @@ assignmentsApi.MapPost("/default", async (
     .RequirePermission("assignments.manage")
     .WithTags("Assignments")
     .WithName("CreateOrUpdateDefaultAssignment");
+
+assignmentsApi.MapPut("/default/stages/{subStageId:guid}", async (
+    Guid subStageId,
+    UpdateStageDefaultAssignmentsRequest request,
+    IAssignmentEngine assignmentEngine,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
+    CancellationToken cancellationToken) =>
+{
+    var actorUserId = currentUserService.UserId;
+    if (actorUserId is null)
+    {
+        return ApiResponse.Failure("Unauthorized", "User context is required.");
+    }
+
+    var result = await assignmentEngine.UpdateStageDefaultAssignmentsAsync(
+        subStageId,
+        request.WorkerIds,
+        actorUserId.Value,
+        $"{httpContext.Request.Method} {httpContext.Request.Path}",
+        cancellationToken);
+    if (result.IsFailure)
+    {
+        return ApiResponse.Failure(
+            result.Error?.Code ?? "ValidationError",
+            result.Error?.Message ?? "Validation failed.",
+            MapFailureStatusCode(result.Error?.Code));
+    }
+
+    return Results.Ok(ApiResponse.Success(result.Value!));
+})
+    .RequirePermission("assignments.manage")
+    .WithTags("Assignments")
+    .WithName("UpdateStageDefaultAssignments");
 
 assignmentsApi.MapDelete("/default/{workerId:guid}", async (
     Guid workerId,

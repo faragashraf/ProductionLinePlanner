@@ -88,7 +88,13 @@ public sealed class LineStaffingEngine(
         }
         var workerDtos = workersResult.Value!;
 
-        var stagesWithWorkers = stages.Select(stage => ToStageDto(stage, workerDtos)).ToArray();
+        var defaultCounts = await dbContext.WorkerDefaultAssignments
+            .AsNoTracking()
+            .Where(assignment => assignment.IsActive && stages.Select(stage => stage.SubStageId).Contains(assignment.SubStageId))
+            .GroupBy(assignment => assignment.SubStageId)
+            .Select(group => new { SubStageId = group.Key, Count = group.Count() })
+            .ToDictionaryAsync(item => item.SubStageId, item => item.Count, cancellationToken);
+        var stagesWithWorkers = stages.Select(stage => ToStageDto(stage, workerDtos, defaultCounts.GetValueOrDefault(stage.SubStageId))).ToArray();
         var withoutWorkers = stagesWithWorkers.Count(stage => stage.EffectiveAssignedWorkersCount == 0);
         var staffingReview = stagesWithWorkers.Count(stage => stage.StaffingStatus == "NeedsStaffingReview");
         var compensationReview = stagesWithWorkers.Count(stage => stage.IsFinancialReviewPending);
@@ -120,6 +126,54 @@ public sealed class LineStaffingEngine(
             workerDtos));
     }
 
+    public async Task<Result<LineStaffingStageRefreshDto>> GetLineStaffingStageRefreshAsync(
+        Guid factoryId,
+        Guid productionLineId,
+        Guid productModelId,
+        Guid subStageId,
+        DateOnly staffingReferenceDate,
+        CancellationToken cancellationToken = default)
+    {
+        if (subStageId == Guid.Empty)
+        {
+            return Result<LineStaffingStageRefreshDto>.Failure(new Error("ValidationError", "SubStageId is required."));
+        }
+
+        var planResult = await GetLineStaffingPlanAsync(
+            factoryId,
+            productionLineId,
+            productModelId,
+            staffingReferenceDate,
+            cancellationToken);
+        if (planResult.IsFailure)
+        {
+            return Result<LineStaffingStageRefreshDto>.Failure(planResult.Error!);
+        }
+
+        var plan = planResult.Value!;
+        var stage = plan.Stages.SingleOrDefault(candidate => candidate.SubStageId == subStageId);
+        if (stage is null)
+        {
+            return Result<LineStaffingStageRefreshDto>.Failure(new Error("NotFound", "The selected stage does not belong to the current line and model."));
+        }
+
+        var workers = plan.Workers
+            .Where(worker => worker.Participations.Any(participation => participation.SubStageId == subStageId))
+            .ToArray();
+        return Result<LineStaffingStageRefreshDto>.Success(new LineStaffingStageRefreshDto(
+            stage,
+            workers,
+            plan.StagesWithWorkers,
+            plan.StagesWithoutWorkers,
+            plan.StagesWithTemporaryAssignments,
+            plan.StagesNeedingCompensationReview,
+            plan.StagesNeedingStaffingReview,
+            plan.OverallStaffingStatus,
+            plan.StaffingPlanComplete,
+            plan.OperationalAttendanceChecked,
+            plan.FinancialConfigurationPending));
+    }
+
     public async Task<Result<IReadOnlyCollection<LineStaffingWorkerDto>>> GetActiveStaffingWorkersAsync(
         DateOnly staffingReferenceDate,
         CancellationToken cancellationToken = default)
@@ -143,7 +197,7 @@ public sealed class LineStaffingEngine(
         }
 
         var workerIds = workers.Select(worker => worker.Id).ToArray();
-        var assignmentsResult = await assignmentEngine.ResolveCurrentAssignmentsAsync(
+        var assignmentsResult = await assignmentEngine.ResolveEffectiveAssignmentsAsync(
             workerIds,
             StaffingReferenceAtUtc(staffingReferenceDate),
             cancellationToken);
@@ -152,21 +206,9 @@ public sealed class LineStaffingEngine(
             return Result<IReadOnlyCollection<LineStaffingWorkerDto>>.Failure(assignmentsResult.Error!);
         }
 
-        var defaultAssignments = await dbContext.WorkerDefaultAssignments
-            .AsNoTracking()
-            .Where(assignment => workerIds.Contains(assignment.WorkerId) && assignment.IsActive)
-            .OrderByDescending(assignment => assignment.AssignedAt)
-            .ThenByDescending(assignment => assignment.Id)
-            .Select(assignment => new { assignment.WorkerId, assignment.SubStageId })
-            .ToArrayAsync(cancellationToken);
-        var defaultByWorker = defaultAssignments
-            .GroupBy(assignment => assignment.WorkerId)
-            .ToDictionary(group => group.Key, group => group.First().SubStageId);
-
         var resolvedAssignments = assignmentsResult.Value!;
-        var referencedSubStageIds = defaultByWorker.Values.Select(subStageId => (Guid?)subStageId)
-            .Concat(resolvedAssignments.Values.Select(assignment => assignment.EffectiveSubStageId))
-            .Concat(resolvedAssignments.Values.Select(assignment => assignment.FromSubStageId))
+        var referencedSubStageIds = resolvedAssignments.Values.SelectMany(assignments => assignments)
+            .SelectMany(assignment => new[] { assignment.EffectiveSubStageId, assignment.FromSubStageId })
             .Where(subStageId => subStageId.HasValue)
             .Select(subStageId => subStageId!.Value)
             .Distinct()
@@ -181,21 +223,19 @@ public sealed class LineStaffingEngine(
 
         IReadOnlyCollection<LineStaffingWorkerDto> workerDtos = workers.Select(worker => ToWorkerDto(
                 worker,
-                defaultByWorker.GetValueOrDefault(worker.Id),
-                resolvedAssignments.GetValueOrDefault(worker.Id),
+                resolvedAssignments.GetValueOrDefault(worker.Id) ?? [],
                 subStageNames))
             .ToArray();
         return Result<IReadOnlyCollection<LineStaffingWorkerDto>>.Success(workerDtos);
     }
 
-    private static LineStaffingStageDto ToStageDto(StageRow stage, IReadOnlyCollection<LineStaffingWorkerDto> workers)
+    private static LineStaffingStageDto ToStageDto(StageRow stage, IReadOnlyCollection<LineStaffingWorkerDto> workers, int defaultCount)
     {
         var effectiveWorkers = workers
-            .Where(worker => worker.EffectiveSubStageId == stage.SubStageId)
+            .Where(worker => worker.Participations.Any(participation => participation.SubStageId == stage.SubStageId))
             .OrderBy(worker => worker.EmployeeCode)
             .ToArray();
-        var defaultCount = workers.Count(worker => worker.DefaultSubStageId == stage.SubStageId);
-        var temporaryCount = effectiveWorkers.Count(worker => worker.EffectiveAssignmentType is "Temporary" or "Replacement");
+        var temporaryCount = effectiveWorkers.Count(worker => worker.Participations.Any(participation => participation.SubStageId == stage.SubStageId && participation.AssignmentType is "Temporary" or "Replacement"));
         var hasRequiredWorkers = stage.Capacity > 0;
         var compensationConfigured = stage.PiecePrice >= 0m && Enum.IsDefined(stage.CompensationMode);
         var financialReviewPending = stage.CompensationMode == CompensationMode.SharedPercentage;
@@ -233,10 +273,35 @@ public sealed class LineStaffingEngine(
 
     private static LineStaffingWorkerDto ToWorkerDto(
         WorkerRow worker,
-        Guid? defaultSubStageId,
-        WorkerAssignmentState? effectiveAssignment,
+        IReadOnlyCollection<WorkerAssignmentState> effectiveAssignments,
         IReadOnlyDictionary<Guid, string> subStageNames)
     {
+        var participations = effectiveAssignments
+            .Where(assignment => assignment.AssignmentId.HasValue && assignment.EffectiveSubStageId.HasValue && assignment.AssignmentType.HasValue)
+            .Select(assignment => new LineStaffingParticipationDto(
+                assignment.AssignmentId!.Value,
+                assignment.AssignmentType!.Value.ToString(),
+                assignment.EffectiveSubStageId!.Value,
+                NameFor(assignment.EffectiveSubStageId, subStageNames),
+                assignment.FromSubStageId,
+                NameFor(assignment.FromSubStageId, subStageNames),
+                assignment.StartsAtUtc,
+                assignment.EndsAtUtc,
+                assignment.ReplacementForWorkerId,
+                assignment.ParticipationMode?.ToString()))
+            .OrderBy(participation => participation.SubStageName, StringComparer.Ordinal)
+            .ThenBy(participation => participation.SubStageId)
+            .ToArray();
+        var defaultAssignment = effectiveAssignments
+            .Where(assignment => assignment.AssignmentType == AssignmentType.Default)
+            .OrderByDescending(assignment => assignment.StartsAtUtc)
+            .ThenByDescending(assignment => assignment.AssignmentId)
+            .FirstOrDefault();
+        var primaryAssignment = effectiveAssignments
+            .OrderByDescending(assignment => assignment.AssignmentType is AssignmentType.Temporary or AssignmentType.Replacement)
+            .ThenByDescending(assignment => assignment.StartsAtUtc)
+            .ThenByDescending(assignment => assignment.AssignmentId)
+            .FirstOrDefault();
         var photoVersion = GetPhotoVersion(worker.PhotoReference);
         var hasPhoto = photoVersion is not null && IsManagedPhotoReference(worker.PhotoReference, worker.Id);
         return new LineStaffingWorkerDto(
@@ -248,17 +313,18 @@ public sealed class LineStaffingEngine(
             hasPhoto,
             hasPhoto ? $"/api/workers/{worker.Id:D}/photo" + (photoVersion is null ? string.Empty : $"?v={photoVersion}") : null,
             photoVersion,
-            defaultSubStageId,
-            NameFor(defaultSubStageId, subStageNames),
-            effectiveAssignment?.AssignmentId,
-            effectiveAssignment?.AssignmentType?.ToString(),
-            effectiveAssignment?.EffectiveSubStageId,
-            NameFor(effectiveAssignment?.EffectiveSubStageId, subStageNames),
-            effectiveAssignment?.FromSubStageId,
-            NameFor(effectiveAssignment?.FromSubStageId, subStageNames),
-            effectiveAssignment?.AssignmentType is AssignmentType.Temporary or AssignmentType.Replacement ? effectiveAssignment.StartsAtUtc : null,
-            effectiveAssignment?.AssignmentType is AssignmentType.Temporary or AssignmentType.Replacement ? effectiveAssignment.EndsAtUtc : null,
-            effectiveAssignment?.ReplacementForWorkerId);
+            defaultAssignment?.EffectiveSubStageId,
+            NameFor(defaultAssignment?.EffectiveSubStageId, subStageNames),
+            primaryAssignment?.AssignmentId,
+            primaryAssignment?.AssignmentType?.ToString(),
+            primaryAssignment?.EffectiveSubStageId,
+            NameFor(primaryAssignment?.EffectiveSubStageId, subStageNames),
+            primaryAssignment?.FromSubStageId,
+            NameFor(primaryAssignment?.FromSubStageId, subStageNames),
+            primaryAssignment?.AssignmentType is AssignmentType.Temporary or AssignmentType.Replacement ? primaryAssignment.StartsAtUtc : null,
+            primaryAssignment?.AssignmentType is AssignmentType.Temporary or AssignmentType.Replacement ? primaryAssignment.EndsAtUtc : null,
+            primaryAssignment?.ReplacementForWorkerId,
+            participations);
     }
 
     private static string? GetPhotoVersion(string? photoReference)

@@ -26,6 +26,23 @@ public sealed record LineStaffingPlanDto(
     IReadOnlyCollection<LineStaffingStageDto> Stages,
     IReadOnlyCollection<LineStaffingWorkerDto> Workers);
 
+/// <summary>
+/// Authoritative, narrow refresh payload for one staffing stage after an
+/// assignment mutation. Clients merge it without replacing the complete plan.
+/// </summary>
+public sealed record LineStaffingStageRefreshDto(
+    LineStaffingStageDto Stage,
+    IReadOnlyCollection<LineStaffingWorkerDto> Workers,
+    int StagesWithWorkers,
+    int StagesWithoutWorkers,
+    int StagesWithTemporaryAssignments,
+    int StagesNeedingCompensationReview,
+    int StagesNeedingStaffingReview,
+    string OverallStaffingStatus,
+    bool StaffingPlanComplete,
+    bool OperationalAttendanceChecked,
+    bool FinancialConfigurationPending);
+
 public sealed record LineStaffingStageDto(
     Guid ProductModelStageId,
     Guid SubStageId,
@@ -65,4 +82,21 @@ public sealed record LineStaffingWorkerDto(
     string? FromSubStageName,
     DateTime? TemporaryStartsAtUtc,
     DateTime? TemporaryEndsAtUtc,
-    Guid? ReplacementForWorkerId);
+    Guid? ReplacementForWorkerId,
+    IReadOnlyCollection<LineStaffingParticipationDto> Participations);
+
+/// <summary>
+/// One effective stage participation.  A worker can intentionally have more
+/// than one item for the same staffing reference date.
+/// </summary>
+public sealed record LineStaffingParticipationDto(
+    Guid AssignmentId,
+    string AssignmentType,
+    Guid SubStageId,
+    string? SubStageName,
+    Guid? FromSubStageId,
+    string? FromSubStageName,
+    DateTime? StartsAtUtc,
+    DateTime? EndsAtUtc,
+    Guid? ReplacementForWorkerId,
+    string? TemporaryParticipationMode);

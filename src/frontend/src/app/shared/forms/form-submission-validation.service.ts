@@ -47,9 +47,10 @@ export class FormSubmissionValidationService {
   serverMessage(error: unknown, fallback: string): string {
     const response = error as {
       message?: unknown;
-      error?: { message?: unknown; error?: { message?: unknown } };
+      detail?: unknown;
+      error?: { message?: unknown; detail?: unknown; error?: { message?: unknown } };
     };
-    const message = response?.error?.error?.message ?? response?.error?.message ?? response?.message;
+    const message = response?.error?.error?.message ?? response?.error?.message ?? response?.error?.detail ?? response?.detail ?? response?.message;
     if (typeof message !== 'string' || !message.trim() || /^Http failure response/i.test(message)) return fallback;
     return message.trim();
   }

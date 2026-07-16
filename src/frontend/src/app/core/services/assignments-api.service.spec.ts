@@ -55,6 +55,24 @@ describe('AssignmentsApiService', () => {
     expect(assignmentId).toBe('assignment-1');
   });
 
+  it('updates permanent selections for one stage in one request', () => {
+    let added = -1;
+
+    service.updateStageDefaultAssignments(subStageId, [workerId, 'a1e4c17a-5ba5-4a56-95d8-02f39b896b2c'])
+      .subscribe(result => added = result.addedWorkersCount);
+
+    const request = http.expectOne(httpRequest =>
+      httpRequest.method === 'PUT' && httpRequest.url.endsWith(`/api/assignments/default/stages/${subStageId}`)
+    );
+    expect(request.request.body).toEqual({ workerIds: [workerId, 'a1e4c17a-5ba5-4a56-95d8-02f39b896b2c'] });
+    request.flush({
+      success: true,
+      data: { subStageId, addedWorkersCount: 1, removedWorkersCount: 0, activeWorkerIds: [workerId, 'a1e4c17a-5ba5-4a56-95d8-02f39b896b2c'] }
+    });
+
+    expect(added).toBe(1);
+  });
+
   it('keeps assigned-workers active while eligible-workers completes beyond the former 1.5 second deadline', fakeAsync(() => {
     let eligibleWorkers = 0;
     let assignedWorkers = 0;

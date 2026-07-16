@@ -24,7 +24,9 @@ public sealed class WorkerDefaultAssignmentConfiguration : IEntityTypeConfigurat
         // overwrite or remove the same active assignment.
         builder.Property(x => x.UpdatedAtUtc).IsRequired().IsConcurrencyToken();
 
-        builder.HasIndex(x => x.WorkerId).IsUnique().HasFilter("[IsActive] = 1");
+        // A worker can participate in multiple stages.  The active uniqueness
+        // boundary is one worker per stage, not one worker for all stages.
+        builder.HasIndex(x => new { x.WorkerId, x.SubStageId }).IsUnique().HasFilter("[IsActive] = 1");
 
         builder.HasOne(x => x.Worker)
             .WithMany(x => x.DefaultAssignmentHistory)
