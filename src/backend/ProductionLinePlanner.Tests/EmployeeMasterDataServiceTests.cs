@@ -43,6 +43,45 @@ public sealed class EmployeeMasterDataServiceTests
     }
 
     [Fact]
+    public async Task GetWorkersAsync_all_directory_filter_keeps_former_workers_readable()
+    {
+        var activeWorker = new Worker(Guid.NewGuid(), "W-001", "Active Worker");
+        var formerWorker = new Worker(Guid.NewGuid(), "W-002", "Former Worker", isActive: false, employmentStatus: EmploymentStatus.LeftEmployment);
+        await using var fixture = await EmployeeMasterDataFixture.CreateAsync([activeWorker, formerWorker]);
+
+        var allWorkers = await fixture.Service.GetWorkersAsync(null, null, page: 1, pageSize: 10);
+        var activeWorkers = await fixture.Service.GetWorkersAsync(null, true, page: 1, pageSize: 10);
+        var formerWorkers = await fixture.Service.GetWorkersAsync(null, false, page: 1, pageSize: 10);
+
+        Assert.Equal(2, allWorkers.Value!.Length);
+        Assert.Single(activeWorkers.Value!);
+        Assert.Single(formerWorkers.Value!);
+        Assert.Equal("Former Worker", formerWorkers.Value.Single().FullName);
+        Assert.Equal(EmploymentStatus.LeftEmployment.ToString(), formerWorkers.Value.Single().EmploymentStatus);
+    }
+
+    [Fact]
+    public async Task Worker_directory_exposes_photo_metadata_only_for_a_managed_cached_photo_reference()
+    {
+        var managedWorker = new Worker(Guid.NewGuid(), "119", "Worker 119");
+        managedWorker.SetPhotoReference($"/api/workers/{managedWorker.Id:D}/photo?v=photo-version", DateTime.UtcNow);
+        var legacyWorker = new Worker(Guid.NewGuid(), "120", "Legacy photo", photoReference: "legacy-photo.png");
+        await using var fixture = await EmployeeMasterDataFixture.CreateAsync([managedWorker, legacyWorker]);
+
+        var result = await fixture.Service.GetWorkersAsync(null, null, page: 1, pageSize: 10);
+
+        Assert.True(result.IsSuccess);
+        var managed = result.Value!.Single(worker => worker.Id == managedWorker.Id);
+        var legacy = result.Value.Single(worker => worker.Id == legacyWorker.Id);
+        Assert.True(managed.HasPhoto);
+        Assert.Equal("photo-version", managed.PhotoVersion);
+        Assert.Equal($"/api/workers/{managedWorker.Id:D}/photo?v=photo-version", managed.PhotoReference);
+        Assert.False(legacy.HasPhoto);
+        Assert.Null(legacy.PhotoReference);
+        Assert.Null(legacy.PhotoVersion);
+    }
+
+    [Fact]
     public async Task GetWorkersAsync_rejects_invalid_paging()
     {
         await using var fixture = await EmployeeMasterDataFixture.CreateAsync();

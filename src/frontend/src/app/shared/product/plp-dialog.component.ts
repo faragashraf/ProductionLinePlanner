@@ -19,6 +19,7 @@ import { PLP_DIALOG_SIZE_CLASS, PlpDialogSize } from './product-responsive';
       [dismissableMask]="!saving"
       [styleClass]="dialogClass"
       [appendTo]="'body'"
+      [focusOnShow]="focusOnShow"
       (visibleChange)="onVisibleChange($event)"
       (onHide)="onHide.emit()"
     >
@@ -76,6 +77,8 @@ export class PlpDialogComponent {
   @Input() showCancel = true;
   @Input() saveLabel = 'حفظ';
   @Input() cancelLabel = 'إلغاء';
+  /** Opt out when a long workspace must preserve its own scroll position. */
+  @Input() focusOnShow = true;
   @Output() visibleChange = new EventEmitter<boolean>();
   @Output() save = new EventEmitter<void>();
   @Output() cancel = new EventEmitter<void>();

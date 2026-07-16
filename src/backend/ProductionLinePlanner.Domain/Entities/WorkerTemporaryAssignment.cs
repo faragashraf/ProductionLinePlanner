@@ -9,20 +9,21 @@ public class WorkerTemporaryAssignment
     public WorkerTemporaryAssignment(
         Guid id,
         Guid workerId,
-        Guid fromSubStageId,
+        Guid? fromSubStageId,
         Guid toSubStageId,
         DateTime startAtUtc,
         DateTime endAtUtc,
         Guid assignedByUserId,
         string reason,
         Guid? replacementForWorkerId = null,
+        TemporaryAssignmentMode participationMode = TemporaryAssignmentMode.TemporaryMove,
         string status = "Scheduled",
         DateTime? createdAtUtc = null)
     {
         if (workerId == Guid.Empty)
             throw new ArgumentException("WorkerId is required.", nameof(workerId));
-        if (fromSubStageId == Guid.Empty)
-            throw new ArgumentException("FromSubStageId is required.", nameof(fromSubStageId));
+        if (participationMode == TemporaryAssignmentMode.TemporaryMove && (!fromSubStageId.HasValue || fromSubStageId == Guid.Empty))
+            throw new ArgumentException("FromSubStageId is required for a temporary move.", nameof(fromSubStageId));
         if (toSubStageId == Guid.Empty)
             throw new ArgumentException("ToSubStageId is required.", nameof(toSubStageId));
         if (assignedByUserId == Guid.Empty)
@@ -43,6 +44,7 @@ public class WorkerTemporaryAssignment
         AssignedByUserId = assignedByUserId;
         Reason = reason.Trim();
         ReplacementForWorkerId = replacementForWorkerId;
+        ParticipationMode = participationMode;
         Status = status;
         CreatedAtUtc = createdAtUtc ?? DateTime.UtcNow;
         UpdatedAtUtc = CreatedAtUtc;
@@ -51,7 +53,7 @@ public class WorkerTemporaryAssignment
     public Guid Id { get; init; }
     public Guid WorkerId { get; init; }
     public Worker? Worker { get; set; }
-    public Guid FromSubStageId { get; init; }
+    public Guid? FromSubStageId { get; init; }
     public SubStage? FromSubStage { get; set; }
     public Guid ToSubStageId { get; init; }
     public SubStage? ToSubStage { get; set; }
@@ -59,6 +61,7 @@ public class WorkerTemporaryAssignment
     public DateTime EndAtUtc { get; private set; }
     public Guid AssignedByUserId { get; private set; }
     public Guid? ReplacementForWorkerId { get; private set; }
+    public TemporaryAssignmentMode ParticipationMode { get; private set; }
     public string Reason { get; private set; } = string.Empty;
     public string Status { get; private set; } = string.Empty;
     public DateTime CreatedAtUtc { get; private set; }

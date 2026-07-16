@@ -1,10 +1,14 @@
-import { Component, HostListener, OnDestroy, OnInit } from '@angular/core';
+import { Component, ElementRef, HostListener, OnDestroy, OnInit, ViewChild } from '@angular/core';
 import { ActivatedRoute, ActivationEnd, NavigationEnd, Router } from '@angular/router';
 import { MenuItem } from 'primeng/api';
 import { Subject, filter, takeUntil, map } from 'rxjs';
 import { APP_NAVIGATION_ITEMS, AppNavigationItem } from '../../core/config/navigation.config';
 import { PermissionHydrationState, PermissionService } from '../../core/services/permission.service';
 import { AuthService } from '../../core/services/auth.service';
+import { PRODUCTION_RUNTIME_Z_INDEX } from '../../shared/design-system/layering/production-z-index';
+import { PLP_ANGULAR_MOTION } from '../../shared/product/product-motion';
+
+export type ShellNavigationMode = 'phone' | 'tablet-portrait' | 'tablet-landscape' | 'desktop';
 
 @Component({
   selector: 'app-shell',
@@ -12,10 +16,14 @@ import { AuthService } from '../../core/services/auth.service';
   styleUrls: ['./app-shell.component.scss']
 })
 export class AppShellComponent implements OnInit, OnDestroy {
-  isSidebarVisible = false;
-  isMobile = false;
+  @ViewChild('menuTrigger') private menuTrigger?: ElementRef<HTMLButtonElement>;
+  @ViewChild('overlayCloseButton') private overlayCloseButton?: ElementRef<HTMLButtonElement>;
+
+  sidebarOpen = false;
+  navigationMode: ShellNavigationMode = 'phone';
   breadcrumbItems: MenuItem[] = [];
-  notificationCount = 3;
+  readonly overlaySidebarBaseZIndex = PRODUCTION_RUNTIME_Z_INDEX.modal;
+  readonly sidebarTransitionOptions = PLP_ANGULAR_MOTION.sidebar;
 
   navigationItems: AppNavigationItem[] = [];
   permissionHydrationState: PermissionHydrationState = 'idle';
@@ -47,15 +55,18 @@ export class AppShellComponent implements OnInit, OnDestroy {
         this.navigationItems = items;
       });
 
-    this.permissionService.ensureHydrated().subscribe();
+    this.hydrateNavigation();
 
     this.router.events
       .pipe(
         filter(event => event instanceof NavigationEnd || event instanceof ActivationEnd),
         takeUntil(this.destroy$)
       )
-      .subscribe(() => {
+      .subscribe((event) => {
         this.breadcrumbItems = this.buildBreadcrumbs(this.activatedRoute.root.snapshot);
+        if (event instanceof NavigationEnd && this.isOverlayNavigation) {
+          this.closeSidebar();
+        }
       });
 
     this.breadcrumbItems = this.buildBreadcrumbs(this.activatedRoute.root.snapshot);
@@ -69,17 +80,48 @@ export class AppShellComponent implements OnInit, OnDestroy {
   @HostListener('window:resize')
   onResize(): void {
     this.checkViewport();
-    if (!this.isMobile) {
-      this.isSidebarVisible = false;
+    if (!this.isOverlayNavigation) {
+      this.closeSidebar();
+    }
+  }
+
+  @HostListener('document:keydown.escape', ['$event'])
+  onEscape(event: KeyboardEvent): void {
+    if (this.isOverlayNavigation && this.sidebarOpen) {
+      event.preventDefault();
+      this.closeSidebar();
     }
   }
 
   toggleSidebar(): void {
-    this.isSidebarVisible = !this.isSidebarVisible;
+    if (this.isOverlayNavigation) {
+      this.sidebarOpen = !this.sidebarOpen;
+    }
   }
 
   closeSidebar(): void {
-    this.isSidebarVisible = false;
+    this.sidebarOpen = false;
+  }
+
+  onSidebarVisibleChange(visible: boolean): void {
+    if (!visible) {
+      this.closeSidebar();
+    }
+  }
+
+  onOverlayNavigationShow(): void {
+    this.overlayCloseButton?.nativeElement.focus();
+  }
+
+  onOverlayNavigationHide(): void {
+    this.sidebarOpen = false;
+    this.menuTrigger?.nativeElement.focus();
+  }
+
+  onNavigationSelected(closeAfterNavigation: boolean): void {
+    if (closeAfterNavigation) {
+      this.closeSidebar();
+    }
   }
 
   isActive(path: string): boolean {
@@ -97,6 +139,38 @@ export class AppShellComponent implements OnInit, OnDestroy {
 
   get showNavigation(): boolean {
     return this.permissionHydrationState !== 'loading';
+  }
+
+  get isOverlayNavigation(): boolean {
+    return this.navigationMode === 'phone' || this.navigationMode === 'tablet-portrait';
+  }
+
+  get hasPersistentNavigation(): boolean {
+    return this.navigationMode === 'tablet-landscape' || this.navigationMode === 'desktop';
+  }
+
+  get workspaceNavigationItems(): AppNavigationItem[] {
+    return this.navigationItems.filter((item) => item.group === 'workspace');
+  }
+
+  get administrationNavigationItems(): AppNavigationItem[] {
+    return this.navigationItems.filter((item) => item.group === 'administration');
+  }
+
+  get currentUserName(): string {
+    return this.authService.userName || 'الحساب';
+  }
+
+  get currentUserInitial(): string {
+    return this.currentUserName.trim().charAt(0) || 'ح';
+  }
+
+  retryNavigationHydration(): void {
+    this.hydrateNavigation();
+  }
+
+  trackByNavigationId(_index: number, item: AppNavigationItem): string {
+    return item.id;
   }
 
   private buildBreadcrumbs(routeSnapshot: any): MenuItem[] {
@@ -133,6 +207,26 @@ export class AppShellComponent implements OnInit, OnDestroy {
   }
 
   private checkViewport(): void {
-    this.isMobile = window.innerWidth < 992;
+    const viewportWidth = typeof window === 'undefined' ? 0 : window.innerWidth;
+
+    if (viewportWidth >= 1024) {
+      this.navigationMode = 'desktop';
+      return;
+    }
+
+    if (viewportWidth >= 768) {
+      this.navigationMode = 'tablet-landscape';
+      return;
+    }
+
+    this.navigationMode = viewportWidth >= 600 ? 'tablet-portrait' : 'phone';
+  }
+
+  private hydrateNavigation(): void {
+    this.permissionService.ensureHydrated()
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        error: () => undefined
+      });
   }
 }

@@ -14,7 +14,15 @@ import { ManufacturingMasterDataPageComponent } from './manufacturing-master-dat
 import { ManufacturingDepartmentsPageComponent } from './manufacturing-departments-page.component';
 import { FactoryStructureFoundationPageComponent } from './factory-structure-foundation-page.component';
 import { ManufacturingCompensationPageComponent } from './manufacturing-compensation-page.component';
+import { LineStaffingWorkspacePageComponent } from './line-staffing-workspace-page.component';
+import { DailyProductionOperationsPageComponent } from './daily-production-operations-page.component';
 import { ManufacturingWorkspaceRoutingModule } from './manufacturing-workspace-routing.module';
+import { PlpResponsiveTableDirective } from '../../shared/product/plp-responsive-table.directive';
+import { PlpTablePaginationDirective } from '../../shared/product/plp-table-pagination.directive';
+import { PlpOverflowRailDirective } from '../../shared/product/plp-horizontal-overflow';
+import { PlpExpandableFormComponent } from '../../shared/product/plp-expandable-form.component';
+import { PlpDialogComponent } from '../../shared/product/plp-dialog.component';
+import { PlpFormComponent } from '../../shared/product/plp-form.component';
 
 @NgModule({
   declarations: [
@@ -24,7 +32,9 @@ import { ManufacturingWorkspaceRoutingModule } from './manufacturing-workspace-r
     ManufacturingMasterDataPageComponent,
     ManufacturingDepartmentsPageComponent,
     FactoryStructureFoundationPageComponent,
-    ManufacturingCompensationPageComponent
+    ManufacturingCompensationPageComponent,
+    LineStaffingWorkspacePageComponent,
+    DailyProductionOperationsPageComponent
   ],
   imports: [
     CommonModule,
@@ -36,6 +46,12 @@ import { ManufacturingWorkspaceRoutingModule } from './manufacturing-workspace-r
     DialogModule,
     FormsModule,
     ReactiveFormsModule,
+    PlpResponsiveTableDirective,
+    PlpTablePaginationDirective,
+    PlpOverflowRailDirective,
+    PlpExpandableFormComponent,
+    PlpDialogComponent,
+    PlpFormComponent,
     ManufacturingWorkspaceRoutingModule
   ]
 })

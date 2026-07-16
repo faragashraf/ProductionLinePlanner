@@ -24,7 +24,7 @@ describe('WorkersApiService', () => {
       success: true,
       data: {
         items: [
-          { id: 'worker-1', code: 'W-1', fullName: 'عامل تجريبي', state: 'جاهز', phone: '01000000000' }
+          { id: 'worker-1', code: 'W-1', fullName: 'عامل تجريبي', employmentStatus: 'Active', isActive: true, photoReference: 'worker-1.png', phone: '01000000000' }
         ],
         totalCount: 1,
         pageNumber: 1,
@@ -33,6 +33,43 @@ describe('WorkersApiService', () => {
     });
 
     http.expectNone(request => request.url.endsWith('/api/workers'));
-    expect(workers).toEqual([{ id: 'worker-1', code: 'W-1', fullName: 'عامل تجريبي', state: 'جاهز', phone: '01000000000' }]);
+    expect(workers).toEqual([{ id: 'worker-1', code: 'W-1', fullName: 'عامل تجريبي', state: 'على رأس العمل', employmentStatus: 'Active', isActive: true, photoReference: 'worker-1.png', hasPhoto: true, phone: '01000000000' }]);
+  });
+
+  it('retains lightweight photo metadata without exposing image bytes', () => {
+    let workers: WorkerPageItem[] = [];
+    service.loadWorkers().subscribe(result => workers = result.workers);
+    const request = http.expectOne(item => item.url.endsWith('/api/workers'));
+    request.flush({ success: true, data: { items: [
+      { id: 'with-photo', employeeCode: '119', fullName: 'Worker 119', isActive: true, employmentStatus: 'Active', hasPhoto: true, photoReference: '/api/workers/with-photo/photo?v=abc', photoVersion: 'abc' },
+      { id: 'without-photo', employeeCode: '120', fullName: 'No Photo', isActive: true, employmentStatus: 'Active', hasPhoto: false, photoReference: null }
+    ] } });
+
+    expect(workers[0]).toEqual(jasmine.objectContaining({ hasPhoto: true, photoVersion: 'abc' }));
+    expect(workers[1]).toEqual(jasmine.objectContaining({ hasPhoto: false }));
+    expect(JSON.stringify(workers)).not.toContain('base64');
+  });
+
+  it('uses an unconstrained query for All, and explicit active/inactive constraints for status filters', () => {
+    let allWorkers: WorkerPageItem[] = [];
+    service.loadWorkers({ search: 'Ali' }).subscribe(result => allWorkers = result.workers);
+    const allRequest = http.expectOne(request => request.url.endsWith('/api/workers'));
+    expect(allRequest.request.params.has('isActive')).toBeFalse();
+    expect(allRequest.request.params.get('search')).toBe('Ali');
+    allRequest.flush({ success: true, data: { items: [
+      { id: 'active', employeeCode: 'A-1', fullName: 'Active', isActive: true, employmentStatus: 'Active' },
+      { id: 'former', employeeCode: 'F-1', fullName: 'Former', isActive: false, employmentStatus: 'LeftEmployment' }
+    ], totalCount: 2, pageNumber: 1, pageSize: 20 } });
+    expect(allWorkers.map(worker => worker.code)).toEqual(['A-1', 'F-1']);
+
+    service.loadWorkers({ serviceStatus: 'active' }).subscribe();
+    const activeRequest = http.expectOne(request => request.url.endsWith('/api/workers'));
+    expect(activeRequest.request.params.get('isActive')).toBe('true');
+    activeRequest.flush({ success: true, data: { items: [] } });
+
+    service.loadWorkers({ serviceStatus: 'inactive' }).subscribe();
+    const formerRequest = http.expectOne(request => request.url.endsWith('/api/workers'));
+    expect(formerRequest.request.params.get('isActive')).toBe('false');
+    formerRequest.flush({ success: true, data: { items: [] } });
   });
 });

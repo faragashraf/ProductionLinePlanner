@@ -1,4 +1,5 @@
 .plp-worker-avatar {
+  position: relative;
   width: 2rem;
   height: 2rem;
   border-radius: var(--plp-radius-pill);
@@ -18,16 +19,52 @@
   object-fit: cover;
 }
 
+.plp-worker-avatar__loading {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--plp-surface) 55%, transparent);
+  animation: plp-worker-avatar-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes plp-worker-avatar-pulse {
+  50% { opacity: 0.35; }
+}
+
+.plp-worker-avatar__default {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  font-size: 1rem;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
 .plp-worker-avatar--sm {
-  width: 1.9rem;
-  height: 1.9rem;
+  width: 2.25rem;
+  height: 2.25rem;
   font-size: 0.75rem;
 }
 
 .plp-worker-avatar--lg {
-  width: 2.4rem;
-  height: 2.4rem;
-  font-size: 0.95rem;
+  width: 7rem;
+  height: 7rem;
+  font-size: 1.5rem;
+}
+
+.plp-worker-avatar--md {
+  width: 3rem;
+  height: 3rem;
+  font-size: 1rem;
 }
 
 .plp-worker-avatar--present {

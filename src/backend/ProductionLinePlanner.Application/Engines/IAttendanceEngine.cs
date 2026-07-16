@@ -23,6 +23,7 @@ public interface IAttendanceEngine
         CancellationToken cancellationToken = default);
 
     Task<Result<AttendanceSyncResultDto>> SyncTodayAsync(CancellationToken cancellationToken = default);
+    Task<Result<AttendanceSyncResultDto>> SyncForProductionDateAsync(DateOnly productionDate, CancellationToken cancellationToken = default);
 
     Task<Result<Dictionary<Guid, AttendanceStatusRecord>>>
         GetLatestAttendanceStatusByWorkerAsync(

@@ -26,6 +26,19 @@
       aria-label="بحث في العاملين"
       (input)="onSearch($event)"
     />
+    <label class="sr-only" for="workersServiceStatus">حالة الخدمة</label>
+    <select
+      id="workersServiceStatus"
+      class="workers-status-filter"
+      [ngModel]="serviceStatus"
+      [ngModelOptions]="{ standalone: true }"
+      (ngModelChange)="onServiceStatusChange($event)"
+      aria-label="تصفية العاملين حسب حالة الخدمة"
+    >
+      <option value="all">الكل</option>
+      <option value="active">على رأس العمل</option>
+      <option value="inactive">خارج الخدمة</option>
+    </select>
   </div>
 
   <plp-loading-skeleton *ngIf="isLoading && !hasLoadedOnce" [lines]="7" [showAvatar]="false"></plp-loading-skeleton>
@@ -58,21 +71,25 @@
 
   <section class="workers-table-shell" *ngIf="!isLoading && !hasAnyError && workers.length > 0">
     <p-table
+      plpResponsiveTable="scroll"
+      plpTablePagination
+      [plpStickyActions]="true"
       [value]="workers"
       dataKey="code"
       [rows]="rows"
-      [paginator]="isServerSidePagination"
       [totalRecords]="totalRecords"
       [first]="first"
       [lazy]="isServerSidePagination"
       [loading]="isTableLoading"
+      [plpPaginationPageSize]="rows"
+      [plpPaginationResetKey]="searchTerm + ':' + serviceStatus"
       (onLazyLoad)="onLazyLoad($event)"
       responsiveLayout="scroll"
       [scrollHeight]="'auto'"
     >
       <ng-template pTemplate="header">
         <tr>
-          <th>اسم العامل</th>
+          <th>العامل</th>
           <th>الكود</th>
           <th>القسم</th>
           <th>الحالة</th>
@@ -82,7 +99,12 @@
       </ng-template>
       <ng-template pTemplate="body" let-worker>
         <tr>
-          <td>{{ worker.fullName }}</td>
+          <td>
+            <div class="workers-identity">
+              <plp-worker-avatar [fullName]="worker.fullName" [code]="worker.code" [photoReference]="worker.photoReference" [hasPhoto]="worker.hasPhoto" [photoVersion]="worker.photoVersion" size="sm"></plp-worker-avatar>
+              <span>{{ worker.fullName }}</span>
+            </div>
+          </td>
           <td>{{ worker.code }}</td>
           <td>{{ worker.department || '-' }}</td>
           <td>
@@ -133,12 +155,15 @@
     </header>
 
     <div class="workers-details__content">
-      <p><strong>الاسم:</strong> {{ selectedWorker.fullName }}</p>
-      <p><strong>الكود:</strong> {{ selectedWorker.code }}</p>
-      <p><strong>الحالة:</strong> {{ selectedWorker.state }}</p>
-      <p><strong>القسم:</strong> {{ selectedWorker.department || '-' }}</p>
-      <p><strong>الهاتف:</strong> {{ selectedWorker.phone || '-' }}</p>
-      <p><strong>البريد الإلكتروني:</strong> {{ selectedWorker.email || '-' }}</p>
+      <plp-worker-avatar [fullName]="selectedWorker.fullName" [code]="selectedWorker.code" [photoReference]="selectedWorker.photoReference" [hasPhoto]="selectedWorker.hasPhoto" [photoVersion]="selectedWorker.photoVersion" size="lg"></plp-worker-avatar>
+      <div class="workers-details__facts">
+        <p><strong>الاسم:</strong> {{ selectedWorker.fullName }}</p>
+        <p><strong>الكود:</strong> {{ selectedWorker.code }}</p>
+        <p><strong>الحالة:</strong> {{ selectedWorker.state }}</p>
+        <p><strong>القسم:</strong> {{ selectedWorker.department || '-' }}</p>
+        <p><strong>الهاتف:</strong> {{ selectedWorker.phone || '-' }}</p>
+        <p><strong>البريد الإلكتروني:</strong> {{ selectedWorker.email || '-' }}</p>
+      </div>
     </div>
   </section>
 </section>

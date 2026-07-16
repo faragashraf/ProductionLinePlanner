@@ -9,6 +9,7 @@ public class StageProductionRecord
     public StageProductionRecord(Guid id, Guid productionOrderId, Guid productModelStageId, DateOnly productionDate,
         decimal producedQuantity, decimal acceptedQuantity, decimal rejectedQuantity, string stageCode, string stageName,
         decimal piecePrice, decimal? standardSeconds, CompensationMode compensationMode, string productModelCode, string productModelName,
+        string factoryCode, string factoryName, string productionLineCode, string productionLineName, string mainStageName,
         Guid clientRequestId, string? notes, Guid actorId, DateTime atUtc)
     {
         ValidateQuantities(producedQuantity, acceptedQuantity, rejectedQuantity);
@@ -17,6 +18,9 @@ public class StageProductionRecord
         SnapshotStageCode = stageCode; SnapshotStageName = stageName; SnapshotPiecePrice = piecePrice;
         SnapshotStandardSeconds = standardSeconds; SnapshotCompensationMode = compensationMode; Notes = Normalize(notes);
         SnapshotProductModelCode = productModelCode; SnapshotProductModelName = productModelName; ClientRequestId = clientRequestId;
+        SnapshotFactoryCode = factoryCode; SnapshotFactoryName = factoryName;
+        SnapshotProductionLineCode = productionLineCode; SnapshotProductionLineName = productionLineName;
+        SnapshotMainStageName = mainStageName;
         CreatedBy = actorId; CreatedAtUtc = atUtc;
     }
 
@@ -34,6 +38,11 @@ public class StageProductionRecord
     public string SnapshotStageName { get; private set; } = string.Empty;
     public string SnapshotProductModelCode { get; private set; } = string.Empty;
     public string SnapshotProductModelName { get; private set; } = string.Empty;
+    public string SnapshotFactoryCode { get; private set; } = string.Empty;
+    public string SnapshotFactoryName { get; private set; } = string.Empty;
+    public string SnapshotProductionLineCode { get; private set; } = string.Empty;
+    public string SnapshotProductionLineName { get; private set; } = string.Empty;
+    public string SnapshotMainStageName { get; private set; } = string.Empty;
     public decimal SnapshotPiecePrice { get; private set; }
     public decimal? SnapshotStandardSeconds { get; private set; }
     public CompensationMode SnapshotCompensationMode { get; private set; }
@@ -45,6 +54,7 @@ public class StageProductionRecord
     public DateTime? ApprovedAtUtc { get; private set; }
     public Guid? CancelledBy { get; private set; }
     public DateTime? CancelledAtUtc { get; private set; }
+    public string? ApprovalCancellationReason { get; private set; }
     public Guid ClientRequestId { get; private set; }
     public Guid ConcurrencyToken { get; private set; } = Guid.NewGuid();
     public List<StageProductionWorkerAllocation> WorkerAllocations { get; } = [];
@@ -62,7 +72,7 @@ public class StageProductionRecord
         foreach (var existing in WorkerAllocations.ToList())
         {
             if (replacements.Remove(existing.WorkerId, out var replacement))
-                existing.Update(replacement.Percentage, replacement.FixedAmount, replacement.EquivalentQuantity, replacement.CalculatedEarning, replacement.Notes);
+                existing.Update(replacement.Percentage, replacement.FixedAmount, replacement.EquivalentQuantity, replacement.CalculatedEarning, replacement.Notes, replacement.ManualOverrideReason, replacement.InputQuantity);
             else
             {
                 WorkerAllocations.Remove(existing);
@@ -70,22 +80,41 @@ public class StageProductionRecord
             }
         }
         WorkerAllocations.AddRange(replacements.Values);
+        SynchronizeTotalWorkerEarnings();
         ConcurrencyToken = Guid.NewGuid();
         return removed;
     }
+    public void Approve(Guid actorId, DateTime atUtc)
+    {
+        EnsureDraft(); EnsureFinancialConsistency(); Status = StageProductionRecordStatus.Approved; ApprovedBy = actorId; ApprovedAtUtc = atUtc; ConcurrencyToken = Guid.NewGuid();
+    }
     public void Approve(decimal totalWorkerEarnings, Guid actorId, DateTime atUtc)
     {
-        EnsureDraft(); TotalWorkerEarnings = totalWorkerEarnings; Status = StageProductionRecordStatus.Approved; ApprovedBy = actorId; ApprovedAtUtc = atUtc; ConcurrencyToken = Guid.NewGuid();
+        EnsureDraft();
+        if (totalWorkerEarnings != WorkerAllocations.Sum(x => x.CalculatedEarning))
+            throw new InvalidOperationException("إجمالي المستحقات لا يطابق مجموع مستحقات العمال المحفوظة.");
+        Approve(actorId, atUtc);
     }
     public void SetCalculationPreview(decimal totalWorkerEarnings)
     {
-        EnsureDraft(); TotalWorkerEarnings = totalWorkerEarnings;
+        EnsureDraft();
+        if (totalWorkerEarnings != WorkerAllocations.Sum(x => x.CalculatedEarning))
+            throw new InvalidOperationException("إجمالي المستحقات لا يطابق مجموع مستحقات العمال المحسوبة.");
+        TotalWorkerEarnings = totalWorkerEarnings;
     }
-    public void Cancel(Guid actorId, DateTime atUtc)
+    public void CancelProductionApproval(string reason, Guid actorId, DateTime atUtc)
     {
         if (Status != StageProductionRecordStatus.Approved) throw new InvalidOperationException("Only approved records can be cancelled.");
-        Status = StageProductionRecordStatus.Cancelled; CancelledBy = actorId; CancelledAtUtc = atUtc; ConcurrencyToken = Guid.NewGuid();
+        if (string.IsNullOrWhiteSpace(reason)) throw new ArgumentException("سبب إلغاء اعتماد الإنتاج مطلوب.", nameof(reason));
+        Status = StageProductionRecordStatus.Cancelled; CancelledBy = actorId; CancelledAtUtc = atUtc; ApprovalCancellationReason = reason.Trim(); ConcurrencyToken = Guid.NewGuid();
     }
+    public void EnsureFinancialConsistency()
+    {
+        var allocationTotal = WorkerAllocations.Sum(x => x.CalculatedEarning);
+        if (TotalWorkerEarnings != allocationTotal)
+            throw new InvalidOperationException("إجمالي المستحقات لا يطابق مجموع مستحقات العمال المحفوظة.");
+    }
+    private void SynchronizeTotalWorkerEarnings() => TotalWorkerEarnings = WorkerAllocations.Sum(x => x.CalculatedEarning);
     private void EnsureDraft() { if (Status != StageProductionRecordStatus.Draft) throw new InvalidOperationException("Only draft records can be changed."); }
     private static void ValidateQuantities(decimal produced, decimal accepted, decimal rejected)
     {

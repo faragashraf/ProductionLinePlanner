@@ -55,3 +55,57 @@
   color: var(--plp-color-text-inverse);
   font-weight: var(--plp-font-weight-bold);
 }
+
+/* Production recording readiness and worker-choice patterns. */
+.production-page__selected-context,.production-page__entry-checklist,.production-page__readiness-states{display:flex;gap:.55rem;flex-wrap:wrap;margin-top:1rem}.production-page__selected-context span,.production-page__entry-checklist span,.production-page__readiness-states span{padding:.45rem .6rem;border-radius:.45rem;background:#f8fafc;color:#475467}.production-page__readiness-states span.is-ready{background:#ecfdf3;color:#067647}.production-page__stage-readiness{display:grid;gap:.4rem;margin-bottom:1rem;padding:.75rem;border:1px solid #d0d5dd;border-radius:.5rem;background:#fcfcfd}.production-page__stage-readiness h3,.production-page__stage-readiness p{margin:0}.production-page__financial-note{margin:.45rem 0 0;padding:.6rem;border-inline-start:3px solid #d97706;color:#92400e;background:#fffbeb}.production-page__problem-stages{display:grid;gap:.45rem;margin-top:.65rem}.production-page__problem-stages article{display:grid;gap:.15rem;padding:.6rem;border-inline-start:3px solid #f79009;background:#fffaeb}.production-page__problem-stages span,.production-page__problem-stages small{color:#667085}.production-page__worker-identity{display:inline-flex;align-items:center;gap:.55rem;margin:0}.production-page__candidate-list{display:grid;gap:.45rem;max-height:17rem;overflow:auto}.production-page__candidate-list button{display:flex;align-items:center;gap:.55rem;width:100%;padding:.55rem;text-align:inherit;color:#344054;border:1px solid #d0d5dd;border-radius:.45rem;background:#fff;cursor:pointer}.production-page__candidate-list button.is-selected{border-color:#175cd3;background:#eff8ff}.production-page__candidate-list button span{display:grid;gap:.08rem;text-align:start}.production-page__candidate-list button small{color:#667085;font-weight:400}
+// Line Staffing keeps its long model-stage list and selected-stage controls
+// independently usable on tablets without adding to the component CSS budget.
+.line-staffing-page__workspace { display: grid; grid-template-columns: minmax(17rem, .95fr) minmax(23rem, 1.35fr); gap: 1rem; align-items: start; overflow-anchor: none; }
+.line-staffing-page__tablet-content { display: contents; }
+.line-staffing-page__section-navigation { display: none; }
+.line-staffing-page__section-target { min-inline-size: 0; }
+.line-staffing-page__stage-region, .line-staffing-page__selected-region { min-width: 0; min-block-size: 0; }
+.line-staffing-page__workspace.is-refreshing { opacity: .78; }
+.line-staffing-page__stage-list { display: grid; gap: .5rem; max-block-size: min(44rem, calc(100dvh - var(--plp-app-shell-header-height, 0px) - 12rem)); min-block-size: 0; overflow: auto; overscroll-behavior: contain; padding-inline-end: .15rem; }
+.line-staffing-page__selected-stage-panel { display: grid; gap: .75rem; min-block-size: 0; }
+.line-staffing-page__worker-table-wrap { max-block-size: min(30rem, 52dvh); overflow: auto; border: 1px solid #eaecf0; border-radius: .55rem; background: #fcfcfd; }
+.line-staffing-page__worker-table { inline-size: 100%; min-inline-size: 38rem; border-collapse: collapse; text-align: start; }
+.line-staffing-page__worker-table th, .line-staffing-page__worker-table td { padding: .65rem; border-block-end: 1px solid #eaecf0; vertical-align: middle; }
+.line-staffing-page__worker-table th { position: sticky; inset-block-start: 0; z-index: 1; color: #475467; background: #f8fafc; font-size: .82rem; }
+.line-staffing-page__worker-table td:first-child { inline-size: 4rem; text-align: center; }
+.line-staffing-page__worker-table tr.is-selected { background: #eff8ff; }
+.line-staffing-page__worker-table td small { display: block; margin-top: .16rem; color: #667085; }
+.line-staffing-page__worker-table-identity { display: flex; align-items: center; gap: .55rem; min-inline-size: 14rem; }
+.line-staffing-page__worker-table-identity span { display: grid; gap: .1rem; }
+
+@media (min-width: 600px) and (max-width: 1023px) {
+  .line-staffing-page__context { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .line-staffing-page__section-navigation { position: sticky; inset-block-start: calc(var(--plp-app-shell-header-height, 0px) + .5rem); z-index: 4; display: flex; gap: .35rem; overflow-x: auto; overscroll-behavior-inline: contain; padding: .35rem; border: 1px solid #d0d5dd; border-radius: .65rem; background: color-mix(in srgb, #fff 94%, transparent); box-shadow: 0 .2rem .6rem rgb(16 24 40 / 8%); scrollbar-width: none; }
+  .line-staffing-page__section-navigation::-webkit-scrollbar { display: none; }
+  .line-staffing-page__section-navigation .p-button { flex: 0 0 auto; min-block-size: 2.35rem; white-space: nowrap; }
+  .line-staffing-page__tablet-content { display: grid; gap: 1rem; block-size: var(--line-staffing-workspace-height, 42rem); min-block-size: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior-y: contain; touch-action: pan-y; -webkit-overflow-scrolling: touch; overflow-anchor: none; padding-inline-end: .15rem; }
+  .line-staffing-page__workspace { grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); block-size: var(--line-staffing-workspace-height, 42rem); min-block-size: 0; overflow: hidden; overscroll-behavior: none; align-items: stretch; contain: layout paint; overflow-anchor: none; }
+  .line-staffing-page__stage-region, .line-staffing-page__selected-region { block-size: 100%; min-block-size: 0; overflow: hidden; overscroll-behavior: none; }
+  .line-staffing-page__stage-region > .p-card, .line-staffing-page__selected-region > .p-card { block-size: 100%; min-block-size: 0; display: flex; flex-direction: column; }
+  .line-staffing-page__stage-region > .p-card .p-card-body, .line-staffing-page__selected-region > .p-card .p-card-body, .line-staffing-page__stage-region > .p-card .p-card-content, .line-staffing-page__selected-region > .p-card .p-card-content { display: flex; flex: 1 1 auto; flex-direction: column; min-block-size: 0; }
+  .line-staffing-page__stage-list, .line-staffing-page__selected-region { flex: 1 1 auto; max-block-size: none; min-block-size: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior-y: contain; touch-action: pan-y; -webkit-overflow-scrolling: touch; overflow-anchor: none; scrollbar-gutter: stable; }
+  .line-staffing-page__selected-region { position: relative; inset-block-start: auto; align-self: stretch; padding-inline-end: .15rem; }
+  .line-staffing-page__selected-stage-command { position: sticky; inset-block-start: 0; z-index: 1; background: #fff; padding-block-end: .75rem; border-block-end: 1px solid #eaecf0; }
+}
+
+// The tablet staffing workspace owns vertical movement after it has loaded.
+// PrimeNG dialogs may add and remove their own body lock; this class stays in
+// place until the workspace is cleared or destroyed, so closing a dialog does
+// not re-enable a page-level overscroll chain.
+html.plp-line-staffing-tablet-scroll-lock,
+html.plp-line-staffing-tablet-scroll-lock body {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+@media (max-width: 599px) {
+  .line-staffing-page__workspace { grid-template-columns: 1fr; }
+  .line-staffing-page__stage-list { max-block-size: min(26rem, calc(100dvh - var(--plp-app-shell-header-height, 0px) - 10rem)); }
+  .line-staffing-page__worker-table-wrap { max-block-size: min(26rem, 48dvh); }
+  .line-staffing-page__worker-table { min-inline-size: 32rem; }
+}

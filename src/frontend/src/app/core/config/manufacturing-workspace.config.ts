@@ -9,6 +9,26 @@ export interface ManufacturingWorkspaceItem extends PermissionRequirementDescrip
   icon: string;
 }
 
+// Recording needs read access for its existing orders/records lookups and record access
+// for draft/preview actions. Keep this shared so the tab, route, and contextual action
+// cannot drift into separate permission rules.
+export const PRODUCTION_RECORDING_ACCESS: PermissionRequirementDescriptor = {
+  requireAll: [PERMISSIONS.production.view, PERMISSIONS.production.record]
+};
+
+export const DAILY_PRODUCTION_OPERATIONS_ACCESS: PermissionRequirementDescriptor = {
+  requireAll: [PERMISSIONS.production.view, PERMISSIONS.production.record]
+};
+
+export const LINE_STAFFING_ACCESS: PermissionRequirementDescriptor = {
+  requireAll: [
+    PERMISSIONS.factoryStructure.view,
+    PERMISSIONS.models.view,
+    PERMISSIONS.workers.view,
+    PERMISSIONS.assignments.view
+  ]
+};
+
 export const MANUFACTURING_WORKSPACE_ITEMS: readonly ManufacturingWorkspaceItem[] = [
   {
     id: 'manufacturing-dashboard',
@@ -22,7 +42,8 @@ export const MANUFACTURING_WORKSPACE_ITEMS: readonly ManufacturingWorkspaceItem[
       PERMISSIONS.factoryStructure.view,
       PERMISSIONS.stages.view,
       PERMISSIONS.models.view,
-      PERMISSIONS.compensation.view
+      PERMISSIONS.compensation.view,
+      PERMISSIONS.production.view
     ]
   },
   {
@@ -67,11 +88,35 @@ export const MANUFACTURING_WORKSPACE_ITEMS: readonly ManufacturingWorkspaceItem[
   },
   {
     id: 'compensation',
-    label: 'التعويضات',
-    description: 'سياسة وأنماط التعويض ستظهر هنا.',
+    label: 'تكلفة المراحل',
+    description: 'إعدادات وطرق احتساب تكلفة المراحل ستظهر هنا.',
     route: '/manufacturing/compensation',
     icon: 'pi-wallet',
     permission: PERMISSIONS.compensation.view
+  },
+  {
+    id: 'line-staffing',
+    label: 'تسكين الخط',
+    description: 'تخطيط التعيين الدائم والمؤقت لعمال الخط دون ربطه بحضور اليوم.',
+    route: '/manufacturing/line-staffing',
+    icon: 'pi-users',
+    ...LINE_STAFFING_ACCESS
+  },
+  {
+    id: 'daily-production-operations',
+    label: 'تشغيل الإنتاج اليومي',
+    description: 'تشغيل كل مراحل الموديل لليوم نفسه من التسكين والحضور حتى مسودة يومية واحدة.',
+    route: '/manufacturing/daily-production-operations',
+    icon: 'pi-calendar-plus',
+    ...DAILY_PRODUCTION_OPERATIONS_ACCESS
+  },
+  {
+    id: 'production-recording',
+    label: 'تسجيل الإنتاج',
+    description: 'تسجيل مرحلة مفردة متوافق مع السجلات السابقة.',
+    route: '/manufacturing/production-recording',
+    icon: 'pi-play-circle',
+    ...PRODUCTION_RECORDING_ACCESS
   }
 ];
 
@@ -81,5 +126,7 @@ export const MANUFACTURING_WORKSPACE_VIEW_PERMISSIONS = [
   PERMISSIONS.factoryStructure.view,
   PERMISSIONS.stages.view,
   PERMISSIONS.models.view,
-  PERMISSIONS.compensation.view
+  PERMISSIONS.compensation.view,
+  PERMISSIONS.assignments.view,
+  PERMISSIONS.production.view
 ] as const;

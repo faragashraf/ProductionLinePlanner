@@ -15,16 +15,28 @@ public sealed class AttendanceDbContext : DbContext
     }
 
     public DbSet<AttendanceSourceUserInfo> UserInfos => Set<AttendanceSourceUserInfo>();
+    public DbSet<AttendanceSourceCurrentEmployee> CurrentEmployees => Set<AttendanceSourceCurrentEmployee>();
     public DbSet<AttendanceSourceCheckInOut> CheckInOuts => Set<AttendanceSourceCheckInOut>();
     public DbSet<AttendanceSourceDepartment> Departments => Set<AttendanceSourceDepartment>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         ConfigureUserInfo(modelBuilder);
+        ConfigureCurrentEmployees(modelBuilder);
         ConfigureCheckInOut(modelBuilder);
         ConfigureDepartment(modelBuilder);
 
         base.OnModelCreating(modelBuilder);
+    }
+
+    private static void ConfigureCurrentEmployees(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<AttendanceSourceCurrentEmployee>(entity =>
+        {
+            entity.HasNoKey();
+            entity.ToTable("CurrentEmployeesImport");
+            entity.Property(x => x.EmployeeCode).HasColumnName("EmployeeCode").HasMaxLength(120);
+        });
     }
 
     private void ConfigureUserInfo(ModelBuilder modelBuilder)
@@ -38,6 +50,7 @@ public sealed class AttendanceDbContext : DbContext
             entity.Property(x => x.BadgeNumber).HasColumnName("BADGENUMBER").HasMaxLength(120);
             entity.Property(x => x.Name).HasColumnName("Name").HasMaxLength(200);
             entity.Property(x => x.DefaultDeptId).HasColumnName("DEFAULTDEPTID");
+            entity.Property(x => x.Photo).HasColumnName("PHOTO");
         });
     }
 

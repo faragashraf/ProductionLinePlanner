@@ -4,7 +4,7 @@ The Product Experience Framework is the Angular composition layer above the Prod
 
 ## Import surface
 
-Import standalone primitives from `src/app/shared/product`:
+Import standalone primitives from `src/app/shared/product`. `ProductExperienceModule` is the shared compatibility import for primitives required by the eagerly loaded application composition (including approved InputText/Message dependencies). `AppModule` imports it once. `plp-form` uses native submit semantics, so a screen only imports Angular Forms when it actually needs reactive or template-driven form state. Lazy feature areas import advanced standalone primitives directly so unused PrimeNG families do not expand the initial bundle.
 
 - `PlpDialogComponent` (`plp-dialog`) for operational dialogs with standard header, subtitle, error, save/cancel footer, body slot, RTL sizing, loading, and tablet/mobile behavior.
 - `PlpConfirmDialogComponent` once in an application shell plus `PlpConfirmationService` for all confirmation requests.
@@ -13,7 +13,7 @@ Import standalone primitives from `src/app/shared/product`:
 - `PlpTableComponent` for projected PrimeNG `pTemplate` table content, loading skeleton, empty state, operational density, and reflow wrapper.
 - `PlpProductEmptyStateComponent`, `PlpProductErrorStateComponent`, `PlpProductLoadingStateComponent`, and `PlpProductUnauthorizedStateComponent` for all non-data states.
 - `PlpStatusBadgeComponent` for the centralized Production Status Language.
-- `PlpActionButtonComponent` for save, cancel, edit, delete, activate, deactivate, refresh, approve, reject, import, and export actions.
+- `PlpActionButtonComponent` for save, cancel, edit, delete, activate, deactivate, refresh, approve, reject, import, and export actions. It accepts `buttonType="submit"` for a standard form submit without creating a page-local primary button.
 - `PlpMotionDirective` for approved fade motion only.
 
 ## Composition rules

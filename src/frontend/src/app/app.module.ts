@@ -15,6 +15,7 @@ import { LoginPageComponent } from './pages/login-page/login-page.component';
 import { AccessDeniedPageComponent } from './pages/access-denied-page/access-denied-page.component';
 import { AppShellComponent } from './layout/app-shell/app-shell.component';
 import { SidebarModule } from 'primeng/sidebar';
+import { FocusTrapModule } from 'primeng/focustrap';
 import { BreadcrumbModule } from 'primeng/breadcrumb';
 import { CardModule } from 'primeng/card';
 import { BadgeModule } from 'primeng/badge';
@@ -26,6 +27,7 @@ import { StageRendererComponent } from './pages/factory-map-page/renderers/stage
 import { AuthTokenInterceptor } from './core/interceptors/auth-token.interceptor';
 import { ConfirmationService, PrimeNGConfig } from 'primeng/api';
 import { configureProductionPrimeNg } from './shared/design-system/layering/production-z-index';
+import { ProductExperienceModule } from './shared/product/product-experience.module';
 
 @NgModule({
   declarations: [
@@ -49,10 +51,12 @@ import { configureProductionPrimeNg } from './shared/design-system/layering/prod
     HttpClientModule,
     AppRoutingModule,
     SidebarModule,
+    FocusTrapModule,
     BreadcrumbModule,
     CardModule,
     BadgeModule,
     ButtonModule,
+    ProductExperienceModule,
     SharedModule
   ],
   providers: [

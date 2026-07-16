@@ -77,6 +77,11 @@
   --plp-motion-ease-standard: cubic-bezier(0.2, 0, 0, 1);
   --plp-motion-ease-emphasized: cubic-bezier(0.2, 0.8, 0.2, 1);
 
+  /* Flowline Signal aliases. These remain semantic so a future dark theme can
+     remap the identity without changing logo or illustration components. */
+  --plp-brand-clear-space: var(--plp-space-8);
+  --plp-brand-motion-duration: 600ms;
+
   /* CSS layer contract. PrimeNG runtime values are configured centrally. */
   --plp-z-base: 0;
   --plp-z-sticky: 100;
@@ -155,6 +160,14 @@
   --plp-color-disabled-text: #94a3b8;
   --plp-color-disabled-border: #d7e0ed;
   --plp-color-overlay: rgba(15, 23, 42, 0.48);
+
+  --plp-brand-flow-primary: var(--plp-color-primary);
+  --plp-brand-flow-ink: var(--plp-color-primary-active);
+  --plp-brand-flow-progress: var(--plp-color-success);
+  --plp-brand-mark-surface: var(--plp-color-primary-soft);
+  --plp-brand-mark-wordmark: var(--plp-color-text);
+  --plp-brand-flow-inverse: var(--plp-color-text-inverse);
+  --plp-brand-flow-inverse-progress: var(--plp-color-success-soft);
 
   --plp-color-success: #16a34a;
   --plp-color-success-soft: #dcfce7;

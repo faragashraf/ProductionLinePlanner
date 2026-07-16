@@ -6,6 +6,9 @@ import { WorkersApiService } from './workers-api.service';
 
 const subStageId = 'c0ec408d-74ab-4299-88cd-1a7543cc335b';
 const workerId = '7d8f9c5b-09f4-4f2e-9360-16a5e950e2c7';
+const factoryId = '43dde27f-7ee3-4e90-9f3b-582fc90a3b0';
+const productionLineId = 'c0550d1f-4bf7-432c-b19b-672763d490fc';
+const productModelId = '46593736-2fe2-450d-84a1-f304b712e07f';
 
 describe('AssignmentsApiService', () => {
   let service: AssignmentsApiService;
@@ -50,6 +53,24 @@ describe('AssignmentsApiService', () => {
     });
 
     expect(assignmentId).toBe('assignment-1');
+  });
+
+  it('updates permanent selections for one stage in one request', () => {
+    let added = -1;
+
+    service.updateStageDefaultAssignments(subStageId, [workerId, 'a1e4c17a-5ba5-4a56-95d8-02f39b896b2c'])
+      .subscribe(result => added = result.addedWorkersCount);
+
+    const request = http.expectOne(httpRequest =>
+      httpRequest.method === 'PUT' && httpRequest.url.endsWith(`/api/assignments/default/stages/${subStageId}`)
+    );
+    expect(request.request.body).toEqual({ workerIds: [workerId, 'a1e4c17a-5ba5-4a56-95d8-02f39b896b2c'] });
+    request.flush({
+      success: true,
+      data: { subStageId, addedWorkersCount: 1, removedWorkersCount: 0, activeWorkerIds: [workerId, 'a1e4c17a-5ba5-4a56-95d8-02f39b896b2c'] }
+    });
+
+    expect(added).toBe(1);
   });
 
   it('keeps assigned-workers active while eligible-workers completes beyond the former 1.5 second deadline', fakeAsync(() => {
@@ -118,5 +139,111 @@ describe('AssignmentsApiService', () => {
     });
 
     expect(eligibleWorkers).toBe(1);
+  });
+
+  it('maps the read-only stage worker context with present, current and available workers', () => {
+    let context: { current: number; present: number; available: number; attendance: string } | undefined;
+
+    service.getSubStageWorkerContext(subStageId, '2026-07-13').subscribe(result => {
+      context = {
+        current: result.currentWorkers.length,
+        present: result.presentWorkers.length,
+        available: result.availableWorkers.length,
+        attendance: result.currentWorkers[0].attendanceStatus
+      };
+    });
+
+    const request = http.expectOne(httpRequest =>
+      httpRequest.method === 'GET' && httpRequest.urlWithParams.endsWith(`/api/assignments/sub-stages/${subStageId}/worker-context?productionDate=2026-07-13`)
+    );
+    request.flush({
+      success: true,
+      data: {
+        subStageId,
+        currentWorkers: [{ workerId, employeeCode: 'W-1', fullName: 'عامل تجريبي', attendanceStatus: 'Present', assignmentType: 'Default', effectiveSubStageId: subStageId, isAvailable: true }],
+        presentWorkers: [{ workerId, employeeCode: 'W-1', fullName: 'عامل تجريبي', attendanceStatus: 'Present', assignmentType: 'Default', effectiveSubStageId: subStageId, isAvailable: true }],
+        availableWorkers: [{ workerId, employeeCode: 'W-1', fullName: 'عامل تجريبي', attendanceStatus: 'Present', assignmentType: 'Default', effectiveSubStageId: subStageId, isAvailable: true }],
+        unavailableWorkersCount: 2
+      }
+    });
+
+    expect(context).toEqual({ current: 1, present: 1, available: 1, attendance: 'Present' });
+  });
+
+  it('does not issue a worker-context request for a stale invalid sub-stage id', () => {
+    let resultCount = -1;
+    service.getSubStageWorkerContext('stale-id', '2026-07-13').subscribe(result => resultCount = result.currentWorkers.length);
+    expect(resultCount).toBe(0);
+  });
+
+  it('sends a required removal reason with the current-stage assignment request', () => {
+    let status = '';
+    service.removeDefaultAssignment(workerId, subStageId, 'انتهت الوردية').subscribe(result => status = result.assignmentType);
+    const request = http.expectOne(httpRequest =>
+      httpRequest.method === 'DELETE' && httpRequest.url.endsWith(`/api/assignments/default/${workerId}`)
+    );
+    expect(request.request.params.get('subStageId')).toBe(subStageId);
+    expect(request.request.params.get('reason')).toBe('انتهت الوردية');
+    request.flush({ success: true, data: { assignmentId: 'assignment-1', workerId, subStageId, assignmentType: 'Default' } });
+    expect(status).toBe('Default');
+  });
+
+  it('posts an atomic move request with the source assignment concurrency guard', () => {
+    service.moveCurrentAssignment({
+      workerId,
+      sourceAssignmentId: '4d9e766d-f18b-4cc4-9d1a-fad375d5296f',
+      fromSubStageId: subStageId,
+      toSubStageId: 'df19ab2b-49df-445d-a516-4d5d070d8de2',
+      effectiveAtUtc: '2026-07-14T09:00:00.000Z',
+      reason: 'نقل تشغيل'
+    }).subscribe();
+
+    const request = http.expectOne(httpRequest => httpRequest.method === 'POST' && httpRequest.url.endsWith('/api/assignments/move'));
+    expect(request.request.body).toEqual(jasmine.objectContaining({ sourceAssignmentId: '4d9e766d-f18b-4cc4-9d1a-fad375d5296f', reason: 'نقل تشغيل' }));
+    request.flush({ success: true, data: { assignmentId: 'assignment-2', workerId, assignmentType: 'Default', subStageId: 'df19ab2b-49df-445d-a516-4d5d070d8de2' } });
+  });
+
+  it('loads one attendance-free line staffing plan for the selected factory, line, model and reference date', () => {
+    let planName = '';
+    service.getLineStaffingPlan(factoryId, productionLineId, productModelId, '2026-07-13').subscribe(plan => planName = plan.productModelName);
+
+    const request = http.expectOne(httpRequest =>
+      httpRequest.method === 'GET' &&
+      httpRequest.urlWithParams.includes('/api/line-staffing?') &&
+      httpRequest.urlWithParams.includes(`factoryId=${factoryId}`) &&
+      httpRequest.urlWithParams.includes(`productionLineId=${productionLineId}`) &&
+      httpRequest.urlWithParams.includes(`productModelId=${productModelId}`) &&
+      httpRequest.urlWithParams.includes('staffingReferenceDate=2026-07-13')
+    );
+    request.flush({
+      success: true,
+      data: {
+        factoryId,
+        productionLineId,
+        productModelId,
+        productModelName: 'جرومان',
+        stages: [],
+        workers: [{ workerId, employeeCode: '119', fullName: 'عامل', hasPhoto: false }]
+      }
+    });
+
+    expect(planName).toBe('جرومان');
+  });
+
+  it('loads the shared active staffing worker source without attendance or a production date', () => {
+    let workers = 0;
+    service.getActiveLineStaffingWorkers('2026-07-13').subscribe(items => workers = items.length);
+
+    const request = http.expectOne(httpRequest =>
+      httpRequest.method === 'GET' &&
+      httpRequest.urlWithParams.includes('/api/line-staffing/workers?') &&
+      httpRequest.urlWithParams.includes('staffingReferenceDate=2026-07-13')
+    );
+    request.flush({
+      success: true,
+      data: [{ workerId, employeeCode: '119', fullName: 'عامل', isOnActiveService: true, hasPhoto: false }]
+    });
+
+    expect(workers).toBe(1);
   });
 });

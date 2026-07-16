@@ -1,5 +1,10 @@
-<div class="plp-worker-avatar" [class]="avatarClasses">
-  <img *ngIf="safeImageUrl; else initialsTpl" [src]="safeImageUrl" [alt]="safeFullName" />
+<div class="plp-worker-avatar" [class]="avatarClasses" [attr.aria-label]="decorative ? null : imageAlt" [attr.aria-hidden]="decorative ? 'true' : null">
+  <img *ngIf="safeImageUrl; else defaultAvatarTpl" [src]="safeImageUrl" [alt]="imageAlt" [attr.loading]="lazy ? 'lazy' : null" (error)="onImageError()" />
+  <span *ngIf="isLoadingPhoto" class="plp-worker-avatar__loading" aria-hidden="true"></span>
+  <ng-template #defaultAvatarTpl>
+    <span class="plp-worker-avatar__default" aria-hidden="true"><i class="pi pi-user"></i></span>
+    <span class="sr-only" *ngIf="!decorative">{{ imageAlt }}</span>
+  </ng-template>
   <ng-template #initialsTpl>
     <span>{{ initials }}</span>
   </ng-template>

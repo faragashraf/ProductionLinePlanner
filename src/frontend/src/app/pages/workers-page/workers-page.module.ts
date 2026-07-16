@@ -1,5 +1,6 @@
 import { CommonModule } from '@angular/common';
 import { NgModule } from '@angular/core';
+import { FormsModule } from '@angular/forms';
 import { RouterModule, Routes } from '@angular/router';
 import { ButtonModule } from 'primeng/button';
 import { RippleModule } from 'primeng/ripple';
@@ -8,6 +9,8 @@ import { PermissionCanActivateGuard } from '../../core/guards/permission-can-act
 import { PERMISSIONS } from '../../core/config/permission-identifiers';
 import { SharedModule } from '../../shared/shared.module';
 import { WorkersPageComponent } from './workers-page.component';
+import { PlpResponsiveTableDirective } from '../../shared/product/plp-responsive-table.directive';
+import { PlpTablePaginationDirective } from '../../shared/product/plp-table-pagination.directive';
 
 const WORKERS_ROUTES: Routes = [
   {
@@ -26,10 +29,13 @@ const WORKERS_ROUTES: Routes = [
   declarations: [WorkersPageComponent],
   imports: [
     CommonModule,
+    FormsModule,
     SharedModule,
     ButtonModule,
     RippleModule,
     TableModule,
+    PlpResponsiveTableDirective,
+    PlpTablePaginationDirective,
     RouterModule.forChild(WORKERS_ROUTES)
   ]
 })

@@ -19,20 +19,39 @@ export interface DefaultAssignmentRequest {
   reason?: string;
 }
 
+export interface StageDefaultAssignmentsUpdateResult {
+  subStageId: string;
+  addedWorkersCount: number;
+  removedWorkersCount: number;
+  activeWorkerIds: string[];
+}
+
 export interface TemporaryAssignmentRequest {
   workerId: string;
-  fromSubStageId: string;
+  fromSubStageId?: string | null;
   toSubStageId: string;
   startAtUtc: string;
   endAtUtc: string;
   reason: string;
   replacementForWorkerId?: string;
+  participationMode?: 'TemporaryMove' | 'AdditionalParticipation';
+}
+
+export interface MoveCurrentAssignmentRequest {
+  workerId: string;
+  sourceAssignmentId: string;
+  fromSubStageId: string;
+  toSubStageId: string;
+  effectiveAtUtc: string;
+  temporaryEndAtUtc?: string;
+  reason: string;
 }
 
 export interface ReplacementAssignmentRequest {
   replacementWorkerId: string;
   replacedWorkerId: string;
   subStageId: string;
+  fromSubStageId?: string | null;
   startAtUtc: string;
   endAtUtc: string;
   reason: string;
@@ -65,6 +84,39 @@ export interface SubStageWorkersData {
   workers: AssignmentWorker[];
   hasBackendData: boolean;
   hasUsableBackendData: boolean;
+}
+
+export interface AssignmentWorkflowWorker {
+  workerId: string;
+  employeeCode: string;
+  fullName: string;
+  photoReference?: string | null;
+  departmentName?: string | null;
+  attendanceStatus: 'Present' | 'Late' | 'Absent' | 'Unassigned' | '';
+  attendanceTimeUtc: string | null;
+  attendanceSource?: string | null;
+  attendanceEvidence?: 'ActualCheckInFound' | 'ConfirmedAbsent' | 'NoSourceCheckIn' | 'NoAttendanceData' | '';
+  hasAttendanceData?: boolean;
+  actualCheckInFound?: boolean;
+  assignmentId?: string | null;
+  assignmentType: ApiAssignmentType | null;
+  assignmentStartsAtUtc?: string | null;
+  assignmentEndsAtUtc?: string | null;
+  effectiveSubStageId: string | null;
+  isAvailable: boolean;
+}
+
+export interface SubStageWorkerContext {
+  subStageId: string;
+  productionDate?: string;
+  activeServiceWorkersCount?: number;
+  workersWithAttendanceDataCount?: number;
+  actualCheckInWorkersCount?: number;
+  noSourceCheckInWorkersCount?: number;
+  currentWorkers: AssignmentWorkflowWorker[];
+  presentWorkers: AssignmentWorkflowWorker[];
+  availableWorkers: AssignmentWorkflowWorker[];
+  unavailableWorkersCount: number;
 }
 
 export interface CurrentWorkerAssignment {
@@ -100,11 +152,135 @@ export interface AssignmentRecommendation {
   risks: string[];
 }
 
+/**
+ * Organizational staffing only.  This deliberately contains no attendance
+ * status: daily production operations apply attendance to this plan later.
+ */
+export interface LineStaffingWorker {
+  workerId: string;
+  employeeCode: string;
+  fullName: string;
+  departmentName: string | null;
+  isOnActiveService: boolean;
+  hasPhoto: boolean;
+  photoReference: string | null;
+  photoVersion: string | null;
+  defaultSubStageId: string | null;
+  defaultSubStageName: string | null;
+  effectiveAssignmentId: string | null;
+  effectiveAssignmentType: ApiAssignmentType | null;
+  effectiveSubStageId: string | null;
+  effectiveSubStageName: string | null;
+  fromSubStageId: string | null;
+  fromSubStageName: string | null;
+  temporaryStartsAtUtc: string | null;
+  temporaryEndsAtUtc: string | null;
+  replacementForWorkerId: string | null;
+  participations: LineStaffingParticipation[];
+}
+
+export interface LineStaffingParticipation {
+  assignmentId: string;
+  assignmentType: ApiAssignmentType;
+  subStageId: string;
+  subStageName: string | null;
+  fromSubStageId: string | null;
+  fromSubStageName: string | null;
+  startsAtUtc: string | null;
+  endsAtUtc: string | null;
+  replacementForWorkerId: string | null;
+  temporaryParticipationMode: 'TemporaryMove' | 'AdditionalParticipation' | null;
+}
+
+export interface LineStaffingStage {
+  productModelStageId: string;
+  subStageId: string;
+  mainStageName: string;
+  stageCode: string;
+  stageName: string;
+  stageOrder: number;
+  piecePrice: number;
+  compensationMode: string;
+  compensationConfigurationStatus: string;
+  isFinancialReviewPending: boolean;
+  defaultAssignedWorkersCount: number;
+  effectiveAssignedWorkersCount: number;
+  temporaryAssignedWorkersCount: number;
+  requiredWorkers: number | null;
+  hasAuthoritativeRequiredWorkerCount: boolean;
+  staffingStatus: string;
+  workerStatusText: string;
+  effectiveWorkerIds: string[];
+}
+
+export interface LineStaffingPlan {
+  factoryId: string;
+  factoryName: string;
+  productionLineId: string;
+  productionLineName: string;
+  productModelId: string;
+  productModelCode: string;
+  productModelName: string;
+  staffingReferenceDate: string;
+  totalStages: number;
+  stagesWithWorkers: number;
+  stagesWithoutWorkers: number;
+  stagesWithTemporaryAssignments: number;
+  stagesNeedingCompensationReview: number;
+  stagesNeedingStaffingReview: number;
+  overallStaffingStatus: string;
+  staffingPlanComplete: boolean;
+  operationalAttendanceChecked: boolean;
+  financialConfigurationPending: boolean;
+  stages: LineStaffingStage[];
+  workers: LineStaffingWorker[];
+}
+
+/** Narrow authoritative payload used after one stage's staffing changes. */
+export interface LineStaffingStageRefresh {
+  stage: LineStaffingStage;
+  workers: LineStaffingWorker[];
+  stagesWithWorkers: number;
+  stagesWithoutWorkers: number;
+  stagesWithTemporaryAssignments: number;
+  stagesNeedingCompensationReview: number;
+  stagesNeedingStaffingReview: number;
+  overallStaffingStatus: string;
+  staffingPlanComplete: boolean;
+  operationalAttendanceChecked: boolean;
+  financialConfigurationPending: boolean;
+}
+
 @Injectable({
   providedIn: 'root'
 })
 export class AssignmentsApiService {
   constructor(private readonly http: HttpClient) {}
+
+  getLineStaffingPlan(factoryId: string, productionLineId: string, productModelId: string, staffingReferenceDate: string): Observable<LineStaffingPlan> {
+    const query = new URLSearchParams({ factoryId, productionLineId, productModelId, staffingReferenceDate });
+    return this.http
+      .get<ApiResponse<LineStaffingPlan>>(buildApiUrl(`/api/line-staffing?${query.toString()}`))
+      .pipe(timeout(STANDARD_API_TIMEOUT_MS), map((response) => this.extractPayload(response)));
+  }
+
+  getLineStaffingStageRefresh(factoryId: string, productionLineId: string, productModelId: string, subStageId: string, staffingReferenceDate: string): Observable<LineStaffingStageRefresh> {
+    const query = new URLSearchParams({ factoryId, productionLineId, productModelId, staffingReferenceDate });
+    return this.http
+      .get<ApiResponse<LineStaffingStageRefresh>>(buildApiUrl(`/api/line-staffing/stages/${encodeURIComponent(subStageId)}?${query.toString()}`))
+      .pipe(timeout(STANDARD_API_TIMEOUT_MS), map((response) => this.extractPayload(response)));
+  }
+
+  /**
+   * Shared organizational worker source for staffing dialogs. It filters only
+   * active employment and never applies daily attendance eligibility.
+   */
+  getActiveLineStaffingWorkers(staffingReferenceDate: string): Observable<LineStaffingWorker[]> {
+    const query = new URLSearchParams({ staffingReferenceDate });
+    return this.http
+      .get<ApiResponse<LineStaffingWorker[]>>(buildApiUrl(`/api/line-staffing/workers?${query.toString()}`))
+      .pipe(timeout(STANDARD_API_TIMEOUT_MS), map((response) => this.extractPayload(response)));
+  }
 
   getSubStageWorkers(subStageId: string): Observable<SubStageWorkersData> {
     if (!isBackendGuid(subStageId)) {
@@ -121,6 +297,19 @@ export class AssignmentsApiService {
       .pipe(
         timeout(ASSIGNMENTS_READ_TIMEOUT_MS),
         map((response) => this.mapSubStageWorkers(this.extractPayload(response), subStageId))
+      );
+  }
+
+  getSubStageWorkerContext(subStageId: string, productionDate: string): Observable<SubStageWorkerContext> {
+    if (!isBackendGuid(subStageId)) {
+      return of({ subStageId, productionDate, activeServiceWorkersCount: 0, workersWithAttendanceDataCount: 0, actualCheckInWorkersCount: 0, noSourceCheckInWorkersCount: 0, currentWorkers: [], presentWorkers: [], availableWorkers: [], unavailableWorkersCount: 0 });
+    }
+
+    return this.http
+      .get<ApiResponse<unknown>>(buildApiUrl(`/api/assignments/sub-stages/${encodeURIComponent(subStageId)}/worker-context?productionDate=${encodeURIComponent(productionDate)}`))
+      .pipe(
+        timeout(STANDARD_API_TIMEOUT_MS),
+        map((response) => this.mapSubStageWorkerContext(this.extractPayload(response), subStageId))
       );
   }
 
@@ -196,6 +385,21 @@ export class AssignmentsApiService {
       .pipe(timeout(ASSIGNMENTS_WRITE_TIMEOUT_MS), map((response) => this.mapActionResult(this.extractPayload(response))));
   }
 
+  updateStageDefaultAssignments(subStageId: string, workerIds: string[]): Observable<StageDefaultAssignmentsUpdateResult> {
+    return this.http
+      .put<ApiResponse<StageDefaultAssignmentsUpdateResult>>(
+        buildApiUrl(`/api/assignments/default/stages/${encodeURIComponent(subStageId)}`),
+        { workerIds }
+      )
+      .pipe(timeout(ASSIGNMENTS_WRITE_TIMEOUT_MS), map((response) => this.extractPayload(response)));
+  }
+
+  removeDefaultAssignment(workerId: string, subStageId: string, reason: string): Observable<AssignmentActionResult> {
+    return this.http
+      .delete<ApiResponse<unknown>>(buildApiUrl(`/api/assignments/default/${encodeURIComponent(workerId)}`), { params: { subStageId, reason } })
+      .pipe(timeout(ASSIGNMENTS_WRITE_TIMEOUT_MS), map((response) => this.mapActionResult(this.extractPayload(response))));
+  }
+
   createFactoryStructureDefaultAssignment(request: DefaultAssignmentRequest): Observable<AssignmentActionResult> {
     return this.http
       .post<ApiResponse<unknown>>(buildApiUrl('/api/factory-structure/assignments/default'), request)
@@ -214,9 +418,15 @@ export class AssignmentsApiService {
       .pipe(timeout(ASSIGNMENTS_WRITE_TIMEOUT_MS), map((response) => this.mapActionResult(this.extractPayload(response))));
   }
 
-  cancelTemporaryAssignment(assignmentId: string): Observable<AssignmentActionResult> {
+  moveCurrentAssignment(request: MoveCurrentAssignmentRequest): Observable<AssignmentActionResult> {
     return this.http
-      .delete<ApiResponse<unknown>>(buildApiUrl(`/api/assignments/temporary/${encodeURIComponent(assignmentId)}`))
+      .post<ApiResponse<unknown>>(buildApiUrl('/api/assignments/move'), request)
+      .pipe(timeout(ASSIGNMENTS_WRITE_TIMEOUT_MS), map((response) => this.mapActionResult(this.extractPayload(response))));
+  }
+
+  cancelTemporaryAssignment(assignmentId: string, reason: string): Observable<AssignmentActionResult> {
+    return this.http
+      .delete<ApiResponse<unknown>>(buildApiUrl(`/api/assignments/temporary/${encodeURIComponent(assignmentId)}`), { params: { reason } })
       .pipe(timeout(ASSIGNMENTS_WRITE_TIMEOUT_MS), map((response) => this.mapActionResult(this.extractPayload(response))));
   }
 
@@ -234,6 +444,44 @@ export class AssignmentsApiService {
       workers: validWorkers,
       hasBackendData,
       hasUsableBackendData: hasBackendData && validWorkers.length === workers.length && this.hasText(subStageId)
+    };
+  }
+
+  private mapSubStageWorkerContext(payload: unknown, requestedSubStageId: string): SubStageWorkerContext {
+    const source = this.normalizeObject(payload);
+    return {
+      subStageId: this.pickString(source, ['subStageId']) || requestedSubStageId,
+      productionDate: this.pickString(source, ['productionDate']),
+      activeServiceWorkersCount: Math.max(0, this.toNumber(this.pickFirst(source, ['activeServiceWorkersCount']))),
+      workersWithAttendanceDataCount: Math.max(0, this.toNumber(this.pickFirst(source, ['workersWithAttendanceDataCount']))),
+      actualCheckInWorkersCount: Math.max(0, this.toNumber(this.pickFirst(source, ['actualCheckInWorkersCount']))),
+      noSourceCheckInWorkersCount: Math.max(0, this.toNumber(this.pickFirst(source, ['noSourceCheckInWorkersCount']))),
+      currentWorkers: this.parseEntityList(this.pickFirst(source, ['currentWorkers'])).map((worker) => this.mapWorkflowWorker(worker)),
+      presentWorkers: this.parseEntityList(this.pickFirst(source, ['presentWorkers'])).map((worker) => this.mapWorkflowWorker(worker)),
+      availableWorkers: this.parseEntityList(this.pickFirst(source, ['availableWorkers'])).map((worker) => this.mapWorkflowWorker(worker)),
+      unavailableWorkersCount: Math.max(0, this.toNumber(this.pickFirst(source, ['unavailableWorkersCount'])))
+    };
+  }
+
+  private mapWorkflowWorker(record: RawRecord): AssignmentWorkflowWorker {
+    return {
+      workerId: this.pickString(record, ['workerId', 'id']),
+      employeeCode: this.pickString(record, ['employeeCode', 'code', 'workerCode']),
+      fullName: this.pickString(record, ['fullName', 'workerName', 'name']),
+      photoReference: this.pickNullableString(record, ['photoReference', 'photoUrl']),
+      departmentName: this.pickNullableString(record, ['departmentName', 'localDepartmentName', 'department']),
+      attendanceStatus: this.toAttendanceStatus(this.pickFirst(record, ['attendanceStatus', 'status'])),
+      attendanceTimeUtc: this.pickNullableString(record, ['attendanceTimeUtc', 'attendanceTime']),
+      attendanceSource: this.pickNullableString(record, ['attendanceSource', 'source']),
+      attendanceEvidence: this.toAttendanceEvidence(this.pickFirst(record, ['attendanceEvidence'])),
+      hasAttendanceData: this.toBoolean(this.pickFirst(record, ['hasAttendanceData'])),
+      actualCheckInFound: this.toBoolean(this.pickFirst(record, ['actualCheckInFound'])),
+      assignmentId: this.pickNullableString(record, ['assignmentId']),
+      assignmentType: this.toNullableAssignmentType(this.pickFirst(record, ['assignmentType', 'type'])),
+      assignmentStartsAtUtc: this.pickNullableString(record, ['assignmentStartsAtUtc', 'startsAtUtc', 'startAtUtc']),
+      assignmentEndsAtUtc: this.pickNullableString(record, ['assignmentEndsAtUtc', 'endsAtUtc', 'endAtUtc']),
+      effectiveSubStageId: this.pickNullableString(record, ['effectiveSubStageId', 'subStageId']),
+      isAvailable: this.toBoolean(this.pickFirst(record, ['isAvailable', 'available']))
     };
   }
 
@@ -376,6 +624,37 @@ export class AssignmentsApiService {
       return 'Replacement';
     }
     return null;
+  }
+
+  private toAttendanceStatus(value: unknown): AssignmentWorkflowWorker['attendanceStatus'] {
+    const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
+    if (normalized === 'present') return 'Present';
+    if (normalized === 'late') return 'Late';
+    if (normalized === 'absent') return 'Absent';
+    if (normalized === 'unassigned') return 'Unassigned';
+    return '';
+  }
+
+  private toAttendanceEvidence(value: unknown): AssignmentWorkflowWorker['attendanceEvidence'] {
+    const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
+    if (normalized === 'actualcheckinfound') return 'ActualCheckInFound';
+    if (normalized === 'confirmedabsent') return 'ConfirmedAbsent';
+    if (normalized === 'nosourcecheckin') return 'NoSourceCheckIn';
+    if (normalized === 'noattendancedata') return 'NoAttendanceData';
+    return '';
+  }
+
+  private toBoolean(value: unknown): boolean {
+    return value === true || value === 'true' || value === 1 || value === '1';
+  }
+
+  private toNumber(value: unknown): number {
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string' && value.trim().length > 0) {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : 0;
+    }
+    return 0;
   }
 
   private toStringList(value: unknown): string[] {

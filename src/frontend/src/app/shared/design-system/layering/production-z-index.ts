@@ -11,8 +11,26 @@ export const PRODUCTION_RUNTIME_Z_INDEX = {
   tooltip: 1400
 } as const;
 
+const PLP_ARIA_TRANSLATIONS = {
+  firstPageLabel: 'الصفحة الأولى',
+  lastPageLabel: 'الصفحة الأخيرة',
+  nextPageLabel: 'الصفحة التالية',
+  prevPageLabel: 'الصفحة السابقة',
+  previousPageLabel: 'الصفحة السابقة',
+  rowsPerPageLabel: 'عدد الصفوف في الصفحة',
+  pageLabel: 'الصفحة {page}',
+  listLabel: 'قائمة الخيارات'
+} as const;
+
 export function configureProductionPrimeNg(config: PrimeNGConfig): void {
   config.ripple = true;
+  config.setTranslation({
+    emptyMessage: 'لا توجد بيانات متاحة',
+    aria: {
+      ...config.translation.aria,
+      ...PLP_ARIA_TRANSLATIONS
+    }
+  });
   config.zIndex = {
     modal: PRODUCTION_RUNTIME_Z_INDEX.modal,
     overlay: PRODUCTION_RUNTIME_Z_INDEX.dropdown,

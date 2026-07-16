@@ -236,6 +236,22 @@ p-radiobutton,
   transition: opacity var(--plp-motion-base) var(--plp-motion-ease-standard);
 }
 
+/* App Shell navigation is appended to body by PrimeNG, so its overlay contract
+ * must be globally scoped to this unique class rather than to app-shell. */
+.p-sidebar.plp-app-shell-overlay-nav {
+  background: var(--plp-color-surface-raised);
+  block-size: calc(100dvh - (var(--plp-control-height-standard) + var(--plp-space-20)));
+  border-inline-start: var(--plp-border-default);
+  box-shadow: var(--plp-shadow-4);
+  color: var(--plp-color-text);
+  direction: rtl;
+  inline-size: min(88vw, 21rem);
+  inset-block-start: calc(var(--plp-control-height-standard) + var(--plp-space-20));
+  inset-inline-end: auto;
+  inset-inline-start: 0;
+  max-inline-size: calc(100vw - (var(--plp-dialog-gutter) * 2));
+}
+
 .p-dialog {
   background: var(--plp-color-surface-raised);
   border: var(--plp-border-default);
@@ -327,6 +343,24 @@ p-radiobutton,
 .p-datatable .p-datatable-tbody > tr.p-highlight {
   background: var(--plp-color-surface-selected);
   color: var(--plp-color-selected-text);
+}
+
+/* The application shell breadcrumb is an intentionally contained RTL scroller.
+ * Its inner list can be wider than the content frame without widening the page. */
+.plp-app-shell__breadcrumb {
+  direction: rtl;
+  max-inline-size: 100%;
+  min-inline-size: 0;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  -webkit-overflow-scrolling: touch;
+  scroll-padding-inline: var(--plp-space-12);
+}
+
+.plp-app-shell__breadcrumb .p-breadcrumb-list {
+  inline-size: max-content;
+  min-inline-size: 100%;
+  white-space: nowrap;
 }
 
 .p-paginator {

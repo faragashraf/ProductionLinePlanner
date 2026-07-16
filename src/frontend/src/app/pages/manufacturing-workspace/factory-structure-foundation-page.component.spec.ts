@@ -1,5 +1,6 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { FormsModule } from '@angular/forms';
+import { Router } from '@angular/router';
 import { By } from '@angular/platform-browser';
 import { ButtonModule } from 'primeng/button';
 import { TableModule } from 'primeng/table';
@@ -10,10 +11,13 @@ import { AssignmentsApiService } from '../../core/services/assignments-api.servi
 import { ManufacturingMasterDataApiService, SubStageOption } from '../../core/services/manufacturing-master-data-api.service';
 import { WorkersApiService } from '../../core/services/workers-api.service';
 import { SharedModule } from '../../shared/shared.module';
+import { PlpResponsiveTableDirective } from '../../shared/product/plp-responsive-table.directive';
+import { PlpTablePaginationDirective } from '../../shared/product/plp-table-pagination.directive';
+import { PlpExpandableFormComponent } from '../../shared/product/plp-expandable-form.component';
 import { FactoryStructureFoundationPageComponent } from './factory-structure-foundation-page.component';
 
 describe('FactoryStructureFoundationPageComponent', () => {
-  function configure(options: { manage?: boolean; fail?: boolean; empty?: boolean } = {}): ComponentFixture<FactoryStructureFoundationPageComponent> {
+  function configure(options: { manage?: boolean; record?: boolean; fail?: boolean; empty?: boolean } = {}): ComponentFixture<FactoryStructureFoundationPageComponent> {
     const masterData = jasmine.createSpyObj<ManufacturingMasterDataApiService>('ManufacturingMasterDataApiService', [
       'factories',
       'allProductionLines',
@@ -38,13 +42,23 @@ describe('FactoryStructureFoundationPageComponent', () => {
       'loadFactoryStructureEligibleWorkers',
       'loadWorkers'
     ]);
+    const router = jasmine.createSpyObj<Router>('Router', ['navigate']);
+    router.navigate.and.returnValue(Promise.resolve(true));
     const hydration = new BehaviorSubject<'ready'>('ready');
+    const grantedPermissions: string[] = [
+      ...(options.manage ? [PERMISSIONS.factoryStructure.manage] : []),
+      ...(options.record ? [PERMISSIONS.production.view, PERMISSIONS.production.record] : [])
+    ];
     const permissionService = {
       permissions$: of([]),
       hydrationState$: hydration.asObservable(),
       get hydrationState() { return 'ready'; },
-      hasPermission: (permission: string) => permission === PERMISSIONS.factoryStructure.manage && options.manage === true,
-      hasAccess: (requirement: { permission?: string }) => requirement.permission !== PERMISSIONS.factoryStructure.manage || options.manage === true
+      hasPermission: (permission: string) => grantedPermissions.includes(permission),
+      hasAccess: (requirement: { permission?: string; requireAll?: string | string[] }) => {
+        if (requirement.permission) return grantedPermissions.includes(requirement.permission);
+        if (requirement.requireAll) return (Array.isArray(requirement.requireAll) ? requirement.requireAll : [requirement.requireAll]).every(permission => grantedPermissions.includes(permission));
+        return true;
+      }
     };
 
     if (options.fail) {
@@ -72,7 +86,9 @@ describe('FactoryStructureFoundationPageComponent', () => {
       id: 'worker-1',
       code: 'W-1',
       fullName: 'عامل تجريبي',
-      state: 'جاهز',
+      state: 'على رأس العمل',
+      employmentStatus: 'Active',
+      isActive: true,
       phone: '01000000000'
     }]));
     assignments.getFactoryStructureSubStageWorkers.and.returnValue(of({
@@ -96,12 +112,13 @@ describe('FactoryStructureFoundationPageComponent', () => {
 
     TestBed.configureTestingModule({
       declarations: [FactoryStructureFoundationPageComponent],
-      imports: [FormsModule, SharedModule, ButtonModule, TableModule],
+      imports: [FormsModule, SharedModule, ButtonModule, TableModule, PlpResponsiveTableDirective, PlpTablePaginationDirective, PlpExpandableFormComponent],
       providers: [
         { provide: ManufacturingMasterDataApiService, useValue: masterData },
         { provide: AssignmentsApiService, useValue: assignments },
         { provide: WorkersApiService, useValue: workers },
-        { provide: PermissionService, useValue: permissionService }
+        { provide: PermissionService, useValue: permissionService },
+        { provide: Router, useValue: router }
       ]
     });
 
@@ -111,6 +128,15 @@ describe('FactoryStructureFoundationPageComponent', () => {
   }
 
   afterEach(() => TestBed.resetTestingModule());
+
+  function openAssignmentForm(fixture: ComponentFixture<FactoryStructureFoundationPageComponent>): void {
+    const trigger = fixture.debugElement.queryAll(By.css('plp-expandable-form button'))
+      .find(button => button.nativeElement.textContent.trim() === 'تعيين عامل');
+
+    expect(trigger).toBeDefined();
+    trigger!.nativeElement.click();
+    fixture.detectChanges();
+  }
 
   it('loads and renders the factory, line, stage, sub-stage, and worker relationships', () => {
     const fixture = configure({ manage: true });
@@ -302,6 +328,7 @@ describe('FactoryStructureFoundationPageComponent', () => {
     component.selectMainStage('main-1');
     component.selectSubStage('sub-1');
     fixture.detectChanges();
+    openAssignmentForm(fixture);
 
     const option = fixture.debugElement.query(By.css('select[name="workerId"] option[value="worker-1"]'));
     expect(option?.nativeElement.textContent).toContain('عامل تجريبي');
@@ -315,6 +342,7 @@ describe('FactoryStructureFoundationPageComponent', () => {
     component.selectMainStage('main-1');
     component.selectSubStage('sub-1');
     fixture.detectChanges();
+    openAssignmentForm(fixture);
 
     const workerSelect = fixture.debugElement.query(By.css('select[name="workerId"]')).nativeElement as HTMLSelectElement;
     const assignButton = fixture.debugElement.query(By.css('#factoryStructureAssignWorkerButton')).nativeElement as HTMLButtonElement;
@@ -358,6 +386,7 @@ describe('FactoryStructureFoundationPageComponent', () => {
     component.selectMainStage('main-1');
     component.selectSubStage('sub-1');
     fixture.detectChanges();
+    openAssignmentForm(fixture);
 
     const workerSelect = fixture.debugElement.query(By.css('select[name="workerId"]')).nativeElement as HTMLSelectElement;
     workerSelect.value = 'worker-1';
@@ -480,6 +509,39 @@ describe('FactoryStructureFoundationPageComponent', () => {
     const fixture = configure({ manage: false });
 
     expect(fixture.debugElement.query(By.css('form'))).toBeNull();
+  });
+
+  it('shows the contextual production action only for an authorized, complete active stage context', () => {
+    const fixture = configure({ record: true });
+    const component = fixture.componentInstance;
+    const router = TestBed.inject(Router) as jasmine.SpyObj<Router>;
+
+    expect(fixture.debugElement.query(By.css('#factoryStructureRecordProductionButton'))).toBeNull();
+
+    component.selectLine('line-1');
+    component.selectMainStage('main-1');
+    component.selectSubStage('sub-1');
+    fixture.detectChanges();
+
+    const action = fixture.debugElement.query(By.css('#factoryStructureRecordProductionButton'));
+    expect(action).not.toBeNull();
+    action.nativeElement.click();
+
+    expect(router.navigate).toHaveBeenCalledWith(['/manufacturing/production-recording'], {
+      queryParams: { factoryId: 'fac-1', productionLineId: 'line-1', mainStageId: 'main-1', subStageId: 'sub-1' }
+    });
+  });
+
+  it('does not expose the contextual production action without recording access', () => {
+    const fixture = configure({ manage: true });
+    const component = fixture.componentInstance;
+
+    component.selectLine('line-1');
+    component.selectMainStage('main-1');
+    component.selectSubStage('sub-1');
+    fixture.detectChanges();
+
+    expect(fixture.debugElement.query(By.css('#factoryStructureRecordProductionButton'))).toBeNull();
   });
 
   it('renders empty state when no structure data exists', () => {

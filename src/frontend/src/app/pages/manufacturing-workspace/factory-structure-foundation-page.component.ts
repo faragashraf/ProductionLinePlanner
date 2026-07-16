@@ -1,6 +1,8 @@
 import { Component, OnDestroy, OnInit } from '@angular/core';
+import { Router } from '@angular/router';
 import { EMPTY, Observable, Subject, catchError, distinctUntilChanged, forkJoin, switchMap, takeUntil, tap, finalize } from 'rxjs';
 import { PERMISSIONS } from '../../core/config/permission-identifiers';
+import { PRODUCTION_RECORDING_ACCESS } from '../../core/config/manufacturing-workspace.config';
 import { AssignmentsApiService, AssignmentWorker } from '../../core/services/assignments-api.service';
 import {
   FactoryItem,
@@ -10,6 +12,7 @@ import {
   SubStageOption
 } from '../../core/services/manufacturing-master-data-api.service';
 import { WorkersApiService } from '../../core/services/workers-api.service';
+import { PermissionService } from '../../core/services/permission.service';
 import { WorkerPageItem } from '../../shared/models/worker.model';
 
 interface FactoryDraft {
@@ -44,6 +47,8 @@ interface SubStageDraft {
   capacity: number;
 }
 
+type FactoryStructureFormId = 'factory' | 'line' | 'main-stage' | 'sub-stage' | 'assignment';
+
 @Component({
   selector: 'app-factory-structure-foundation-page',
   templateUrl: './factory-structure-foundation-page.component.html',
@@ -71,6 +76,7 @@ export class FactoryStructureFoundationPageComponent implements OnInit, OnDestro
   hasError = false;
   errorMessage = 'تعذر تحميل بنية المصنع، يرجى المحاولة مرة أخرى.';
   successMessage = '';
+  activeForm: FactoryStructureFormId | null = null;
 
   factoryDraft: FactoryDraft = this.emptyFactoryDraft();
   lineDraft: LineDraft = this.emptyLineDraft();
@@ -88,7 +94,9 @@ export class FactoryStructureFoundationPageComponent implements OnInit, OnDestro
   constructor(
     private readonly masterDataApi: ManufacturingMasterDataApiService,
     private readonly assignmentsApi: AssignmentsApiService,
-    private readonly workersApi: WorkersApiService
+    private readonly workersApi: WorkersApiService,
+    private readonly permissionService: PermissionService,
+    private readonly router: Router
   ) {}
 
   ngOnInit(): void {
@@ -136,12 +144,44 @@ export class FactoryStructureFoundationPageComponent implements OnInit, OnDestro
     return this.workers.some(worker => worker.id === this.selectedWorkerId);
   }
 
+  get canManage(): boolean {
+    return this.permissionService.hasPermission(this.permissions.factoryStructure.manage);
+  }
+
+  get productionRecordingContext(): { factoryId: string; productionLineId: string; mainStageId: string; subStageId: string } | null {
+    const factory = this.factories.find(item => item.id === this.selectedFactoryId && item.isActive);
+    const line = this.lines.find(item => item.id === this.selectedLineId && item.factoryId === factory?.id && item.isActive);
+    const mainStage = this.mainStages.find(item => item.id === this.selectedMainStageId && item.productionLineId === line?.id && item.isActive);
+    const subStage = this.subStages.find(item => item.id === this.selectedSubStageId && item.mainStageId === mainStage?.id && item.isActive);
+
+    return factory && line && mainStage && subStage
+      ? { factoryId: factory.id, productionLineId: line.id, mainStageId: mainStage.id, subStageId: subStage.id }
+      : null;
+  }
+
+  get canOpenProductionRecording(): boolean {
+    return !!this.productionRecordingContext && this.permissionService.hasAccess(PRODUCTION_RECORDING_ACCESS);
+  }
+
   onSearch(event: Event): void {
     this.searchTerm = ((event.target as HTMLInputElement).value ?? '').trim();
   }
 
   onClearSearch(): void {
     this.searchTerm = '';
+  }
+
+  onFormExpandedChange(formId: FactoryStructureFormId, expanded: boolean): void {
+    this.activeForm = expanded ? formId : null;
+  }
+
+  openProductionRecording(): void {
+    const context = this.productionRecordingContext;
+    if (!context || !this.permissionService.hasAccess(PRODUCTION_RECORDING_ACCESS)) {
+      return;
+    }
+
+    void this.router.navigate(['/manufacturing/production-recording'], { queryParams: context });
   }
 
   reload(): void {
@@ -217,6 +257,7 @@ export class FactoryStructureFoundationPageComponent implements OnInit, OnDestro
       code: item.code,
       location: item.location ?? ''
     };
+    this.activeForm = 'factory';
   }
 
   saveFactory(): void {
@@ -238,6 +279,7 @@ export class FactoryStructureFoundationPageComponent implements OnInit, OnDestro
 
     this.save(request, () => {
       this.factoryDraft = this.emptyFactoryDraft();
+      this.activeForm = null;
     });
   }
 
@@ -249,6 +291,7 @@ export class FactoryStructureFoundationPageComponent implements OnInit, OnDestro
       lineCode: item.lineCode ?? '',
       sequenceOrder: item.sequenceOrder
     };
+    this.activeForm = 'line';
   }
 
   saveLine(): void {
@@ -277,6 +320,7 @@ export class FactoryStructureFoundationPageComponent implements OnInit, OnDestro
     this.save(request, () => {
       this.lineDraft = this.emptyLineDraft();
       this.lineDraft.factoryId = this.selectedFactoryId;
+      this.activeForm = null;
     });
   }
 
@@ -292,6 +336,7 @@ export class FactoryStructureFoundationPageComponent implements OnInit, OnDestro
       sequenceOrder: item.sequenceOrder,
       isCritical: item.isCritical
     };
+    this.activeForm = 'main-stage';
   }
 
   saveMainStage(): void {
@@ -320,6 +365,7 @@ export class FactoryStructureFoundationPageComponent implements OnInit, OnDestro
     this.save(request, () => {
       this.mainStageDraft = this.emptyMainStageDraft();
       this.mainStageDraft.productionLineId = this.selectedLineId;
+      this.activeForm = null;
     });
   }
 
@@ -336,6 +382,7 @@ export class FactoryStructureFoundationPageComponent implements OnInit, OnDestro
       defaultOrder: item.sequenceOrder,
       capacity: item.capacity
     };
+    this.activeForm = 'sub-stage';
   }
 
   saveSubStage(): void {
@@ -366,6 +413,7 @@ export class FactoryStructureFoundationPageComponent implements OnInit, OnDestro
     this.save(request, () => {
       this.subStageDraft = this.emptySubStageDraft();
       this.subStageDraft.mainStageId = this.selectedMainStageId;
+      this.activeForm = null;
     });
   }
 
@@ -401,6 +449,7 @@ export class FactoryStructureFoundationPageComponent implements OnInit, OnDestro
       () => {
         this.selectedWorkerId = '';
         this.reloadAssignedWorkers$.next(this.selectedSubStageId);
+        this.activeForm = null;
       },
       false
     );

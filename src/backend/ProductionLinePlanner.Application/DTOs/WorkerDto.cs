@@ -11,9 +11,13 @@ public sealed class WorkerDto
     public string? BadgeNumber { get; init; }
     public string? Phone { get; init; }
     public int? AttendanceDepartmentId { get; init; }
+    /// <summary>Planner-owned department label. This is not read from or written to ZKTime.</summary>
+    public string? LocalDepartmentName { get; init; }
     public string EmploymentStatus { get; init; } = string.Empty;
     public DateTime? EmploymentEndDate { get; init; }
     public string? PhotoReference { get; init; }
+    public bool HasPhoto { get; init; }
+    public string? PhotoVersion { get; init; }
     public bool IsActive { get; init; }
     public Guid? DefaultSubStageId { get; init; }
 }

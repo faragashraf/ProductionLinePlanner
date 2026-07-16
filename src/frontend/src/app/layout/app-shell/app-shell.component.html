@@ -1,84 +1,143 @@
-<div class="app-shell">
-  <header class="topbar">
+<div class="plp-app-shell" [attr.data-navigation-mode]="navigationMode" plpMotion>
+  <header class="plp-app-shell__topbar">
     <button
-      *ngIf="isMobile"
+      *ngIf="isOverlayNavigation"
+      #menuTrigger
+      pButton
       type="button"
-      class="mobile-menu-button"
+      icon="pi pi-bars"
+      class="p-button-text plp-app-shell__menu-trigger"
       aria-label="فتح القائمة"
+      [attr.aria-expanded]="sidebarOpen"
+      aria-controls="app-shell-overlay-navigation"
       (click)="toggleSidebar()"
-    >
-      <i class="pi pi-bars"></i>
-    </button>
-    <div class="brand">
-      <span class="brand-badge">PLP</span>
-      <div class="brand-texts">
-        <span class="brand-title">منصة تخطيط خطوط الإنتاج</span>
-        <span class="brand-subtitle">منصة خطط الإنتاج</span>
-      </div>
-    </div>
-    <div class="topbar-actions">
-      <span class="notification-button">
-        <i class="pi pi-bell"></i>
-        <span class="notification-count">{{ notificationCount }}</span>
+    ></button>
+
+    <a class="plp-app-shell__brand" routerLink="/dashboard" aria-label="العودة إلى الرئيسية">
+      <plp-brand-logo class="plp-app-shell__brand-mark" variant="header" size="28px" [inverse]="true"></plp-brand-logo>
+      <span class="plp-app-shell__brand-copy">
+        <span class="plp-text-supporting">منصة تخطيط خطوط الإنتاج</span>
+        <span class="plp-text-caption">مساحة العمليات</span>
       </span>
+    </a>
+
+    <div class="plp-app-shell__account">
+      <span class="plp-app-shell__account-name plp-text-supporting">{{ currentUserName }}</span>
+      <span class="plp-app-shell__account-initial" [attr.aria-label]="'الحساب: ' + currentUserName">{{ currentUserInitial }}</span>
+      <button
+        pButton
+        type="button"
+        icon="pi pi-sign-out"
+        class="p-button-text plp-app-shell__logout-trigger"
+        aria-label="تسجيل الخروج"
+        (click)="logout()"
+      ></button>
     </div>
   </header>
 
   <p-sidebar
-    [(visible)]="isSidebarVisible"
-    [modal]="isMobile"
+    *ngIf="isOverlayNavigation"
+    [visible]="sidebarOpen"
+    (visibleChange)="onSidebarVisibleChange($event)"
+    appendTo="body"
+    [baseZIndex]="overlaySidebarBaseZIndex"
+    [modal]="true"
+    [dismissible]="true"
+    [closeOnEscape]="true"
+    [blockScroll]="true"
     [showCloseIcon]="false"
+    [transitionOptions]="sidebarTransitionOptions"
     position="right"
-    styleClass="shell-sidebar-shell"
-    (onHide)="closeSidebar()"
+    styleClass="plp-app-shell-overlay-nav"
+    (onShow)="onOverlayNavigationShow()"
+    (onHide)="onOverlayNavigationHide()"
   >
-    <ng-template pTemplate="header">
-      <div class="sidebar-header">القائمة</div>
-    </ng-template>
-    <ng-container *ngIf="showNavigation; else sidebarLoadingState">
-      <ul class="menu-list" *ngIf="navigationItems.length > 0">
-        <li
-          *ngFor="let item of navigationItems"
-          class="menu-item"
-          [class.active]="isActive(item.route)"
-        >
-          <a class="menu-link" [routerLink]="item.route" (click)="closeSidebar()">
-            <i class="pi {{ item.icon }}"></i>
-            <span>{{ item.label }}</span>
-          </a>
-        </li>
-      </ul>
-    </ng-container>
-    <ng-template #sidebarLoadingState>
-      <plp-loading-skeleton [lines]="5" [showAvatar]="false" [cardLike]="true"></plp-loading-skeleton>
-    </ng-template>
+    <div class="plp-app-shell__overlay-focus-trap" pFocusTrap>
+      <div id="app-shell-overlay-navigation" class="plp-app-shell__sidebar-header">
+        <div class="plp-app-shell__sidebar-identity">
+          <plp-brand-logo class="plp-app-shell__brand-mark" variant="header" size="28px"></plp-brand-logo>
+          <span>
+            <span class="plp-text-supporting">منصة تخطيط خطوط الإنتاج</span>
+            <span class="plp-text-caption">مساحة العمليات</span>
+          </span>
+        </div>
+        <button
+          #overlayCloseButton
+          pButton
+          type="button"
+          icon="pi pi-times"
+          class="p-button-text p-button-rounded plp-app-shell__close-trigger"
+          aria-label="إغلاق القائمة"
+          (click)="closeSidebar()"
+        ></button>
+      </div>
+      <ng-container *ngTemplateOutlet="navigationMenu; context: { closeAfterNavigation: true }"></ng-container>
+    </div>
   </p-sidebar>
 
-  <aside class="sidebar desktop-sidebar" *ngIf="showNavigation">
-    <ul class="menu-list" *ngIf="navigationItems.length > 0">
-      <li
-        *ngFor="let item of navigationItems"
-        class="menu-item"
-        [class.active]="isActive(item.route)"
-      >
-        <a class="menu-link" [routerLink]="item.route">
-          <i class="pi {{ item.icon }}"></i>
-          <span>{{ item.label }}</span>
-        </a>
-      </li>
-    </ul>
-    <plp-loading-skeleton
-      *ngIf="isNavigationLoading"
-      [lines]="5"
-      [showAvatar]="false"
-      [cardLike]="true"
-    ></plp-loading-skeleton>
+  <aside id="app-shell-navigation" class="plp-app-shell__desktop-nav">
+    <div class="plp-app-shell__sidebar-header">
+      <plp-brand-logo class="plp-app-shell__brand-lockup" variant="horizontal" size="28px"></plp-brand-logo>
+    </div>
+    <ng-container *ngTemplateOutlet="navigationMenu; context: { closeAfterNavigation: false }"></ng-container>
   </aside>
 
-  <main class="main-content">
-    <p-breadcrumb [model]="breadcrumbItems" class="breadcrumb"></p-breadcrumb>
-    <section class="content-wrapper">
+  <main class="plp-app-shell__main">
+    <p-breadcrumb [model]="breadcrumbItems" styleClass="plp-app-shell__breadcrumb"></p-breadcrumb>
+    <section class="plp-app-shell__content plp-page-frame">
       <router-outlet />
     </section>
   </main>
 </div>
+
+<ng-template #navigationMenu let-closeAfterNavigation="closeAfterNavigation">
+  <plp-product-loading-state *ngIf="isNavigationLoading" [lines]="6" label="جارٍ تجهيز قائمة العمل"></plp-product-loading-state>
+
+  <plp-product-error-state
+    *ngIf="permissionHydrationState === 'error'"
+    title="تعذر تجهيز قائمة العمل"
+    description="تحقق من الاتصال ثم أعد المحاولة."
+    (retry)="retryNavigationHydration()"
+  ></plp-product-error-state>
+
+  <ng-container *ngIf="showNavigation && !isNavigationLoading && permissionHydrationState !== 'error'">
+    <nav *ngIf="navigationItems.length > 0; else emptyNavigation" class="plp-app-shell__nav-list plp-text-supporting" aria-label="التنقل الرئيسي">
+      <section *ngIf="workspaceNavigationItems.length > 0" class="plp-app-shell__nav-group">
+        <h2>مساحة العمل</h2>
+        <a
+          *ngFor="let item of workspaceNavigationItems; trackBy: trackByNavigationId"
+          class="plp-app-shell__nav-link"
+          [class.plp-app-shell__nav-link--active]="isActive(item.route)"
+          [routerLink]="item.route"
+          [attr.aria-current]="isActive(item.route) ? 'page' : null"
+          (click)="onNavigationSelected(closeAfterNavigation)"
+        >
+          <i class="pi" [ngClass]="item.icon" aria-hidden="true"></i>
+          <span>{{ item.label }}</span>
+        </a>
+      </section>
+
+      <section *ngIf="administrationNavigationItems.length > 0" class="plp-app-shell__nav-group">
+        <h2>الإدارة</h2>
+        <a
+          *ngFor="let item of administrationNavigationItems; trackBy: trackByNavigationId"
+          class="plp-app-shell__nav-link"
+          [class.plp-app-shell__nav-link--active]="isActive(item.route)"
+          [routerLink]="item.route"
+          [attr.aria-current]="isActive(item.route) ? 'page' : null"
+          (click)="onNavigationSelected(closeAfterNavigation)"
+        >
+          <i class="pi" [ngClass]="item.icon" aria-hidden="true"></i>
+          <span>{{ item.label }}</span>
+        </a>
+      </section>
+    </nav>
+
+    <ng-template #emptyNavigation>
+      <plp-product-empty-state
+        title="لا توجد مساحة عمل متاحة"
+        description="لا توجد عناصر تنقل متاحة لحسابك حالياً."
+      ></plp-product-empty-state>
+    </ng-template>
+  </ng-container>
+</ng-template>

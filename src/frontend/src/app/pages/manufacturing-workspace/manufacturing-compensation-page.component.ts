@@ -4,6 +4,7 @@ import { finalize } from 'rxjs';
 import { PERMISSIONS } from '../../core/config/permission-identifiers';
 import { PermissionService } from '../../core/services/permission.service';
 import { environment } from '../../../environments/environment';
+import { STAGE_COST_TERMINOLOGY } from '../../core/config/stage-cost-terminology';
 import {
   CompensationMode,
   CompensationModelStageUpdate,
@@ -18,6 +19,33 @@ const COMPENSATION_MODES: readonly CompensationMode[] = [
   'FixedAmount'
 ];
 
+interface CompensationMethodDefinition {
+  mode: CompensationMode;
+  title: string;
+  description: string;
+}
+
+interface CompensationStageField {
+  key: 'code' | 'name' | 'piecePrice' | 'standardSeconds' | 'method' | 'status';
+  label: string;
+  emphasis?: 'method';
+}
+
+const COMPENSATION_METHODS: readonly CompensationMethodDefinition[] = [
+  { mode: 'SharedPercentage', title: 'توزيع نسبي', description: 'تُسجّل كمية المرحلة مرة واحدة ثم توزّع المستحقات بحسب نسب العاملين.' },
+  { mode: 'FullRatePerWorker', title: 'سعر كامل لكل عامل', description: 'يحصل كل عامل معيّن على قيمة الكمية المقبولة كاملة من دون مضاعفة الإنتاج.' },
+  { mode: 'FixedAmount', title: 'قيمة ثابتة', description: 'يتلقى العامل مبلغًا ثابتًا مستقلًا عن كمية الإنتاج المسجّلة.' }
+];
+
+const COMPENSATION_STAGE_FIELDS: readonly CompensationStageField[] = [
+  { key: 'code', label: 'الكود' },
+  { key: 'name', label: 'المرحلة' },
+  { key: 'piecePrice', label: 'سعر القطعة' },
+  { key: 'standardSeconds', label: 'الثواني' },
+  { key: 'method', label: STAGE_COST_TERMINOLOGY.calculationMethod, emphasis: 'method' },
+  { key: 'status', label: 'الحالة' }
+];
+
 @Component({
   selector: 'app-manufacturing-compensation-page',
   templateUrl: './manufacturing-compensation-page.component.html',
@@ -25,7 +53,10 @@ const COMPENSATION_MODES: readonly CompensationMode[] = [
 })
 export class ManufacturingCompensationPageComponent implements OnInit {
   readonly permissions = PERMISSIONS;
+  readonly stageCostTerminology = STAGE_COST_TERMINOLOGY;
   readonly compensationModes = COMPENSATION_MODES;
+  readonly compensationMethods = COMPENSATION_METHODS;
+  readonly stageFields = COMPENSATION_STAGE_FIELDS;
   readonly showDialogDiagnostics = !environment.production;
 
   models: ProductModelItem[] = [];
@@ -42,7 +73,7 @@ export class ManufacturingCompensationPageComponent implements OnInit {
   hasLoadedStages = false;
   isSaving = false;
   hasError = false;
-  errorMessage = 'تعذر تحميل إعدادات التعويض، يرجى المحاولة مرة أخرى.';
+  errorMessage = 'تعذر تحميل إعدادات تكلفة المراحل، يرجى المحاولة مرة أخرى.';
   successMessage = '';
 
   readonly stageForm = this.formBuilder.group({
@@ -141,11 +172,11 @@ export class ManufacturingCompensationPageComponent implements OnInit {
       .pipe(finalize(() => this.isSaving = false))
       .subscribe({
         next: () => {
-          this.successMessage = 'تم حفظ إعداد التعويض.';
+          this.successMessage = 'تم حفظ إعداد تكلفة المرحلة.';
           this.cancelEdit();
           this.loadStages(this.selectedModelId);
         },
-        error: error => this.setError(error, 'تعذر حفظ إعداد التعويض.')
+        error: error => this.setError(error, 'تعذر حفظ إعداد تكلفة المرحلة.')
       });
   }
 
@@ -164,6 +195,21 @@ export class ManufacturingCompensationPageComponent implements OnInit {
       case 'FullRatePerWorker': return 'سعر كامل لكل عامل';
       case 'FixedAmount': return 'قيمة ثابتة';
     }
+  }
+
+  stageFieldValue(stage: ModelStageItem, field: CompensationStageField): string | number {
+    switch (field.key) {
+      case 'code': return stage.subStageCode || '-';
+      case 'name': return stage.subStageName || stage.subStageId;
+      case 'piecePrice': return stage.piecePrice;
+      case 'standardSeconds': return stage.standardSeconds ?? '-';
+      case 'method': return this.modeLabel(stage.compensationMode);
+      case 'status': return stage.isActive ? 'نشطة' : 'معطلة';
+    }
+  }
+
+  trackByStageId(_: number, stage: ModelStageItem): string {
+    return stage.id;
   }
 
   private loadModels(): void {

@@ -15,14 +15,20 @@ export class LoginPageComponent {
   isLoading = false;
   errorMessage = '';
   warningMessage = '';
+  submitted = false;
+  isPasswordVisible = false;
 
   constructor(
     private readonly router: Router,
     private readonly authService: AuthService
   ) {}
 
-  onLogin(event: Event): void {
-    event.preventDefault();
+  onLogin(): void {
+    if (this.isLoading) {
+      return;
+    }
+
+    this.submitted = true;
     this.errorMessage = '';
     this.warningMessage = '';
 
@@ -47,6 +53,28 @@ export class LoginPageComponent {
       });
   }
 
+  onEmailChanged(value: string): void {
+    this.email = value;
+    this.clearValidationError();
+  }
+
+  onPasswordChanged(value: string): void {
+    this.password = value;
+    this.clearValidationError();
+  }
+
+  togglePasswordVisibility(): void {
+    this.isPasswordVisible = !this.isPasswordVisible;
+  }
+
+  get emailValidationMessage(): string {
+    return this.submitted && !this.email.trim() ? 'البريد الإلكتروني مطلوب.' : '';
+  }
+
+  get passwordValidationMessage(): string {
+    return this.submitted && !this.password ? 'كلمة المرور مطلوبة.' : '';
+  }
+
   private resolveLoginErrorMessage(error: unknown): string {
     if (error instanceof HttpErrorResponse) {
       if (error.status === 0) {
@@ -63,5 +91,11 @@ export class LoginPageComponent {
     }
 
     return 'حدث خطأ غير متوقع أثناء تسجيل الدخول. حاول مرة أخرى.';
+  }
+
+  private clearValidationError(): void {
+    if (this.submitted && this.email.trim() && this.password) {
+      this.errorMessage = '';
+    }
   }
 }

@@ -4,7 +4,6 @@ import { map, Observable, timeout } from 'rxjs';
 import { ApiResponse } from '../models/api-response.model';
 import { buildApiUrl } from '../config/api.config';
 import { STANDARD_API_TIMEOUT_MS } from '../config/api-timeout.config';
-import { resolveFactoryStatus, FactoryStatus } from '../../shared/models/factory-status.model';
 import { WorkerPageItem } from '../../shared/models/worker.model';
 
 type RawRecord = Record<string, unknown>;
@@ -24,6 +23,7 @@ export interface WorkersApiQuery {
   page?: number;
   pageSize?: number;
   search?: string;
+  serviceStatus?: 'all' | 'active' | 'inactive';
 }
 
 @Injectable({
@@ -38,7 +38,7 @@ export class WorkersApiService {
     const search = (query.search ?? '').trim();
 
     return this.http
-      .get<ApiResponse<unknown>>(buildApiUrl('/api/workers'), { params: this.buildWorkersParams(page, pageSize, search) })
+      .get<ApiResponse<unknown>>(buildApiUrl('/api/workers'), { params: this.buildWorkersParams(page, pageSize, search, query.serviceStatus ?? 'all') })
       .pipe(
         timeout(STANDARD_API_TIMEOUT_MS),
         map((response) => {
@@ -82,11 +82,17 @@ export class WorkersApiService {
       );
   }
 
-  private buildWorkersParams(page: number, pageSize: number, search: string): HttpParams {
+  private buildWorkersParams(page: number, pageSize: number, search: string, serviceStatus: WorkersApiQuery['serviceStatus']): HttpParams {
     let params = new HttpParams().set('page', String(page)).set('pageSize', String(pageSize));
 
     if (search.length > 0) {
       params = params.set('search', search);
+    }
+
+    if (serviceStatus === 'active') {
+      params = params.set('isActive', 'true');
+    } else if (serviceStatus === 'inactive') {
+      params = params.set('isActive', 'false');
     }
 
     return params;
@@ -96,22 +102,31 @@ export class WorkersApiService {
     const safeRecord = this.normalizeObject(worker);
     const code = this.pickString(safeRecord, ['code', 'workerCode', 'empCode', 'employeeCode', 'badge']);
     const fullName = this.pickString(safeRecord, ['fullName', 'name', 'workerName', 'displayName', 'employeeName']);
-    const status = this.resolveWorkerState(
-      this.pickFirst(safeRecord, ['status', 'state', 'availability', 'attendanceStatus', 'workerStatus'])
-    );
+    const employmentStatus = this.pickString(safeRecord, ['employmentStatus', 'employmentState', 'workerStatus']);
+    const isActive = this.toBoolean(this.pickFirst(safeRecord, ['isActive', 'active', 'onService']));
+    const status = this.resolveWorkerState(employmentStatus, isActive);
 
-    const department = this.pickString(safeRecord, ['department', 'departmentName', 'groupName']);
+    const department = this.pickString(safeRecord, ['localDepartmentName', 'department', 'departmentName', 'groupName']);
     const email = this.pickString(safeRecord, ['email', 'emailAddress', 'mail']);
     const phone = this.pickString(safeRecord, ['phone', 'phoneNumber', 'mobile']);
+    const photoReference = this.pickString(safeRecord, ['photoReference', 'photoUrl', 'imageUrl']);
+    const hasPhotoValue = this.pickFirst(safeRecord, ['hasPhoto']);
+    const hasPhoto = typeof hasPhotoValue === 'boolean' ? hasPhotoValue : Boolean(photoReference);
+    const photoVersion = this.pickString(safeRecord, ['photoVersion']);
 
     return {
       id: this.pickString(safeRecord, ['id', 'workerId', '_id']),
       code: code || `W-${index + 1}`,
       fullName: fullName || 'عامل غير محدد',
       state: status,
+      ...(employmentStatus ? { employmentStatus } : {}),
+      ...(isActive ? { isActive } : { isActive: false }),
       ...(department ? { department } : {}),
       ...(email ? { email } : {}),
-      ...(phone ? { phone } : {})
+      ...(phone ? { phone } : {}),
+      ...(photoReference ? { photoReference } : {}),
+      hasPhoto,
+      ...(photoVersion ? { photoVersion } : {})
     };
   }
 
@@ -167,31 +182,11 @@ export class WorkersApiService {
     };
   }
 
-  private resolveWorkerState(rawStatus: unknown): WorkerPageItem['state'] {
-    const statusMeta = resolveFactoryStatus(rawStatus as string | FactoryStatus | null);
-    if (statusMeta.status === 'present') {
-      return 'جاهز';
-    }
-    if (statusMeta.status === 'late') {
-      return 'متأخر';
-    }
-    if (statusMeta.status === 'absent') {
-      return 'غائب';
-    }
-
-    const fallbackLabel = this.toString(rawStatus).trim();
-    if (fallbackLabel === 'جاهز' || fallbackLabel === 'متأخر' || fallbackLabel === 'غائب') {
-      return fallbackLabel;
-    }
-
-    if (fallbackLabel === 'حاضر') {
-      return 'جاهز';
-    }
-    if (fallbackLabel === 'موجود') {
-      return 'جاهز';
-    }
-
-    return 'غائب';
+  private resolveWorkerState(employmentStatus: string, isActive: boolean): WorkerPageItem['state'] {
+    const normalized = employmentStatus.trim().toLowerCase();
+    return isActive && normalized !== 'suspended' && normalized !== 'leftemployment'
+      ? 'على رأس العمل'
+      : 'خارج الخدمة';
   }
 
   private extractPayload<T>(response: ApiResponse<T>): T {
@@ -265,5 +260,9 @@ export class WorkersApiService {
       return Number.isFinite(parsed) ? Math.trunc(parsed) : 0;
     }
     return 0;
+  }
+
+  private toBoolean(value: unknown): boolean {
+    return value === true || value === 'true' || value === 1 || value === '1';
   }
 }

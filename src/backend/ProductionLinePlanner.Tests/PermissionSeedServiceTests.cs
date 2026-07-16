@@ -27,6 +27,7 @@ public sealed class PermissionSeedServiceTests
 
         Assert.Equal(expectedAdminPermissions, adminPermissionNames.OrderBy(name => name));
         Assert.Contains("workers.manage", adminPermissionNames);
+        Assert.Contains("production.approve", adminPermissionNames);
         Assert.DoesNotContain("compensation.manage", adminPermissionNames);
         Assert.True((await fixture.GetRoleAsync(fixture.AdminRole.Id)).IsSystemRole);
 
@@ -54,6 +55,7 @@ public sealed class PermissionSeedServiceTests
         Assert.Equal(
             PermissionCatalog.All.Select(permission => permission.Name).OrderBy(name => name),
             superAdminPermissionNames.OrderBy(name => name));
+        Assert.Contains("production.approve", superAdminPermissionNames);
     }
 
     [CollectionDefinition("PermissionSeedService", DisableParallelization = true)]

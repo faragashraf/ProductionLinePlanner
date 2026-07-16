@@ -30,6 +30,8 @@ public sealed class AuditEngine : IAuditEngine
         "StartAtUtc",
         "EndAtUtc",
         "CreatedAtUtc",
+        "ApprovedAtUtc",
+        "CancelledAtUtc",
         "UpdatedAtUtc",
         "ExpiresAtUtc",
         "RevokedAtUtc",
@@ -55,6 +57,10 @@ public sealed class AuditEngine : IAuditEngine
         ,"EquivalentQuantity"
         ,"CalculatedEarning"
         ,"ConcurrencyToken"
+        ,"ClientRequestId"
+        ,"ApprovedBy"
+        ,"CancelledBy"
+        ,"ApprovalCancellationReason"
         ,"SnapshotProductModelCode"
         ,"SnapshotProductModelName"
         ,"SnapshotStageCode"

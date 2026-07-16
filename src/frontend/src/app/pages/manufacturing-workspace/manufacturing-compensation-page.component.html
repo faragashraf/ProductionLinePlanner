@@ -1,52 +1,69 @@
 <section class="page-frame" dir="rtl" [attr.aria-busy]="isLoadingModels || isLoadingStages || isSaving">
-  <plp-page-header title="إعدادات التعويض" description="تهيئة سعر وزمن وطريقة تعويض مراحل الموديل. الحساب المالي يتم حصراً في الخادم." [compact]="true">
+  <plp-page-header [title]="stageCostTerminology.configuration" [description]="'تهيئة سعر المرحلة وزمنها و' + stageCostTerminology.calculationMethod + ' للموديل. الحساب المالي يتم حصراً في الخادم.'" [compact]="true">
     <div header-actions>
       <button pButton type="button" class="p-button-sm p-button-outlined" icon="pi pi-refresh" label="تحديث" [disabled]="isLoadingModels || isLoadingStages || isSaving" (click)="onRetry()"></button>
     </div>
   </plp-page-header>
 
-  <p-card>
-    <div>
+  <p-card styleClass="compensation-model-picker">
+    <div class="compensation-model-picker__field">
       <label for="compensationModel">موديل المنتج</label>
       <select id="compensationModel" [value]="selectedModelId" [disabled]="isLoadingModels || isSaving" (change)="onModelChange($event)">
         <option value="">اختر موديلًا نشطًا</option>
         <option *ngFor="let model of models" [value]="model.id">{{ model.code }} - {{ model.name }}</option>
       </select>
     </div>
-    <p *ngIf="!canManage">لديك صلاحية العرض فقط. التعديل يتطلب صلاحية إدارة التعويضات.</p>
+    <p *ngIf="!canManage">لديك صلاحية العرض فقط. التعديل يتطلب صلاحية إدارة تكلفة المراحل.</p>
   </p-card>
 
-  <section>
-    <h3>طرق التعويض</h3>
-    <ul>
-      <li><strong>توزيع نسبي:</strong> كمية المرحلة تسجل مرة واحدة، ثم توزع الأرباح وفق نسب العمال.</li>
-      <li><strong>سعر كامل لكل عامل:</strong> كمية المرحلة لا تتضاعف، لكن كل عامل يحصل على القيمة الكاملة للكمية المقبولة.</li>
-      <li><strong>قيمة ثابتة:</strong> لكل عامل مبلغ ثابت لا يعتمد على كمية الإنتاج.</li>
-    </ul>
+  <section class="compensation-methods" aria-labelledby="compensation-methods-title">
+    <div>
+      <h3 id="compensation-methods-title">{{ stageCostTerminology.calculationMethods }}</h3>
+      <p>اختر الطريقة المناسبة عند تعديل إعداد المرحلة.</p>
+    </div>
+    <details *ngFor="let method of compensationMethods" class="compensation-methods__item" [open]="method.mode === 'SharedPercentage'">
+      <summary>{{ method.title }}</summary>
+      <p>{{ method.description }}</p>
+    </details>
   </section>
 
   <plp-loading-skeleton *ngIf="(isLoadingModels && !hasLoadedModels) || (isLoadingStages && !hasLoadedStages)" [lines]="6" [showAvatar]="false"></plp-loading-skeleton>
 
-  <plp-error-state *ngIf="hasError && !isLoadingModels && !isLoadingStages" [title]="'تعذر تحميل إعدادات التعويض'" [description]="errorMessage" [actionText]="'إعادة المحاولة'" (action)="onRetry()"></plp-error-state>
+  <plp-error-state *ngIf="hasError && !isLoadingModels && !isLoadingStages" [title]="'تعذر تحميل إعدادات تكلفة المراحل'" [description]="errorMessage" [actionText]="'إعادة المحاولة'" (action)="onRetry()"></plp-error-state>
 
-  <plp-empty-state *ngIf="isModelsEmpty" title="لا توجد نماذج نشطة" description="لا توجد نماذج منتجات نشطة متاحة لإعداد التعويض." actionText="تحديث" (action)="onRetry()"></plp-empty-state>
+  <plp-empty-state *ngIf="isModelsEmpty" title="لا توجد نماذج نشطة" description="لا توجد نماذج منتجات نشطة متاحة لإعداد تكلفة المراحل." actionText="تحديث" (action)="onRetry()"></plp-empty-state>
 
   <ng-container *ngIf="selectedModelId && !hasError && !isLoadingStages">
-    <plp-empty-state *ngIf="isStagesEmpty" title="لا توجد مراحل مهيأة" description="لا توجد مراحل موديل لعرض إعدادات تعويضها." actionText="تحديث" (action)="onRetry()"></plp-empty-state>
+    <plp-empty-state *ngIf="isStagesEmpty" title="لا توجد مراحل مهيأة" description="لا توجد مراحل موديل لعرض إعدادات تكلفة مراحلها." actionText="تحديث" (action)="onRetry()"></plp-empty-state>
 
-    <p-table *ngIf="stages.length > 0" [value]="stages" dataKey="id" responsiveLayout="scroll">
+    <p-table
+      *ngIf="stages.length > 0"
+      plpResponsiveTable="stack"
+      plpTablePagination
+      [plpPaginationPageSize]="10"
+      [plpPaginationMobilePageSize]="5"
+      [plpPaginationResetKey]="selectedModelId"
+      [value]="stages"
+      dataKey="id"
+      responsiveLayout="scroll"
+      styleClass="compensation-table"
+    >
       <ng-template pTemplate="header">
-        <tr><th>الكود</th><th>المرحلة</th><th>سعر القطعة</th><th>الثواني</th><th>طريقة التعويض</th><th>الحالة</th><th></th></tr>
+        <tr>
+          <th *ngFor="let field of stageFields">{{ field.label }}</th>
+          <th>الإجراء</th>
+        </tr>
       </ng-template>
       <ng-template pTemplate="body" let-stage>
         <tr>
-          <td>{{ stage.subStageCode || '-' }}</td>
-          <td>{{ stage.subStageName || stage.subStageId }}</td>
-          <td>{{ stage.piecePrice }}</td>
-          <td>{{ stage.standardSeconds ?? '-' }}</td>
-          <td>{{ modeLabel(stage.compensationMode) }}</td>
-          <td>{{ stage.isActive ? 'نشطة' : 'معطلة' }}</td>
-          <td><button *plpCan="permissions.compensation.manage" pButton type="button" class="p-button-sm p-button-text" label="تعديل" [disabled]="isSaving" (click)="editStage(stage)"></button></td>
+          <td
+            *ngFor="let field of stageFields"
+            [attr.data-plp-label]="field.label"
+            [class.compensation-table__method]="field.emphasis === 'method'"
+          >{{ stageFieldValue(stage, field) }}</td>
+          <td class="compensation-table__action" data-plp-label="الإجراء">
+            <button *plpCan="permissions.compensation.manage" pButton type="button" class="p-button-sm p-button-text" label="تعديل" [disabled]="isSaving" (click)="editStage(stage)"></button>
+          </td>
         </tr>
       </ng-template>
     </p-table>
@@ -54,8 +71,8 @@
 
   <p *ngIf="successMessage && !hasError">{{ successMessage }}</p>
 
-  <aside *ngIf="showDialogDiagnostics" aria-label="تشخيص نافذة التعويض" data-testid="compensation-dialog-diagnostics">
-    <strong>تشخيص تطوير نافذة التعويض</strong>
+  <aside *ngIf="showDialogDiagnostics" aria-label="تشخيص نافذة تكلفة المرحلة" data-testid="compensation-dialog-diagnostics">
+    <strong>تشخيص تطوير نافذة تكلفة المرحلة</strong>
     <dl>
       <div><dt>المكوّن النشط</dt><dd>ManufacturingCompensationPageComponent</dd></div>
       <div><dt>تم دخول editStage</dt><dd>{{ editStageEntered }}</dd></div>
@@ -68,7 +85,7 @@
 
   <p-dialog
     [(visible)]="isEditDialogVisible"
-    header="تعديل إعداد التعويض"
+    header="تعديل إعداد تكلفة المرحلة"
     [modal]="true"
     appendTo="body"
     [baseZIndex]="1000"
@@ -91,7 +108,7 @@
 
       <p class="compensation-edit-dialog__error" *ngIf="hasError">{{ errorMessage }}</p>
 
-      <label>طريقة التعويض
+      <label>{{ stageCostTerminology.calculationMethod }}
         <select formControlName="compensationMode">
           <option *ngFor="let mode of compensationModes" [value]="mode">{{ modeLabel(mode) }}</option>
         </select>

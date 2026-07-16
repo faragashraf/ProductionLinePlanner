@@ -38,18 +38,23 @@
   <ng-container *ngIf="!isLoading && !isEmpty">
     <section class="factory-structure-grid">
       <article class="factory-structure-panel">
-        <header>
-          <h2>المصانع</h2>
-        </header>
+        <plp-expandable-form
+          title="المصانع"
+          [summary]="filteredFactories.length + ' مصنعًا'"
+          openLabel="إضافة مصنع"
+          [canExpand]="canManage"
+          [expanded]="activeForm === 'factory'"
+          (expandedChange)="onFormExpandedChange('factory', $event)"
+        >
+          <form class="factory-structure-form" (ngSubmit)="saveFactory()" novalidate *plpCan="permissions.factoryStructure.manage">
+            <input name="factoryName" [(ngModel)]="factoryDraft.name" placeholder="اسم المصنع" required>
+            <input name="factoryCode" [(ngModel)]="factoryDraft.code" placeholder="كود المصنع" [disabled]="!!factoryDraft.id" required>
+            <input name="factoryLocation" [(ngModel)]="factoryDraft.location" placeholder="الموقع">
+            <button pButton type="submit" [label]="factoryDraft.id ? 'تحديث المصنع' : 'إضافة مصنع'" [disabled]="isSaving"></button>
+          </form>
+        </plp-expandable-form>
 
-        <form class="factory-structure-form" (ngSubmit)="saveFactory()" *plpCan="permissions.factoryStructure.manage">
-          <input name="factoryName" [(ngModel)]="factoryDraft.name" placeholder="اسم المصنع" required>
-          <input name="factoryCode" [(ngModel)]="factoryDraft.code" placeholder="كود المصنع" [disabled]="!!factoryDraft.id" required>
-          <input name="factoryLocation" [(ngModel)]="factoryDraft.location" placeholder="الموقع">
-          <button pButton type="submit" [label]="factoryDraft.id ? 'تحديث المصنع' : 'إضافة مصنع'" [disabled]="isSaving"></button>
-        </form>
-
-        <p-table [value]="filteredFactories" dataKey="id" responsiveLayout="scroll">
+        <p-table plpResponsiveTable="scroll" plpTablePagination [plpPaginationPageSize]="10" [plpPaginationResetKey]="searchTerm" [plpStickyActions]="true" [value]="filteredFactories" dataKey="id" responsiveLayout="scroll">
           <ng-template pTemplate="header">
             <tr><th>الكود</th><th>الاسم</th><th>الموقع</th><th>الحالة</th><th></th></tr>
           </ng-template>
@@ -71,23 +76,27 @@
       </article>
 
       <article class="factory-structure-panel">
-        <header>
-          <h2>خطوط الإنتاج</h2>
-          <span>{{ factoryName(selectedFactoryId) }}</span>
-        </header>
+        <plp-expandable-form
+          title="خطوط الإنتاج"
+          [summary]="selectedFactoryId ? visibleLines.length + ' خطًا · ' + factoryName(selectedFactoryId) : 'اختر مصنعًا لعرض الخطوط'"
+          openLabel="إضافة خط"
+          [canExpand]="canManage"
+          [expanded]="activeForm === 'line'"
+          (expandedChange)="onFormExpandedChange('line', $event)"
+        >
+          <form class="factory-structure-form" (ngSubmit)="saveLine()" novalidate *plpCan="permissions.factoryStructure.manage">
+            <select name="lineFactoryId" [(ngModel)]="lineDraft.factoryId" [disabled]="!!lineDraft.id" required>
+              <option value="">اختر المصنع</option>
+              <option *ngFor="let factory of factories" [value]="factory.id">{{ factory.code }} - {{ factory.name }}</option>
+            </select>
+            <input name="lineName" [(ngModel)]="lineDraft.name" placeholder="اسم الخط" required>
+            <input name="lineCode" [(ngModel)]="lineDraft.lineCode" placeholder="كود الخط">
+            <input name="lineOrder" [(ngModel)]="lineDraft.sequenceOrder" type="number" placeholder="الترتيب">
+            <button pButton type="submit" [label]="lineDraft.id ? 'تحديث الخط' : 'إضافة خط'" [disabled]="isSaving"></button>
+          </form>
+        </plp-expandable-form>
 
-        <form class="factory-structure-form" (ngSubmit)="saveLine()" *plpCan="permissions.factoryStructure.manage">
-          <select name="lineFactoryId" [(ngModel)]="lineDraft.factoryId" [disabled]="!!lineDraft.id" required>
-            <option value="">اختر المصنع</option>
-            <option *ngFor="let factory of factories" [value]="factory.id">{{ factory.code }} - {{ factory.name }}</option>
-          </select>
-          <input name="lineName" [(ngModel)]="lineDraft.name" placeholder="اسم الخط" required>
-          <input name="lineCode" [(ngModel)]="lineDraft.lineCode" placeholder="كود الخط">
-          <input name="lineOrder" [(ngModel)]="lineDraft.sequenceOrder" type="number" placeholder="الترتيب">
-          <button pButton type="submit" [label]="lineDraft.id ? 'تحديث الخط' : 'إضافة خط'" [disabled]="isSaving"></button>
-        </form>
-
-        <p-table [value]="visibleLines" dataKey="id" responsiveLayout="scroll">
+        <p-table plpResponsiveTable="scroll" plpTablePagination [plpPaginationPageSize]="10" [plpPaginationResetKey]="selectedFactoryId" [plpStickyActions]="true" [value]="visibleLines" dataKey="id" responsiveLayout="scroll">
           <ng-template pTemplate="header">
             <tr><th>الكود</th><th>الاسم</th><th>الترتيب</th><th>الحالة</th><th></th></tr>
           </ng-template>
@@ -112,23 +121,27 @@
 
     <section class="factory-structure-grid">
       <article class="factory-structure-panel">
-        <header>
-          <h2>المراحل الرئيسية</h2>
-          <span>{{ lineName(selectedLineId) }}</span>
-        </header>
+        <plp-expandable-form
+          title="المراحل الرئيسية"
+          [summary]="selectedLineId ? visibleMainStages.length + ' مرحلة · ' + lineName(selectedLineId) : 'اختر خط إنتاج لعرض المراحل'"
+          openLabel="إضافة مرحلة"
+          [canExpand]="canManage"
+          [expanded]="activeForm === 'main-stage'"
+          (expandedChange)="onFormExpandedChange('main-stage', $event)"
+        >
+          <form class="factory-structure-form" (ngSubmit)="saveMainStage()" novalidate *plpCan="permissions.factoryStructure.manage">
+            <select name="mainLineId" [(ngModel)]="mainStageDraft.productionLineId" [disabled]="!selectedLineId || !!mainStageDraft.id" required>
+              <option value="">اختر الخط</option>
+              <option *ngFor="let line of visibleLines" [value]="line.id">{{ line.name }}</option>
+            </select>
+            <input name="mainName" [(ngModel)]="mainStageDraft.name" placeholder="اسم المرحلة الرئيسية" required>
+            <input name="mainOrder" [(ngModel)]="mainStageDraft.sequenceOrder" type="number" placeholder="الترتيب">
+            <label class="factory-structure-check"><input name="mainCritical" [(ngModel)]="mainStageDraft.isCritical" type="checkbox"> حرجة</label>
+            <button pButton type="submit" [label]="mainStageDraft.id ? 'تحديث المرحلة' : 'إضافة مرحلة'" [disabled]="isSaving"></button>
+          </form>
+        </plp-expandable-form>
 
-        <form class="factory-structure-form" (ngSubmit)="saveMainStage()" *plpCan="permissions.factoryStructure.manage">
-          <select name="mainLineId" [(ngModel)]="mainStageDraft.productionLineId" [disabled]="!selectedLineId || !!mainStageDraft.id" required>
-            <option value="">اختر الخط</option>
-            <option *ngFor="let line of visibleLines" [value]="line.id">{{ line.name }}</option>
-          </select>
-          <input name="mainName" [(ngModel)]="mainStageDraft.name" placeholder="اسم المرحلة الرئيسية" required>
-          <input name="mainOrder" [(ngModel)]="mainStageDraft.sequenceOrder" type="number" placeholder="الترتيب">
-          <label class="factory-structure-check"><input name="mainCritical" [(ngModel)]="mainStageDraft.isCritical" type="checkbox"> حرجة</label>
-          <button pButton type="submit" [label]="mainStageDraft.id ? 'تحديث المرحلة' : 'إضافة مرحلة'" [disabled]="isSaving"></button>
-        </form>
-
-        <p-table [value]="visibleMainStages" dataKey="id" responsiveLayout="scroll">
+        <p-table plpResponsiveTable="scroll" plpTablePagination [plpPaginationPageSize]="10" [plpPaginationResetKey]="selectedLineId" [plpStickyActions]="true" [value]="visibleMainStages" dataKey="id" responsiveLayout="scroll">
           <ng-template pTemplate="header">
             <tr><th>الاسم</th><th>الترتيب</th><th>حرجة</th><th>الحالة</th><th></th></tr>
           </ng-template>
@@ -151,24 +164,28 @@
       </article>
 
       <article class="factory-structure-panel">
-        <header>
-          <h2>المراحل الفرعية</h2>
-          <span>{{ mainStageName(selectedMainStageId) }}</span>
-        </header>
+        <plp-expandable-form
+          title="المراحل الفرعية"
+          [summary]="selectedMainStageId ? visibleSubStages.length + ' مرحلة · ' + mainStageName(selectedMainStageId) : 'اختر مرحلة رئيسية لعرض التفاصيل'"
+          openLabel="إضافة مرحلة فرعية"
+          [canExpand]="canManage"
+          [expanded]="activeForm === 'sub-stage'"
+          (expandedChange)="onFormExpandedChange('sub-stage', $event)"
+        >
+          <form class="factory-structure-form" (ngSubmit)="saveSubStage()" novalidate *plpCan="permissions.factoryStructure.manage">
+            <select name="subMainId" [(ngModel)]="subStageDraft.mainStageId" [disabled]="!selectedMainStageId || !!subStageDraft.id" required>
+              <option value="">اختر المرحلة الرئيسية</option>
+              <option *ngFor="let stage of visibleMainStages" [value]="stage.id">{{ stage.name }}</option>
+            </select>
+            <input name="subCode" [(ngModel)]="subStageDraft.code" placeholder="الكود" required>
+            <input name="subName" [(ngModel)]="subStageDraft.name" placeholder="اسم المرحلة الفرعية" required>
+            <input name="subOrder" [(ngModel)]="subStageDraft.defaultOrder" type="number" placeholder="الترتيب">
+            <input name="subCapacity" [(ngModel)]="subStageDraft.capacity" type="number" placeholder="السعة">
+            <button pButton type="submit" [label]="subStageDraft.id ? 'تحديث الفرعية' : 'إضافة فرعية'" [disabled]="isSaving"></button>
+          </form>
+        </plp-expandable-form>
 
-        <form class="factory-structure-form" (ngSubmit)="saveSubStage()" *plpCan="permissions.factoryStructure.manage">
-          <select name="subMainId" [(ngModel)]="subStageDraft.mainStageId" [disabled]="!selectedMainStageId || !!subStageDraft.id" required>
-            <option value="">اختر المرحلة الرئيسية</option>
-            <option *ngFor="let stage of visibleMainStages" [value]="stage.id">{{ stage.name }}</option>
-          </select>
-          <input name="subCode" [(ngModel)]="subStageDraft.code" placeholder="الكود" required>
-          <input name="subName" [(ngModel)]="subStageDraft.name" placeholder="اسم المرحلة الفرعية" required>
-          <input name="subOrder" [(ngModel)]="subStageDraft.defaultOrder" type="number" placeholder="الترتيب">
-          <input name="subCapacity" [(ngModel)]="subStageDraft.capacity" type="number" placeholder="السعة">
-          <button pButton type="submit" [label]="subStageDraft.id ? 'تحديث الفرعية' : 'إضافة فرعية'" [disabled]="isSaving"></button>
-        </form>
-
-        <p-table [value]="visibleSubStages" dataKey="id" responsiveLayout="scroll">
+        <p-table plpResponsiveTable="scroll" plpTablePagination [plpPaginationPageSize]="10" [plpPaginationResetKey]="selectedMainStageId" [plpStickyActions]="true" [value]="visibleSubStages" dataKey="id" responsiveLayout="scroll">
           <ng-template pTemplate="header">
             <tr><th>الكود</th><th>الاسم</th><th>الترتيب</th><th>السعة</th><th>الحالة</th><th></th></tr>
           </ng-template>
@@ -193,31 +210,46 @@
     </section>
 
     <section class="factory-structure-panel factory-structure-panel--wide">
-      <header>
-        <h2>العاملون المعينون للمرحلة الفرعية</h2>
-        <span>{{ selectedSubStageId ? 'مرحلة محددة' : 'اختر مرحلة فرعية' }}</span>
-      </header>
-
-      <form class="factory-structure-form factory-structure-form--inline" novalidate *plpCan="permissions.factoryStructure.manage">
-        <select
-          name="workerId"
-          [(ngModel)]="selectedWorkerId"
-          [ngModelOptions]="{ standalone: true }"
-          [disabled]="!selectedSubStageId"
-          required>
-          <option value="">اختر العامل</option>
-          <option *ngFor="let worker of workers" [value]="worker.id">{{ worker.code }} - {{ worker.fullName }}</option>
-        </select>
+      <div class="factory-structure-panel__actions" *ngIf="canOpenProductionRecording">
         <button
-          id="factoryStructureAssignWorkerButton"
+          id="factoryStructureRecordProductionButton"
           pButton
           type="button"
-          label="تعيين العامل"
-          [disabled]="isSaving || !selectedSubStageId || !selectedWorkerId"
-          (click)="assignWorker()"></button>
-      </form>
+          class="p-button-sm"
+          icon="pi pi-play"
+          label="تسجيل إنتاج المرحلة"
+          (click)="openProductionRecording()"
+        ></button>
+      </div>
+      <plp-expandable-form
+        title="العاملون المعينون للمرحلة الفرعية"
+        [summary]="selectedSubStageId ? assignedWorkers.length + ' عاملًا معينًا' : 'اختر مرحلة فرعية أولًا'"
+        openLabel="تعيين عامل"
+        [canExpand]="canManage"
+        [expanded]="activeForm === 'assignment'"
+        (expandedChange)="onFormExpandedChange('assignment', $event)"
+      >
+        <form class="factory-structure-form factory-structure-form--inline" novalidate *plpCan="permissions.factoryStructure.manage">
+          <select
+            name="workerId"
+            [(ngModel)]="selectedWorkerId"
+            [ngModelOptions]="{ standalone: true }"
+            [disabled]="!selectedSubStageId"
+            required>
+            <option value="">اختر العامل</option>
+            <option *ngFor="let worker of workers" [value]="worker.id">{{ worker.code }} - {{ worker.fullName }}</option>
+          </select>
+          <button
+            id="factoryStructureAssignWorkerButton"
+            pButton
+            type="button"
+            label="تعيين العامل"
+            [disabled]="isSaving || !selectedSubStageId || !selectedWorkerId"
+            (click)="assignWorker()"></button>
+        </form>
+      </plp-expandable-form>
 
-      <p-table [value]="assignedWorkers" dataKey="id" responsiveLayout="scroll">
+      <p-table plpResponsiveTable="scroll" plpTablePagination [plpPaginationPageSize]="10" [plpPaginationMobilePageSize]="5" [plpPaginationResetKey]="selectedSubStageId" [value]="assignedWorkers" dataKey="id" responsiveLayout="scroll">
         <ng-template pTemplate="header">
           <tr><th>الكود</th><th>العامل</th><th>نوع التعيين</th></tr>
         </ng-template>

@@ -17,8 +17,37 @@ public interface IAssignmentEngine
         DateTime asOfUtc,
         CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Resolves every effective stage participation for each worker.  The
+    /// singular resolver remains for legacy callers that only understand a
+    /// primary assignment.
+    /// </summary>
+    Task<Result<Dictionary<Guid, IReadOnlyCollection<WorkerAssignmentState>>>> ResolveEffectiveAssignmentsAsync(
+        IEnumerable<Guid> workerIds,
+        DateTime asOfUtc,
+        CancellationToken cancellationToken = default);
+
     Task<Result<AssignmentActionResultDto>> CreateOrUpdateDefaultAssignmentAsync(
         CreateDefaultAssignmentRequest request,
+        Guid actorUserId,
+        string? requestMeta = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Reconciles permanent participation for one stage only. It is additive
+    /// across stages: a worker keeps every other active participation.
+    /// </summary>
+    Task<Result<StageDefaultAssignmentsUpdateResultDto>> UpdateStageDefaultAssignmentsAsync(
+        Guid subStageId,
+        IReadOnlyCollection<Guid>? workerIds,
+        Guid actorUserId,
+        string? requestMeta = null,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<AssignmentActionResultDto>> RemoveDefaultAssignmentAsync(
+        Guid workerId,
+        Guid subStageId,
+        string reason,
         Guid actorUserId,
         string? requestMeta = null,
         CancellationToken cancellationToken = default);
@@ -35,8 +64,15 @@ public interface IAssignmentEngine
         string? requestMeta = null,
         CancellationToken cancellationToken = default);
 
+    Task<Result<AssignmentActionResultDto>> MoveCurrentAssignmentAsync(
+        MoveCurrentWorkerAssignmentRequest request,
+        Guid actorUserId,
+        string? requestMeta = null,
+        CancellationToken cancellationToken = default);
+
     Task<Result<CancelTemporaryAssignmentResultDto>> CancelTemporaryAssignmentAsync(
         Guid assignmentId,
+        string reason,
         Guid actorUserId,
         string? requestMeta = null,
         CancellationToken cancellationToken = default);
@@ -56,6 +92,7 @@ public interface IAssignmentEngine
 }
 
 public sealed record WorkerAssignmentState(
+    Guid? AssignmentId,
     Guid WorkerId,
     AssignmentType? AssignmentType,
     DateTime? StartsAtUtc,
@@ -63,4 +100,5 @@ public sealed record WorkerAssignmentState(
     Guid? EffectiveSubStageId,
     Guid? FromSubStageId,
     Guid? ToSubStageId,
-    Guid? ReplacementForWorkerId);
+    Guid? ReplacementForWorkerId,
+    TemporaryAssignmentMode? ParticipationMode = null);

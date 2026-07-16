@@ -1,32 +1,98 @@
-<section class="page-frame auth-page">
-  <h1>تسجيل الدخول</h1>
-  <p>استخدم حساب النظام للوصول إلى لوحة تخطيط خطوط الإنتاج.</p>
+<main class="plp-login" plpMotion>
+  <section class="plp-login__brand" aria-labelledby="login-brand-title">
+    <plp-brand-logo class="plp-login__brand-mark" variant="login" size="56px" [animated]="true" label="شعار منصة تخطيط خطوط الإنتاج"></plp-brand-logo>
+    <p class="plp-login__eyebrow">PRODUCTION LINE PLANNER</p>
+    <h1 id="login-brand-title" class="plp-text-display">منصة تخطيط خطوط الإنتاج</h1>
+    <p class="plp-text-supporting">مساحة تشغيل موحّدة تُحوّل مراحل المصنع إلى خطة عمل واضحة وقابلة للمتابعة.</p>
+    <div class="plp-login__brand-points" aria-label="مزايا المنصة">
+      <span><i class="pi pi-check-circle" aria-hidden="true"></i> تشغيل واضح</span>
+      <span><i class="pi pi-check-circle" aria-hidden="true"></i> إدارة أسرع</span>
+      <span><i class="pi pi-check-circle" aria-hidden="true"></i> بيانات موثوقة</span>
+    </div>
+  </section>
 
-  <form class="auth-card" (submit)="onLogin($event)">
-    <label>
-      <span>البريد الإلكتروني</span>
-      <input
-        type="email"
-        autocomplete="username"
-        [value]="email"
+  <section class="plp-login__panel" aria-labelledby="login-title">
+    <div class="plp-login__panel-header">
+      <p class="plp-login__panel-kicker">بوابة التشغيل</p>
+      <h2 id="login-title" class="plp-text-page-title">تسجيل الدخول</h2>
+      <p class="plp-text-supporting">أدخل بيانات حسابك للمتابعة إلى مساحة العمل.</p>
+    </div>
+
+    <plp-form [busy]="isLoading" (submitted)="onLogin()">
+      <plp-form-field
+        label="البريد الإلكتروني"
+        controlId="login-email"
+        [required]="true"
         [disabled]="isLoading"
-        (input)="email = $any($event.target).value"
-      />
-    </label>
-    <label>
-      <span>كلمة المرور</span>
-      <input
-        type="password"
-        autocomplete="current-password"
-        [value]="password"
+        [error]="emailValidationMessage"
+      >
+        <input
+          pInputText
+          class="plp-control"
+          id="login-email"
+          name="email"
+          type="email"
+          autocomplete="username"
+          inputmode="email"
+          [value]="email"
+          [disabled]="isLoading"
+          [attr.aria-invalid]="emailValidationMessage ? 'true' : null"
+          (input)="onEmailChanged($any($event.target).value)"
+        />
+      </plp-form-field>
+
+      <plp-form-field
+        label="كلمة المرور"
+        controlId="login-password"
+        [required]="true"
         [disabled]="isLoading"
-        (input)="password = $any($event.target).value"
-      />
-    </label>
-    <p *ngIf="errorMessage" class="auth-message auth-message--error" role="alert">{{ errorMessage }}</p>
-    <p *ngIf="warningMessage" class="auth-message auth-message--warning">{{ warningMessage }}</p>
-    <button type="submit" class="primary-button" aria-label="تسجيل الدخول" [disabled]="isLoading">
-      {{ isLoading ? 'جار تسجيل الدخول...' : 'دخول' }}
-    </button>
-  </form>
-</section>
+        [error]="passwordValidationMessage"
+      >
+        <div class="plp-login__password-control">
+          <input
+            pInputText
+            class="plp-control"
+            id="login-password"
+            name="password"
+            [type]="isPasswordVisible ? 'text' : 'password'"
+            autocomplete="current-password"
+            [value]="password"
+            [disabled]="isLoading"
+            [attr.aria-invalid]="passwordValidationMessage ? 'true' : null"
+            (input)="onPasswordChanged($any($event.target).value)"
+          />
+          <button
+            pButton
+            type="button"
+            class="p-button-text plp-login__password-toggle"
+            [icon]="isPasswordVisible ? 'pi pi-eye-slash' : 'pi pi-eye'"
+            [disabled]="isLoading"
+            [attr.aria-label]="isPasswordVisible ? 'إخفاء كلمة المرور' : 'إظهار كلمة المرور'"
+            (click)="togglePasswordVisibility()"
+          ></button>
+        </div>
+      </plp-form-field>
+
+      <p-message
+        *ngIf="errorMessage"
+        severity="error"
+        [text]="errorMessage"
+        styleClass="plp-login__message"
+      ></p-message>
+      <p-message
+        *ngIf="warningMessage"
+        severity="info"
+        [text]="warningMessage"
+        styleClass="plp-login__message"
+      ></p-message>
+
+      <plp-action-button
+        action="save"
+        buttonType="submit"
+        label="دخول إلى مساحة العمل"
+        [loading]="isLoading"
+        [disabled]="isLoading"
+      ></plp-action-button>
+    </plp-form>
+  </section>
+</main>

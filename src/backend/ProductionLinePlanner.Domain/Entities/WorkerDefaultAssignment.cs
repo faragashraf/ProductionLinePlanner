@@ -49,4 +49,13 @@ public class WorkerDefaultAssignment
     public DateTime UpdatedAtUtc { get; private set; }
 
     public AssignmentType AssignmentType => AssignmentType.Default;
+
+    public void Deactivate(DateTime atUtc)
+    {
+        if (!IsActive)
+            throw new InvalidOperationException("Only active default assignments can be removed.");
+
+        IsActive = false;
+        UpdatedAtUtc = atUtc;
+    }
 }

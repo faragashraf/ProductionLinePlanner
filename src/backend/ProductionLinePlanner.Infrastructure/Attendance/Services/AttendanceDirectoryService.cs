@@ -10,8 +10,44 @@ namespace ProductionLinePlanner.Infrastructure.Attendance.Services;
 
 public sealed class AttendanceDirectoryService(
     AttendanceDbContext attendanceDbContext,
-    IOptions<AttendanceSourceOptions> sourceOptions) : IAttendanceEmployeeReader, IAttendanceEmployeeWriter, IAttendanceDepartmentReader, IAttendanceDepartmentWriter
+    IOptions<AttendanceSourceOptions> sourceOptions) : IAttendanceEmployeeReader, IAttendanceEmployeeWriter, IAttendanceDepartmentReader, IAttendanceDepartmentWriter, IAttendanceWorkerPhotoReader
 {
+    public async Task<Result<AttendanceWorkerPhotoRecord[]>> GetAllCurrentPhotosAsync(CancellationToken cancellationToken = default)
+    {
+        var currentEmployeeCodes = await GetCurrentEmployeeCodesAsync(cancellationToken);
+        var sourcePhotos = await attendanceDbContext.UserInfos
+            .AsNoTracking()
+            .Where(x => x.Photo != null && x.UserId != null)
+            .Select(x => new { x.UserId, x.BadgeNumber, x.Photo })
+            .ToArrayAsync(cancellationToken);
+
+        return Result<AttendanceWorkerPhotoRecord[]>.Success(sourcePhotos
+            .Where(x => currentEmployeeCodes.Contains(NormalizeCode(x.BadgeNumber)))
+            .Where(x => x.Photo is { Length: > 0 })
+            .Select(x => new AttendanceWorkerPhotoRecord(x.UserId!.Value.ToString(), x.Photo!))
+            .ToArray());
+    }
+
+    public async Task<Result<AttendanceWorkerPhotoRecord?>> GetPhotoByAttendanceUserIdAsync(
+        string attendanceUserId,
+        CancellationToken cancellationToken = default)
+    {
+        if (!TryParseAttendanceUserId(attendanceUserId, out var userId))
+        {
+            return Result<AttendanceWorkerPhotoRecord?>.Failure(new Error("ValidationError", "AttendanceUserId must be a valid integer."));
+        }
+
+        var photo = await attendanceDbContext.UserInfos
+            .AsNoTracking()
+            .Where(x => x.UserId == userId && x.Photo != null)
+            .Select(x => x.Photo)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return Result<AttendanceWorkerPhotoRecord?>.Success(photo is { Length: > 0 }
+            ? new AttendanceWorkerPhotoRecord(userId.ToString(), photo)
+            : null);
+    }
+
     public async Task<Result<AttendanceEmployeeRecord?>> GetByAttendanceUserIdAsync(
         string attendanceUserId,
         CancellationToken cancellationToken = default)
@@ -30,21 +66,23 @@ public sealed class AttendanceDirectoryService(
             return Result<AttendanceEmployeeRecord?>.Success(null);
         }
 
+        var currentEmployeeCodes = await GetCurrentEmployeeCodesAsync(cancellationToken);
+
         return Result<AttendanceEmployeeRecord?>.Success(new AttendanceEmployeeRecord(
             AttendanceUserId: userId.ToString(),
             DepartmentId: entity.DepartmentId,
             BadgeNumber: entity.BadgeNumber,
             Name: entity.Name,
-            IsActive: true));
+            IsActive: currentEmployeeCodes.Contains(NormalizeCode(entity.BadgeNumber))));
     }
 
     public async Task<Result<AttendanceEmployeeRecord[]>> GetAllAsync(CancellationToken cancellationToken = default)
     {
-        var sourceUsers = await attendanceDbContext.UserInfos
-            .AsNoTracking()
-            .ToListAsync(cancellationToken);
+        var currentEmployeeCodes = await GetCurrentEmployeeCodesAsync(cancellationToken);
+        var sourceUsers = await attendanceDbContext.UserInfos.AsNoTracking().ToListAsync(cancellationToken);
 
         var records = sourceUsers
+            .Where(x => currentEmployeeCodes.Contains(NormalizeCode(x.BadgeNumber)))
             .Select(x => new AttendanceEmployeeRecord(
                 AttendanceUserId: x.UserId?.ToString(),
                 DepartmentId: x.DepartmentId,
@@ -238,4 +276,14 @@ public sealed class AttendanceDirectoryService(
     private string GetUserInfoTableName() => sourceOptions.Value.UserInfoTable ?? "USERINFO";
 
     private string GetDepartmentsTableName() => sourceOptions.Value.DepartmentsTable ?? "DEPARTMENTS";
+
+    private async Task<HashSet<string>> GetCurrentEmployeeCodesAsync(CancellationToken cancellationToken) =>
+        (await attendanceDbContext.CurrentEmployees.AsNoTracking()
+            .Select(x => x.EmployeeCode)
+            .ToArrayAsync(cancellationToken))
+            .Select(NormalizeCode)
+            .Where(x => x.Length > 0)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+    private static string NormalizeCode(string? value) => value?.Trim() ?? string.Empty;
 }
