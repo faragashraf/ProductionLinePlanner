@@ -34,7 +34,7 @@ public static class ProductionCostRecordingEndpoints
             if (result.IsFailure)
             {
                 var status = result.Error?.Code == "NotFound" ? StatusCodes.Status404NotFound : StatusCodes.Status400BadRequest;
-                return Results.Json(ApiResponse.Failure(result.Error?.Code ?? "ReadinessFailed", result.Error?.Message ?? "Unable to calculate product readiness.", status), statusCode: status);
+                return ApiResponse.Failure(result.Error?.Code ?? "ReadinessFailed", result.Error?.Message ?? "Unable to calculate product readiness.", status);
             }
 
             return Results.Ok(ApiResponse.Success(result.Value!));

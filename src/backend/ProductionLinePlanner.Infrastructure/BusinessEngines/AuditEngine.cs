@@ -37,7 +37,21 @@ public sealed class AuditEngine : IAuditEngine
         "RevokedAtUtc",
         "IsRead",
         "ReadAtUtc",
-        "IsActive"
+        "IsActive",
+        "Name",
+        "Description",
+        "Code",
+        "Location",
+        "LineCode",
+        "FactoryId",
+        "SequenceOrder",
+        "Role",
+        "Roles",
+        "RoleIds",
+        "Permissions",
+        "PermissionNames",
+        "Permission",
+        "Effect"
         ,"OrderNumber"
         ,"ProductionOrderId"
         ,"ProductModelStageId"
@@ -180,6 +194,17 @@ public sealed class AuditEngine : IAuditEngine
                         if (items.Count == 100) break;
                     }
                     result[property.Name] = items;
+                }
+                else if (value is System.Collections.IEnumerable values && value is not string)
+                {
+                    var safeValues = values.Cast<object?>()
+                        .Where(item => item is not null && IsSimpleType(item))
+                        .Take(100)
+                        .ToArray();
+                    if (safeValues.Length > 0)
+                    {
+                        result[property.Name] = safeValues;
+                    }
                 }
             }
 

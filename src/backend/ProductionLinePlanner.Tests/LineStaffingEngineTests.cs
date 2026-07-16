@@ -74,7 +74,7 @@ public sealed class LineStaffingEngineTests
         Assert.Equal("Default", afterWorker.EffectiveAssignmentType);
         Assert.Equal(fixture.DefaultSubStage.Id, afterWorker.DefaultSubStageId);
         Assert.True((await fixture.Db.WorkerDefaultAssignments.SingleAsync(assignment => assignment.WorkerId == fixture.TemporarilyMovedWorker.Id)).IsActive);
-        Assert.Equal("Completed", (await fixture.Db.WorkerTemporaryAssignments.SingleAsync()).Status);
+        Assert.Equal("Active", (await fixture.Db.WorkerTemporaryAssignments.SingleAsync()).Status);
     }
 
     [Fact]

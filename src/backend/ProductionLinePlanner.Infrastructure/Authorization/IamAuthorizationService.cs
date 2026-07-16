@@ -1,7 +1,7 @@
 using System.Data;
-using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using ProductionLinePlanner.Application.Abstractions;
+using ProductionLinePlanner.Application.Engines;
 using ProductionLinePlanner.Application.Requests;
 using ProductionLinePlanner.Domain.Entities;
 using ProductionLinePlanner.Domain.Enums;
@@ -9,7 +9,10 @@ using ProductionLinePlanner.Infrastructure.Data;
 
 namespace ProductionLinePlanner.Infrastructure.Authorization;
 
-public sealed class IamAuthorizationService(AppDbContext dbContext, IIamDelegationPolicy delegationPolicy) : IIamAuthorizationService
+public sealed class IamAuthorizationService(
+    AppDbContext dbContext,
+    IIamDelegationPolicy delegationPolicy,
+    IAuditEngine auditEngine) : IIamAuthorizationService
 {
     public async Task<IamAuthorizationUpdateResult> ReplaceAsync(Guid actorUserId, Guid targetUserId, UserAuthorizationUpdateRequest request, string? requestMeta, CancellationToken cancellationToken = default)
     {
@@ -43,7 +46,15 @@ public sealed class IamAuthorizationService(AppDbContext dbContext, IIamDelegati
         dbContext.UserPermissionOverrides.RemoveRange(overrides.Select(entry => entry.Entry));
         foreach (var permission in permissions) dbContext.UserPermissionOverrides.Add(new UserPermissionOverride(targetUserId, permission.Id, desired[permission.Name], actorUserId));
         dbContext.Entry(user).Property(nameof(AppUser.UpdatedAtUtc)).CurrentValue = DateTime.UtcNow;
-        dbContext.AuditLogs.Add(new AuditLog(Guid.NewGuid(), actorUserId, AuditActionType.Update, nameof(AppUser), targetUserId.ToString(), JsonSerializer.Serialize(before), JsonSerializer.Serialize(new { RoleIds = roleIds, Permissions = desired.Select(x => $"{x.Key}:{x.Value}").ToArray(), Result = "AuthorizationUpdated" }), requestMeta));
+        await auditEngine.RecordAsync(
+            actorUserId,
+            AuditActionType.Update,
+            nameof(AppUser),
+            targetUserId.ToString(),
+            before,
+            new { RoleIds = roleIds, Permissions = desired.Select(x => $"{x.Key}:{x.Value}").ToArray(), Result = "AuthorizationUpdated" },
+            requestMeta,
+            cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken);
         return new(true, 200, string.Empty, string.Empty, roleIds, grants, denies);
     }

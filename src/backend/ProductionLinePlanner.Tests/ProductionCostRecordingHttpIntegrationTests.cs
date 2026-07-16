@@ -117,6 +117,41 @@ public sealed class ProductionCostRecordingHttpIntegrationTests
     }
 
     [Fact]
+    public async Task Product_readiness_success_uses_the_standard_api_success_envelope()
+    {
+        await using var fixture = await ProductionHttpFixture.CreateAsync();
+
+        var response = await fixture.SendAsync(
+            HttpMethod.Get,
+            $"/api/production/readiness?productModelId={fixture.ModelId}&productionLineId={fixture.LineId}&productionDate=2026-07-13",
+            permissions: ["production.view"]);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.True(document.RootElement.GetProperty("success").GetBoolean());
+        Assert.Equal(1, document.RootElement.GetProperty("data").GetProperty("totalStages").GetInt32());
+    }
+
+    [Fact]
+    public async Task Product_readiness_failure_uses_the_standard_api_failure_envelope()
+    {
+        await using var fixture = await ProductionHttpFixture.CreateAsync(readinessError: new Error("NotFound", "Readiness source not found."));
+
+        var response = await fixture.SendAsync(
+            HttpMethod.Get,
+            $"/api/production/readiness?productModelId={fixture.ModelId}&productionLineId={fixture.LineId}&productionDate=2026-07-13",
+            permissions: ["production.view"]);
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Equal("application/json", response.Content.Headers.ContentType?.MediaType);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.False(document.RootElement.GetProperty("success").GetBoolean());
+        Assert.Equal("NotFound", document.RootElement.GetProperty("error").GetProperty("code").GetString());
+        Assert.Equal("Readiness source not found.", document.RootElement.GetProperty("error").GetProperty("message").GetString());
+        Assert.False(document.RootElement.TryGetProperty("statusCode", out _));
+    }
+
+    [Fact]
     public async Task Production_endpoints_enforce_http_permission_boundaries()
     {
         await using var fixture = await ProductionHttpFixture.CreateAsync();
@@ -263,7 +298,7 @@ public sealed class ProductionCostRecordingHttpIntegrationTests
         { _connection = connection; _app = app; _client = client; _userId = userId; FactoryId = factoryId; ModelId = modelId; LineId = lineId; ModelStageId = modelStageId; WorkerAId = workerAId; WorkerBId = workerBId; }
         public Guid FactoryId { get; } public Guid ModelId { get; } public Guid LineId { get; } public Guid ModelStageId { get; } public Guid WorkerAId { get; } public Guid WorkerBId { get; }
 
-        public static async Task<ProductionHttpFixture> CreateAsync(decimal piecePrice = .50m)
+        public static async Task<ProductionHttpFixture> CreateAsync(decimal piecePrice = .50m, Error? readinessError = null)
         {
             var connection = new SqliteConnection("Data Source=:memory:"); connection.CreateCollation("SQL_Latin1_General_CP1_CI_AS", (left, right) => string.Compare(left, right, StringComparison.OrdinalIgnoreCase)); await connection.OpenAsync();
             var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "IntegrationTest" });
@@ -279,7 +314,14 @@ public sealed class ProductionCostRecordingHttpIntegrationTests
             builder.Services.AddScoped<IAssignmentEngine, AssignmentEngine>();
             builder.Services.AddScoped<IAttendanceEngine, PresentAttendanceEngine>();
             builder.Services.AddScoped<IProductionCostRecordingService, ProductionCostRecordingService>();
-            builder.Services.AddScoped<IProductionReadinessEngine, ProductionReadinessEngine>();
+            if (readinessError is null)
+            {
+                builder.Services.AddScoped<IProductionReadinessEngine, ProductionReadinessEngine>();
+            }
+            else
+            {
+                builder.Services.AddSingleton<IProductionReadinessEngine>(new FailingProductionReadinessEngine(readinessError));
+            }
             builder.Services.AddScoped<IImportNormalizationService, ImportNormalizationService>();
             builder.Services.AddScoped<IRealDataIntakeService, RealDataIntakeService>();
             var app = builder.Build(); app.UseExceptionHandler(error => error.Run(context =>
@@ -329,6 +371,16 @@ public sealed class ProductionCostRecordingHttpIntegrationTests
         public Task<Result<AttendanceSyncResultDto>> SyncTodayAsync(CancellationToken cancellationToken = default) => Task.FromResult(Result<AttendanceSyncResultDto>.Success(new AttendanceSyncResultDto()));
         public Task<Result<AttendanceSyncResultDto>> SyncForProductionDateAsync(DateOnly productionDate, CancellationToken cancellationToken = default) => Task.FromResult(Result<AttendanceSyncResultDto>.Success(new AttendanceSyncResultDto()));
         public Task<Result<Dictionary<Guid, AttendanceStatusRecord>>> GetLatestAttendanceStatusByWorkerAsync(IEnumerable<Guid> workerIds, DateTime? asOfUtc = null, CancellationToken cancellationToken = default) => Task.FromResult(Result<Dictionary<Guid, AttendanceStatusRecord>>.Success(workerIds.Distinct().ToDictionary(id => id, id => new AttendanceStatusRecord(id, AttendanceStatus.Present, asOfUtc ?? DateTime.UtcNow, "test"))));
+    }
+
+    private sealed class FailingProductionReadinessEngine(Error error) : IProductionReadinessEngine
+    {
+        public Task<Result<ProductProductionReadinessDto>> GetProductReadinessAsync(
+            Guid productModelId,
+            Guid productionLineId,
+            DateOnly productionDate,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(Result<ProductProductionReadinessDto>.Failure(error));
     }
 
     private sealed class HeaderAuthenticationHandler(IOptionsMonitor<AuthenticationSchemeOptions> options, ILoggerFactory logger, UrlEncoder encoder) : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder)

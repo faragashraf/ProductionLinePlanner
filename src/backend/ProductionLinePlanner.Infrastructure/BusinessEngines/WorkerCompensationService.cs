@@ -170,22 +170,21 @@ public sealed class WorkerCompensationService(
         dbContext.WorkerSalaryHistories.Add(entity);
         try
         {
+            await auditEngine.RecordAsync(
+                actorUserId,
+                Domain.Enums.AuditActionType.Create,
+                nameof(WorkerSalaryHistory),
+                entity.Id.ToString(),
+                before: current is null ? null : new { current.Id, current.WorkerId, current.EffectiveFrom, current.EffectiveTo, current.Amount },
+                after: new { entity.Id, entity.WorkerId, entity.Amount, entity.CurrencyCode, entity.EffectiveFrom, entity.EffectiveTo },
+                requestMeta: requestMeta,
+                cancellationToken: cancellationToken);
             await dbContext.SaveChangesAsync(cancellationToken);
         }
         catch (DbUpdateException)
         {
             return Result<WorkerSalaryHistoryDto>.Failure(new Error("Conflict", "A current salary record already exists for this worker."));
         }
-
-        await auditEngine.RecordAsync(
-            actorUserId,
-            Domain.Enums.AuditActionType.Create,
-            nameof(WorkerSalaryHistory),
-            entity.Id.ToString(),
-            before: current is null ? null : new { current.Id, current.WorkerId, current.EffectiveFrom, current.EffectiveTo, current.Amount },
-            after: new { entity.Id, entity.WorkerId, entity.Amount, entity.CurrencyCode, entity.EffectiveFrom, entity.EffectiveTo },
-            requestMeta: requestMeta,
-            cancellationToken: cancellationToken);
 
         return Result<WorkerSalaryHistoryDto>.Success(MapSalary(entity));
     }
@@ -274,8 +273,6 @@ public sealed class WorkerCompensationService(
             createdAtUtc: DateTime.UtcNow);
 
         dbContext.WorkerSalaryHistories.Add(entity);
-        await dbContext.SaveChangesAsync(cancellationToken);
-
         await auditEngine.RecordAsync(
             actorUserId,
             Domain.Enums.AuditActionType.Create,
@@ -285,6 +282,7 @@ public sealed class WorkerCompensationService(
             after: new { entity.Id, entity.WorkerId, entity.Amount, entity.CurrencyCode, entity.EffectiveFrom, entity.EffectiveTo },
             requestMeta: requestMeta,
             cancellationToken: cancellationToken);
+        await dbContext.SaveChangesAsync(cancellationToken);
 
         return Result<WorkerSalaryHistoryDto>.Success(MapSalary(entity));
     }

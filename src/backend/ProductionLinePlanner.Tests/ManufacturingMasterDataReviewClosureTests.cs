@@ -255,7 +255,7 @@ public sealed class ManufacturingMasterDataReviewClosureTests
     }
 
     [Fact]
-    public async Task Department_persistence_failure_compensates_external_move_without_success_audit()
+    public async Task Department_persistence_failure_compensates_external_move_after_queuing_the_uncommitted_audit()
     {
         var interceptor = new ThrowingSaveChangesInterceptor();
         await using var dbContext = ProductModelFixture.CreateContext(interceptor);
@@ -279,11 +279,11 @@ public sealed class ManufacturingMasterDataReviewClosureTests
         Assert.True(result.IsFailure);
         Assert.Equal("PersistenceFailed", result.Error!.Code);
         Assert.Equal(new[] { 2, 1 }, writer.DepartmentUpdates.Select(x => x.DepartmentId));
-        Assert.Empty(audit.Calls);
+        Assert.Single(audit.Calls);
     }
 
     [Fact]
-    public async Task Department_rollback_failure_requires_reconciliation_without_success_audit()
+    public async Task Department_rollback_failure_requires_reconciliation_after_queuing_the_uncommitted_audit()
     {
         var interceptor = new ThrowingSaveChangesInterceptor();
         await using var dbContext = ProductModelFixture.CreateContext(interceptor);
@@ -310,7 +310,7 @@ public sealed class ManufacturingMasterDataReviewClosureTests
 
         Assert.True(result.IsFailure);
         Assert.Equal("NeedsReconciliation", result.Error!.Code);
-        Assert.Empty(audit.Calls);
+        Assert.Single(audit.Calls);
     }
 
     private sealed class TestableManufacturingMigration : AddManufacturingMasterDataFoundation

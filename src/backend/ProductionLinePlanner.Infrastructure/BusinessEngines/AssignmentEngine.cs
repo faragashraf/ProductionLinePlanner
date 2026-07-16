@@ -110,10 +110,6 @@ public sealed class AssignmentEngine : IAssignmentEngine
         if (uniqueWorkerIds.Length == 0)
             return Result<Dictionary<Guid, IReadOnlyCollection<WorkerAssignmentState>>>.Success(new Dictionary<Guid, IReadOnlyCollection<WorkerAssignmentState>>());
 
-        var finalizeResult = await FinalizeCompletedTemporaryAssignmentsAsync(asOfUtc, cancellationToken);
-        if (finalizeResult.IsFailure)
-            return Result<Dictionary<Guid, IReadOnlyCollection<WorkerAssignmentState>>>.Failure(finalizeResult.Error!);
-
         var defaultAssignments = await _dbContext.WorkerDefaultAssignments
             .AsNoTracking()
             .Where(x => uniqueWorkerIds.Contains(x.WorkerId) && x.IsActive)
@@ -835,7 +831,11 @@ public sealed class AssignmentEngine : IAssignmentEngine
         }
 
         var now = DateTime.UtcNow;
-        await FinalizeCompletedTemporaryAssignmentsAsync(now, cancellationToken);
+        var finalizeResult = await FinalizeCompletedTemporaryAssignmentsCoreAsync(now, cancellationToken);
+        if (finalizeResult.IsFailure)
+        {
+            return Result<CancelTemporaryAssignmentResultDto>.Failure(finalizeResult.Error!);
+        }
 
         var assignment = await _dbContext.WorkerTemporaryAssignments
             .FirstOrDefaultAsync(
@@ -1282,7 +1282,17 @@ public sealed class AssignmentEngine : IAssignmentEngine
         return Result<SubStage>.Success(subStage);
     }
 
-    private async Task<Result> FinalizeCompletedTemporaryAssignmentsAsync(
+    public async Task<Result<int>> FinalizeCompletedTemporaryAssignmentsAsync(
+        DateTime? asOfUtc = null,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await FinalizeCompletedTemporaryAssignmentsCoreAsync(asOfUtc ?? DateTime.UtcNow, cancellationToken);
+        return result.IsFailure
+            ? Result<int>.Failure(result.Error!)
+            : Result<int>.Success(result.Value!);
+    }
+
+    private async Task<Result<int>> FinalizeCompletedTemporaryAssignmentsCoreAsync(
         DateTime asOfUtc,
         CancellationToken cancellationToken)
     {
@@ -1292,7 +1302,7 @@ public sealed class AssignmentEngine : IAssignmentEngine
 
         if (endedAssignments.Count == 0)
         {
-            return Result.Success();
+            return Result<int>.Success(0);
         }
 
         foreach (var assignment in endedAssignments)
@@ -1322,8 +1332,8 @@ public sealed class AssignmentEngine : IAssignmentEngine
         }
         catch (DbUpdateConcurrencyException)
         {
-            return Result.Failure(new Error("Conflict", "تمت معالجة انتهاء التعيين المؤقت بواسطة مستخدم آخر."));
+            return Result<int>.Failure(new Error("Conflict", "تمت معالجة انتهاء التعيين المؤقت بواسطة مستخدم آخر."));
         }
-        return Result.Success();
+        return Result<int>.Success(endedAssignments.Count);
     }
 }

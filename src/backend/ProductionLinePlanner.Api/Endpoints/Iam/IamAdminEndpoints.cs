@@ -9,6 +9,8 @@ using ProductionLinePlanner.Domain.Enums;
 using ProductionLinePlanner.Domain.Entities;
 using ProductionLinePlanner.Domain.Authorization;
 using ProductionLinePlanner.Api.Authorization;
+using ProductionLinePlanner.Api.Diagnostics;
+using ProductionLinePlanner.Application.Engines;
 using ProductionLinePlanner.Infrastructure.Data;
 
 public static class IamAdminEndpoints
@@ -204,6 +206,7 @@ adminApi.MapPatch("/users/{userId:guid}/roles", async (
     AppDbContext dbContext,
     IIamDelegationPolicy delegationPolicy,
     ICurrentUserService currentUserService,
+    IAuditEngine auditEngine,
     HttpContext httpContext,
     CancellationToken cancellationToken) =>
 {
@@ -285,22 +288,20 @@ adminApi.MapPatch("/users/{userId:guid}/roles", async (
     }
 
     dbContext.Entry(user).Property(nameof(AppUser.UpdatedAtUtc)).CurrentValue = DateTime.UtcNow;
-    await dbContext.SaveChangesAsync(cancellationToken);
-
     var afterRoles = user.Roles
         .Select(role => role.Name)
         .OrderBy(role => role)
         .ToArray();
 
-    AssignmentHelpers.AddAuditLog(
-        dbContext,
+    await auditEngine.RecordAsync(
         actorUserId.Value,
         AuditActionType.Update,
         nameof(AppUser),
         user.Id.ToString(),
         before: new { roles = beforeRoles },
         after: new { roles = afterRoles },
-        httpContext);
+        requestMeta: AuditRequestMetadata.From(httpContext),
+        cancellationToken: cancellationToken);
     await dbContext.SaveChangesAsync(cancellationToken);
 
     await roleAssignmentTransaction.CommitAsync(cancellationToken);
@@ -336,6 +337,7 @@ adminApi.MapPatch("/users/{userId:guid}/status", async (
     UserStatusRequest request,
     AppDbContext dbContext,
     ICurrentUserService currentUserService,
+    IAuditEngine auditEngine,
     HttpContext httpContext,
     CancellationToken cancellationToken) =>
 {
@@ -377,17 +379,15 @@ adminApi.MapPatch("/users/{userId:guid}/status", async (
     var before = new { user.IsActive };
     dbContext.Entry(user).Property(nameof(AppUser.IsActive)).CurrentValue = request.IsActive;
     dbContext.Entry(user).Property(nameof(AppUser.UpdatedAtUtc)).CurrentValue = DateTime.UtcNow;
-    await dbContext.SaveChangesAsync(cancellationToken);
-
-    AssignmentHelpers.AddAuditLog(
-        dbContext,
+    await auditEngine.RecordAsync(
         actorUserId.Value,
         AuditActionType.Update,
         nameof(AppUser),
         user.Id.ToString(),
         before,
         new { isActive = request.IsActive },
-        httpContext);
+        requestMeta: AuditRequestMetadata.From(httpContext),
+        cancellationToken: cancellationToken);
     await dbContext.SaveChangesAsync(cancellationToken);
 
     await userStatusTransaction.CommitAsync(cancellationToken);
@@ -404,6 +404,7 @@ adminApi.MapPost("/users/{userId:guid}/permission-overrides", async (
     AppDbContext dbContext,
     IIamDelegationPolicy delegationPolicy,
     ICurrentUserService currentUserService,
+    IAuditEngine auditEngine,
     HttpContext httpContext,
     CancellationToken cancellationToken) =>
 {
@@ -458,15 +459,15 @@ adminApi.MapPost("/users/{userId:guid}/permission-overrides", async (
         effect: effect,
         createdByUserId: actorUserId));
 
-    AssignmentHelpers.AddAuditLog(
-        dbContext,
+    await auditEngine.RecordAsync(
         actorUserId.Value,
         AuditActionType.Update,
         nameof(AppUser),
         userId.ToString(),
         before: null,
         after: new { permission = permission.Name, effect = effect.ToString() },
-        httpContext);
+        requestMeta: AuditRequestMetadata.From(httpContext),
+        cancellationToken: cancellationToken);
     await dbContext.SaveChangesAsync(cancellationToken);
 
     return Results.Ok(ApiResponse.Success(new
@@ -486,6 +487,7 @@ adminApi.MapDelete("/users/{userId:guid}/permission-overrides/{permissionName}",
     AppDbContext dbContext,
     IIamDelegationPolicy delegationPolicy,
     ICurrentUserService currentUserService,
+    IAuditEngine auditEngine,
     HttpContext httpContext,
     CancellationToken cancellationToken) =>
 {
@@ -531,17 +533,15 @@ adminApi.MapDelete("/users/{userId:guid}/permission-overrides/{permissionName}",
     }
 
     dbContext.UserPermissionOverrides.Remove(existingOverride);
-    await dbContext.SaveChangesAsync(cancellationToken);
-
-    AssignmentHelpers.AddAuditLog(
-        dbContext,
+    await auditEngine.RecordAsync(
         actorUserId.Value,
         AuditActionType.Update,
         nameof(AppUser),
         userId.ToString(),
         before: new { permission = permission.Name, effect = existingOverride.Effect.ToString() },
         after: null,
-        httpContext);
+        requestMeta: AuditRequestMetadata.From(httpContext),
+        cancellationToken: cancellationToken);
     await dbContext.SaveChangesAsync(cancellationToken);
 
     return Results.Ok(ApiResponse.Success(new { removed = true }));
@@ -618,6 +618,7 @@ adminApi.MapPost("/roles", async (
     RoleCreateRequest request,
     AppDbContext dbContext,
     ICurrentUserService currentUserService,
+    IAuditEngine auditEngine,
     HttpContext httpContext,
     CancellationToken cancellationToken) =>
 {
@@ -659,16 +660,15 @@ adminApi.MapPost("/roles", async (
 
     dbContext.AppRoles.Add(roleEntity);
 
-    await dbContext.SaveChangesAsync(cancellationToken);
-    AssignmentHelpers.AddAuditLog(
-        dbContext,
+    await auditEngine.RecordAsync(
         actorUserId.Value,
         AuditActionType.Create,
         nameof(AppRole),
         roleEntity.Id.ToString(),
         before: null,
         after: new { roleEntity.Role, roleEntity.Name, roleEntity.Description, roleEntity.IsSystemRole },
-        httpContext);
+        requestMeta: AuditRequestMetadata.From(httpContext),
+        cancellationToken: cancellationToken);
     await dbContext.SaveChangesAsync(cancellationToken);
 
     return Results.Created($"/api/admin/roles/{roleEntity.Id}", ApiResponse.Success(new AdminRoleDto
@@ -692,6 +692,7 @@ adminApi.MapPatch("/roles/{roleId:guid}", async (
     RoleUpdateRequest request,
     AppDbContext dbContext,
     ICurrentUserService currentUserService,
+    IAuditEngine auditEngine,
     HttpContext httpContext,
     CancellationToken cancellationToken) =>
 {
@@ -743,17 +744,15 @@ adminApi.MapPatch("/roles/{roleId:guid}", async (
     }
 
     role.UpdateDetails(request.Name, request.HasDescription, request.Description, request.IsActive);
-    await dbContext.SaveChangesAsync(cancellationToken);
-
-    AssignmentHelpers.AddAuditLog(
-        dbContext,
+    await auditEngine.RecordAsync(
         actorUserId.Value,
         AuditActionType.Update,
         nameof(AppRole),
         role.Id.ToString(),
         beforeRole,
         after: new { role.Name, role.Description, role.IsActive },
-        httpContext);
+        requestMeta: AuditRequestMetadata.From(httpContext),
+        cancellationToken: cancellationToken);
     await dbContext.SaveChangesAsync(cancellationToken);
 
     return Results.Ok(ApiResponse.Success(new AdminRoleDto
@@ -782,6 +781,7 @@ adminApi.MapDelete("/roles/{roleId:guid}", async (
     Guid roleId,
     AppDbContext dbContext,
     ICurrentUserService currentUserService,
+    IAuditEngine auditEngine,
     HttpContext httpContext,
     CancellationToken cancellationToken) =>
 {
@@ -811,15 +811,15 @@ adminApi.MapDelete("/roles/{roleId:guid}", async (
     var beforeRole = new { role.Role, role.Name, role.Description, role.IsActive };
     dbContext.AppRoles.Remove(role);
 
-    AssignmentHelpers.AddAuditLog(
-        dbContext,
+    await auditEngine.RecordAsync(
         actorUserId.Value,
         AuditActionType.Delete,
         nameof(AppRole),
         role.Id.ToString(),
         beforeRole,
         after: null,
-        httpContext);
+        requestMeta: AuditRequestMetadata.From(httpContext),
+        cancellationToken: cancellationToken);
 
     await dbContext.SaveChangesAsync(cancellationToken);
     return Results.NoContent();
@@ -835,6 +835,7 @@ adminApi.MapPut("/roles/{roleId:guid}/permissions", async (
     IPermissionService permissionService,
     IIamDelegationPolicy delegationPolicy,
     ICurrentUserService currentUserService,
+    IAuditEngine auditEngine,
     HttpContext httpContext,
     CancellationToken cancellationToken) =>
 {
@@ -915,17 +916,15 @@ adminApi.MapPut("/roles/{roleId:guid}/permissions", async (
     }
 
     dbContext.Entry(role).Property(nameof(AppRole.UpdatedAtUtc)).CurrentValue = DateTime.UtcNow;
-    await dbContext.SaveChangesAsync(cancellationToken);
-
-    AssignmentHelpers.AddAuditLog(
-        dbContext,
+    await auditEngine.RecordAsync(
         actorUserId.Value,
         AuditActionType.Update,
         nameof(AppRole),
         role.Id.ToString(),
         before: new { Permissions = currentPermissionNames.OrderBy(permission => permission).ToArray() },
         after: new { Permissions = requestedSet.OrderBy(permission => permission).ToArray() },
-        httpContext);
+        requestMeta: AuditRequestMetadata.From(httpContext),
+        cancellationToken: cancellationToken);
     await dbContext.SaveChangesAsync(cancellationToken);
 
     var assignedUsers = await dbContext.AppUsers.CountAsync(user => user.Roles.Any(userRole => userRole.Id == role.Id), cancellationToken);

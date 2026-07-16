@@ -27,6 +27,14 @@ public interface IAssignmentEngine
         DateTime asOfUtc,
         CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Finalizes expired temporary assignments as an explicit write operation.
+    /// Read resolvers deliberately do not mutate assignment state.
+    /// </summary>
+    Task<Result<int>> FinalizeCompletedTemporaryAssignmentsAsync(
+        DateTime? asOfUtc = null,
+        CancellationToken cancellationToken = default);
+
     Task<Result<AssignmentActionResultDto>> CreateOrUpdateDefaultAssignmentAsync(
         CreateDefaultAssignmentRequest request,
         Guid actorUserId,

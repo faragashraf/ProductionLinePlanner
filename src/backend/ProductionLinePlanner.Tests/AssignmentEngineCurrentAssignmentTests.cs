@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using ProductionLinePlanner.Application.Engines;
 using ProductionLinePlanner.Application.Requests;
 using ProductionLinePlanner.Domain.Entities;
@@ -11,7 +12,7 @@ namespace ProductionLinePlanner.Tests;
 public sealed class AssignmentEngineCurrentAssignmentTests
 {
     [Fact]
-    public async Task Expired_temporary_assignment_is_finalized_and_not_current()
+    public async Task Expired_temporary_assignment_is_not_current_and_assignment_read_does_not_write()
     {
         await using var fixture = AssignmentFixture.Create();
         var asOfUtc = new DateTime(2026, 7, 13, 12, 0, 0, DateTimeKind.Utc);
@@ -41,7 +42,51 @@ public sealed class AssignmentEngineCurrentAssignmentTests
         var assignment = Assert.Single(result.Value!);
         Assert.Equal(fixture.DefaultSubStage.Id, assignment.Value.EffectiveSubStageId);
         Assert.Equal(AssignmentType.Default, assignment.Value.AssignmentType);
-        Assert.Equal("Completed", (await fixture.Db.WorkerTemporaryAssignments.SingleAsync()).Status);
+        Assert.Equal("Active", (await fixture.Db.WorkerTemporaryAssignments.AsNoTracking().SingleAsync()).Status);
+        Assert.Empty(await fixture.Db.AssignmentTimelineEntries.AsNoTracking().ToListAsync());
+    }
+
+    [Fact]
+    public async Task Explicit_finalization_is_the_only_path_that_completes_expired_temporary_assignments()
+    {
+        await using var fixture = AssignmentFixture.Create();
+        var asOfUtc = new DateTime(2026, 7, 13, 12, 0, 0, DateTimeKind.Utc);
+        fixture.Db.WorkerTemporaryAssignments.Add(new WorkerTemporaryAssignment(
+            Guid.NewGuid(), fixture.Worker.Id, fixture.DefaultSubStage.Id, fixture.TemporarySubStage.Id,
+            asOfUtc.AddHours(-3), asOfUtc.AddHours(-1), fixture.ActorId, "Expired temporary", status: "Active"));
+        await fixture.Db.SaveChangesAsync();
+
+        var finalized = await fixture.Engine.FinalizeCompletedTemporaryAssignmentsAsync(asOfUtc);
+
+        Assert.True(finalized.IsSuccess);
+        Assert.Equal(1, finalized.Value);
+        Assert.Equal("Completed", (await fixture.Db.WorkerTemporaryAssignments.AsNoTracking().SingleAsync()).Status);
+        Assert.Single(await fixture.Db.AssignmentTimelineEntries.AsNoTracking().ToListAsync());
+    }
+
+    [Fact]
+    public async Task Assignment_read_does_not_invoke_SaveChanges_when_expired_assignments_exist()
+    {
+        var saveInterceptor = new ThrowingSaveChangesInterceptor();
+        var options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .AddInterceptors(saveInterceptor)
+            .Options;
+        var asOfUtc = new DateTime(2026, 7, 13, 12, 0, 0, DateTimeKind.Utc);
+        var workerId = Guid.NewGuid();
+        var actorId = Guid.NewGuid();
+        await using var db = new AppDbContext(options);
+        db.AddRange(
+            new WorkerDefaultAssignment(Guid.NewGuid(), workerId, Guid.NewGuid(), actorId, asOfUtc.AddDays(-1)),
+            new WorkerTemporaryAssignment(Guid.NewGuid(), workerId, Guid.NewGuid(), Guid.NewGuid(), asOfUtc.AddHours(-3), asOfUtc.AddHours(-1), actorId, "Expired temporary", status: "Active"));
+        await db.SaveChangesAsync();
+        saveInterceptor.ThrowOnSave = true;
+        var engine = new AssignmentEngine(db, new NoopAuditEngine());
+
+        var result = await engine.ResolveCurrentAssignmentsAsync([workerId], asOfUtc);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(0, saveInterceptor.BlockedSaveAttempts);
     }
 
     [Fact]
@@ -289,7 +334,7 @@ public sealed class AssignmentEngineCurrentAssignmentTests
         Assert.Equal(new[] { fixture.DefaultSubStage.Id, fixture.TemporarySubStage.Id }.Order(), during.Value![fixture.Worker.Id].Select(assignment => assignment.EffectiveSubStageId!.Value).Order());
         Assert.Equal([fixture.DefaultSubStage.Id], after.Value![fixture.Worker.Id].Select(assignment => assignment.EffectiveSubStageId!.Value).ToArray());
         Assert.True((await fixture.Db.WorkerDefaultAssignments.SingleAsync()).IsActive);
-        Assert.Equal("Completed", (await fixture.Db.WorkerTemporaryAssignments.SingleAsync()).Status);
+        Assert.Equal("Active", (await fixture.Db.WorkerTemporaryAssignments.SingleAsync()).Status);
     }
 
     [Fact]
@@ -407,5 +452,25 @@ public sealed class AssignmentEngineCurrentAssignmentTests
             string? requestMeta = null,
             CancellationToken cancellationToken = default) =>
             Task.FromResult(ProductionLinePlanner.Application.Common.Result.Success());
+    }
+
+    private sealed class ThrowingSaveChangesInterceptor : SaveChangesInterceptor
+    {
+        public bool ThrowOnSave { get; set; }
+        public int BlockedSaveAttempts { get; private set; }
+
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (ThrowOnSave)
+            {
+                BlockedSaveAttempts++;
+                throw new InvalidOperationException("Assignment reads must not save changes.");
+            }
+
+            return base.SavingChangesAsync(eventData, result, cancellationToken);
+        }
     }
 }

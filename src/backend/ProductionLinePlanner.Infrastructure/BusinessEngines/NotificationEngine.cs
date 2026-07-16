@@ -115,8 +115,6 @@ public sealed class NotificationEngine : INotificationEngine
         if (!notification.IsRead)
         {
             notification.MarkAsRead(readAtUtc ?? DateTime.UtcNow);
-            await _dbContext.SaveChangesAsync(cancellationToken);
-
             await _auditEngine.RecordAsync(
                 recipientUserId,
                 AuditActionType.Update,
@@ -125,6 +123,7 @@ public sealed class NotificationEngine : INotificationEngine
                 before,
                 notification,
                 cancellationToken: cancellationToken);
+            await _dbContext.SaveChangesAsync(cancellationToken);
         }
 
         return Result<NotificationDto>.Success(new NotificationDto
@@ -163,20 +162,40 @@ public sealed class NotificationEngine : INotificationEngine
         }
 
         var now = DateTime.UtcNow;
-        var updatedCount = await query.ExecuteUpdateAsync(setters => setters
-            .SetProperty(x => x.IsRead, true)
-            .SetProperty(x => x.Status, NotificationStatus.Read)
-            .SetProperty(x => x.ReadAtUtc, now), cancellationToken);
+        await using var transaction = _dbContext.Database.IsRelational()
+            ? await _dbContext.Database.BeginTransactionAsync(cancellationToken)
+            : null;
+        try
+        {
+            var updatedCount = await query.ExecuteUpdateAsync(setters => setters
+                .SetProperty(x => x.IsRead, true)
+                .SetProperty(x => x.Status, NotificationStatus.Read)
+                .SetProperty(x => x.ReadAtUtc, now), cancellationToken);
 
-        await _auditEngine.RecordAsync(
-            recipientUserId,
-            AuditActionType.Update,
-            nameof(Notification),
-            "read-all",
-            new { recipientUserId, beforeDateUtc },
-            new { recipientUserId, updatedCount },
-            cancellationToken: cancellationToken);
+            await _auditEngine.RecordAsync(
+                recipientUserId,
+                AuditActionType.Update,
+                nameof(Notification),
+                "read-all",
+                new { recipientUserId, beforeDateUtc },
+                new { recipientUserId, updatedCount },
+                cancellationToken: cancellationToken);
+            await _dbContext.SaveChangesAsync(cancellationToken);
+            if (transaction is not null)
+            {
+                await transaction.CommitAsync(cancellationToken);
+            }
 
-        return Result<int>.Success(updatedCount);
+            return Result<int>.Success(updatedCount);
+        }
+        catch
+        {
+            if (transaction is not null)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+            }
+
+            throw;
+        }
     }
 }

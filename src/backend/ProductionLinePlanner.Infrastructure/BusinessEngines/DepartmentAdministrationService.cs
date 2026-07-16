@@ -204,6 +204,15 @@ public sealed class DepartmentAdministrationService(
 
         try
         {
+            await auditEngine.RecordAsync(
+                actorUserId,
+                Domain.Enums.AuditActionType.Update,
+                nameof(Worker),
+                worker.Id.ToString(),
+                before: before,
+                after: new { worker.Id, worker.AttendanceDepartmentId },
+                requestMeta: requestMeta,
+                cancellationToken: cancellationToken);
             await dbContext.SaveChangesAsync(cancellationToken);
         }
         catch (Exception)
@@ -224,15 +233,6 @@ public sealed class DepartmentAdministrationService(
                 "PersistenceFailed",
                 "Planner persistence failed; the attendance department change was rolled back."));
         }
-        await auditEngine.RecordAsync(
-            actorUserId,
-            Domain.Enums.AuditActionType.Update,
-            nameof(Worker),
-            worker.Id.ToString(),
-            before: before,
-            after: new { worker.Id, worker.AttendanceDepartmentId },
-            requestMeta: requestMeta);
-
         return Result.Success();
     }
 

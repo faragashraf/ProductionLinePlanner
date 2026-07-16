@@ -447,6 +447,7 @@ authApi.MapPost("/login", async (
     AppDbContext dbContext,
     IPasswordHasher<AppUser> passwordHasher,
     IPermissionService permissionService,
+    IAuditEngine auditEngine,
     HttpContext httpContext,
     CancellationToken cancellationToken) =>
 {
@@ -479,6 +480,10 @@ authApi.MapPost("/login", async (
     var refreshTokenHash = AuthTokenService.HashRefreshToken(refreshToken);
     var refreshTokenExpiresAt = now.AddDays(jwtRefreshTokenDays);
 
+    await using var loginTransaction = dbContext.Database.IsRelational()
+        ? await dbContext.Database.BeginTransactionAsync(cancellationToken)
+        : null;
+
     await dbContext.RefreshTokens
         .Where(rt => rt.AppUserId == user.Id && !rt.IsRevoked && rt.ExpiresAtUtc > now)
         .ExecuteUpdateAsync(setters => setters
@@ -494,17 +499,20 @@ authApi.MapPost("/login", async (
         createdAtUtc: now));
 
     var accessToken = AuthTokenService.CreateAccessToken(user, now, expiresAt, jwtIssuer, jwtAudience, jwtKey);
-    await dbContext.SaveChangesAsync(cancellationToken);
-
-    AssignmentHelpers.AddAuditLog(
-        dbContext,
+    await auditEngine.RecordAsync(
         user.Id,
         AuditActionType.Create,
         nameof(AppUser),
         user.Id.ToString(),
         before: null,
         after: new { Event = "AuthLogin", user.Email },
-        httpContext: httpContext);
+        requestMeta: AuditRequestMetadata.From(httpContext),
+        cancellationToken: cancellationToken);
+    await dbContext.SaveChangesAsync(cancellationToken);
+    if (loginTransaction is not null)
+    {
+        await loginTransaction.CommitAsync(cancellationToken);
+    }
     var roles = user.Roles
         .Select(role => role.Name)
         .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -703,6 +711,7 @@ authApi.MapPost("/refresh", async (
     RefreshTokenRequest request,
     AppDbContext dbContext,
     IPermissionService permissionService,
+    IAuditEngine auditEngine,
     HttpContext httpContext,
     CancellationToken cancellationToken) =>
 {
@@ -729,22 +738,29 @@ authApi.MapPost("/refresh", async (
     {
         if (storedToken.IsRevoked)
         {
+            await using var reuseTransaction = dbContext.Database.IsRelational()
+                ? await dbContext.Database.BeginTransactionAsync(cancellationToken)
+                : null;
             await dbContext.RefreshTokens
                 .Where(token => token.AppUserId == storedToken.AppUserId && !token.IsRevoked)
                 .ExecuteUpdateAsync(setters => setters
                     .SetProperty(token => token.IsRevoked, true)
                     .SetProperty(token => token.RevokedAtUtc, now)
                     .SetProperty(token => token.RevokedReason, "RefreshTokenReuseDetected"), cancellationToken);
-            AssignmentHelpers.AddAuditLog(
-                dbContext,
+            await auditEngine.RecordAsync(
                 storedToken.AppUserId,
                 AuditActionType.Revoke,
                 nameof(RefreshToken),
                 storedToken.Id.ToString(),
                 before: new { Result = "RefreshTokenReuseDetected" },
                 after: new { Result = "SessionRevoked" },
-                httpContext);
+                requestMeta: AuditRequestMetadata.From(httpContext),
+                cancellationToken: cancellationToken);
             await dbContext.SaveChangesAsync(cancellationToken);
+            if (reuseTransaction is not null)
+            {
+                await reuseTransaction.CommitAsync(cancellationToken);
+            }
         }
         if (!storedToken.IsRevoked)
         {
@@ -769,6 +785,10 @@ authApi.MapPost("/refresh", async (
     var newRefreshTokenHash = AuthTokenService.HashRefreshToken(newRefreshToken);
     var newRefreshTokenExpiresAt = now.AddDays(jwtRefreshTokenDays);
 
+    await using var rotationTransaction = dbContext.Database.IsRelational()
+        ? await dbContext.Database.BeginTransactionAsync(cancellationToken)
+        : null;
+
     var rotationSucceeded = await dbContext.RefreshTokens
         .Where(token => token.Id == storedToken.Id && !token.IsRevoked && token.ExpiresAtUtc > now)
         .ExecuteUpdateAsync(setters => setters
@@ -784,16 +804,20 @@ authApi.MapPost("/refresh", async (
                 .SetProperty(token => token.IsRevoked, true)
                 .SetProperty(token => token.RevokedAtUtc, now)
                 .SetProperty(token => token.RevokedReason, "RefreshTokenReuseDetected"), cancellationToken);
-        AssignmentHelpers.AddAuditLog(
-            dbContext,
+        await auditEngine.RecordAsync(
             user.Id,
             AuditActionType.Revoke,
             nameof(RefreshToken),
             storedToken.Id.ToString(),
             before: new { Result = "ConcurrentRefreshReuseDetected" },
             after: new { Result = "SessionRevoked" },
-            httpContext);
+            requestMeta: AuditRequestMetadata.From(httpContext),
+            cancellationToken: cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
+        if (rotationTransaction is not null)
+        {
+            await rotationTransaction.CommitAsync(cancellationToken);
+        }
         return ApiResponse.Failure("InvalidToken", "Invalid refresh token.", 401);
     }
 
@@ -804,17 +828,21 @@ authApi.MapPost("/refresh", async (
         expiresAtUtc: newRefreshTokenExpiresAt,
         createdAtUtc: now));
 
-    AssignmentHelpers.AddAuditLog(
-        dbContext,
+    await auditEngine.RecordAsync(
         user.Id,
         AuditActionType.Update,
         nameof(RefreshToken),
         storedToken.Id.ToString(),
         before: storedToken,
         after: new { eventType = "AuthRefresh", storedToken.Id, replacedBy = newRefreshTokenHash[..8] },
-        httpContext);
+        requestMeta: AuditRequestMetadata.From(httpContext),
+        cancellationToken: cancellationToken);
 
     await dbContext.SaveChangesAsync(cancellationToken);
+    if (rotationTransaction is not null)
+    {
+        await rotationTransaction.CommitAsync(cancellationToken);
+    }
 
     var response = new AuthLoginResponse
     {
@@ -836,6 +864,7 @@ authApi.MapPost("/refresh", async (
 authApi.MapPost("/logout", async (
     LogoutRequest request,
     AppDbContext dbContext,
+    IAuditEngine auditEngine,
     HttpContext httpContext,
     CancellationToken cancellationToken) =>
 {
@@ -860,17 +889,16 @@ authApi.MapPost("/logout", async (
     if (!storedToken.IsRevoked)
     {
         storedToken.Revoke(now, "Logout");
-        await dbContext.SaveChangesAsync(cancellationToken);
-
-        AssignmentHelpers.AddAuditLog(
-            dbContext,
+        await auditEngine.RecordAsync(
             storedToken.AppUserId,
             AuditActionType.Revoke,
             nameof(RefreshToken),
             storedToken.Id.ToString(),
             before: storedToken,
             after: new { eventType = "AuthLogout" },
-            httpContext);
+            requestMeta: AuditRequestMetadata.From(httpContext),
+            cancellationToken: cancellationToken);
+        await dbContext.SaveChangesAsync(cancellationToken);
     }
 
     return Results.Ok(ApiResponse.Success(new { revoked = true }));
@@ -950,6 +978,7 @@ factoriesApi.MapPost("", async (
     CreateFactoryRequest request,
     AppDbContext dbContext,
     ICurrentUserService currentUserService,
+    IAuditEngine auditEngine,
     HttpContext httpContext,
     CancellationToken cancellationToken) =>
 {
@@ -987,16 +1016,16 @@ factoriesApi.MapPost("", async (
         isActive: request.IsActive);
 
     dbContext.Factories.Add(entity);
-    await dbContext.SaveChangesAsync(cancellationToken);
-    AssignmentHelpers.AddAuditLog(
-        dbContext,
+    await auditEngine.RecordAsync(
         actorUserId.Value,
         AuditActionType.Create,
         nameof(Factory),
         entity.Id.ToString(),
         before: null,
         after: new { entity.Id, entity.Name, entity.Code, entity.Location, entity.IsActive },
-        httpContext);
+        requestMeta: AuditRequestMetadata.From(httpContext),
+        cancellationToken: cancellationToken);
+    await dbContext.SaveChangesAsync(cancellationToken);
 
     return Results.Created($"/api/factories/{entity.Id}", ApiResponse.Success(new FactoryDto
     {
@@ -1016,6 +1045,7 @@ factoriesApi.MapPatch("/{factoryId:guid}", async (
     UpdateFactoryRequest request,
     AppDbContext dbContext,
     ICurrentUserService currentUserService,
+    IAuditEngine auditEngine,
     HttpContext httpContext,
     CancellationToken cancellationToken) =>
 {
@@ -1075,16 +1105,16 @@ factoriesApi.MapPatch("/{factoryId:guid}", async (
 
     var beforeFactory = new { entity.Id, entity.Name, entity.Code, entity.Location, entity.IsActive };
     entry.Property(nameof(Factory.UpdatedAtUtc)).CurrentValue = updatedAt;
-    await dbContext.SaveChangesAsync(cancellationToken);
-    AssignmentHelpers.AddAuditLog(
-        dbContext,
+    await auditEngine.RecordAsync(
         actorUserId.Value,
         AuditActionType.Update,
         nameof(Factory),
         entity.Id.ToString(),
         before: beforeFactory,
         after: new { entity.Id, entity.Name, entity.Code, entity.Location, entity.IsActive },
-        httpContext);
+        requestMeta: AuditRequestMetadata.From(httpContext),
+        cancellationToken: cancellationToken);
+    await dbContext.SaveChangesAsync(cancellationToken);
 
     return Results.Ok(ApiResponse.Success(new FactoryDto
     {
@@ -1103,6 +1133,7 @@ factoriesApi.MapDelete("/{factoryId:guid}", async (
     Guid factoryId,
     AppDbContext dbContext,
     ICurrentUserService currentUserService,
+    IAuditEngine auditEngine,
     HttpContext httpContext,
     CancellationToken cancellationToken) =>
 {
@@ -1121,16 +1152,16 @@ factoriesApi.MapDelete("/{factoryId:guid}", async (
     var beforeFactory = new { entity.Id, entity.Name, entity.Code, entity.Location, entity.IsActive };
     dbContext.Entry(entity).Property(nameof(Factory.IsActive)).CurrentValue = false;
     dbContext.Entry(entity).Property(nameof(Factory.UpdatedAtUtc)).CurrentValue = DateTime.UtcNow;
-    await dbContext.SaveChangesAsync(cancellationToken);
-    AssignmentHelpers.AddAuditLog(
-        dbContext,
+    await auditEngine.RecordAsync(
         actorUserId.Value,
         AuditActionType.Delete,
         nameof(Factory),
         entity.Id.ToString(),
         before: beforeFactory,
         after: new { entity.Id, entity.Name, entity.Code, entity.Location, entity.IsActive },
-        httpContext);
+        requestMeta: AuditRequestMetadata.From(httpContext),
+        cancellationToken: cancellationToken);
+    await dbContext.SaveChangesAsync(cancellationToken);
 
     return Results.NoContent();
 })
@@ -1246,6 +1277,7 @@ productionLinesApi.MapPost("", async (
     CreateProductionLineRequest request,
     AppDbContext dbContext,
     ICurrentUserService currentUserService,
+    IAuditEngine auditEngine,
     HttpContext httpContext,
     CancellationToken cancellationToken) =>
 {
@@ -1297,16 +1329,16 @@ productionLinesApi.MapPost("", async (
         isActive: request.IsActive);
 
     dbContext.ProductionLines.Add(entity);
-    await dbContext.SaveChangesAsync(cancellationToken);
-    AssignmentHelpers.AddAuditLog(
-        dbContext,
+    await auditEngine.RecordAsync(
         actorUserId.Value,
         AuditActionType.Create,
         nameof(ProductionLine),
         entity.Id.ToString(),
         before: null,
         after: new { entity.Id, entity.FactoryId, entity.Name, entity.LineCode, entity.SequenceOrder, entity.IsActive },
-        httpContext);
+        requestMeta: AuditRequestMetadata.From(httpContext),
+        cancellationToken: cancellationToken);
+    await dbContext.SaveChangesAsync(cancellationToken);
 
     return Results.Created($"/api/production-lines/{entity.Id}", ApiResponse.Success(new ProductionLineDto
     {
@@ -1327,6 +1359,7 @@ productionLinesApi.MapPatch("/{lineId:guid}", async (
     UpdateProductionLineRequest request,
     AppDbContext dbContext,
     ICurrentUserService currentUserService,
+    IAuditEngine auditEngine,
     HttpContext httpContext,
     CancellationToken cancellationToken) =>
 {
@@ -1413,16 +1446,16 @@ productionLinesApi.MapPatch("/{lineId:guid}", async (
 
     var beforeProductionLine = new { entity.Id, entity.FactoryId, entity.Name, entity.LineCode, entity.SequenceOrder, entity.IsActive };
     entry.Property(nameof(ProductionLine.UpdatedAtUtc)).CurrentValue = updatedAt;
-    await dbContext.SaveChangesAsync(cancellationToken);
-    AssignmentHelpers.AddAuditLog(
-        dbContext,
+    await auditEngine.RecordAsync(
         actorUserId.Value,
         AuditActionType.Update,
         nameof(ProductionLine),
         entity.Id.ToString(),
         before: beforeProductionLine,
         after: new { entity.Id, entity.FactoryId, entity.Name, entity.LineCode, entity.SequenceOrder, entity.IsActive },
-        httpContext);
+        requestMeta: AuditRequestMetadata.From(httpContext),
+        cancellationToken: cancellationToken);
+    await dbContext.SaveChangesAsync(cancellationToken);
 
     return Results.Ok(ApiResponse.Success(new ProductionLineDto
     {
@@ -1442,6 +1475,7 @@ productionLinesApi.MapDelete("/{lineId:guid}", async (
     Guid lineId,
     AppDbContext dbContext,
     ICurrentUserService currentUserService,
+    IAuditEngine auditEngine,
     HttpContext httpContext,
     CancellationToken cancellationToken) =>
 {
@@ -1460,16 +1494,16 @@ productionLinesApi.MapDelete("/{lineId:guid}", async (
     var beforeProductionLine = new { entity.Id, entity.FactoryId, entity.Name, entity.LineCode, entity.SequenceOrder, entity.IsActive };
     dbContext.Entry(entity).Property(nameof(ProductionLine.IsActive)).CurrentValue = false;
     dbContext.Entry(entity).Property(nameof(ProductionLine.UpdatedAtUtc)).CurrentValue = DateTime.UtcNow;
-    await dbContext.SaveChangesAsync(cancellationToken);
-    AssignmentHelpers.AddAuditLog(
-        dbContext,
+    await auditEngine.RecordAsync(
         actorUserId.Value,
         AuditActionType.Delete,
         nameof(ProductionLine),
         entity.Id.ToString(),
         before: beforeProductionLine,
         after: new { entity.Id, entity.FactoryId, entity.Name, entity.LineCode, entity.SequenceOrder, entity.IsActive },
-        httpContext);
+        requestMeta: AuditRequestMetadata.From(httpContext),
+        cancellationToken: cancellationToken);
+    await dbContext.SaveChangesAsync(cancellationToken);
 
     return Results.NoContent();
 })

@@ -217,7 +217,6 @@ public sealed class ProductionStageCatalogService(
             isActive: isActive);
 
         dbContext.MainStages.Add(entity);
-        await dbContext.SaveChangesAsync(cancellationToken);
         await auditEngine.RecordAsync(
             actorUserId,
             AuditActionType.Create,
@@ -226,6 +225,7 @@ public sealed class ProductionStageCatalogService(
             before: null,
             after: new { entity.Id, entity.ProductionLineId, entity.Name, entity.IsCritical, entity.SequenceOrder, entity.IsActive },
             requestMeta: requestMeta);
+        await dbContext.SaveChangesAsync(cancellationToken);
 
         return Result<MainStageDto>.Success(new MainStageDto
         {
@@ -315,8 +315,6 @@ public sealed class ProductionStageCatalogService(
         }
 
         dbContext.Entry(entity).Property(nameof(MainStage.UpdatedAtUtc)).CurrentValue = DateTime.UtcNow;
-        await dbContext.SaveChangesAsync(cancellationToken);
-
         await auditEngine.RecordAsync(
             actorUserId,
             AuditActionType.Update,
@@ -325,6 +323,7 @@ public sealed class ProductionStageCatalogService(
             before,
             new { entity.Id, entity.ProductionLineId, entity.Name, entity.IsCritical, entity.SequenceOrder, entity.IsActive },
             requestMeta);
+        await dbContext.SaveChangesAsync(cancellationToken);
 
         return Result<MainStageDto>.Success(new MainStageDto
         {
@@ -371,8 +370,6 @@ public sealed class ProductionStageCatalogService(
         var before = new { entity.Id, entity.ProductionLineId, entity.Name, entity.IsCritical, entity.SequenceOrder, entity.IsActive };
         dbContext.Entry(entity).Property(nameof(MainStage.IsActive)).CurrentValue = false;
         dbContext.Entry(entity).Property(nameof(MainStage.UpdatedAtUtc)).CurrentValue = DateTime.UtcNow;
-        await dbContext.SaveChangesAsync(cancellationToken);
-
         await auditEngine.RecordAsync(
             actorUserId,
             AuditActionType.Update,
@@ -381,6 +378,7 @@ public sealed class ProductionStageCatalogService(
             before: before,
             after: new { entity.Id, entity.ProductionLineId, entity.Name, entity.IsCritical, entity.SequenceOrder, entity.IsActive },
             requestMeta: requestMeta);
+        await dbContext.SaveChangesAsync(cancellationToken);
 
         return Result.Success();
     }
@@ -458,7 +456,6 @@ public sealed class ProductionStageCatalogService(
             isActive: isActive);
 
         dbContext.SubStages.Add(entity);
-        await dbContext.SaveChangesAsync(cancellationToken);
         await auditEngine.RecordAsync(
             actorUserId,
             AuditActionType.Create,
@@ -467,6 +464,7 @@ public sealed class ProductionStageCatalogService(
             before: null,
             after: new { entity.Id, entity.MainStageId, entity.Code, entity.Name, entity.Capacity, entity.DefaultOrder, entity.IsActive },
             requestMeta: requestMeta);
+        await dbContext.SaveChangesAsync(cancellationToken);
 
         return Result<SubStageDto>.Success(new SubStageDto
         {
@@ -587,8 +585,6 @@ public sealed class ProductionStageCatalogService(
         }
 
         dbContext.Entry(entity).Property(nameof(SubStage.UpdatedAtUtc)).CurrentValue = DateTime.UtcNow;
-        await dbContext.SaveChangesAsync(cancellationToken);
-
         await auditEngine.RecordAsync(
             actorUserId,
             AuditActionType.Update,
@@ -597,6 +593,7 @@ public sealed class ProductionStageCatalogService(
             before: before,
             after: new { entity.Id, entity.MainStageId, entity.Code, entity.Name, entity.Capacity, entity.DefaultOrder, entity.IsActive },
             requestMeta: requestMeta);
+        await dbContext.SaveChangesAsync(cancellationToken);
 
         return Result<SubStageDto>.Success(new SubStageDto
         {
@@ -649,8 +646,6 @@ public sealed class ProductionStageCatalogService(
         var before = new { entity.Id, entity.MainStageId, entity.Code, entity.Name, entity.Capacity, entity.DefaultOrder, entity.IsActive };
         dbContext.Entry(entity).Property(nameof(SubStage.IsActive)).CurrentValue = false;
         dbContext.Entry(entity).Property(nameof(SubStage.UpdatedAtUtc)).CurrentValue = DateTime.UtcNow;
-        await dbContext.SaveChangesAsync(cancellationToken);
-
         await auditEngine.RecordAsync(
             actorUserId,
             AuditActionType.Update,
@@ -659,6 +654,7 @@ public sealed class ProductionStageCatalogService(
             before: before,
             after: new { entity.Id, entity.MainStageId, entity.Code, entity.Name, entity.Capacity, entity.DefaultOrder, entity.IsActive },
             requestMeta: requestMeta);
+        await dbContext.SaveChangesAsync(cancellationToken);
 
         return Result.Success();
     }

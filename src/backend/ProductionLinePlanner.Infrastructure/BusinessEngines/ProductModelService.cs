@@ -121,8 +121,6 @@ public sealed class ProductModelService(
             isActive: request.IsActive);
 
         dbContext.ProductModels.Add(entity);
-        await dbContext.SaveChangesAsync(cancellationToken);
-
         await auditEngine.RecordAsync(
             actorUserId,
             AuditActionType.Create,
@@ -131,6 +129,7 @@ public sealed class ProductModelService(
             before: null,
             after: new { entity.Id, entity.Code, entity.Name, entity.Description, entity.IsActive },
             requestMeta: requestMeta);
+        await dbContext.SaveChangesAsync(cancellationToken);
 
         return Result<ProductModelDto>.Success(new ProductModelDto
         {
@@ -215,8 +214,6 @@ public sealed class ProductModelService(
 
         var before = new { entity.Id, entity.Code, entity.Name, entity.Description, entity.IsActive };
         dbContext.Entry(entity).Property(nameof(ProductModel.UpdatedAtUtc)).CurrentValue = DateTime.UtcNow;
-        await dbContext.SaveChangesAsync(cancellationToken);
-
         await auditEngine.RecordAsync(
             actorUserId,
             AuditActionType.Update,
@@ -225,6 +222,7 @@ public sealed class ProductModelService(
             before: before,
             after: new { entity.Id, entity.Code, entity.Name, entity.Description, entity.IsActive },
             requestMeta: requestMeta);
+        await dbContext.SaveChangesAsync(cancellationToken);
 
         return Result<ProductModelDto>.Success(new ProductModelDto
         {
@@ -269,8 +267,6 @@ public sealed class ProductModelService(
         var before = new { entity.Id, entity.IsActive };
         dbContext.Entry(entity).Property(nameof(ProductModel.IsActive)).CurrentValue = isActive;
         dbContext.Entry(entity).Property(nameof(ProductModel.UpdatedAtUtc)).CurrentValue = DateTime.UtcNow;
-        await dbContext.SaveChangesAsync(cancellationToken);
-
         await auditEngine.RecordAsync(
             actorUserId,
             AuditActionType.Update,
@@ -279,6 +275,7 @@ public sealed class ProductModelService(
             before: before,
             after: new { entity.Id, entity.IsActive },
             requestMeta: requestMeta);
+        await dbContext.SaveChangesAsync(cancellationToken);
 
         return Result.Success();
     }
@@ -418,8 +415,6 @@ public sealed class ProductModelService(
             effectiveFrom: request.EffectiveFrom);
 
         dbContext.ProductModelStages.Add(entity);
-        await dbContext.SaveChangesAsync(cancellationToken);
-
         var subStage = await dbContext.SubStages.AsNoTracking().SingleAsync(x => x.Id == request.SubStageId.Value, cancellationToken);
         await auditEngine.RecordAsync(
             actorUserId,
@@ -429,6 +424,7 @@ public sealed class ProductModelService(
             before: null,
             after: new { entity.Id, entity.ProductModelId, entity.SubStageId, entity.StageOrder, entity.PiecePrice, entity.StandardSeconds, entity.CompensationMode, entity.IsRequired, entity.IsActive },
             requestMeta: requestMeta);
+        await dbContext.SaveChangesAsync(cancellationToken);
 
         return Result<ProductModelStageDto>.Success(new ProductModelStageDto
         {
@@ -538,8 +534,6 @@ public sealed class ProductModelService(
             DateTime.UtcNow);
 
         dbContext.Entry(entity).Property(nameof(ProductModelStage.UpdatedAtUtc)).CurrentValue = DateTime.UtcNow;
-        await dbContext.SaveChangesAsync(cancellationToken);
-
         var subStage = await dbContext.SubStages.AsNoTracking().SingleAsync(x => x.Id == entity.SubStageId, cancellationToken);
         await auditEngine.RecordAsync(
             actorUserId,
@@ -549,6 +543,7 @@ public sealed class ProductModelService(
             before: before,
             after: new { entity.Id, entity.SubStageId, entity.StageOrder, entity.PiecePrice, entity.StandardSeconds, entity.CompensationMode, entity.IsRequired, entity.IsActive },
             requestMeta: requestMeta);
+        await dbContext.SaveChangesAsync(cancellationToken);
 
         return Result<ProductModelStageDto>.Success(new ProductModelStageDto
         {
@@ -600,7 +595,6 @@ public sealed class ProductModelService(
 
         var before = new { entity.Id, entity.IsActive };
         entity.Deactivate(DateTime.UtcNow);
-        await dbContext.SaveChangesAsync(cancellationToken);
         await auditEngine.RecordAsync(
             actorUserId,
             AuditActionType.Update,
@@ -609,6 +603,7 @@ public sealed class ProductModelService(
             before: before,
             after: new { entity.Id, entity.IsActive },
             requestMeta: requestMeta);
+        await dbContext.SaveChangesAsync(cancellationToken);
 
         return Result.Success();
     }
@@ -696,7 +691,6 @@ public sealed class ProductModelService(
             dbContext.ProductModelStages.Add(clone);
         }
 
-        await dbContext.SaveChangesAsync(cancellationToken);
         await auditEngine.RecordAsync(
             actorUserId,
             AuditActionType.Create,
@@ -705,6 +699,7 @@ public sealed class ProductModelService(
             before: null,
             after: new { SourceModelId = sourceModelId, TargetModelId = request.TargetModelId, CopiedCount = sourceStages.Count, request.Note },
             requestMeta: requestMeta);
+        await dbContext.SaveChangesAsync(cancellationToken);
 
         return Result.Success();
     }

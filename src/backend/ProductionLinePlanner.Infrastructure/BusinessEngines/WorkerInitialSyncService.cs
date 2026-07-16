@@ -374,7 +374,6 @@ public sealed class WorkerInitialSyncService(
         await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
         try
         {
-            await dbContext.SaveChangesAsync(cancellationToken);
             await RecordAuditAsync(actorUserId, requestMeta, new WorkerInitialSyncResultDto
             {
                 SourceCount = sourceCount,
@@ -395,6 +394,7 @@ public sealed class WorkerInitialSyncService(
                 StartedAtUtc = startedAtUtc,
                 CompletedAtUtc = completedAtUtc
             }, cancellationToken);
+            await dbContext.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
         }
         catch

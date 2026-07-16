@@ -171,6 +171,15 @@ public sealed class EmployeeMasterDataService(
 
             dbContext.Entry(entity).Property(nameof(Worker.LastExternalSyncAt)).CurrentValue = now;
             dbContext.Entry(entity).Property(nameof(Worker.UpdatedAtUtc)).CurrentValue = now;
+            await auditEngine.RecordAsync(
+                actorUserId,
+                AuditActionType.Update,
+                nameof(Worker),
+                entity.Id.ToString(),
+                before: before,
+                after: MapWorker(entity),
+                requestMeta: requestMeta,
+                cancellationToken: cancellationToken);
             await dbContext.SaveChangesAsync(cancellationToken);
         }
         catch
@@ -193,16 +202,6 @@ public sealed class EmployeeMasterDataService(
 
             throw;
         }
-
-        var after = MapWorker(entity);
-        await auditEngine.RecordAsync(
-            actorUserId,
-            AuditActionType.Update,
-            nameof(Worker),
-            entity.Id.ToString(),
-            before: before,
-            after: after,
-            requestMeta: requestMeta);
 
         var result = (await MapWorkersWithAssignmentsAsync([entity], cancellationToken)).Single();
         return Result<WorkerDto>.Success(result);
@@ -260,8 +259,6 @@ public sealed class EmployeeMasterDataService(
         }
 
         dbContext.Entry(entity).Property(nameof(Worker.UpdatedAtUtc)).CurrentValue = now;
-        await dbContext.SaveChangesAsync(cancellationToken);
-
         await auditEngine.RecordAsync(
             actorUserId,
             AuditActionType.Update,
@@ -269,7 +266,9 @@ public sealed class EmployeeMasterDataService(
             entity.Id.ToString(),
             before: before,
             after: MapWorker(entity),
-            requestMeta: requestMeta);
+            requestMeta: requestMeta,
+            cancellationToken: cancellationToken);
+        await dbContext.SaveChangesAsync(cancellationToken);
 
         var result = (await MapWorkersWithAssignmentsAsync([entity], cancellationToken)).Single();
         return Result<WorkerDto>.Success(result);

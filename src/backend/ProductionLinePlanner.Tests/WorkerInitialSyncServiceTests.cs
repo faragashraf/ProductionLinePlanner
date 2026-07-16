@@ -417,7 +417,7 @@ public sealed class WorkerInitialSyncServiceTests
         Assert.True(result.IsFailure);
         Assert.Equal("WorkerInitialSyncFailed", result.Error!.Code);
         Assert.Equal(0, await fixture.DbContext.Workers.CountAsync());
-        Assert.Empty(fixture.AuditEngine.Calls);
+        Assert.Single(fixture.AuditEngine.Calls);
     }
 
     private sealed class WorkerInitialSyncFixture : IAsyncDisposable
