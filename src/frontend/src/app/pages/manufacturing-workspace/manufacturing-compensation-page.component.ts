@@ -171,10 +171,10 @@ export class ManufacturingCompensationPageComponent implements OnInit {
     this.api.updateCompensationModelStage(this.selectedModelId, this.editingStageId, payload)
       .pipe(finalize(() => this.isSaving = false))
       .subscribe({
-        next: () => {
+        next: updated => {
           this.successMessage = 'تم حفظ إعداد تكلفة المرحلة.';
+          this.stages = this.stages.map(stage => stage.id === updated.id ? updated : stage);
           this.cancelEdit();
-          this.loadStages(this.selectedModelId);
         },
         error: error => this.setError(error, 'تعذر حفظ إعداد تكلفة المرحلة.')
       });

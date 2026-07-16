@@ -44,6 +44,8 @@
           openLabel="إضافة مصنع"
           [canExpand]="canManage"
           [expanded]="activeForm === 'factory'"
+          [saving]="isSaving"
+          [error]="hasError ? errorMessage : ''"
           (expandedChange)="onFormExpandedChange('factory', $event)"
         >
           <form class="factory-structure-form" (ngSubmit)="saveFactory()" novalidate *plpCan="permissions.factoryStructure.manage">
@@ -82,6 +84,8 @@
           openLabel="إضافة خط"
           [canExpand]="canManage"
           [expanded]="activeForm === 'line'"
+          [saving]="isSaving"
+          [error]="hasError ? errorMessage : ''"
           (expandedChange)="onFormExpandedChange('line', $event)"
         >
           <form class="factory-structure-form" (ngSubmit)="saveLine()" novalidate *plpCan="permissions.factoryStructure.manage">
@@ -127,6 +131,8 @@
           openLabel="إضافة مرحلة"
           [canExpand]="canManage"
           [expanded]="activeForm === 'main-stage'"
+          [saving]="isSaving"
+          [error]="hasError ? errorMessage : ''"
           (expandedChange)="onFormExpandedChange('main-stage', $event)"
         >
           <form class="factory-structure-form" (ngSubmit)="saveMainStage()" novalidate *plpCan="permissions.factoryStructure.manage">
@@ -170,6 +176,8 @@
           openLabel="إضافة مرحلة فرعية"
           [canExpand]="canManage"
           [expanded]="activeForm === 'sub-stage'"
+          [saving]="isSaving"
+          [error]="hasError ? errorMessage : ''"
           (expandedChange)="onFormExpandedChange('sub-stage', $event)"
         >
           <form class="factory-structure-form" (ngSubmit)="saveSubStage()" novalidate *plpCan="permissions.factoryStructure.manage">
@@ -227,6 +235,8 @@
         openLabel="تعيين عامل"
         [canExpand]="canManage"
         [expanded]="activeForm === 'assignment'"
+        [saving]="isSaving"
+        [error]="hasError ? errorMessage : ''"
         (expandedChange)="onFormExpandedChange('assignment', $event)"
       >
         <form class="factory-structure-form factory-structure-form--inline" novalidate *plpCan="permissions.factoryStructure.manage">

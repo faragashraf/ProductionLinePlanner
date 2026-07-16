@@ -83,22 +83,18 @@
     </dl>
   </aside>
 
-  <p-dialog
+  <plp-form-sheet
     [(visible)]="isEditDialogVisible"
-    header="تعديل إعداد تكلفة المرحلة"
-    [modal]="true"
-    appendTo="body"
-    [baseZIndex]="1000"
-    [rtl]="true"
-    [closable]="false"
-    [draggable]="false"
-    [resizable]="false"
-    transitionOptions="0ms"
-    [style]="{ width: '34rem', maxWidth: 'calc(100vw - 2rem)' }"
-    [breakpoints]="{ '960px': '75vw', '640px': 'calc(100vw - 1rem)' }"
-    styleClass="compensation-edit-dialog"
+    title="تعديل إعداد تكلفة المرحلة"
+    subtitle="عدّل الإعدادات المالية للمرحلة المحددة مع الاحتفاظ بسياق الموديل."
+    size="standard"
+    [saving]="isSaving"
+    [saveDisabled]="stageForm.invalid"
+    saveLabel="حفظ"
     (onShow)="onDialogShow()"
     (onHide)="onDialogHide()"
+    (save)="saveStage()"
+    (cancel)="cancelEdit()"
   >
     <form *plpCan="permissions.compensation.manage" [formGroup]="stageForm" (ngSubmit)="saveStage()" class="compensation-edit-dialog__form">
       <dl class="compensation-edit-dialog__context" *ngIf="editingStage as stage">
@@ -116,10 +112,6 @@
       <label>سعر القطعة<input type="number" min="0" step="0.01" formControlName="piecePrice"></label>
       <label>الثواني القياسية<input type="number" min="1" step="1" formControlName="standardSeconds"></label>
 
-      <footer>
-        <button pButton type="submit" label="حفظ" [loading]="isSaving" [disabled]="isSaving"></button>
-        <button pButton type="button" label="إلغاء" class="p-button-text" [disabled]="isSaving" (click)="cancelEdit()"></button>
-      </footer>
     </form>
-  </p-dialog>
+  </plp-form-sheet>
 </section>

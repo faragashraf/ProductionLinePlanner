@@ -11,6 +11,7 @@ import {
   LineStaffingStage,
   LineStaffingWorker
 } from '../../core/services/assignments-api.service';
+import { PlpSectionNavigationItem } from '../../shared/product/plp-section-navigation.component';
 import {
   FactoryItem,
   ManufacturingMasterDataApiService,
@@ -42,6 +43,12 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
   @ViewChild('staffingSummary') private staffingSummary?: ElementRef<HTMLElement>;
   readonly permissions = PERMISSIONS;
   readonly stageCostTerminology = STAGE_COST_TERMINOLOGY;
+  readonly sectionNavigationItems: readonly PlpSectionNavigationItem[] = [
+    { id: 'choices', label: 'اختيارات الخط' },
+    { id: 'summary', label: 'ملخص التسكين' },
+    { id: 'stages', label: 'قائمة المراحل' },
+    { id: 'workers', label: 'عمال المرحلة المحددة' }
+  ];
   readonly staffingReferenceDate = this.egyptToday();
   readonly assignmentForm = this.fb.group({
     workerId: ['', Validators.required],
@@ -159,6 +166,10 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
     return Boolean(this.selectedFactoryId && this.selectedProductionLineId && this.selectedProductModelId && this.referenceDate);
   }
 
+  get activeStaffingSection(): string {
+    return this.currentRouteFragmentSection ?? 'choices';
+  }
+
   get selectedStage(): LineStaffingStage | null {
     return this.plan?.stages.find(stage => stage.subStageId === this.selectedSubStageId) ?? null;
   }
@@ -225,6 +236,12 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
       'remove-default': 'إلغاء التعيين الدائم',
       'cancel-temporary': 'إلغاء التعيين المؤقت'
     }[this.assignmentDialogMode];
+  }
+
+  get assignmentDialogSubtitle(): string {
+    const stageContext = this.selectedStage ? `${this.selectedStage.stageCode} — ${this.selectedStage.stageName}` : '';
+    const workerContext = this.pendingWorker ? `${this.pendingWorker.employeeCode} — ${this.pendingWorker.fullName}` : '';
+    return [stageContext, workerContext].filter(Boolean).join(' · ');
   }
 
   get assignmentDialogSaveLabel(): string {
@@ -384,16 +401,18 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
    * This is the only user-driven section navigation entry point. It replaces
    * the route fragment and then moves only the bounded tablet regions.
    */
-  requestStaffingSection(section: StaffingSection): void {
-    this.currentRouteFragmentSection = section;
-    this.pendingExplicitFragmentSection = section;
+  requestStaffingSection(section: string): void {
+    const target = this.workspaceSectionFromFragment(section);
+    if (!target) return;
+    this.currentRouteFragmentSection = target;
+    this.pendingExplicitFragmentSection = target;
     void this.router.navigate([], {
       relativeTo: this.route,
-      fragment: section,
+      fragment: target,
       replaceUrl: true,
       queryParamsHandling: 'preserve'
     });
-    this.requestFragmentSectionNavigation(section, true);
+    this.requestFragmentSectionNavigation(target, true);
   }
 
   private scrollToStaffingSection(section: StaffingSection): boolean {
@@ -826,8 +845,8 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
     }
     if (this.dialogNeedsTargetStage) rules.push({ control: 'targetSubStageId', message: 'مرحلة النقل مطلوبة' });
     if (this.dialogNeedsTemporaryPeriod) {
-      rules.push({ control: 'startAtLocal', message: 'تاريخ ووقت البداية مطلوب' });
-      rules.push({ control: 'endAtLocal', message: 'تاريخ ووقت النهاية مطلوب' });
+      rules.push({ control: 'startAtLocal', message: 'تاريخ ووقت البداية مطلوب', isMissing: () => !(this.assignmentForm.controls.startAtLocal.value ?? '').trim() });
+      rules.push({ control: 'endAtLocal', message: 'تاريخ ووقت النهاية مطلوب', isMissing: () => !(this.assignmentForm.controls.endAtLocal.value ?? '').trim() });
     }
     if (this.assignmentDialogMode === 'temporary') {
       rules.push({ control: 'reason', message: 'سبب التعيين المؤقت مطلوب', isMissing: () => !(this.assignmentForm.controls.reason.value ?? '').trim() });

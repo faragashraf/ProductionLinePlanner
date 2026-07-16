@@ -8,7 +8,8 @@
   <ng-container *ngIf="!loading; else loadingState">
     <ng-container *ngIf="mode === 'stages'; else modelsView">
       <div class="master-page__grid">
-        <p-card header="مرحلة رئيسية">
+        <p-card>
+          <plp-expandable-form title="مرحلة رئيسية" summary="أضف مرحلة أو عدّلها دون مغادرة قائمة المراحل." openLabel="إضافة مرحلة رئيسية" [expanded]="mainFormVisible" [saving]="saving" [error]="error" (expandedChange)="onMainFormVisibility($event)">
           <form [formGroup]="mainForm" (ngSubmit)="saveMain()" class="master-page__form">
             <label>خط الإنتاج<select formControlName="productionLineId"><option value="">اختر الخط</option><option *ngFor="let line of lines" [value]="line.id">{{ line.name }}</option></select></label>
             <label>الاسم<input pInputText formControlName="name"></label>
@@ -16,8 +17,10 @@
             <label><input type="checkbox" formControlName="isCritical"> حرجة</label>
             <button pButton type="submit" [label]="editMainId ? 'تحديث' : 'إضافة'" [disabled]="saving"></button>
           </form>
+          </plp-expandable-form>
         </p-card>
-        <p-card header="مرحلة فرعية">
+        <p-card>
+          <plp-expandable-form title="مرحلة فرعية" summary="اربط المرحلة الفرعية بالمرحلة الرئيسية المناسبة." openLabel="إضافة مرحلة فرعية" [expanded]="subFormVisible" [saving]="saving" [error]="error" (expandedChange)="onSubFormVisibility($event)">
           <form [formGroup]="subForm" (ngSubmit)="saveSub()" class="master-page__form">
             <label>الرئيسية<select formControlName="mainStageId"><option value="">اختر المرحلة</option><option *ngFor="let item of mains" [value]="item.id">{{ item.name }}</option></select></label>
             <label>الكود<input pInputText formControlName="code"></label>
@@ -26,6 +29,7 @@
             <label>السعة<input type="number" formControlName="capacity"></label>
             <button pButton type="submit" [label]="editSubId ? 'تحديث' : 'إضافة'" [disabled]="saving"></button>
           </form>
+          </plp-expandable-form>
         </p-card>
       </div>
 
@@ -47,12 +51,14 @@
     <ng-template #modelsView>
       <div class="master-page__grid">
         <p-card header="الموديلات">
+          <plp-expandable-form title="موديل المنتج" summary="أضف موديلًا أو عدّل بيانات الموديل المحدد." openLabel="إضافة موديل" [expanded]="modelFormVisible" [saving]="saving" [error]="error" (expandedChange)="onModelFormVisibility($event)">
           <form [formGroup]="modelForm" (ngSubmit)="saveModel()" class="master-page__form">
             <label>الكود<input pInputText formControlName="code"></label>
             <label>الاسم<input pInputText formControlName="name"></label>
             <label>الوصف<input pInputText formControlName="description"></label>
             <button pButton type="submit" [label]="editModelId ? 'تحديث' : 'إضافة موديل'" [disabled]="saving"></button>
           </form>
+          </plp-expandable-form>
           <p-table plpResponsiveTable="scroll" plpTablePagination [plpPaginationPageSize]="10" [plpPaginationResetKey]="models.length" [plpStickyActions]="true" [value]="models" dataKey="id" responsiveLayout="scroll">
             <ng-template pTemplate="header"><tr><th>الكود</th><th>الاسم</th><th>الحالة</th><th>الإجراءات</th></tr></ng-template>
             <ng-template pTemplate="body" let-item><tr [class.master-page__selected]="selected?.id === item.id"><td>{{ item.code }}</td><td>{{ item.name }}</td><td>{{ item.isActive ? 'نشط' : 'معطل' }}</td><td><button pButton type="button" class="p-button-text p-button-sm" label="اختيار" (click)="select(item)"></button><button pButton type="button" icon="pi pi-pencil" class="p-button-text" aria-label="تعديل الموديل" [disabled]="saving" (click)="editModel(item)"></button></td></tr></ng-template>
@@ -62,6 +68,7 @@
 
         <p-card header="إعدادات المراحل" *ngIf="selected">
           <p>السعر القياسي: {{ totalPrice() }} | الزمن: {{ totalSeconds() }} ثانية</p>
+          <plp-expandable-form title="إعداد مرحلة الموديل" [summary]="selected.code + ' — ' + selected.name" openLabel="إضافة مرحلة للموديل" [expanded]="modelStageFormVisible" [saving]="saving" [error]="error" (expandedChange)="onModelStageFormVisibility($event)">
           <form [formGroup]="stageForm" (ngSubmit)="saveModelStage()" class="master-page__form">
             <label>المرحلة<select formControlName="subStageId"><option value="">اختر المرحلة</option><option *ngFor="let item of subs" [value]="item.id" [disabled]="!item.isActive">{{ item.code }} - {{ item.name }}</option></select></label>
             <label>الترتيب<input type="number" formControlName="stageOrder"></label>
@@ -71,6 +78,7 @@
             <label><input type="checkbox" formControlName="isRequired"> مطلوبة</label>
             <button pButton type="submit" [label]="editModelStageId ? 'تحديث' : 'إضافة مرحلة'" [disabled]="saving"></button>
           </form>
+          </plp-expandable-form>
         </p-card>
       </div>
 

@@ -125,6 +125,36 @@ describe('LineStaffingWorkspacePageComponent', () => {
     expect(assignments.getActiveLineStaffingWorkers).toHaveBeenCalledTimes(workerDirectoryRequests);
   });
 
+  it('routes every scoped assignment action through the one shared sheet state and retains worker context', () => {
+    initialize(component);
+    const assignedWorker = component.plan!.workers[0];
+
+    component.openDefaultAssignment();
+    expect(component.assignmentDialogVisible).toBeTrue();
+    expect(component.assignmentDialogMode).toBe('default');
+    component.closeAssignmentDialog();
+
+    component.openTemporaryAssignment();
+    expect(component.assignmentDialogVisible).toBeTrue();
+    expect(component.assignmentDialogMode).toBe('temporary');
+    component.closeAssignmentDialog();
+
+    component.openReplacement(assignedWorker);
+    expect(component.assignmentDialogVisible).toBeTrue();
+    expect(component.assignmentDialogMode).toBe('replacement');
+    expect(component.assignmentDialogSubtitle).toContain(assignedWorker.employeeCode);
+    component.closeAssignmentDialog();
+
+    component.openMove(assignedWorker);
+    expect(component.assignmentDialogVisible).toBeTrue();
+    expect(component.assignmentDialogMode).toBe('move');
+    component.closeAssignmentDialog();
+
+    component.openCancellation(assignedWorker);
+    expect(component.assignmentDialogVisible).toBeTrue();
+    expect(component.assignmentDialogMode).toBe('remove-default');
+  });
+
   it('does not submit the permanent bulk dialog from the form while filtering or selecting workers', () => {
     initialize(component);
     const save = spyOn(component, 'saveAssignment');
@@ -198,6 +228,28 @@ describe('LineStaffingWorkspacePageComponent', () => {
 
     component.toggleDefaultWorker(component.availableWorkers[1], false);
     expect(component.assignmentMissingRequirements).not.toContain('سبب تغيير التعيين الدائم مطلوب');
+  });
+
+  it('keeps temporary assignment in the shared form state until reason and a valid period are supplied', () => {
+    initialize(component);
+    component.openTemporaryAssignment();
+    component.selectDialogWorker(component.availableWorkers[1]);
+
+    expect(component.assignmentDialogVisible).toBeTrue();
+    expect(component.assignmentMissingRequirements).toContain('سبب التعيين المؤقت مطلوب');
+    expect(component.assignmentMissingRequirements).toContain('تاريخ ووقت النهاية مطلوب');
+
+    component.assignmentForm.controls.startAtLocal.setValue('');
+    expect(component.assignmentMissingRequirements).toContain('تاريخ ووقت البداية مطلوب');
+
+    component.assignmentForm.patchValue({
+      startAtLocal: '2026-07-16T08:00',
+      endAtLocal: '2026-07-16T12:00',
+      reason: 'تغطية مؤقتة'
+    });
+
+    expect(component.assignmentMissingRequirements).toEqual([]);
+    expect(component.assignmentDialogVisible).toBeTrue();
   });
 
   it('shows temporary-assignment candidates before an end date is entered instead of silently filtering them away', () => {

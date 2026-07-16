@@ -15,7 +15,9 @@
     </div>
   </plp-page-header>
 
-  <div class="workers-toolbar">
+  <p class="workers-source-note" role="status">تُنشأ سجلات العاملين من مصدر الحضور المعتمد. يمكن تعديل بيانات الهوية المتاحة هنا دون إعادة تحميل القائمة.</p>
+
+  <div class="workers-toolbar plp-filter-toolbar">
     <label class="sr-only" for="workersSearch">بحث</label>
     <input
       id="workersSearch"
@@ -71,7 +73,7 @@
 
   <section class="workers-table-shell" *ngIf="!isLoading && !hasAnyError && workers.length > 0">
     <p-table
-      plpResponsiveTable="scroll"
+      plpResponsiveTable="stack"
       plpTablePagination
       [plpStickyActions]="true"
       [value]="workers"
@@ -98,26 +100,26 @@
         </tr>
       </ng-template>
       <ng-template pTemplate="body" let-worker>
-        <tr>
-          <td>
+        <tr [class.workers-row--selected]="selectedWorker?.id === worker.id || selectedWorker?.code === worker.code">
+          <td data-plp-label="العامل">
             <div class="workers-identity">
               <plp-worker-avatar [fullName]="worker.fullName" [code]="worker.code" [photoReference]="worker.photoReference" [hasPhoto]="worker.hasPhoto" [photoVersion]="worker.photoVersion" size="sm"></plp-worker-avatar>
               <span>{{ worker.fullName }}</span>
             </div>
           </td>
-          <td>{{ worker.code }}</td>
-          <td>{{ worker.department || '-' }}</td>
-          <td>
+          <td data-plp-label="الكود"><span class="plp-code">{{ worker.code }}</span></td>
+          <td data-plp-label="القسم">{{ worker.department || '-' }}</td>
+          <td data-plp-label="الحالة">
             <span class="workers-state">{{ worker.state }}</span>
           </td>
-          <td>
+          <td data-plp-label="التواصل">
             <div class="workers-contact">
               <span *ngIf="worker.phone">{{ worker.phone }}</span>
               <span *ngIf="!worker.phone && worker.email">{{ worker.email }}</span>
               <span *ngIf="!worker.phone && !worker.email">-</span>
             </div>
           </td>
-          <td>
+          <td data-plp-label="الإجراءات" class="workers-table__actions">
             <button
               pButton
               pRipple
@@ -127,6 +129,17 @@
               label="عرض التفاصيل"
               (click)="openWorkerDetails(worker)"
               *plpCan="permissions.workers.view"
+            ></button>
+            <button
+              pButton
+              pRipple
+              class="p-button-sm p-button-text"
+              type="button"
+              icon="pi pi-pencil"
+              label="تعديل"
+              [disabled]="!worker.id || workerSaving"
+              (click)="openWorkerEdit(worker)"
+              *plpCan="permissions.workers.manage"
             ></button>
           </td>
         </tr>
@@ -139,31 +152,46 @@
     </p-table>
   </section>
 
-  <section class="workers-details" *ngIf="selectedWorker && !isLoading">
-    <header class="workers-details__header">
-      <h2>تفاصيل العامل</h2>
-      <button
-        pButton
-        pRipple
-        class="p-button-sm p-button-text"
-        type="button"
-        icon="pi pi-times"
-        label="إغلاق"
-        (click)="closeWorkerDetails()"
-        aria-label="إغلاق تفاصيل العامل"
-      ></button>
-    </header>
+  <plp-form-sheet
+    [visible]="workerSheetVisible"
+    [title]="workerSheetMode === 'edit' ? 'تعديل بيانات العامل' : 'تفاصيل العامل'"
+    [subtitle]="selectedWorker ? selectedWorker.code + ' — ' + selectedWorker.fullName : ''"
+    size="standard"
+    [saving]="workerSaving"
+    [saveDisabled]="workerForm.invalid"
+    [error]="workerSaveError"
+    [readOnly]="workerSheetMode === 'details'"
+    [successMessage]="workerSuccessMessage"
+    saveLabel="حفظ التعديل"
+    closeLabel="إغلاق التفاصيل"
+    (visibleChange)="onWorkerSheetVisibilityChange($event)"
+    (cancel)="closeWorkerSheet()"
+    (save)="saveWorker()"
+  >
+    <ng-container *ngIf="selectedWorker as worker">
+      <section class="workers-sheet-profile" *ngIf="workerSheetMode === 'details'">
+        <plp-worker-avatar [fullName]="worker.fullName" [code]="worker.code" [photoReference]="worker.photoReference" [hasPhoto]="worker.hasPhoto" [photoVersion]="worker.photoVersion" size="lg"></plp-worker-avatar>
+        <dl class="workers-sheet-profile__facts">
+          <div><dt>الاسم</dt><dd>{{ worker.fullName }}</dd></div>
+          <div><dt>الكود</dt><dd>{{ worker.code }}</dd></div>
+          <div><dt>الحالة</dt><dd>{{ worker.state }}</dd></div>
+          <div><dt>القسم</dt><dd>{{ worker.department || '-' }}</dd></div>
+          <div><dt>الهاتف</dt><dd>{{ worker.phone || '-' }}</dd></div>
+          <div><dt>البريد الإلكتروني</dt><dd>{{ worker.email || '-' }}</dd></div>
+        </dl>
+      </section>
 
-    <div class="workers-details__content">
-      <plp-worker-avatar [fullName]="selectedWorker.fullName" [code]="selectedWorker.code" [photoReference]="selectedWorker.photoReference" [hasPhoto]="selectedWorker.hasPhoto" [photoVersion]="selectedWorker.photoVersion" size="lg"></plp-worker-avatar>
-      <div class="workers-details__facts">
-        <p><strong>الاسم:</strong> {{ selectedWorker.fullName }}</p>
-        <p><strong>الكود:</strong> {{ selectedWorker.code }}</p>
-        <p><strong>الحالة:</strong> {{ selectedWorker.state }}</p>
-        <p><strong>القسم:</strong> {{ selectedWorker.department || '-' }}</p>
-        <p><strong>الهاتف:</strong> {{ selectedWorker.phone || '-' }}</p>
-        <p><strong>البريد الإلكتروني:</strong> {{ selectedWorker.email || '-' }}</p>
-      </div>
-    </div>
-  </section>
+      <plp-form *ngIf="workerSheetMode === 'edit'" [formGroup]="workerForm" [columns]="1" [busy]="workerSaving" (submitted)="saveWorker()">
+        <label class="workers-sheet-field">الاسم الكامل <span aria-hidden="true">*</span>
+          <input pInputText type="text" formControlName="fullName" autocomplete="name" maxlength="200" [attr.aria-invalid]="workerForm.controls.fullName.invalid && workerForm.controls.fullName.touched" aria-describedby="workerFullNameError">
+          <small id="workerFullNameError" class="workers-sheet-field__validation" [class.is-visible]="workerForm.controls.fullName.invalid && workerForm.controls.fullName.touched" [attr.role]="workerForm.controls.fullName.invalid && workerForm.controls.fullName.touched ? 'alert' : null">{{ workerForm.controls.fullName.invalid && workerForm.controls.fullName.touched ? 'اسم العامل مطلوب.' : '' }}</small>
+        </label>
+        <label class="workers-sheet-field">رقم الهاتف
+          <input pInputText type="tel" formControlName="phone" autocomplete="tel" maxlength="50">
+          <small>يُترك كما هو إن لم يكن متاحًا للتعديل.</small>
+        </label>
+        <p class="workers-sheet-context">الكود والقسم والحالة تأتي من المصدر المعتمد ولا تتغير من هذه الشاشة.</p>
+      </plp-form>
+    </ng-container>
+  </plp-form-sheet>
 </section>

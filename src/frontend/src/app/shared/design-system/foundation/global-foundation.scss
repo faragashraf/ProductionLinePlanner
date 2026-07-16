@@ -197,6 +197,101 @@ textarea:read-only,
   padding-block: var(--plp-space-24);
 }
 
+.plp-page-layout {
+  display: grid;
+  gap: var(--plp-grid-gap);
+  min-inline-size: 0;
+}
+
+.plp-page-surface {
+  background: var(--plp-color-surface);
+  border: var(--plp-border-default);
+  border-radius: var(--plp-radius-lg);
+  box-shadow: var(--plp-elevation-1);
+  min-inline-size: 0;
+  padding: var(--plp-space-16);
+}
+
+.plp-filter-toolbar {
+  align-items: end;
+  background: var(--plp-color-surface-soft);
+  border: var(--plp-border-muted);
+  border-radius: var(--plp-radius-md);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--plp-space-12);
+  padding: var(--plp-space-12);
+}
+
+.plp-filter-toolbar > :is(input, select, label) {
+  flex: 1 1 min(100%, 13rem);
+  min-inline-size: 0;
+}
+
+.plp-sticky-action-bar {
+  align-items: center;
+  background: color-mix(in oklab, var(--plp-color-surface-raised) 94%, transparent);
+  border-block-start: var(--plp-border-muted);
+  bottom: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--plp-space-8);
+  padding: var(--plp-space-12) max(var(--plp-page-padding), env(safe-area-inset-right)) max(var(--plp-space-12), env(safe-area-inset-bottom));
+  position: sticky;
+  z-index: var(--plp-z-sticky);
+}
+
+.plp-bounded-workspace {
+  min-block-size: 0;
+  min-inline-size: 0;
+}
+
+.plp-bounded-workspace__panel {
+  min-block-size: 0;
+  min-inline-size: 0;
+  overscroll-behavior: contain;
+}
+
+.plp-bounded-workspace__scroll-region {
+  min-block-size: 0;
+  overscroll-behavior: contain;
+}
+
+.plp-bounded-workspace__sticky-header {
+  background: var(--plp-color-surface-raised);
+  inset-block-start: 0;
+  position: sticky;
+  z-index: 1;
+}
+
+plp-section-navigation {
+  display: block;
+}
+
+.plp-section-navigation {
+  display: flex;
+  gap: var(--plp-space-8);
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  padding-block: var(--plp-space-4);
+  scroll-padding-inline: var(--plp-page-padding);
+  scrollbar-width: none;
+}
+
+.plp-section-navigation::-webkit-scrollbar {
+  display: none;
+}
+
+.plp-section-navigation__item {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.plp-section-navigation__item--active {
+  background: var(--plp-color-primary-soft) !important;
+  color: var(--plp-color-primary-active) !important;
+}
+
 .plp-responsive-grid,
 .plp-form-grid {
   display: grid;
@@ -397,6 +492,53 @@ plp-expandable-form {
     min-inline-size: 42rem;
   }
 
+  .plp-operational-table--stack .p-datatable-wrapper {
+    overflow: visible;
+  }
+
+  .plp-operational-table--stack .p-datatable-table,
+  .plp-operational-table--stack .p-datatable-tbody {
+    display: grid;
+    inline-size: 100%;
+  }
+
+  .plp-operational-table--stack .p-datatable-thead {
+    display: none;
+  }
+
+  .plp-operational-table--stack .p-datatable-tbody {
+    gap: var(--plp-space-12);
+    padding: var(--plp-space-8);
+  }
+
+  .plp-operational-table--stack .p-datatable-tbody > tr {
+    background: var(--plp-color-surface-raised);
+    border: var(--plp-border-default);
+    border-radius: var(--plp-radius-md);
+    display: grid;
+    overflow: hidden;
+  }
+
+  .plp-operational-table--stack .p-datatable-tbody > tr > td {
+    align-items: baseline;
+    display: grid;
+    gap: var(--plp-space-12);
+    grid-template-columns: minmax(6.5rem, 40%) minmax(0, 1fr);
+    min-block-size: 0;
+    padding: var(--plp-space-8) var(--plp-space-12);
+  }
+
+  .plp-operational-table--stack .p-datatable-tbody > tr > td::before {
+    color: var(--plp-color-text-subtle);
+    content: attr(data-plp-label);
+    font-size: var(--plp-type-caption);
+    font-weight: var(--plp-font-weight-semibold);
+  }
+
+  .plp-operational-table--stack .p-datatable-tbody > tr > td:empty::before {
+    content: '';
+  }
+
   .plp-operational-table--sticky-actions .p-datatable-thead > tr > :last-child,
   .plp-operational-table--sticky-actions .p-datatable-tbody > tr > :last-child {
     background: var(--plp-color-surface-raised);
@@ -423,6 +565,30 @@ plp-expandable-form {
 
   .plp-table-pagination .p-paginator-pages {
     display: none;
+  }
+}
+
+@media (max-width: 1023px) {
+  .plp-page-surface {
+    border-inline: 0;
+    border-radius: var(--plp-radius-md);
+    box-shadow: none;
+    margin-inline: calc(var(--plp-page-padding) * -1);
+    padding-inline: var(--plp-page-padding);
+  }
+
+  .plp-filter-toolbar > :is(input, select, label) {
+    flex-basis: 100%;
+  }
+
+  .plp-section-navigation {
+    background: color-mix(in oklab, var(--plp-color-surface-raised) 94%, transparent);
+    border-block: var(--plp-border-muted);
+    margin-inline: calc(var(--plp-page-padding) * -1);
+    padding-inline: var(--plp-page-padding);
+    position: sticky;
+    top: 0;
+    z-index: var(--plp-z-sticky);
   }
 }
 
@@ -473,6 +639,38 @@ plp-expandable-form {
   .plp-form-grid--two-columns,
   .plp-responsive-grid--two-columns {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .plp-bounded-workspace.plp-bounded-workspace--tablet {
+    block-size: min(68dvh, 52rem);
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    overflow: hidden;
+  }
+
+  .plp-bounded-workspace.plp-bounded-workspace--tablet > .plp-bounded-workspace__panel {
+    overflow: auto;
+    scrollbar-gutter: stable;
+  }
+
+  .plp-bounded-workspace.plp-bounded-workspace--tablet > p-card.plp-bounded-workspace__panel,
+  .plp-bounded-workspace.plp-bounded-workspace--tablet > p-card.plp-bounded-workspace__panel > .p-card,
+  .plp-bounded-workspace.plp-bounded-workspace--tablet > p-card.plp-bounded-workspace__panel .p-card-body,
+  .plp-bounded-workspace.plp-bounded-workspace--tablet > p-card.plp-bounded-workspace__panel .p-card-content {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-block-size: 0;
+  }
+
+  .plp-bounded-workspace.plp-bounded-workspace--tablet .plp-bounded-workspace__scroll-region {
+    flex: 1 1 auto;
+    max-block-size: none;
+    overflow: auto;
+  }
+
+  .plp-bounded-workspace.plp-bounded-workspace--tablet .plp-bounded-workspace__sticky-header {
+    padding-block-end: var(--plp-space-12);
   }
 }
 

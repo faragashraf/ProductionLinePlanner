@@ -107,5 +107,15 @@ html.plp-line-staffing-tablet-scroll-lock body {
   .line-staffing-page__workspace { grid-template-columns: 1fr; }
   .line-staffing-page__stage-list { max-block-size: min(26rem, calc(100dvh - var(--plp-app-shell-header-height, 0px) - 10rem)); }
   .line-staffing-page__worker-table-wrap { max-block-size: min(26rem, 48dvh); }
-  .line-staffing-page__worker-table { min-inline-size: 32rem; }
+  .line-staffing-page__worker-table { min-inline-size: 0; }
+  .line-staffing-page__worker-table thead { display: none; }
+  .line-staffing-page__worker-table,
+  .line-staffing-page__worker-table tbody,
+  .line-staffing-page__worker-table tr,
+  .line-staffing-page__worker-table td { display: block; }
+  .line-staffing-page__worker-table tr { display: grid; grid-template-columns: 2.75rem minmax(0, 1fr); gap: .25rem .45rem; padding: .6rem; border-block-end: 1px solid #eaecf0; }
+  .line-staffing-page__worker-table td { padding: 0; border: 0; }
+  .line-staffing-page__worker-table td:first-child { inline-size: auto; padding-block-start: .2rem; }
+  .line-staffing-page__worker-table td:last-child { grid-column: 1 / -1; padding-inline-start: 3.2rem; }
+  .line-staffing-page__worker-table-identity { min-inline-size: 0; }
 }

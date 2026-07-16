@@ -21,6 +21,8 @@
 
 .plp-product-dialog__header,
 .plp-product-dialog__footer,
+.plp-form-sheet__header,
+.plp-form-sheet__footer,
 .plp-product-page-header,
 .plp-product-toolbar {
   align-items: center;
@@ -30,25 +32,62 @@
 }
 
 .plp-product-dialog__header,
+.plp-form-sheet__header,
 .plp-product-page-header {
   align-items: flex-start;
 }
 
 .plp-product-dialog__header h2,
-.plp-product-dialog__header p {
+.plp-product-dialog__header p,
+.plp-form-sheet__header h2,
+.plp-form-sheet__header p {
   margin: 0;
 }
 
-.plp-product-dialog__body {
-  display: grid;
-  gap: var(--plp-space-16);
+.plp-form-sheet__header {
+  flex: 1 1 auto;
+  min-inline-size: 0;
 }
 
-.plp-product-dialog__footer {
+.plp-form-sheet__header > div {
+  display: grid;
+  gap: var(--plp-space-4);
+  min-inline-size: 0;
+}
+
+.plp-form-sheet__header h2 {
+  color: var(--plp-color-text);
+  font-size: var(--plp-type-section-title);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.plp-form-sheet__header p {
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.plp-product-dialog__body,
+.plp-form-sheet__body {
+  display: grid;
+  gap: var(--plp-space-12);
+}
+
+.plp-product-dialog__footer,
+.plp-form-sheet__footer {
   flex-wrap: wrap;
 }
 
-.plp-product-dialog__footer > :first-child:not(.plp-action-group) {
+.plp-form-sheet__footer .plp-action-group {
+  margin-inline-start: auto;
+}
+
+.plp-form-sheet__footer .plp-action-button {
+  min-block-size: var(--plp-touch-target-min);
+}
+
+.plp-product-dialog__footer > :first-child:not(.plp-action-group),
+.plp-form-sheet__footer > :first-child:not(.plp-action-group) {
   margin-inline-end: auto;
 }
 
@@ -268,18 +307,21 @@
   }
 
   .plp-product-dialog__footer,
+  .plp-form-sheet__footer,
   .plp-product-page-header__actions,
   .plp-product-toolbar__actions {
     inline-size: 100%;
   }
 
   .plp-product-dialog__footer .plp-action-group,
+  .plp-form-sheet__footer .plp-action-group,
   .plp-product-page-header__actions,
   .plp-product-toolbar__actions {
     justify-content: stretch;
   }
 
   .plp-product-dialog__footer .plp-action-button,
+  .plp-form-sheet__footer .plp-action-button,
   .plp-product-page-header__actions .plp-action-button,
   .plp-product-toolbar__actions .plp-action-button {
     flex: 1 1 auto;

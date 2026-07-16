@@ -14,6 +14,7 @@ import { SharedModule } from '../../shared/shared.module';
 import { PlpResponsiveTableDirective } from '../../shared/product/plp-responsive-table.directive';
 import { PlpTablePaginationDirective } from '../../shared/product/plp-table-pagination.directive';
 import { PlpExpandableFormComponent } from '../../shared/product/plp-expandable-form.component';
+import { NoopAnimationsModule } from '@angular/platform-browser/animations';
 import { FactoryStructureFoundationPageComponent } from './factory-structure-foundation-page.component';
 
 describe('FactoryStructureFoundationPageComponent', () => {
@@ -112,7 +113,7 @@ describe('FactoryStructureFoundationPageComponent', () => {
 
     TestBed.configureTestingModule({
       declarations: [FactoryStructureFoundationPageComponent],
-      imports: [FormsModule, SharedModule, ButtonModule, TableModule, PlpResponsiveTableDirective, PlpTablePaginationDirective, PlpExpandableFormComponent],
+      imports: [FormsModule, SharedModule, ButtonModule, TableModule, PlpResponsiveTableDirective, PlpTablePaginationDirective, PlpExpandableFormComponent, NoopAnimationsModule],
       providers: [
         { provide: ManufacturingMasterDataApiService, useValue: masterData },
         { provide: AssignmentsApiService, useValue: assignments },

@@ -26,6 +26,11 @@ export interface WorkersApiQuery {
   serviceStatus?: 'all' | 'active' | 'inactive';
 }
 
+export interface WorkerIdentityUpdate {
+  fullName?: string;
+  phone?: string;
+}
+
 @Injectable({
   providedIn: 'root'
 })
@@ -79,6 +84,16 @@ export class WorkersApiService {
             .map((worker, index) => this.mapWorker(worker, index))
             .filter((worker) => this.hasText(worker.id ?? '') && this.hasText(worker.code) && this.hasText(worker.fullName));
         })
+      );
+  }
+
+  /** Updates one worker and returns the authoritative row shape for local reconciliation. */
+  updateWorker(workerId: string, update: WorkerIdentityUpdate): Observable<WorkerPageItem> {
+    return this.http
+      .patch<ApiResponse<unknown>>(buildApiUrl(`/api/workers/${encodeURIComponent(workerId)}`), update)
+      .pipe(
+        timeout(STANDARD_API_TIMEOUT_MS),
+        map(response => this.mapWorker(this.normalizeObject(this.extractPayload(response)), 0))
       );
   }
 

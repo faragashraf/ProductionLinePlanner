@@ -72,4 +72,17 @@ describe('WorkersApiService', () => {
     expect(formerRequest.request.params.get('isActive')).toBe('false');
     formerRequest.flush({ success: true, data: { items: [] } });
   });
+
+  it('patches one worker and maps the authoritative response for targeted UI reconciliation', () => {
+    let updated: WorkerPageItem | undefined;
+
+    service.updateWorker('worker-1', { fullName: 'عامل محدّث', phone: '01012345678' }).subscribe(value => updated = value);
+
+    const request = http.expectOne(item => item.url.endsWith('/api/workers/worker-1'));
+    expect(request.request.method).toBe('PATCH');
+    expect(request.request.body).toEqual({ fullName: 'عامل محدّث', phone: '01012345678' });
+    request.flush({ success: true, data: { id: 'worker-1', employeeCode: 'E-1', fullName: 'عامل محدّث', phone: '01012345678', isActive: true, employmentStatus: 'Active' } });
+
+    expect(updated).toEqual(jasmine.objectContaining({ id: 'worker-1', code: 'E-1', fullName: 'عامل محدّث', phone: '01012345678' }));
+  });
 });
