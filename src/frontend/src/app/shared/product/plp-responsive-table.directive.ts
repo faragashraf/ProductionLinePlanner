@@ -1,4 +1,4 @@
-import { AfterViewInit, Directive, ElementRef, Inject, Input, OnDestroy, PLATFORM_ID, booleanAttribute } from '@angular/core';
+import { AfterViewInit, Directive, ElementRef, Inject, Input, NgZone, OnDestroy, PLATFORM_ID, booleanAttribute } from '@angular/core';
 import { isPlatformBrowser } from '@angular/common';
 import { PlpHorizontalOverflowController } from './plp-horizontal-overflow';
 
@@ -26,10 +26,12 @@ export class PlpResponsiveTableDirective implements AfterViewInit, OnDestroy {
   @Input({ transform: booleanAttribute }) plpStickyActions = false;
 
   private controller: PlpHorizontalOverflowController | null = null;
+  private destroyed = false;
 
   constructor(
     private readonly elementRef: ElementRef<HTMLElement>,
-    @Inject(PLATFORM_ID) private readonly platformId: object
+    @Inject(PLATFORM_ID) private readonly platformId: object,
+    private readonly ngZone: NgZone
   ) {}
 
   ngAfterViewInit(): void {
@@ -37,11 +39,22 @@ export class PlpResponsiveTableDirective implements AfterViewInit, OnDestroy {
       return;
     }
 
-    queueMicrotask(() => this.attachOverflowObserver());
+    // Geometry observers mutate only presentation affordances. Keeping their
+    // callbacks outside Angular prevents DOM character-data observations from
+    // recursively scheduling application-wide change detection.
+    queueMicrotask(() => {
+      if (this.destroyed) {
+        return;
+      }
+
+      this.ngZone.runOutsideAngular(() => this.attachOverflowObserver());
+    });
   }
 
   ngOnDestroy(): void {
+    this.destroyed = true;
     this.controller?.destroy();
+    this.controller = null;
   }
 
   private attachOverflowObserver(): void {

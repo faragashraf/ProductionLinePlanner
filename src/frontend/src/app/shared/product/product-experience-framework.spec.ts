@@ -1,5 +1,5 @@
-import { Component, Type } from '@angular/core';
-import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { Component, NgZone, Type } from '@angular/core';
+import { ComponentFixture, TestBed, fakeAsync, flushMicrotasks } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { NoopAnimationsModule } from '@angular/platform-browser/animations';
 import { ConfirmationService, PrimeNGConfig } from 'primeng/api';
@@ -150,6 +150,31 @@ describe('Product Experience Framework', () => {
     expect(table.classList.contains('plp-operational-table--sticky-actions')).toBeTrue();
     expect(table.getAttribute('data-plp-table-presentation')).toBe('scroll');
   });
+
+  it('attaches responsive table geometry observers outside Angular change detection', fakeAsync(() => {
+    const ngZone = TestBed.inject(NgZone);
+    const runOutsideAngular = spyOn(ngZone, 'runOutsideAngular').and.callThrough();
+
+    const fixture = createComponent(ResponsiveTableHostComponent);
+    flushMicrotasks();
+
+    const attachesOverflowObserverOutsideAngular = runOutsideAngular.calls
+      .allArgs()
+      .some(([callback]) => String(callback).includes('attachOverflowObserver'));
+
+    expect(attachesOverflowObserverOutsideAngular).toBeTrue();
+    fixture.destroy();
+  }));
+
+  it('does not attach responsive table observers after the host is destroyed', fakeAsync(() => {
+    const fixture = createComponent(ResponsiveTableHostComponent);
+    const table = fixture.nativeElement.querySelector('p-table') as HTMLElement;
+
+    fixture.destroy();
+    flushMicrotasks();
+
+    expect(table.classList.contains('plp-horizontal-overflow')).toBeFalse();
+  }));
 
   it('configures client pagination with the standard total, current-page report, and mobile-safe paginator shell', () => {
     const fixture = createComponent(PaginatedTableHostComponent);
