@@ -211,7 +211,7 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
       .pipe(finalize(() => this.attendanceSyncing = false), takeUntil(this.destroy$))
       .subscribe({
         next: result => this.onAttendanceSynchronized(result),
-        error: error => this.error = this.formValidation.serverMessage(error, 'تعذر مزامنة حضور تاريخ الإنتاج المحدد.')
+        error: error => this.error = this.attendanceSyncFailureMessage(error)
       });
   }
 
@@ -384,6 +384,26 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
     if (this.operations && this.selectedFactoryId && this.selectedProductionLineId && this.selectedProductModelId) {
       this.loadTodayOperations();
     }
+  }
+
+  private attendanceSyncFailureMessage(error: unknown): string {
+    const response = error as {
+      status?: number;
+      name?: string;
+      error?: { error?: { code?: string }; code?: string };
+    };
+    const payload = response.error?.error ?? response.error;
+    const code = payload?.code ?? '';
+
+    if (code === 'AttendanceSyncInProgress') return 'المزامنة جارية بالفعل.';
+    if (code === 'AttendanceSyncTimeout' || code === 'AttendanceSourceTimeout' || response.status === 504 || response.name === 'TimeoutError') {
+      return 'انتهت مهلة مزامنة الحضور.';
+    }
+    if (code === 'AttendanceSourceError' || code === 'AttendanceSyncCancelled' || response.status === 0 || response.status === 503) {
+      return 'تعذر الاتصال بمصدر الحضور.';
+    }
+
+    return this.formValidation.serverMessage(error, 'تعذر مزامنة حضور تاريخ الإنتاج المحدد.');
   }
 
   private toEditableStage(stage: DailyProductionStage): EditableDailyStage {

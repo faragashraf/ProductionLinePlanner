@@ -3575,8 +3575,11 @@ static int MapFailureStatusCode(string? code)
         "NotFound" => StatusCodes.Status404NotFound,
         "Unauthorized" or "InvalidToken" or "InvalidCredentials" => StatusCodes.Status401Unauthorized,
         "Conflict" => StatusCodes.Status409Conflict,
+        "AttendanceSyncInProgress" => StatusCodes.Status409Conflict,
         "BootstrapNotAllowed" => StatusCodes.Status409Conflict,
         "Forbidden" => StatusCodes.Status403Forbidden,
+        "AttendanceSyncTimeout" or "AttendanceSourceTimeout" => StatusCodes.Status504GatewayTimeout,
+        "AttendanceSourceError" or "AttendanceSyncCancelled" => StatusCodes.Status503ServiceUnavailable,
         _ => StatusCodes.Status500InternalServerError
     };
 }

@@ -22,6 +22,8 @@ import { PlpTablePaginationDirective } from '../../shared/product/plp-table-pagi
 import { PlpOverflowRailDirective } from '../../shared/product/plp-horizontal-overflow';
 import { PlpExpandableFormComponent } from '../../shared/product/plp-expandable-form.component';
 import { PlpDialogComponent } from '../../shared/product/plp-dialog.component';
+import { PlpFormSheetComponent } from '../../shared/product/plp-form-sheet.component';
+import { PlpSectionNavigationComponent } from '../../shared/product/plp-section-navigation.component';
 import { PlpFormComponent } from '../../shared/product/plp-form.component';
 
 @NgModule({
@@ -51,6 +53,8 @@ import { PlpFormComponent } from '../../shared/product/plp-form.component';
     PlpOverflowRailDirective,
     PlpExpandableFormComponent,
     PlpDialogComponent,
+    PlpFormSheetComponent,
+    PlpSectionNavigationComponent,
     PlpFormComponent,
     ManufacturingWorkspaceRoutingModule
   ]

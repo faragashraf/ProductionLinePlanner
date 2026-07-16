@@ -11,7 +11,7 @@
       </label>
       <div class="daily-production-operations__attendance-action">
         <span>الحضور لتاريخ الإنتاج</span>
-        <button pButton type="button" class="p-button-outlined" [label]="attendanceSyncing ? 'جارٍ مزامنة الحضور…' : 'مزامنة حضور التاريخ'" icon="pi pi-refresh" [loading]="attendanceSyncing" (click)="synchronizeAttendance()"></button>
+        <button pButton type="button" class="p-button-outlined" [label]="attendanceSyncing ? 'جارٍ مزامنة الحضور…' : 'مزامنة حضور التاريخ'" icon="pi pi-refresh" [loading]="attendanceSyncing" [disabled]="attendanceSyncing || !productionDate" (click)="synchronizeAttendance()"></button>
         <small [class.is-confirmed]="attendanceSyncedForDate === productionDate">{{ attendanceSyncedForDate === productionDate ? 'تمت المزامنة لهذا التاريخ' : 'المزامنة اليدوية مطلوبة قبل التحميل' }}</small>
       </div>
       <label>المصنع
@@ -62,8 +62,8 @@
       <p class="daily-production-operations__refresh-note" *ngIf="operationsLoading">جارٍ تحديث حالة الحضور والتسكين في الخلفية؛ تبقى بياناتك الحالية ظاهرة.</p>
     </p-card>
 
-    <section class="daily-production-operations__workspace">
-      <p-card header="كل مراحل الموديل">
+    <section class="daily-production-operations__workspace plp-bounded-workspace plp-bounded-workspace--tablet">
+      <p-card class="plp-bounded-workspace__panel" header="كل مراحل الموديل">
         <div class="daily-production-operations__filters">
           <input pInputText type="search" [(ngModel)]="stageSearch" placeholder="ابحث باسم أو كود المرحلة">
           <select [(ngModel)]="stageFilter" aria-label="فلتر حالة المرحلة">
@@ -75,7 +75,7 @@
             <option value="cost-review">مراجعة تكلفة</option>
           </select>
         </div>
-        <div class="daily-production-operations__stage-list" aria-live="polite">
+        <div class="daily-production-operations__stage-list plp-bounded-workspace__scroll-region" aria-live="polite">
           <button type="button" *ngFor="let stage of filteredStages; trackBy: trackById" class="daily-production-operations__stage" [class.is-selected]="stage.productModelStageId === selectedStageId" (click)="selectStage(stage.productModelStageId)">
             <span><strong>{{ stage.stageOrder }}. {{ stage.stageCode }} — {{ stage.stageName }}</strong><small>{{ stage.mainStageName }} · {{ stage.workers.length }} عامل</small></span>
             <span class="daily-production-operations__stage-badges"><small>{{ stageStatusLabel(stage) }}</small><small *ngIf="stage.isFinancialReviewPending">تكلفة</small></span>
@@ -85,8 +85,8 @@
       </p-card>
 
       <ng-container *ngIf="selectedStage as stage; else stageGuidance">
-        <p-card>
-          <div class="daily-production-operations__stage-header">
+        <p-card class="plp-bounded-workspace__panel">
+          <div class="daily-production-operations__stage-header plp-bounded-workspace__sticky-header">
             <div>
               <h2>{{ stage.stageCode }} — {{ stage.stageName }}</h2>
               <p>{{ stage.mainStageName }} · {{ stage.compensationMode }} · سعر المرحلة {{ stage.piecePrice | number:'1.2-4' }}</p>
@@ -98,7 +98,7 @@
           <p class="daily-production-operations__warning" *ngIf="stage.hasAbsentWorkers">يوجد عامل غائب في هذا التاريخ؛ الحضور لا يغيّر حالة العمل أو التعيين، والتجاوز يتطلب سببًا وصلاحية.</p>
           <p class="daily-production-operations__warning" *ngIf="stage.hasNoSourceCheckInWorkers">لا يوجد تسجيل بصمة مصدر لبعض العمال؛ هذه ليست حالة غياب تلقائية.</p>
 
-          <div class="daily-production-operations__worker-list">
+          <div class="daily-production-operations__worker-list plp-bounded-workspace__scroll-region">
             <article *ngFor="let worker of stage.workers; trackBy: trackById" class="daily-production-operations__worker">
               <div>
                 <strong>{{ worker.workerCode }} — {{ worker.workerName }}</strong>
@@ -130,7 +130,7 @@
           <p class="daily-production-operations__stage-preview" *ngIf="stagePreview(stage.productModelStageId) as stagePreview">معاينة المرحلة: كمية {{ stagePreview.stageQuantity | number:'1.0-3' }} · تكلفة {{ stagePreview.stageCost | number:'1.2-4' }} · مستحقات العمال {{ stagePreview.workers.length }}</p>
         </p-card>
       </ng-container>
-      <ng-template #stageGuidance><p-card header="تفاصيل المرحلة"><p>اختر مرحلة من القائمة لمراجعة العمال والتوزيع.</p></p-card></ng-template>
+      <ng-template #stageGuidance><p-card class="plp-bounded-workspace__panel" header="تفاصيل المرحلة"><p>اختر مرحلة من القائمة لمراجعة العمال والتوزيع.</p></p-card></ng-template>
     </section>
 
     <p-card header="كمية الخط والمعاينة الموحّدة">
@@ -141,7 +141,7 @@
         <label>ملاحظات المسودة
           <input pInputText [(ngModel)]="notes" maxlength="1000" (ngModelChange)="stageChanged()" placeholder="اختياري">
         </label>
-        <div class="daily-production-operations__final-actions">
+        <div class="daily-production-operations__final-actions plp-sticky-action-bar">
           <span>{{ operations.totalStages }} مرحلة · {{ totalEnteredWorkers }} صف عامل. لا يضاعف أي صف كمية الخط أو المرحلة.</span>
           <button pButton type="button" class="p-button-outlined" label="حساب معاينة موحّدة" icon="pi pi-calculator" [loading]="previewing" [disabled]="previewing || saving" (click)="calculatePreview()"></button>
           <button pButton type="button" label="حفظ مسودة اليوم" icon="pi pi-save" [loading]="saving" [disabled]="!isPreviewCurrent || saving" (click)="saveDailyDraft()"></button>

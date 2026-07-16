@@ -8,10 +8,14 @@ export function isLocalDevelopmentOrigin(
   location: Pick<Location, 'hostname' | 'port'>,
   apiBaseUrl: string
 ): boolean {
-  return location.port === '4200' && (
-    LOOPBACK_DEVELOPMENT_HOSTS.has(location.hostname) ||
-    location.hostname === apiHostname(apiBaseUrl)
-  );
+  if (location.port !== '4200') return false;
+
+  // A relative API base means the Angular dev server is the explicit local
+  // runtime boundary. Any host at its development port is supported, including
+  // the Mac's changing LAN address used by tablets.
+  if (apiBaseUrl.startsWith('/')) return true;
+
+  return LOOPBACK_DEVELOPMENT_HOSTS.has(location.hostname) || location.hostname === apiHostname(apiBaseUrl);
 }
 
 export function initializeLocalDevelopmentRuntime(

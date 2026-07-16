@@ -25,7 +25,8 @@ import { FactoryRendererComponent } from './pages/factory-map-page/renderers/fac
 import { LineRendererComponent } from './pages/factory-map-page/renderers/line-renderer/line-renderer.component';
 import { StageRendererComponent } from './pages/factory-map-page/renderers/stage-renderer/stage-renderer.component';
 import { AuthTokenInterceptor } from './core/interceptors/auth-token.interceptor';
-import { ConfirmationService, PrimeNGConfig } from 'primeng/api';
+import { ConfirmationService, MessageService, PrimeNGConfig } from 'primeng/api';
+import { ToastModule } from 'primeng/toast';
 import { configureProductionPrimeNg } from './shared/design-system/layering/production-z-index';
 import { ProductExperienceModule } from './shared/product/product-experience.module';
 
@@ -56,11 +57,13 @@ import { ProductExperienceModule } from './shared/product/product-experience.mod
     CardModule,
     BadgeModule,
     ButtonModule,
+    ToastModule,
     ProductExperienceModule,
     SharedModule
   ],
   providers: [
     ConfirmationService,
+    MessageService,
     {
       provide: HTTP_INTERCEPTORS,
       useClass: AuthTokenInterceptor,

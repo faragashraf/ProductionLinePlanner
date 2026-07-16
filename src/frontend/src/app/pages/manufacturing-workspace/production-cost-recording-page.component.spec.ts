@@ -368,7 +368,7 @@ describe('ProductionCostRecordingPageComponent', () => {
 
     component.syncAttendanceToday();
 
-    expect(component.attendanceError).toBe('استغرقت مزامنة الحضور وقتًا أطول من المتوقع. تحقق من حالة المصدر ثم أعد المحاولة.');
+    expect(component.attendanceError).toBe('انتهت مهلة مزامنة الحضور. تحقق من حالة المصدر ثم أعد المحاولة.');
     expect(attendance.getForProductionDate).toHaveBeenCalledTimes(1);
     expect(assignments.getSubStageWorkerContext).toHaveBeenCalledWith('sub-1', component.selectedProductionDate);
     expect(component.showWorkerPanel).toBeTrue();

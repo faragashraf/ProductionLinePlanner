@@ -1,4 +1,5 @@
 import { Component, OnDestroy, OnInit } from '@angular/core';
+import { FormBuilder, Validators } from '@angular/forms';
 import { catchError, finalize, Subject, debounceTime, distinctUntilChanged, map, merge, of, switchMap, takeUntil, tap } from 'rxjs';
 import { PERMISSIONS } from '../../core/config/permission-identifiers';
 import { TableLazyLoadEvent } from 'primeng/table';
@@ -10,6 +11,8 @@ type WorkersLoadResult = { payload: WorkersApiData; query: WorkersApiRequest; er
 interface WorkersApiRequest extends WorkersApiQuery {
   force?: boolean;
 }
+
+type WorkerSheetMode = 'details' | 'edit';
 
 @Component({
   selector: 'app-workers-page',
@@ -25,6 +28,11 @@ export class WorkersPageComponent implements OnInit, OnDestroy {
 
   workers: WorkerPageItem[] = [];
   selectedWorker: WorkerPageItem | null = null;
+  workerSheetVisible = false;
+  workerSheetMode: WorkerSheetMode = 'details';
+  workerSaving = false;
+  workerSaveError = '';
+  workerSuccessMessage = 'تم تحديث بيانات العامل.';
   searchTerm = '';
   serviceStatus: 'all' | 'active' | 'inactive' = 'all';
   isLoading = false;
@@ -37,7 +45,15 @@ export class WorkersPageComponent implements OnInit, OnDestroy {
   totalRecords = 0;
   errorRetryText = 'إعادة المحاولة';
 
-  constructor(private readonly workersApiService: WorkersApiService) {}
+  readonly workerForm = this.formBuilder.nonNullable.group({
+    fullName: ['', [Validators.required, Validators.maxLength(200)]],
+    phone: ['', [Validators.maxLength(50)]]
+  });
+
+  constructor(
+    private readonly workersApiService: WorkersApiService,
+    private readonly formBuilder: FormBuilder
+  ) {}
 
   ngOnInit(): void {
     merge(
@@ -187,10 +203,65 @@ export class WorkersPageComponent implements OnInit, OnDestroy {
 
   openWorkerDetails(worker: WorkerPageItem): void {
     this.selectedWorker = worker;
+    this.workerSheetMode = 'details';
+    this.workerSaveError = '';
+    this.workerSheetVisible = true;
   }
 
-  closeWorkerDetails(): void {
-    this.selectedWorker = null;
+  openWorkerEdit(worker: WorkerPageItem): void {
+    if (!worker.id) {
+      this.selectedWorker = worker;
+      this.workerSaveError = 'تعذر تعديل هذا العامل لأن معرفه غير متاح في البيانات المعروضة.';
+      this.workerSheetMode = 'details';
+      this.workerSheetVisible = true;
+      return;
+    }
+
+    this.selectedWorker = worker;
+    this.workerSheetMode = 'edit';
+    this.workerSaveError = '';
+    this.workerForm.reset({ fullName: worker.fullName, phone: worker.phone ?? '' });
+    this.workerSheetVisible = true;
+  }
+
+  closeWorkerSheet(force = false): void {
+    if (this.workerSaving && !force) return;
+    this.workerSheetVisible = false;
+    this.workerSaveError = '';
+  }
+
+  onWorkerSheetVisibilityChange(visible: boolean): void {
+    if (!visible) this.closeWorkerSheet();
+  }
+
+  saveWorker(): void {
+    const worker = this.selectedWorker;
+    if (this.workerSaving || !worker?.id) return;
+
+    if (this.workerForm.invalid) {
+      this.workerForm.markAllAsTouched();
+      this.workerSaveError = 'راجع الحقول المطلوبة قبل الحفظ.';
+      return;
+    }
+
+    const value = this.workerForm.getRawValue();
+    const update = {
+      fullName: value.fullName.trim(),
+      ...(value.phone.trim() ? { phone: value.phone.trim() } : {})
+    };
+    this.workerSaving = true;
+    this.workerSaveError = '';
+    this.workersApiService.updateWorker(worker.id, update)
+      .pipe(finalize(() => this.workerSaving = false), takeUntil(this.destroy$))
+      .subscribe({
+        next: updatedWorker => {
+          this.workers = this.workers.map(candidate => this.sameWorker(candidate, worker) ? updatedWorker : candidate);
+          this.selectedWorker = updatedWorker;
+          this.workerSuccessMessage = `تم تحديث بيانات ${updatedWorker.fullName}.`;
+          this.closeWorkerSheet(true);
+        },
+        error: error => this.workerSaveError = this.extractErrorMessage(error)
+      });
   }
 
   private get currentPage(): number {
@@ -244,6 +315,10 @@ export class WorkersPageComponent implements OnInit, OnDestroy {
 
   private withFallback(value: string | undefined, fallback: string): string {
     return value?.trim() || fallback;
+  }
+
+  private sameWorker(left: WorkerPageItem, right: WorkerPageItem): boolean {
+    return Boolean(left.id && right.id) ? left.id === right.id : left.code === right.code;
   }
 
   private createEmptyWorkersPayload(query: WorkersApiQuery): WorkersApiData {

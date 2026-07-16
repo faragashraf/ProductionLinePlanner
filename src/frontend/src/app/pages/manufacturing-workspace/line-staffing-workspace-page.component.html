@@ -11,12 +11,13 @@
     </div>
   </plp-toolbar-shell>
 
-  <nav class="line-staffing-page__section-navigation" *ngIf="plan" aria-label="التنقل بين أقسام التسكين">
-    <button pButton type="button" class="p-button-sm p-button-text" label="اختيارات الخط" (click)="requestStaffingSection('choices')"></button>
-    <button pButton type="button" class="p-button-sm p-button-text" label="ملخص التسكين" (click)="requestStaffingSection('summary')"></button>
-    <button pButton type="button" class="p-button-sm p-button-text" label="قائمة المراحل" (click)="requestStaffingSection('stages')"></button>
-    <button pButton type="button" class="p-button-sm p-button-text" label="عمال المرحلة المحددة" (click)="requestStaffingSection('workers')"></button>
-  </nav>
+  <plp-section-navigation
+    *ngIf="plan"
+    class="line-staffing-page__section-navigation"
+    [sections]="sectionNavigationItems"
+    [activeId]="activeStaffingSection"
+    (requested)="requestStaffingSection($event)"
+  ></plp-section-navigation>
 
   <div #tabletContent class="line-staffing-page__tablet-content" [style.--line-staffing-workspace-height.px]="tabletWorkspaceHeightPx">
     <p class="line-staffing-page__error" *ngIf="planError" role="alert">{{ planError }}</p>
@@ -190,15 +191,16 @@
     </ng-container>
   </div>
 
-  <plp-dialog
+  <plp-form-sheet
     [visible]="assignmentDialogVisible"
     [title]="assignmentDialogTitle"
-    [subtitle]="selectedStage ? selectedStage.stageCode + ' — ' + selectedStage.stageName : ''"
+    [subtitle]="assignmentDialogSubtitle"
     size="wide"
     [saving]="assignmentSaving"
     [error]="assignmentDialogError"
     [saveDisabled]="assignmentSaving"
     [saveLabel]="assignmentDialogSaveLabel"
+    [successMessage]="successMessage"
     [focusOnShow]="false"
     (cancel)="closeAssignmentDialog()"
     (visibleChange)="!$event && closeAssignmentDialog()"
@@ -303,5 +305,5 @@
         <li *ngIf="assignmentValidationSummary && !assignmentMissingRequirements.length">{{ assignmentValidationSummary }}</li>
       </ul>
     </plp-form>
-  </plp-dialog>
+  </plp-form-sheet>
 </section>

@@ -8,6 +8,7 @@ import { DialogModule } from 'primeng/dialog';
 import { Table } from 'primeng/table';
 import { PlpResponsiveTableDirective } from '../../shared/product/plp-responsive-table.directive';
 import { PlpTablePaginationDirective } from '../../shared/product/plp-table-pagination.directive';
+import { PlpFormSheetComponent } from '../../shared/product/plp-form-sheet.component';
 import { ReactiveFormsModule } from '@angular/forms';
 import { NoopAnimationsModule } from '@angular/platform-browser/animations';
 import { PERMISSIONS } from '../../core/config/permission-identifiers';
@@ -62,7 +63,7 @@ describe('ManufacturingCompensationPageComponent', () => {
 
     TestBed.configureTestingModule({
       declarations: [ManufacturingCompensationPageComponent],
-      imports: [ReactiveFormsModule, SharedModule, CardModule, ButtonModule, TableModule, DialogModule, PlpResponsiveTableDirective, PlpTablePaginationDirective, NoopAnimationsModule],
+      imports: [ReactiveFormsModule, SharedModule, CardModule, ButtonModule, TableModule, DialogModule, PlpResponsiveTableDirective, PlpTablePaginationDirective, PlpFormSheetComponent, NoopAnimationsModule],
       providers: [
         { provide: ManufacturingMasterDataApiService, useValue: api },
         { provide: PermissionService, useValue: permissionService }
@@ -134,15 +135,16 @@ describe('ManufacturingCompensationPageComponent', () => {
     editButton!.nativeElement.click();
     fixture.detectChanges();
 
-    const dialog = fixture.debugElement.query(By.css('p-dialog'));
+    const dialog = Array.from(document.body.querySelectorAll<HTMLElement>('.p-dialog.plp-form-sheet'))
+      .find(candidate => candidate.textContent?.includes('تعديل إعداد تكلفة المرحلة')) ?? null;
     expect(dialog).not.toBeNull();
     expect(component.isEditDialogVisible).toBeTrue();
     expect(component.editingStageId).toBe('stage-shared');
     expect(component.stageForm.getRawValue()).toEqual({ compensationMode: 'SharedPercentage', piecePrice: 0.5, standardSeconds: 22 });
-    expect(fixture.nativeElement.textContent).toContain('STG001');
-    expect(fixture.nativeElement.textContent).toContain('تجهيز');
+    expect(dialog!.textContent).toContain('STG001');
+    expect(dialog!.textContent).toContain('تجهيز');
     expect(document.body.querySelector('.p-dialog-mask')).not.toBeNull();
-    expect(document.body.querySelector('.p-dialog.compensation-edit-dialog')).not.toBeNull();
+    expect(document.body.querySelector('.p-dialog.plp-form-sheet')).not.toBeNull();
     expect(fixture.debugElement.queryAll(By.css('p-card')).length).toBe(1);
   });
 
@@ -151,7 +153,7 @@ describe('ManufacturingCompensationPageComponent', () => {
     ['FullRatePerWorker', 0.75, 18],
     ['FixedAmount', 1.25, null]
   ] as Array<[CompensationMode, number, number | null]>).forEach(([mode, piecePrice, standardSeconds]) => {
-    it(`saves ${mode} with valid price and standard-seconds values then reloads persisted stages`, () => {
+    it(`saves ${mode} with valid price and standard-seconds values through a targeted row update`, () => {
       const fixture = createComponent({ manage: true });
       const component = fixture.componentInstance;
       const api = TestBed.inject(ManufacturingMasterDataApiService) as jasmine.SpyObj<ManufacturingMasterDataApiService>;
@@ -166,14 +168,15 @@ describe('ManufacturingCompensationPageComponent', () => {
 
       expect(api.updateCompensationModelStage).toHaveBeenCalledTimes(1);
       expect(api.updateCompensationModelStage).toHaveBeenCalledWith('model-grm001', 'stage-shared', { compensationMode: mode, piecePrice, standardSeconds });
-      expect(api.compensationModelStages).toHaveBeenCalledTimes(1);
+      expect(api.compensationModelStages).not.toHaveBeenCalled();
+      expect(component.stages.find(stage => stage.id === 'stage-shared')).toEqual(jasmine.objectContaining({ compensationMode: mode, piecePrice, standardSeconds }));
       expect(component.selectedModelId).toBe('model-grm001');
       expect(component.editingStageId).toBe('');
       expect(component.isEditDialogVisible).toBeFalse();
     });
   });
 
-  it('saves from the rendered dialog once, closes it after success, and reloads persisted rows', () => {
+  it('handles the shared form-sheet save once, closes it after success, and preserves the loaded rows', () => {
     const fixture = createComponent({ manage: true });
     const component = fixture.componentInstance;
     const api = TestBed.inject(ManufacturingMasterDataApiService) as jasmine.SpyObj<ManufacturingMasterDataApiService>;
@@ -182,14 +185,14 @@ describe('ManufacturingCompensationPageComponent', () => {
     api.compensationModelStages.calls.reset();
     fixture.detectChanges();
 
-    fixture.debugElement.query(By.css('.compensation-edit-dialog__form button[type="submit"]')).nativeElement.click();
+    fixture.debugElement.query(By.directive(PlpFormSheetComponent)).componentInstance.save.emit();
     fixture.detectChanges();
 
     expect(api.updateCompensationModelStage).toHaveBeenCalledTimes(1);
     expect(api.updateCompensationModelStage).toHaveBeenCalledWith('model-grm001', 'stage-full', {
       compensationMode: 'FullRatePerWorker', piecePrice: 0.75, standardSeconds: 18
     });
-    expect(api.compensationModelStages).toHaveBeenCalledTimes(1);
+    expect(api.compensationModelStages).not.toHaveBeenCalled();
     expect(component.isEditDialogVisible).toBeFalse();
     expect(component.selectedModelId).toBe('model-grm001');
   });
@@ -203,15 +206,15 @@ describe('ManufacturingCompensationPageComponent', () => {
     component.editStage(stages[0]);
     fixture.detectChanges();
 
-    fixture.debugElement.query(By.css('.compensation-edit-dialog__form button[type="submit"]')).nativeElement.click();
+    fixture.debugElement.query(By.directive(PlpFormSheetComponent)).componentInstance.save.emit();
     fixture.detectChanges();
 
     expect(api.updateCompensationModelStage).toHaveBeenCalledTimes(1);
     expect(component.isEditDialogVisible).toBeTrue();
-    expect(fixture.nativeElement.textContent).toContain('Save failed');
+    expect(document.body.textContent).toContain('Save failed');
   });
 
-  it('cancels the rendered dialog without saving and resets values when another row is opened', () => {
+  it('cancels the shared form sheet without saving and resets values when another row is opened', () => {
     const fixture = createComponent({ manage: true });
     const component = fixture.componentInstance;
     const api = TestBed.inject(ManufacturingMasterDataApiService) as jasmine.SpyObj<ManufacturingMasterDataApiService>;
@@ -220,7 +223,7 @@ describe('ManufacturingCompensationPageComponent', () => {
     component.stageForm.patchValue({ piecePrice: 99 });
     fixture.detectChanges();
 
-    fixture.debugElement.query(By.css('.compensation-edit-dialog__form button.p-button-text')).nativeElement.click();
+    fixture.debugElement.query(By.directive(PlpFormSheetComponent)).componentInstance.cancel.emit();
     fixture.detectChanges();
     expect(api.updateCompensationModelStage).not.toHaveBeenCalled();
     expect(component.isEditDialogVisible).toBeFalse();

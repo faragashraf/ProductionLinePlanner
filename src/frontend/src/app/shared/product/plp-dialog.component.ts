@@ -1,67 +1,43 @@
 import { ChangeDetectionStrategy, Component, EventEmitter, Input, Output } from '@angular/core';
-import { CommonModule } from '@angular/common';
-import { DialogModule } from 'primeng/dialog';
-import { PlpActionButtonComponent } from './plp-action-button.component';
 import { PLP_DIALOG_SIZE_CLASS, PlpDialogSize } from './product-responsive';
+import { PlpFormSheetComponent } from './plp-form-sheet.component';
 
-/** Canonical responsive dialog shell for operational forms and confirmations. */
+/**
+ * Compatibility facade for existing operational dialogs.
+ * New CRUD work should use `plp-form-sheet`; this facade intentionally routes
+ * legacy dialog markup through that same responsive implementation.
+ */
 @Component({
   selector: 'plp-dialog',
   standalone: true,
-  imports: [CommonModule, DialogModule, PlpActionButtonComponent],
+  imports: [PlpFormSheetComponent],
   template: `
-    <p-dialog
+    <plp-form-sheet
       [visible]="visible"
-      [modal]="true"
-      [draggable]="false"
-      [resizable]="false"
-      [closable]="!saving"
-      [dismissableMask]="!saving"
-      [styleClass]="dialogClass"
-      [appendTo]="'body'"
+      [title]="title"
+      [subtitle]="subtitle"
+      [size]="size"
+      [saving]="saving"
+      [saveDisabled]="saveDisabled"
+      [error]="error"
+      [showSave]="showSave"
+      [showCancel]="showCancel"
+      [saveLabel]="saveLabel"
+      [cancelLabel]="cancelLabel"
+      [closeLabel]="closeLabel"
+      [closeAriaLabel]="closeAriaLabel"
+      [successMessage]="successMessage"
+      [readOnly]="readOnly"
       [focusOnShow]="focusOnShow"
-      (visibleChange)="onVisibleChange($event)"
+      [rtl]="rtl"
+      (visibleChange)="visibleChange.emit($event)"
+      (onShow)="onShow.emit()"
       (onHide)="onHide.emit()"
+      (save)="save.emit()"
+      (cancel)="cancel.emit()"
     >
-      <ng-template pTemplate="header">
-        <div class="plp-product-dialog__header">
-          <div>
-            <h2 class="plp-text-section-title">{{ title }}</h2>
-            <p *ngIf="subtitle" class="plp-text-supporting">{{ subtitle }}</p>
-          </div>
-          <ng-content select="[plp-dialog-header-actions]"></ng-content>
-        </div>
-      </ng-template>
-
-      <div class="plp-product-dialog__body" [attr.aria-busy]="saving || null">
-        <p *ngIf="error" class="plp-product-dialog__error" role="alert">{{ error }}</p>
-        <ng-content></ng-content>
-      </div>
-
-      <ng-template pTemplate="footer">
-        <div class="plp-product-dialog__footer">
-          <ng-content select="[plp-dialog-footer-start]"></ng-content>
-          <div class="plp-action-group">
-            <plp-action-button
-              *ngIf="showCancel"
-              action="cancel"
-              [label]="cancelLabel"
-              [disabled]="saving"
-              (triggered)="cancel.emit()"
-            ></plp-action-button>
-            <plp-action-button
-              *ngIf="showSave"
-              action="save"
-              [label]="saveLabel"
-              [disabled]="saveDisabled"
-              [loading]="saving"
-              (triggered)="save.emit()"
-            ></plp-action-button>
-            <ng-content select="[plp-dialog-footer-actions]"></ng-content>
-          </div>
-        </div>
-      </ng-template>
-    </p-dialog>
+      <ng-content></ng-content>
+    </plp-form-sheet>
   `,
   changeDetection: ChangeDetectionStrategy.OnPush
 })
@@ -77,18 +53,21 @@ export class PlpDialogComponent {
   @Input() showCancel = true;
   @Input() saveLabel = 'حفظ';
   @Input() cancelLabel = 'إلغاء';
+  @Input() closeLabel = 'إغلاق';
+  @Input() closeAriaLabel = 'إغلاق النافذة';
+  @Input() successMessage = 'تم الحفظ بنجاح.';
+  @Input() readOnly = false;
   /** Opt out when a long workspace must preserve its own scroll position. */
   @Input() focusOnShow = true;
+  @Input() rtl = true;
   @Output() visibleChange = new EventEmitter<boolean>();
   @Output() save = new EventEmitter<void>();
   @Output() cancel = new EventEmitter<void>();
+  @Output() onShow = new EventEmitter<void>();
   @Output() onHide = new EventEmitter<void>();
 
+  /** Preserves the legacy public surface while delegating rendering to form-sheet. */
   get dialogClass(): string {
-    return ['plp-product-dialog', PLP_DIALOG_SIZE_CLASS[this.size]].join(' ');
-  }
-
-  onVisibleChange(visible: boolean): void {
-    this.visibleChange.emit(visible);
+    return ['plp-form-sheet', PLP_DIALOG_SIZE_CLASS[this.size]].join(' ');
   }
 }

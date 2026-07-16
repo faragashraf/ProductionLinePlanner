@@ -77,11 +77,19 @@ export class PlpHorizontalOverflowController {
       return;
     }
 
-    element.scrollIntoView({
-      behavior: smooth && !this.prefersReducedMotion ? 'smooth' : 'auto',
-      block: 'nearest',
-      inline: 'nearest'
-    });
+    const viewport = this.scroller.getBoundingClientRect();
+    const target = element.getBoundingClientRect();
+    const delta = target.left < viewport.left
+      ? target.left - viewport.left
+      : target.right > viewport.right
+        ? target.right - viewport.right
+        : 0;
+    if (delta) {
+      this.scroller.scrollBy({
+        left: delta,
+        behavior: smooth && !this.prefersReducedMotion ? 'smooth' : 'auto'
+      });
+    }
     this.scheduleRefresh();
   }
 
