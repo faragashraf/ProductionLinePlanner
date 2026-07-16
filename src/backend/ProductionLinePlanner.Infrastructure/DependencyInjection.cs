@@ -33,6 +33,8 @@ public static class DependencyInjection
         var userInfoTable = attendanceSourceSection["UserInfoTable"]?.Trim();
         var checkInOutTable = attendanceSourceSection["CheckInOutTable"]?.Trim();
         var departmentsTable = attendanceSourceSection["DepartmentsTable"]?.Trim();
+        var syncReadCommandTimeoutSeconds = attendanceSourceSection["SyncReadCommandTimeoutSeconds"];
+        var syncReadTimeoutSeconds = attendanceSourceSection["SyncReadTimeoutSeconds"];
 
         var attendanceSourceOptions = new AttendanceSourceOptions
         {
@@ -42,7 +44,9 @@ public static class DependencyInjection
             LateThresholdMinutes = int.TryParse(lateThresholdMinutes, out var parsedLateThreshold) ? parsedLateThreshold : 15,
             UserInfoTable = string.IsNullOrWhiteSpace(userInfoTable) ? "USERINFO" : userInfoTable,
             CheckInOutTable = string.IsNullOrWhiteSpace(checkInOutTable) ? "CHECKINOUT" : checkInOutTable,
-            DepartmentsTable = string.IsNullOrWhiteSpace(departmentsTable) ? "DEPARTMENTS" : departmentsTable
+            DepartmentsTable = string.IsNullOrWhiteSpace(departmentsTable) ? "DEPARTMENTS" : departmentsTable,
+            SyncReadCommandTimeoutSeconds = int.TryParse(syncReadCommandTimeoutSeconds, out var parsedSyncReadCommandTimeout) ? Math.Max(1, parsedSyncReadCommandTimeout) : 30,
+            SyncReadTimeoutSeconds = int.TryParse(syncReadTimeoutSeconds, out var parsedSyncReadTimeout) ? Math.Max(1, parsedSyncReadTimeout) : 35
         };
 
         services.AddSingleton(Options.Create(attendanceSourceOptions));
@@ -58,8 +62,10 @@ public static class DependencyInjection
             options.UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking);
         });
 
-        services.AddScoped<IAttendanceReadService, AttendanceSyncService>();
-        services.AddScoped<IAttendanceSyncService, AttendanceSyncService>();
+        services.AddScoped<AttendanceSyncService>();
+        services.AddScoped<IAttendanceReadService>(serviceProvider => serviceProvider.GetRequiredService<AttendanceSyncService>());
+        services.AddScoped<IAttendanceSyncRunner>(serviceProvider => serviceProvider.GetRequiredService<AttendanceSyncService>());
+        services.AddSingleton<IAttendanceSyncService, AttendanceSyncCoordinator>();
         services.AddScoped<IAttendanceEngine, AttendanceEngine>();
         services.AddScoped<IAssignmentEngine, AssignmentEngine>();
         services.AddScoped<IAssignmentRecommendationEngine, AssignmentRecommendationEngine>();

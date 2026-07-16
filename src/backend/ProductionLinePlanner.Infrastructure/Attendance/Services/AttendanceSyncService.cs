@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -11,7 +13,7 @@ using ProductionLinePlanner.Infrastructure.Data;
 
 namespace ProductionLinePlanner.Infrastructure.Attendance.Services;
 
-public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceSyncService
+public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceSyncRunner
 {
     private const string TempStatusActive = "Active";
     private const string TempStatusScheduled = "Scheduled";
@@ -298,8 +300,93 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
         return SyncForProductionDateAsync(DateOnly.FromDateTime(cairoNow), cancellationToken);
     }
 
-    public async Task<Result<AttendanceSyncResultDto>> SyncForProductionDateAsync(DateOnly productionDate, CancellationToken cancellationToken = default)
+    public Task<Result<AttendanceSyncResultDto>> SyncForProductionDateAsync(DateOnly productionDate, CancellationToken cancellationToken = default)
+        => RunAsync(new AttendanceSyncExecutionContext(productionDate, Guid.NewGuid().ToString("N"), "direct"), cancellationToken);
+
+    public async Task<Result<AttendanceSyncResultDto>> RunAsync(
+        AttendanceSyncExecutionContext context,
+        CancellationToken cancellationToken = default)
     {
+        var startedAtUtc = DateTime.UtcNow;
+        var stopwatch = Stopwatch.StartNew();
+        using var internalTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(Math.Max(1, _sourceOptions.SyncReadTimeoutSeconds)));
+        using var operationCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, internalTimeout.Token);
+
+        _logger.LogInformation(
+            "Attendance sync started. correlationId={CorrelationId}, date={SyncDate}, trigger={TriggerType}, startedAtUtc={StartedAtUtc}",
+            context.CorrelationId,
+            context.ProductionDate,
+            context.TriggerType,
+            startedAtUtc);
+
+        try
+        {
+            var result = await SyncCoreAsync(context, operationCancellation.Token);
+            _logger.LogInformation(
+                "Attendance sync finished. correlationId={CorrelationId}, date={SyncDate}, trigger={TriggerType}, finishedAtUtc={FinishedAtUtc}, elapsedMs={ElapsedMs}, successful={Successful}, sourceUsers={SourceUsersCount}, sourceCheckIns={SourceCheckInsCount}",
+                context.CorrelationId,
+                context.ProductionDate,
+                context.TriggerType,
+                DateTime.UtcNow,
+                stopwatch.ElapsedMilliseconds,
+                result.IsSuccess,
+                result.Value?.SourceUsersCount ?? 0,
+                result.Value?.SourceCheckInsCount ?? 0);
+            return result;
+        }
+        catch (OperationCanceledException exception) when (AttendanceSyncFailureClassifier.Classify(exception, cancellationToken.IsCancellationRequested, internalTimeout.IsCancellationRequested) == AttendanceSyncFailureClassifier.ClientCancelled)
+        {
+            _logger.LogWarning(
+                "Attendance sync cancelled by request token. correlationId={CorrelationId}, date={SyncDate}, trigger={TriggerType}, elapsedMs={ElapsedMs}, cancellationSource={CancellationSource}",
+                context.CorrelationId,
+                context.ProductionDate,
+                context.TriggerType,
+                stopwatch.ElapsedMilliseconds,
+                "request-token");
+            return Result<AttendanceSyncResultDto>.Failure(new Error(AttendanceSyncFailureClassifier.ClientCancelled, "Attendance synchronization request was cancelled by the client."));
+        }
+        catch (OperationCanceledException exception) when (AttendanceSyncFailureClassifier.Classify(exception, cancellationToken.IsCancellationRequested, internalTimeout.IsCancellationRequested) == AttendanceSyncFailureClassifier.InternalTimeout)
+        {
+            _logger.LogWarning(
+                "Attendance sync cancelled by internal timeout. correlationId={CorrelationId}, date={SyncDate}, trigger={TriggerType}, elapsedMs={ElapsedMs}, cancellationSource={CancellationSource}",
+                context.CorrelationId,
+                context.ProductionDate,
+                context.TriggerType,
+                stopwatch.ElapsedMilliseconds,
+                "internal-timeout");
+            return Result<AttendanceSyncResultDto>.Failure(new Error(AttendanceSyncFailureClassifier.InternalTimeout, "Attendance synchronization exceeded its bounded source-read timeout."));
+        }
+        catch (OperationCanceledException exception)
+        {
+            _logger.LogWarning(
+                exception,
+                "Attendance sync was cancelled by an undetermined provider source. correlationId={CorrelationId}, date={SyncDate}, trigger={TriggerType}, elapsedMs={ElapsedMs}, cancellationSource={CancellationSource}",
+                context.CorrelationId,
+                context.ProductionDate,
+                context.TriggerType,
+                stopwatch.ElapsedMilliseconds,
+                "undetermined");
+            return Result<AttendanceSyncResultDto>.Failure(new Error(AttendanceSyncFailureClassifier.Cancelled, "Attendance synchronization was cancelled before completion."));
+        }
+        catch (Exception exception) when (AttendanceSyncFailureClassifier.Classify(exception, cancellationToken.IsCancellationRequested, internalTimeout.IsCancellationRequested) == AttendanceSyncFailureClassifier.SourceTimeout)
+        {
+            _logger.LogWarning(
+                exception,
+                "Attendance source SQL command timed out. correlationId={CorrelationId}, date={SyncDate}, trigger={TriggerType}, elapsedMs={ElapsedMs}, cancellationSource={CancellationSource}",
+                context.CorrelationId,
+                context.ProductionDate,
+                context.TriggerType,
+                stopwatch.ElapsedMilliseconds,
+                "sql-command-timeout");
+            return Result<AttendanceSyncResultDto>.Failure(new Error(AttendanceSyncFailureClassifier.SourceTimeout, "Attendance source query timed out."));
+        }
+    }
+
+    private async Task<Result<AttendanceSyncResultDto>> SyncCoreAsync(
+        AttendanceSyncExecutionContext context,
+        CancellationToken cancellationToken)
+    {
+        var productionDate = context.ProductionDate;
         if (productionDate == default)
         {
             return Result<AttendanceSyncResultDto>.Failure(new Error("ValidationError", "Production date is required."));
@@ -313,7 +400,19 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
 
         try
         {
-            sourceUserInfos = await _attendanceDbContext.UserInfos.AsNoTracking().ToListAsync(cancellationToken);
+            if (_attendanceDbContext.Database.IsRelational())
+            {
+                _attendanceDbContext.Database.SetCommandTimeout(Math.Max(1, _sourceOptions.SyncReadCommandTimeoutSeconds));
+            }
+
+            sourceUserInfos = await _attendanceDbContext.UserInfos
+                .AsNoTracking()
+                .Select(x => new AttendanceSourceUserInfo
+                {
+                    UserId = x.UserId,
+                    BadgeNumber = x.BadgeNumber
+                })
+                .ToListAsync(cancellationToken);
             sourceCheckIns = await _attendanceDbContext.CheckInOuts
                 .AsNoTracking()
                 .Where(x => x.CheckTime >= startLocal && x.CheckTime < endLocal && x.UserId != null)
@@ -322,6 +421,14 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
                 .AsNoTracking()
                 .Where(x => x.IsActive && x.EmploymentStatus == EmploymentStatus.Active)
                 .ToListAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (SqlException exception) when (exception.Number == -2)
+        {
+            throw;
         }
         catch (Exception exception)
         {
@@ -332,10 +439,13 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
         var sourceUsersCount = sourceUserInfos.Count;
         var sourceCheckInsCount = sourceCheckIns.Count;
         _logger.LogInformation(
-            "Attendance sync started. sourceUsers={SourceUsersCount}, sourceCheckIns={SourceCheckInsCount}, date={SyncDate}",
+            "Attendance sync source reads completed. correlationId={CorrelationId}, date={SyncDate}, trigger={TriggerType}, sourceUsers={SourceUsersCount}, sourceCheckIns={SourceCheckInsCount}, workersRead={WorkersReadCount}",
+            context.CorrelationId,
+            productionDate,
+            context.TriggerType,
             sourceUsersCount,
             sourceCheckInsCount,
-            productionDate);
+            workers.Count);
 
         var mappedWorkers = workers
             .Where(x => !string.IsNullOrWhiteSpace(x.AttendanceUserId) || !string.IsNullOrWhiteSpace(x.BadgeNumber))
@@ -357,6 +467,8 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
 
             return Result<AttendanceSyncResultDto>.Success(new AttendanceSyncResultDto
             {
+                CorrelationId = context.CorrelationId,
+                TriggerType = context.TriggerType,
                 SyncDateUtc = startUtc,
                 SourceUsersCount = sourceUsersCount,
                 SourceCheckInsCount = sourceCheckInsCount,
@@ -528,6 +640,8 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
 
         return Result<AttendanceSyncResultDto>.Success(new AttendanceSyncResultDto
         {
+            CorrelationId = context.CorrelationId,
+            TriggerType = context.TriggerType,
             SyncDateUtc = startUtc,
             SourceUsersCount = sourceUsersCount,
             SourceCheckInsCount = sourceCheckInsCount,

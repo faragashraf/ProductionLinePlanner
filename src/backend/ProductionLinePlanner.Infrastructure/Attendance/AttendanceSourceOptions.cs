@@ -11,4 +11,6 @@ public sealed class AttendanceSourceOptions
     public string UserInfoTable { get; init; } = "USERINFO";
     public string CheckInOutTable { get; init; } = "CHECKINOUT";
     public string? DepartmentsTable { get; init; } = "DEPARTMENTS";
+    public int SyncReadCommandTimeoutSeconds { get; init; } = 30;
+    public int SyncReadTimeoutSeconds { get; init; } = 35;
 }

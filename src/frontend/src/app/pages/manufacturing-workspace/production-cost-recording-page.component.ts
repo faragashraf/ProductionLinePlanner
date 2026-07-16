@@ -1683,11 +1683,14 @@ export class ProductionCostRecordingPageComponent implements OnInit, OnDestroy {
     const normalized = `${code} ${message}`.toLowerCase();
     const transportType = (response.error as { type?: string } | undefined)?.type?.toLowerCase();
 
-    if (this.isAttendanceSyncTimeout(error)) return 'استغرقت مزامنة الحضور وقتًا أطول من المتوقع. تحقق من حالة المصدر ثم أعد المحاولة.';
+    if (code === 'AttendanceSyncInProgress') return 'المزامنة جارية بالفعل.';
+    if (code === 'AttendanceSyncTimeout' || code === 'AttendanceSourceTimeout' || response.status === 504 || this.isAttendanceSyncTimeout(error)) {
+      return 'انتهت مهلة مزامنة الحضور. تحقق من حالة المصدر ثم أعد المحاولة.';
+    }
     if (response.status === 403) return 'لا تملك صلاحية تحديث الحضور الآن.';
     if (response.status === 401) return 'انتهت جلسة المستخدم. سجّل الدخول ثم حاول مرة أخرى.';
     if (transportType === 'abort' || normalized.includes('abort')) return 'تم إلغاء طلب مزامنة الحضور من المتصفح. تحقق من الاتصال ثم أعد المحاولة.';
-    if (code === 'AttendanceSourceError' || response.status === 0 || normalized.includes('attendance source')) {
+    if (code === 'AttendanceSourceError' || code === 'AttendanceSyncCancelled' || response.status === 0 || normalized.includes('attendance source')) {
       return 'تعذر الاتصال بمصدر البصمة. تحقق من اتصال مصدر الحضور ثم حاول مرة أخرى.';
     }
     if (normalized.includes('no attendance') || normalized.includes('no check-in')) {

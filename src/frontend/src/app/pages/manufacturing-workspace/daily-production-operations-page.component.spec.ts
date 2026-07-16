@@ -6,6 +6,7 @@ describe('DailyProductionOperationsPageComponent unified preview', () => {
   let component: DailyProductionOperationsPageComponent;
   let production: jasmine.SpyObj<any>;
   let masterData: jasmine.SpyObj<any>;
+  let attendance: jasmine.SpyObj<any>;
 
   const preview: DailyProductionPreview = {
     productionDate: '2026-07-16',
@@ -24,9 +25,10 @@ describe('DailyProductionOperationsPageComponent unified preview', () => {
   beforeEach(() => {
     production = jasmine.createSpyObj('ProductionCostRecordingApiService', ['previewDailyOperations', 'loadDailyOperations', 'saveDailyDraft']);
     masterData = jasmine.createSpyObj('ManufacturingMasterDataApiService', ['factories', 'allProductionLines', 'models']);
+    attendance = jasmine.createSpyObj('AttendanceApiService', ['syncForProductionDate']);
     component = new DailyProductionOperationsPageComponent(
       masterData,
-      jasmine.createSpyObj('AttendanceApiService', ['syncForProductionDate']),
+      attendance,
       production,
       { hasPermission: () => true } as any,
       { serverMessage: (error: any, fallback: string) => error?.error?.detail ?? fallback } as any
@@ -52,6 +54,23 @@ describe('DailyProductionOperationsPageComponent unified preview', () => {
         effectiveAssignmentType: 'Permanent', attendanceStatus: 'Present', hasSourceCheckIn: true, isPresent: true,
         requiresAuthorizedOverride: false, suggestedPercentage: 100, percentage: 100, fixedAmount: null, notes: '', manualOverrideReason: '' }]
     } as any];
+  });
+
+  it('starts attendance synchronization only from the explicit manual action and blocks duplicate clicks', () => {
+    const pending = new Subject<any>();
+    masterData.factories.and.returnValue(of([]));
+    attendance.syncForProductionDate.and.returnValue(pending);
+
+    component.ngOnInit();
+    expect(attendance.syncForProductionDate).not.toHaveBeenCalled();
+
+    component.synchronizeAttendance();
+    component.synchronizeAttendance();
+
+    expect(attendance.syncForProductionDate).toHaveBeenCalledTimes(1);
+    expect(component.attendanceSyncing).toBeTrue();
+    pending.complete();
+    expect(component.attendanceSyncing).toBeFalse();
   });
 
   it('sends exactly one request for repeated clicks while preview is active and renders its response without a page reload', () => {

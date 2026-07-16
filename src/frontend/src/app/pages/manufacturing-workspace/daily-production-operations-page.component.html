@@ -11,7 +11,7 @@
       </label>
       <div class="daily-production-operations__attendance-action">
         <span>الحضور لتاريخ الإنتاج</span>
-        <button pButton type="button" class="p-button-outlined" [label]="attendanceSyncing ? 'جارٍ مزامنة الحضور…' : 'مزامنة حضور التاريخ'" icon="pi pi-refresh" [loading]="attendanceSyncing" (click)="synchronizeAttendance()"></button>
+        <button pButton type="button" class="p-button-outlined" [label]="attendanceSyncing ? 'جارٍ مزامنة الحضور…' : 'مزامنة حضور التاريخ'" icon="pi pi-refresh" [loading]="attendanceSyncing" [disabled]="attendanceSyncing || !productionDate" (click)="synchronizeAttendance()"></button>
         <small [class.is-confirmed]="attendanceSyncedForDate === productionDate">{{ attendanceSyncedForDate === productionDate ? 'تمت المزامنة لهذا التاريخ' : 'المزامنة اليدوية مطلوبة قبل التحميل' }}</small>
       </div>
       <label>المصنع
