@@ -24,6 +24,7 @@ obj/
 *.pid
 *.seed
 coverage/
+artifacts/test-data-bootstrap/
 
 # OS files
 .DS_Store
