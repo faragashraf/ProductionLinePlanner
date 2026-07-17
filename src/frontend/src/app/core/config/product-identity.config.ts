@@ -1,6 +1,6 @@
 export const PRODUCT_IDENTITY = Object.freeze({
-  nameAr: 'منصة ديوب',
-  nameEn: 'DAYOUB',
+  nameAr: 'DAYOUB',
+  nameEn: 'منصة ديوب',
 
   workspaceNameAr: 'منظومة الإدارة والتشغيل المتكاملة',
 
