@@ -297,34 +297,67 @@ public sealed class ProductionCostRecordingService(
         // that immutable read context keeps a full production-day preview read-only
         // and avoids repeating those source lookups once for every mapped stage.
         var activeWorkers = context.ActiveWorkers.ToDictionary(worker => worker.WorkerId);
-        var requiresAuthorizedOverride = false;
         var stagePreviews = new List<DailyStagePreview>(context.Stages.Count);
         foreach (var stage in context.Stages)
         {
             var stageRequest = requestByStage[stage.Entity.Id];
-            ValidateAllocationInputs(stage.Entity.CompensationMode, stageRequest.Workers);
-
             var requestedWorkerIds = stageRequest.Workers.Select(worker => worker.WorkerId).ToArray();
+            if (requestedWorkerIds.Distinct().Count() != requestedWorkerIds.Length)
+                throw new ProductionConflictException("لا يمكن تكرار العامل داخل المرحلة نفسها في تشغيل اليوم.");
             if (requestedWorkerIds.Any(workerId => !activeWorkers.ContainsKey(workerId)))
                 throw new ProductionConflictException("يجب أن يكون كل عامل مشارك نشطًا وموجودًا في مصدر العمال المعتمد.");
-
-            var assignedWorkerIds = stage.Dto.Workers
+            var assignedWorkers = stage.Workers.ToDictionary(worker => worker.WorkerId);
+            var readyAssignedWorkerIds = assignedWorkers.Values
+                .Where(worker => worker.Contribution.IsProductionReady)
                 .Select(worker => worker.WorkerId)
                 .ToHashSet();
-            var workersRequiringOverride = stageRequest.Workers
-                .Where(worker => !assignedWorkerIds.Contains(worker.WorkerId) || !activeWorkers[worker.WorkerId].IsPresent)
+            var requestedWorkerIdSet = requestedWorkerIds.ToHashSet();
+            var removedAssignedWorkers = readyAssignedWorkerIds.Except(requestedWorkerIdSet).ToArray();
+            var addedDailyOverrides = stageRequest.Workers
+                .Where(worker => !assignedWorkers.ContainsKey(worker.WorkerId))
                 .ToArray();
-            if (workersRequiringOverride.Any(worker => string.IsNullOrWhiteSpace(worker.ManualOverrideReason)))
-                throw new ProductionConflictException("العامل غير الحاضر أو غير المعيّن للمرحلة يتطلب سبب تجاوز يدوي واضح.");
-            requiresAuthorizedOverride |= workersRequiringOverride.Length > 0;
+            var requestedNonReadyAssignedWorkers = stageRequest.Workers
+                .Where(worker => assignedWorkers.TryGetValue(worker.WorkerId, out var assigned) && !assigned.Contribution.IsProductionReady)
+                .ToArray();
+            if (requestedNonReadyAssignedWorkers.Length > 0)
+                throw new ProductionConflictException("العامل المسكّن غير الجاهز يبقى ظاهرًا في لقطة اليوم، لكنه لا يُحتسب ضمن المشاركين أو دقائق العمل.");
+            if (addedDailyOverrides.Any(worker => string.IsNullOrWhiteSpace(worker.ManualOverrideReason)))
+                throw new ProductionConflictException("إضافة عامل يومية خارج تسكين المرحلة تتطلب سببًا واضحًا.");
+            if (addedDailyOverrides.Any(worker => !activeWorkers[worker.WorkerId].IsProductionReady))
+                throw new ProductionConflictException("لا يمكن احتساب إضافة يومية بلا نافذة حضور مكتملة وصالحة.");
+            if (removedAssignedWorkers.Length > 0 || addedDailyOverrides.Length > 0)
+            {
+                var permissions = await permissionService.GetEffectivePermissionsAsync(actorId, ct);
+                if (!permissions.Contains(ManualParticipantOverridePermission, StringComparer.OrdinalIgnoreCase))
+                    throw new ProductionConflictException("لا تملك صلاحية تعديل المشاركين في تشغيل اليوم.");
+            }
 
-            var calculatedAmounts = CalculateAllocationAmounts(
-                stage.Entity.CompensationMode,
-                RoundQuantity(request.LineQuantity),
-                stage.Entity.PiecePrice,
-                stageRequest.Workers)
-                .ToDictionary(amount => amount.WorkerId);
-            var allocations = stageRequest.Workers.Select(worker =>
+            var participantContributions = stageRequest.Workers.ToDictionary(
+                worker => worker.WorkerId,
+                worker => assignedWorkers.TryGetValue(worker.WorkerId, out var assigned)
+                    ? assigned.Contribution
+                    : ContributionFromDto(activeWorkers[worker.WorkerId]));
+
+            IReadOnlyDictionary<Guid, WorkerQuantityShare> minuteShares = stage.Entity.CompensationMode == CompensationMode.SharedPercentage
+                ? TimeAwareProductionAllocation.AllocateByMinutes(
+                    RoundQuantity(request.LineQuantity),
+                    participantContributions.Values).ToDictionary(share => share.WorkerId)
+                : new Dictionary<Guid, WorkerQuantityShare>();
+            var authoritativeWorkers = stageRequest.Workers.Select(worker => stage.Entity.CompensationMode == CompensationMode.SharedPercentage
+                ? worker with { Percentage = minuteShares[worker.WorkerId].Percentage, FixedAmount = null }
+                : worker).ToArray();
+            ValidateAllocationInputs(stage.Entity.CompensationMode, authoritativeWorkers);
+
+            var calculatedAmounts = stage.Entity.CompensationMode == CompensationMode.SharedPercentage
+                ? minuteShares.ToDictionary(
+                    pair => pair.Key,
+                    pair => new CalculatedAllocation(pair.Key, pair.Value.Quantity, RoundMoney(pair.Value.Quantity * stage.Entity.PiecePrice)))
+                : CalculateAllocationAmounts(
+                    stage.Entity.CompensationMode,
+                    RoundQuantity(request.LineQuantity),
+                    stage.Entity.PiecePrice,
+                    authoritativeWorkers).ToDictionary(amount => amount.WorkerId);
+            var allocations = authoritativeWorkers.Select(worker =>
             {
                 var snapshot = activeWorkers[worker.WorkerId];
                 var calculated = calculatedAmounts[worker.WorkerId];
@@ -348,13 +381,6 @@ public sealed class ProductionCostRecordingService(
                 RoundQuantity(request.LineQuantity),
                 RoundMoney(allocations.Sum(allocation => allocation.CalculatedEarning)),
                 warnings));
-        }
-
-        if (requiresAuthorizedOverride)
-        {
-            var permissions = await permissionService.GetEffectivePermissionsAsync(actorId, ct);
-            if (!permissions.Contains(ManualParticipantOverridePermission, StringComparer.OrdinalIgnoreCase))
-                throw new ProductionConflictException("لا تملك صلاحية التجاوز اليدوي لتعيين أو حضور العامل.");
         }
 
         return new DailyPreview(
@@ -406,49 +432,44 @@ public sealed class ProductionCostRecordingService(
             .Select(worker => new ActiveWorker(worker.Id, worker.EmployeeCode, worker.FullName))
             .ToArrayAsync(ct);
         var workerIds = workers.Select(worker => worker.Id).ToArray();
-        var evidenceAtUtc = ProductionDateEvidenceAtUtc(productionDate);
-        var assignments = await assignmentEngine.ResolveEffectiveAssignmentsAsync(workerIds, evidenceAtUtc, ct);
-        if (assignments.IsFailure)
-            throw new ProductionConflictException("تعذر احتساب التعيين الفعلي للعمال في تاريخ الإنتاج.");
-        var attendance = await attendanceEngine.GetLatestAttendanceStatusByWorkerAsync(workerIds, evidenceAtUtc, ct);
+        var assignmentWindows = await LoadAssignmentWindowsAsync(workerIds, productionDate, ct);
+        var attendance = await attendanceEngine.GetPresenceWindowsByWorkerAsync(workerIds, productionDate, ct);
         if (attendance.IsFailure)
-            throw new ProductionConflictException("تعذر قراءة حضور العمال لتاريخ الإنتاج المحدد. نفّذ مزامنة الحضور ثم أعد المحاولة.");
+            throw new ProductionConflictException("تعذر قراءة نافذة حضور العمال لتاريخ الإنتاج المحدد. نفّذ مزامنة الحضور ثم أعد المحاولة.");
 
-        var workerContexts = workers.Select(worker =>
+        var workersById = workers.ToDictionary(worker => worker.Id);
+        var staffingCandidates = assignmentWindows.SelectMany(pair => pair.Value.Select(window =>
         {
-            var assignment = assignments.Value!.GetValueOrDefault(worker.Id)
-                ?.OrderByDescending(item => item.AssignmentType is AssignmentType.Temporary or AssignmentType.Replacement)
-                .ThenByDescending(item => item.StartsAtUtc)
-                .FirstOrDefault();
-            var hasAttendance = attendance.Value!.TryGetValue(worker.Id, out var attendanceRecord);
-            var attendanceStatus = hasAttendance
-                ? AttendanceLabel(attendanceRecord!.Status)
-                : "NoSourceCheckIn";
-            var isPresent = hasAttendance && attendanceRecord!.Status is AttendanceStatus.Present or AttendanceStatus.Late;
-            return new DailyWorkerContext(
+            var worker = workersById[pair.Key.WorkerId];
+            return new DailyStaffingCandidate(
                 worker.Id,
                 worker.Code,
                 worker.Name,
-                assignment?.EffectiveSubStageId,
-                assignment?.AssignmentType?.ToString(),
-                attendanceStatus,
-                hasAttendance,
-                isPresent,
-                assignment?.AssignmentId,
-                attendanceRecord?.AttendanceTimeUtc);
-        }).ToArray();
+                pair.Key.SubStageId,
+                window.AssignmentType,
+                window.AssignmentId,
+                [new UtcTimeWindow(window.StartUtc, window.EndUtc)]);
+        })).ToArray();
+        var staffingSnapshot = DailyStageStaffingBuilder.Build(staffingCandidates, attendance.Value!);
 
         var stageContexts = stages.Select(stage =>
         {
-            var stageWorkers = workerContexts
-                .SelectMany(worker => assignments.Value![worker.WorkerId]
-                    .Where(assignment => assignment.EffectiveSubStageId == stage.SubStageId)
-                    .Select(assignment => worker with
-                    {
-                        EffectiveSubStageId = assignment.EffectiveSubStageId,
-                        EffectiveAssignmentType = assignment.AssignmentType?.ToString(),
-                        AssignmentId = assignment.AssignmentId
-                    }))
+            var stageWorkers = staffingSnapshot
+                .Where(worker => worker.SubStageId == stage.SubStageId)
+                .Select(worker => new DailyWorkerContext(
+                    worker.WorkerId,
+                    worker.WorkerCode,
+                    worker.WorkerName,
+                    stage.SubStageId,
+                    worker.AssignmentType,
+                    worker.Attendance is null ? "NoSourceCheckIn" : AttendanceLabel(worker.Attendance.Status),
+                    worker.Attendance?.HasSourceCheckIn == true,
+                    worker.Attendance?.Status is AttendanceStatus.Present or AttendanceStatus.Late,
+                    worker.AssignmentId,
+                    worker.Attendance?.FirstInUtc,
+                    worker.Contribution,
+                    IsAssignedWorker: true,
+                    IsDailyOverride: false))
                 .OrderBy(worker => worker.WorkerCode, StringComparer.Ordinal)
                 .ThenBy(worker => worker.WorkerId)
                 .ToArray();
@@ -457,7 +478,7 @@ public sealed class ProductionCostRecordingService(
             var hasAbsent = workerDtos.Any(worker => worker.AttendanceStatus == "Absent");
             var hasNoCheckIn = workerDtos.Any(worker => worker.AttendanceStatus == "NoSourceCheckIn");
             var staffed = workerDtos.Length > 0;
-            var ready = staffed && workerDtos.All(worker => worker.IsPresent);
+            var ready = staffed && workerDtos.Any(worker => worker.IsProductionReady);
             var staffingStatus = staffed ? "Staffed" : "NoStaffing";
             var attendanceStatus = !staffed
                 ? "NoStaffing"
@@ -483,16 +504,142 @@ public sealed class ProductionCostRecordingService(
                     hasNoCheckIn,
                     stage.CompensationMode == CompensationMode.SharedPercentage,
                     ready,
-                    workerDtos));
+                    workerDtos),
+                stageWorkers);
         }).ToArray();
 
-        var allWorkers = workerContexts
-            .OrderBy(worker => worker.WorkerCode, StringComparer.Ordinal)
-            .ThenBy(worker => worker.WorkerId)
-            .Select(worker => worker.ToDto(null))
+        var (dayStartUtc, dayEndUtc) = ProductionDayBoundsUtc(productionDate);
+        var allWorkers = workers
+            .OrderBy(worker => worker.Code, StringComparer.Ordinal)
+            .ThenBy(worker => worker.Id)
+            .Select(worker =>
+            {
+                attendance.Value!.TryGetValue(worker.Id, out var presence);
+                var contribution = TimeAwareProductionAllocation.CalculateContribution(
+                    worker.Id,
+                    [new UtcTimeWindow(dayStartUtc, dayEndUtc)],
+                    presence);
+                return new DailyProductionWorkerDto(
+                    worker.Id, worker.Code, worker.Name, true, null,
+                    presence is null ? "NoSourceCheckIn" : AttendanceLabel(presence.Status),
+                    presence?.HasSourceCheckIn == true,
+                    presence?.Status is AttendanceStatus.Present or AttendanceStatus.Late,
+                    false, null,
+                    contribution.ContributionStartsAtUtc,
+                    contribution.ContributionEndsAtUtc,
+                    contribution.WorkerMinutes,
+                    contribution.IsProductionReady,
+                    contribution.ExclusionReason,
+                    IsAssignedWorker: false,
+                    IsDailyOverride: false);
+            })
             .ToArray();
-        var version = StaffingContextVersion(factory, line, product, productionDate, stageContexts, workerContexts);
-        return new DailyContext(factory, line, product, productionDate, version, stageContexts, allWorkers);
+        var existingOrder = await db.Set<ProductionOrder>()
+            .AsNoTracking()
+            .Include(order => order.ProductModel)
+            .Include(order => order.StageProductionRecords)
+                .ThenInclude(record => record.WorkerAllocations)
+                    .ThenInclude(allocation => allocation.Worker)
+            .Where(order => order.ProductionDate == productionDate
+                && order.ProductionLineId == productionLineId
+                && order.ProductModelId == productModelId
+                && order.StageProductionRecords.Any())
+            .OrderByDescending(order => order.RecordedAtUtc)
+            .FirstOrDefaultAsync(ct);
+        var existingDraft = existingOrder is null ? null : ToDailyDraftDto(existingOrder, wasAlreadySaved: true);
+        var version = StaffingContextVersion(factory, line, product, productionDate, stageContexts, stageContexts.SelectMany(stage => stage.Workers).ToArray());
+        return new DailyContext(factory, line, product, productionDate, version, stageContexts, allWorkers, existingDraft);
+    }
+
+    private async Task<Dictionary<(Guid WorkerId, Guid SubStageId), List<AssignmentWindow>>> LoadAssignmentWindowsAsync(
+        IReadOnlyCollection<Guid> workerIds,
+        DateOnly productionDate,
+        CancellationToken ct)
+    {
+        var (dayStartUtc, dayEndUtc) = ProductionDayBoundsUtc(productionDate);
+        var defaults = await db.Set<WorkerDefaultAssignment>().AsNoTracking()
+            .Where(assignment => workerIds.Contains(assignment.WorkerId) && assignment.IsActive)
+            .Select(assignment => new
+            {
+                assignment.Id,
+                assignment.WorkerId,
+                assignment.SubStageId
+            })
+            .ToArrayAsync(ct);
+        var temporary = await db.Set<WorkerTemporaryAssignment>().AsNoTracking()
+            .Where(assignment => workerIds.Contains(assignment.WorkerId)
+                                 && (assignment.Status == "Scheduled" || assignment.Status == "Active")
+                                 && assignment.StartAtUtc < dayEndUtc
+                                 && assignment.EndAtUtc > dayStartUtc)
+            .Select(assignment => new
+            {
+                assignment.Id,
+                assignment.WorkerId,
+                assignment.FromSubStageId,
+                assignment.ToSubStageId,
+                assignment.StartAtUtc,
+                assignment.EndAtUtc,
+                assignment.ReplacementForWorkerId,
+                assignment.ParticipationMode
+            })
+            .ToArrayAsync(ct);
+
+        var result = new Dictionary<(Guid WorkerId, Guid SubStageId), List<AssignmentWindow>>();
+        foreach (var assignment in defaults)
+        {
+            AddWindow(result, assignment.WorkerId, assignment.SubStageId, new AssignmentWindow(assignment.Id, "Default", dayStartUtc, dayEndUtc));
+        }
+
+        foreach (var assignment in temporary.OrderBy(item => item.StartAtUtc).ThenBy(item => item.Id))
+        {
+            var start = assignment.StartAtUtc > dayStartUtc ? assignment.StartAtUtc : dayStartUtc;
+            var end = assignment.EndAtUtc < dayEndUtc ? assignment.EndAtUtc : dayEndUtc;
+            if (start >= end) continue;
+            if (assignment.ParticipationMode == TemporaryAssignmentMode.TemporaryMove && assignment.FromSubStageId.HasValue)
+                SubtractWindow(result, assignment.WorkerId, assignment.FromSubStageId.Value, start, end);
+            AddWindow(result, assignment.WorkerId, assignment.ToSubStageId, new AssignmentWindow(
+                assignment.Id,
+                assignment.ReplacementForWorkerId.HasValue ? "Replacement" : "Temporary",
+                start,
+                end));
+        }
+        return result;
+    }
+
+    private static void AddWindow(
+        IDictionary<(Guid WorkerId, Guid SubStageId), List<AssignmentWindow>> windows,
+        Guid workerId,
+        Guid subStageId,
+        AssignmentWindow window)
+    {
+        var key = (workerId, subStageId);
+        if (!windows.TryGetValue(key, out var list)) windows[key] = list = [];
+        list.Add(window);
+    }
+
+    private static void SubtractWindow(
+        IDictionary<(Guid WorkerId, Guid SubStageId), List<AssignmentWindow>> windows,
+        Guid workerId,
+        Guid subStageId,
+        DateTime subtractStart,
+        DateTime subtractEnd)
+    {
+        var key = (workerId, subStageId);
+        if (!windows.TryGetValue(key, out var list)) return;
+        var replacements = new List<AssignmentWindow>();
+        foreach (var window in list)
+        {
+            if (subtractEnd <= window.StartUtc || subtractStart >= window.EndUtc)
+            {
+                replacements.Add(window);
+                continue;
+            }
+            if (window.StartUtc < subtractStart)
+                replacements.Add(window with { EndUtc = subtractStart });
+            if (subtractEnd < window.EndUtc)
+                replacements.Add(window with { StartUtc = subtractEnd });
+        }
+        windows[key] = replacements;
     }
 
     private static void ValidateDailyStages(DailyProductionOperationRequest request, DailyContext context)
@@ -582,20 +729,20 @@ public sealed class ProductionCostRecordingService(
         _ => "NoSourceCheckIn"
     };
 
+    private static WorkerContributionResult ContributionFromDto(DailyProductionWorkerDto worker) => new(
+        worker.WorkerId,
+        worker.ContributionStartsAtUtc,
+        worker.ContributionEndsAtUtc,
+        worker.WorkerMinutes,
+        worker.ExclusionReason);
+
     private static IReadOnlyDictionary<Guid, decimal> SuggestedSharedPercentages(
         CompensationMode mode,
         IReadOnlyCollection<DailyWorkerContext> workers)
     {
         if (mode != CompensationMode.SharedPercentage || workers.Count == 0)
             return new Dictionary<Guid, decimal>();
-
-        const decimal step = 0.0001m;
-        var baseShare = decimal.Floor((100m / workers.Count) / step) * step;
-        var remainingUnits = (int)decimal.Round((100m - baseShare * workers.Count) / step, 0, MidpointRounding.AwayFromZero);
-        return workers
-            .OrderBy(worker => worker.WorkerCode, StringComparer.Ordinal)
-            .ThenBy(worker => worker.WorkerId)
-            .Select((worker, index) => new { worker.WorkerId, Percentage = baseShare + (index < remainingUnits ? step : 0m) })
+        return TimeAwareProductionAllocation.AllocateByMinutes(100m, workers.Select(worker => worker.Contribution))
             .ToDictionary(item => item.WorkerId, item => item.Percentage);
     }
 
@@ -654,7 +801,10 @@ public sealed class ProductionCostRecordingService(
         bool HasSourceCheckIn,
         bool IsPresent,
         Guid? AssignmentId,
-        DateTime? AttendanceAtUtc)
+        DateTime? AttendanceAtUtc,
+        WorkerContributionResult Contribution,
+        bool IsAssignedWorker,
+        bool IsDailyOverride)
     {
         public DailyProductionWorkerDto ToDto(decimal? suggestedPercentage) => new(
             WorkerId,
@@ -665,10 +815,18 @@ public sealed class ProductionCostRecordingService(
             AttendanceStatus,
             HasSourceCheckIn,
             IsPresent,
-            RequiresAuthorizedOverride: !IsPresent,
-            suggestedPercentage);
+            RequiresAuthorizedOverride: false,
+            suggestedPercentage,
+            Contribution.ContributionStartsAtUtc,
+            Contribution.ContributionEndsAtUtc,
+            Contribution.WorkerMinutes,
+            Contribution.IsProductionReady,
+            Contribution.ExclusionReason,
+            IsAssignedWorker,
+            IsDailyOverride);
     }
-    private sealed record DailyStageContext(ProductModelStage Entity, DailyProductionStageDto Dto);
+    private sealed record AssignmentWindow(Guid AssignmentId, string AssignmentType, DateTime StartUtc, DateTime EndUtc);
+    private sealed record DailyStageContext(ProductModelStage Entity, DailyProductionStageDto Dto, IReadOnlyCollection<DailyWorkerContext> Workers);
     private sealed record DailyContext(
         Factory Factory,
         ProductionLine Line,
@@ -676,7 +834,8 @@ public sealed class ProductionCostRecordingService(
         DateOnly ProductionDate,
         string ContextVersion,
         IReadOnlyCollection<DailyStageContext> Stages,
-        IReadOnlyCollection<DailyProductionWorkerDto> ActiveWorkers)
+        IReadOnlyCollection<DailyProductionWorkerDto> ActiveWorkers,
+        DailyProductionDraftDto? ExistingDraft)
     {
         public DailyProductionOperationsDto ToDto() => new(
             Factory.Id,
@@ -695,7 +854,8 @@ public sealed class ProductionCostRecordingService(
             Stages.Count(stage => stage.Dto.StaffingStatus == "NoStaffing"),
             Stages.Count(stage => stage.Dto.IsFinancialReviewPending),
             Stages.Select(stage => stage.Dto).ToArray(),
-            ActiveWorkers);
+            ActiveWorkers,
+            ExistingDraft);
     }
     private sealed record DailyStagePreview(
         DailyStageContext Stage,
@@ -890,9 +1050,14 @@ public sealed class ProductionCostRecordingService(
     private static decimal RoundMoney(decimal value) => decimal.Round(value, MoneyScale, MidpointRounding.AwayFromZero);
     private static DateTime ProductionDateEvidenceAtUtc(DateOnly productionDate)
     {
+        return ProductionDayBoundsUtc(productionDate).EndUtc.AddTicks(-1);
+    }
+
+    private static (DateTime StartUtc, DateTime EndUtc) ProductionDayBoundsUtc(DateOnly productionDate)
+    {
         var egypt = TimeZoneInfo.FindSystemTimeZoneById("Africa/Cairo");
-        var localEnd = productionDate.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified).AddDays(1);
-        return TimeZoneInfo.ConvertTimeToUtc(localEnd, egypt).AddTicks(-1);
+        var localStart = productionDate.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified);
+        return (TimeZoneInfo.ConvertTimeToUtc(localStart, egypt), TimeZoneInfo.ConvertTimeToUtc(localStart.AddDays(1), egypt));
     }
 
     private sealed record CalculatedAllocation(Guid WorkerId, decimal EquivalentQuantity, decimal CalculatedEarning);

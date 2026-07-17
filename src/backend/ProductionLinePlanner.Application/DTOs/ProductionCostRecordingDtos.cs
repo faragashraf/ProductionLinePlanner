@@ -20,7 +20,14 @@ public sealed record DailyProductionWorkerDto(
     bool HasSourceCheckIn,
     bool IsPresent,
     bool RequiresAuthorizedOverride,
-    decimal? SuggestedPercentage);
+    decimal? SuggestedPercentage,
+    DateTime? ContributionStartsAtUtc,
+    DateTime? ContributionEndsAtUtc,
+    int WorkerMinutes,
+    bool IsProductionReady,
+    string? ExclusionReason,
+    bool IsAssignedWorker,
+    bool IsDailyOverride);
 
 public sealed record DailyProductionStageDto(
     Guid ProductModelStageId,
@@ -56,7 +63,8 @@ public sealed record DailyProductionOperationsDto(
     int StagesWithoutStaffing,
     int StagesRequiringCostReview,
     IReadOnlyCollection<DailyProductionStageDto> Stages,
-    IReadOnlyCollection<DailyProductionWorkerDto> ActiveWorkers);
+    IReadOnlyCollection<DailyProductionWorkerDto> ActiveWorkers,
+    DailyProductionDraftDto? ExistingDraft);
 
 public sealed record DailyProductionStagePreviewDto(
     Guid ProductModelStageId,

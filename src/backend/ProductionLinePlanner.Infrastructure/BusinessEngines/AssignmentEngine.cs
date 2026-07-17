@@ -848,6 +848,17 @@ public sealed class AssignmentEngine : IAssignmentEngine
             return Result<CancelTemporaryAssignmentResultDto>.Failure(new Error("NotFound", "لم يتم العثور على تعيين مؤقت نشط لإلغائه."));
         }
 
+        var before = new
+        {
+            assignment.Id,
+            assignment.WorkerId,
+            assignment.FromSubStageId,
+            assignment.ToSubStageId,
+            assignment.StartAtUtc,
+            assignment.EndAtUtc,
+            assignment.Status,
+            assignment.UpdatedAtUtc
+        };
         _dbContext.Entry(assignment).Property(nameof(WorkerTemporaryAssignment.Status)).CurrentValue = TempStatusCancelled;
         _dbContext.Entry(assignment).Property(nameof(WorkerTemporaryAssignment.EndAtUtc)).CurrentValue = now;
         _dbContext.Entry(assignment).Property(nameof(WorkerTemporaryAssignment.UpdatedAtUtc)).CurrentValue = now;
@@ -873,8 +884,8 @@ public sealed class AssignmentEngine : IAssignmentEngine
             AuditActionType.Cancel,
             nameof(WorkerTemporaryAssignment),
             assignment.Id.ToString(),
-            before: assignment,
-            after: new { assignment.Id, assignment.Status, CancelReason = reason.Trim(), CancelledAtUtc = now },
+            before,
+            after: new { assignment.Id, Status = TempStatusCancelled, assignment.StartAtUtc, EndAtUtc = now, UpdatedAtUtc = now, CancelReason = reason.Trim(), CancelledAtUtc = now },
             requestMeta: requestMeta);
 
         try
@@ -961,7 +972,7 @@ public sealed class AssignmentEngine : IAssignmentEngine
                     return ToAssignmentResult(temporary);
                 }
 
-                var before = new { defaultAssignment.Id, defaultAssignment.WorkerId, defaultAssignment.SubStageId, defaultAssignment.IsActive };
+                var before = new { defaultAssignment.Id, defaultAssignment.WorkerId, defaultAssignment.SubStageId, defaultAssignment.IsActive, defaultAssignment.AssignedAt, defaultAssignment.UpdatedAtUtc };
                 if (await HasEffectiveParticipationAsync(request.WorkerId, request.ToSubStageId, request.EffectiveAtUtc, cancellationToken))
                     return Result<AssignmentActionResultDto>.Failure(new Error("Conflict", "العامل مشارك بالفعل في المرحلة المستهدفة."));
                 defaultAssignment.Deactivate(now);
@@ -991,6 +1002,17 @@ public sealed class AssignmentEngine : IAssignmentEngine
             if (await HasEffectiveParticipationAsync(request.WorkerId, request.ToSubStageId, request.EffectiveAtUtc, cancellationToken))
                 return Result<AssignmentActionResultDto>.Failure(new Error("Conflict", "العامل مشارك بالفعل في المرحلة المستهدفة."));
 
+            var sourceBefore = new
+            {
+                sourceTemporary.Id,
+                sourceTemporary.WorkerId,
+                sourceTemporary.FromSubStageId,
+                sourceTemporary.ToSubStageId,
+                sourceTemporary.StartAtUtc,
+                sourceTemporary.EndAtUtc,
+                sourceTemporary.Status,
+                sourceTemporary.UpdatedAtUtc
+            };
             _dbContext.Entry(sourceTemporary).Property(nameof(WorkerTemporaryAssignment.Status)).CurrentValue = TempStatusCancelled;
             _dbContext.Entry(sourceTemporary).Property(nameof(WorkerTemporaryAssignment.EndAtUtc)).CurrentValue = request.EffectiveAtUtc;
             _dbContext.Entry(sourceTemporary).Property(nameof(WorkerTemporaryAssignment.UpdatedAtUtc)).CurrentValue = now;
@@ -999,7 +1021,7 @@ public sealed class AssignmentEngine : IAssignmentEngine
             var replacement = CreateTemporaryEntity(request.WorkerId, request.FromSubStageId, request.ToSubStageId, request.EffectiveAtUtc, destinationEnd, actorUserId, request.Reason, now);
             _dbContext.WorkerTemporaryAssignments.Add(replacement);
             AddAssignmentTimeline(replacement, TimelineActionCreate, request.Reason, actorUserId, now);
-            await _auditEngine.RecordAsync(actorUserId, AuditActionType.Update, nameof(WorkerTemporaryAssignment), sourceTemporary.Id.ToString(), sourceTemporary, replacement, requestMeta, cancellationToken);
+            await _auditEngine.RecordAsync(actorUserId, AuditActionType.Update, nameof(WorkerTemporaryAssignment), sourceTemporary.Id.ToString(), sourceBefore, replacement, requestMeta, cancellationToken);
             await _dbContext.SaveChangesAsync(cancellationToken);
             if (transaction is not null) await transaction.CommitAsync(cancellationToken);
             return ToAssignmentResult(replacement);

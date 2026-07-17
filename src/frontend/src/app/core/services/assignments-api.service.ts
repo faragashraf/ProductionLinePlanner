@@ -239,6 +239,7 @@ export interface LineStaffingPlan {
 /** Narrow authoritative payload used after one stage's staffing changes. */
 export interface LineStaffingStageRefresh {
   stage: LineStaffingStage;
+  stages: LineStaffingStage[];
   workers: LineStaffingWorker[];
   stagesWithWorkers: number;
   stagesWithoutWorkers: number;

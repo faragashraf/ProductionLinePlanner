@@ -30,6 +30,8 @@ import { PlpProductPageHeaderComponent } from './product/plp-page-header.compone
 import { PlpProductSectionHeaderComponent } from './product/plp-section-header.component';
 import { PlpProductMetadataItemComponent, PlpProductMetadataRowComponent } from './product/plp-metadata-row.component';
 import { PlpResponsiveEntityRowComponent } from './product/plp-responsive-entity-row.component';
+import { WorkerAssignmentDetailsComponent } from './business/worker-assignment-details/worker-assignment-details.component';
+import { WorkerAssignmentCardComponent } from './business/worker-assignment-card/worker-assignment-card.component';
 
 @NgModule({
   declarations: [
@@ -55,7 +57,8 @@ import { PlpResponsiveEntityRowComponent } from './product/plp-responsive-entity
     NotificationCardComponent,
     PermissionDirective,
     IamListSkeletonComponent,
-    PermissionSelectionComponent
+    PermissionSelectionComponent,
+    WorkerAssignmentCardComponent
   ],
   imports: [
     CommonModule,
@@ -66,7 +69,8 @@ import { PlpResponsiveEntityRowComponent } from './product/plp-responsive-entity
     PlpProductMetadataRowComponent,
     PlpResponsiveEntityRowComponent,
     PlpProductPageHeaderComponent,
-    PlpProductSectionHeaderComponent
+    PlpProductSectionHeaderComponent,
+    WorkerAssignmentDetailsComponent
   ],
   exports: [
     EmptyStateComponent,
@@ -95,7 +99,9 @@ import { PlpResponsiveEntityRowComponent } from './product/plp-responsive-entity
     PlpProductMetadataItemComponent,
     PlpProductMetadataRowComponent,
     PlpResponsiveEntityRowComponent,
-    PlpProductSectionHeaderComponent
+    PlpProductSectionHeaderComponent,
+    WorkerAssignmentDetailsComponent,
+    WorkerAssignmentCardComponent
   ]
 })
 export class SharedModule {}

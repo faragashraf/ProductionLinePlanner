@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.Json;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -500,7 +501,7 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
             .Where(x => !string.IsNullOrWhiteSpace(x.WorkerUserId))
             .ToList();
 
-        var matchedByWorker = new Dictionary<Guid, (DateTime CheckTime, string SourceRawId)>();
+        var matchedByWorker = new Dictionary<Guid, (DateTime FirstIn, DateTime LastOut, string SourceRawId)>();
         var unmatchedSourceUsers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var item in validCheckIns.OrderBy(x => x.CheckTimeUtc))
@@ -512,10 +513,10 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
                 continue;
             }
 
-            if (!matchedByWorker.TryGetValue(workerId, out _))
-            {
-                matchedByWorker[workerId] = (item.CheckTimeUtc, item.RawSourceIdentifier);
-            }
+            if (!matchedByWorker.TryGetValue(workerId, out var window))
+                matchedByWorker[workerId] = (item.CheckTimeUtc, item.CheckTimeUtc, item.RawSourceIdentifier);
+            else if (item.CheckTimeUtc > window.LastOut)
+                matchedByWorker[workerId] = (window.FirstIn, item.CheckTimeUtc, window.SourceRawId);
         }
 
         var matchedWorkersCount = matchedByWorker.Count;
@@ -542,12 +543,18 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
             var statusTime = endUtc.AddTicks(-1);
             var status = AttendanceStatus.Absent;
             var sourceRawId = SyncAbsentStatus;
+            string? sourcePayload = null;
 
             if (matchedByWorker.TryGetValue(worker.Id, out var match))
             {
-                statusTime = match.CheckTime;
-                status = CalculateStatus(match.CheckTime, startLocal);
+                statusTime = match.FirstIn;
+                status = CalculateStatus(match.FirstIn, startLocal);
                 sourceRawId = match.SourceRawId;
+                sourcePayload = JsonSerializer.Serialize(new
+                {
+                    FirstInUtc = match.FirstIn,
+                    LastOutUtc = match.LastOut > match.FirstIn ? match.LastOut : (DateTime?)null
+                });
             }
 
             if (!existingByWorker.TryGetValue(worker.Id, out var existing))
@@ -558,7 +565,7 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
                     attendanceTimeUtc: statusTime,
                     attendanceStatus: status,
                     source: _sourceOptions.SourceName,
-                    sourcePayload: null,
+                    sourcePayload: sourcePayload,
                     sourceRawId: sourceRawId,
                     attendanceUserId: worker.AttendanceUserId,
                     badgeNumber: worker.BadgeNumber,
@@ -569,7 +576,7 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
                 continue;
             }
 
-            if (existing.AttendanceStatus == status && existing.AttendanceTimeUtc == statusTime && existing.SourceRawId == sourceRawId)
+            if (existing.AttendanceStatus == status && existing.AttendanceTimeUtc == statusTime && existing.SourceRawId == sourceRawId && existing.SourcePayload == sourcePayload)
             {
                 unchangedCount++;
                 continue;
@@ -579,7 +586,7 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
                 statusTime,
                 status,
                 _sourceOptions.SourceName,
-                null,
+                sourcePayload,
                 sourceRawId,
                 worker.AttendanceUserId,
                 worker.BadgeNumber,

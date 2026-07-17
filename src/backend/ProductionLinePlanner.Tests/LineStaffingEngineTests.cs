@@ -118,6 +118,32 @@ public sealed class LineStaffingEngineTests
         Assert.Contains(result.Value.Stages.Single(stage => stage.SubStageId == fixture.TemporarySubStage.Id).EffectiveWorkerIds, id => id == fixture.TemporarilyMovedWorker.Id);
     }
 
+    [Fact]
+    public async Task Stage_refresh_after_removing_the_last_worker_returns_needs_staffing_and_cleared_worker_state()
+    {
+        await using var fixture = await StaffingFixture.CreateAsync();
+        var lastAssignment = await fixture.Db.WorkerDefaultAssignments
+            .SingleAsync(assignment => assignment.WorkerId != fixture.TemporarilyMovedWorker.Id);
+        lastAssignment.Deactivate(DateTime.UtcNow);
+        await fixture.Db.SaveChangesAsync();
+
+        var result = await fixture.Engine.GetLineStaffingStageRefreshAsync(
+            fixture.Factory.Id,
+            fixture.Line.Id,
+            fixture.Model.Id,
+            fixture.DefaultSubStage.Id,
+            fixture.ReferenceDate);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(0, result.Value!.Stage.EffectiveAssignedWorkersCount);
+        Assert.Equal("NeedsStaffing", result.Value.Stage.StaffingStatus);
+        Assert.Empty(result.Value.Stage.EffectiveWorkerIds);
+        Assert.Equal(2, result.Value.Workers.Count);
+        Assert.DoesNotContain(
+            result.Value.Workers.Single(worker => worker.WorkerId == lastAssignment.WorkerId).Participations,
+            participation => participation.SubStageId == fixture.DefaultSubStage.Id);
+    }
+
     private sealed class StaffingFixture : IAsyncDisposable
     {
         private StaffingFixture(

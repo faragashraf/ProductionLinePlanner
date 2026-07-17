@@ -1,0 +1,56 @@
+<label
+  *ngIf="selectionMode === 'multiple'; else singleSelectionCard"
+  class="plp-worker-assignment-card plp-worker-assignment-card--multiple"
+  [class.is-selected]="selected"
+  [class.is-disabled]="disabled"
+  [attr.aria-disabled]="disabled"
+>
+  <input
+    class="plp-worker-assignment-card__checkbox"
+    type="checkbox"
+    [checked]="selected"
+    [disabled]="disabled"
+    [attr.aria-label]="'تحديد ' + fullName"
+    (change)="onCheckboxChange($event)"
+  >
+  <ng-container *ngTemplateOutlet="cardContent"></ng-container>
+</label>
+
+<ng-template #singleSelectionCard>
+  <button
+    type="button"
+    class="plp-worker-assignment-card"
+    [class.is-selected]="selected"
+    [disabled]="disabled"
+    [attr.aria-pressed]="selected"
+    [attr.aria-label]="'اختيار ' + fullName"
+    (click)="selectSingle()"
+  >
+    <ng-container *ngTemplateOutlet="cardContent"></ng-container>
+  </button>
+</ng-template>
+
+<ng-template #cardContent>
+  <plp-worker-avatar
+    [fullName]="fullName"
+    [code]="employeeCode"
+    [hasPhoto]="hasPhoto"
+    [photoReference]="photoReference"
+    [photoVersion]="photoVersion"
+    size="sm"
+    [decorative]="true"
+  ></plp-worker-avatar>
+  <span class="plp-worker-assignment-card__body">
+    <plp-worker-assignment-details
+      [fullName]="fullName"
+      [employeeCode]="employeeCode"
+      [productionLineName]="productionLineName"
+      [isOnActiveService]="isOnActiveService"
+      [stageNames]="stageNames"
+    ></plp-worker-assignment-details>
+    <span class="plp-worker-assignment-card__state-list" *ngIf="statusMessage || unavailableMessage">
+      <small class="plp-worker-assignment-card__state" *ngIf="statusMessage">{{ statusMessage }}</small>
+      <small class="plp-worker-assignment-card__state plp-worker-assignment-card__state--unavailable" *ngIf="unavailableMessage">{{ unavailableMessage }}</small>
+    </span>
+  </span>
+</ng-template>

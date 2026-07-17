@@ -22,9 +22,9 @@ import { productionDisplayLabel } from '../../shared/product/production-display-
 type StageFilter = 'all' | 'ready' | 'absent' | 'no-check-in' | 'no-staffing' | 'cost-review';
 type EditableDailyStage = Omit<DailyProductionStage, 'workers'> & {
   workers: EditableDailyWorker[];
-  originalWorkerIds: string[];
 };
 type EditableDailyWorker = DailyProductionWorker & {
+  includedInProduction: boolean;
   percentage: number | null;
   fixedAmount: number | null;
   notes: string;
@@ -139,7 +139,7 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
     if (!stage || !this.operations) return [];
     const existing = new Set(stage.workers.map(worker => worker.workerId));
     return this.operations.activeWorkers
-      .filter(worker => !existing.has(worker.workerId))
+      .filter(worker => worker.isProductionReady && !existing.has(worker.workerId))
       .sort((left, right) => `${left.workerCode}|${left.workerId}`.localeCompare(`${right.workerCode}|${right.workerId}`));
   }
 
@@ -147,8 +147,12 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
     return !!this.preview && this.previewRevision === this.revision;
   }
 
+  get hasExistingDraft(): boolean {
+    return !!this.operations?.existingDraft;
+  }
+
   get totalEnteredWorkers(): number {
-    return this.stages.reduce((total, stage) => total + stage.workers.length, 0);
+    return this.stages.reduce((total, stage) => total + stage.workers.filter(worker => worker.includedInProduction !== false).length, 0);
   }
 
   get firstLoadPending(): boolean {
@@ -249,6 +253,10 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
             : this.stages[0]?.productModelStageId ?? '';
           this.replacementWorkerId = '';
           this.invalidatePreview(false);
+          if (operations.existingDraft) {
+            this.applyExistingDraft(operations.existingDraft);
+            this.successMessage = 'تم تحميل مسودة اليوم المحفوظة فوق لقطة التسكين الحالية دون إعادة بنائها أو الكتابة فوقها.';
+          }
         },
         error: error => {
           if (version !== this.operationsRequestVersion) return;
@@ -266,7 +274,7 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
     const stage = this.selectedStage;
     const worker = this.availableReplacementWorkers.find(candidate => candidate.workerId === this.replacementWorkerId);
     if (!stage || !worker || !this.canOverrideParticipants) return;
-    stage.workers = [...stage.workers, this.toEditableWorker(worker)];
+    stage.workers = [...stage.workers, this.toEditableWorker({ ...worker, isAssignedWorker: false, isDailyOverride: true }, true)];
     if (stage.compensationMode === 'SharedPercentage') this.applyEqualDistribution(stage, false);
     this.replacementWorkerId = '';
     this.stageChanged();
@@ -274,17 +282,44 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
 
   removeWorker(stage: EditableDailyStage, workerId: string): void {
     if (!this.canOverrideParticipants) return;
-    stage.workers = stage.workers.filter(worker => worker.workerId !== workerId);
+    const worker = stage.workers.find(candidate => candidate.workerId === workerId);
+    if (!worker) return;
+    if (worker.isAssignedWorker !== false && !worker.isDailyOverride) worker.includedInProduction = false;
+    else stage.workers = stage.workers.filter(candidate => candidate.workerId !== workerId);
+    if (stage.compensationMode === 'SharedPercentage') this.applyEqualDistribution(stage, false);
+    this.stageChanged();
+  }
+
+  restoreWorker(stage: EditableDailyStage, worker: EditableDailyWorker): void {
+    if (!this.canOverrideParticipants || !worker.isProductionReady) return;
+    worker.includedInProduction = true;
     if (stage.compensationMode === 'SharedPercentage') this.applyEqualDistribution(stage, false);
     this.stageChanged();
   }
 
   applyEqualDistribution(stage: EditableDailyStage, markChanged = true): void {
-    if (stage.compensationMode !== 'SharedPercentage' || !stage.workers.length) return;
-    const ordered = [...stage.workers].sort((left, right) => `${left.workerCode}|${left.workerId}`.localeCompare(`${right.workerCode}|${right.workerId}`));
-    const base = Math.floor((100 / ordered.length) * 10_000) / 10_000;
-    const remainingUnits = Math.round((100 - base * ordered.length) * 10_000);
-    ordered.forEach((worker, index) => worker.percentage = Number((base + (index < remainingUnits ? 0.0001 : 0)).toFixed(4)));
+    if (stage.compensationMode !== 'SharedPercentage') return;
+    const participants = stage.workers
+      .filter(worker => worker.includedInProduction !== false && worker.isProductionReady && worker.workerMinutes > 0)
+      .sort((left, right) => left.workerId.localeCompare(right.workerId));
+    const totalMinutes = participants.reduce((total, worker) => total + worker.workerMinutes, 0);
+    const percentageUnits = 1_000_000;
+    const shares = participants.map(worker => {
+      const exactUnits = totalMinutes > 0 ? worker.workerMinutes * percentageUnits / totalMinutes : 0;
+      const units = Math.floor(exactUnits);
+      return { worker, units, remainder: exactUnits - units };
+    });
+    let remainingUnits = percentageUnits - shares.reduce((total, share) => total + share.units, 0);
+    shares
+      .sort((left, right) => right.remainder - left.remainder || left.worker.workerId.localeCompare(right.worker.workerId))
+      .forEach(share => {
+        if (remainingUnits <= 0) return;
+        share.units++;
+        remainingUnits--;
+      });
+
+    stage.workers.forEach(worker => worker.percentage = null);
+    shares.forEach(share => share.worker.percentage = share.units / 10_000);
     if (markChanged) this.stageChanged();
   }
 
@@ -322,6 +357,10 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
   }
 
   saveDailyDraft(): void {
+    if (this.hasExistingDraft) {
+      this.error = 'توجد مسودة محفوظة بالفعل لهذا اليوم. تم تحميلها كما هي ولن تُكتب فوقها بصمت.';
+      return;
+    }
     if (!this.isPreviewCurrent || !this.preview || this.saving) {
       this.error = 'احسب معاينة حديثة أولًا؛ أي تغيير في المرحلة أو الكمية يجعل الحفظ غير صالح.';
       return;
@@ -346,7 +385,7 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
   }
 
   workerNeedsOverride(stage: EditableDailyStage, worker: EditableDailyWorker): boolean {
-    return !stage.originalWorkerIds.includes(worker.workerId) || !worker.isPresent;
+    return worker.includedInProduction && (worker.isDailyOverride === true || worker.isAssignedWorker === false || !worker.isProductionReady);
   }
 
   stagePreview(stageId: string) {
@@ -398,6 +437,42 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
     return productionDisplayLabel(worker.attendanceStatus, 'لا توجد بصمة مصدر');
   }
 
+  contributionTime(value: string | null | undefined): string {
+    if (!value) return '—';
+    return new Intl.DateTimeFormat('ar-EG', { timeZone: 'Africa/Cairo', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(value));
+  }
+
+  exclusionReasonLabel(reason: string | null | undefined): string {
+    return ({
+      Absent: 'غياب',
+      OutsideAssignmentWindow: 'خارج فترة التسكين',
+      NoTemporalIntersection: 'لا يوجد تقاطع زمني',
+      IncompleteAttendance: 'حضور غير مكتمل',
+      NotProductionReady: 'غير جاهز للإنتاج'
+    } as Record<string, string>)[reason ?? ''] ?? 'غير جاهز للإنتاج';
+  }
+
+  calculatedWorkerQuantity(stage: EditableDailyStage, worker: EditableDailyWorker): number {
+    if (worker.includedInProduction === false || !worker.isProductionReady || !this.lineQuantity || stage.compensationMode !== 'SharedPercentage' || !worker.percentage) return 0;
+    return Math.round(this.lineQuantity * worker.percentage / 100 * 1000) / 1000;
+  }
+
+  dailyStaffingLabel(worker: EditableDailyWorker): string {
+    if (worker.isDailyOverride) return 'إضافة يومية';
+    if (!worker.includedInProduction && worker.isProductionReady) return 'مسكن — مستبعد من تشغيل اليوم';
+    if (worker.isProductionReady) return 'مسكن وجاهز';
+    if (worker.attendanceStatus === 'Absent' || worker.exclusionReason === 'Absent') return 'مسكن — غائب';
+    if (worker.exclusionReason === 'IncompleteAttendance' || worker.attendanceStatus === 'NoSourceCheckIn') return 'مسكن — حضور غير مكتمل';
+    if (worker.exclusionReason === 'NoTemporalIntersection' || worker.exclusionReason === 'OutsideAssignmentWindow') return 'مسكن — خارج الفترة';
+    return 'مسكن — غير جاهز للإنتاج';
+  }
+
+  dailyStaffingTone(worker: EditableDailyWorker): string {
+    if (worker.isDailyOverride) return 'info';
+    if (worker.isProductionReady && worker.includedInProduction) return 'ready';
+    return worker.attendanceStatus === 'Absent' || worker.exclusionReason === 'Absent' ? 'critical' : 'warning';
+  }
+
   trackById(_: number, item: { productModelStageId?: string; workerId?: string; id?: string }): string {
     return item.productModelStageId ?? item.workerId ?? item.id ?? String(_);
   }
@@ -441,16 +516,17 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
   }
 
   private toEditableStage(stage: DailyProductionStage): EditableDailyStage {
+    const assignedWorkers = this.uniqueWorkers(stage.workers);
     return {
       ...stage,
-      originalWorkerIds: stage.workers.map(worker => worker.workerId),
-      workers: stage.workers.map(worker => this.toEditableWorker(worker))
+      workers: assignedWorkers.map(worker => this.toEditableWorker(worker, worker.isProductionReady))
     };
   }
 
-  private toEditableWorker(worker: DailyProductionWorker): EditableDailyWorker {
+  private toEditableWorker(worker: DailyProductionWorker, includedInProduction = worker.isProductionReady): EditableDailyWorker {
     return {
       ...worker,
+      includedInProduction,
       percentage: worker.suggestedPercentage ?? null,
       fixedAmount: null,
       notes: '',
@@ -464,16 +540,17 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
     if (!this.lineQuantity || this.lineQuantity <= 0) messages.push('أدخل كمية تشغيل الخط مرة واحدة بقيمة أكبر من صفر.');
 
     this.stages.forEach(stage => {
-      if (!stage.workers.length) messages.push(`${stage.stageCode}: أضف عاملًا واحدًا على الأقل أو عالج نقص التسكين.`);
-      if (stage.compensationMode === 'SharedPercentage' && stage.workers.length) {
-        const invalid = stage.workers.some(worker => worker.percentage === null || worker.percentage <= 0);
-        const total = stage.workers.reduce((sum, worker) => sum + (worker.percentage ?? 0), 0);
+      const participants = stage.workers.filter(worker => worker.includedInProduction !== false && worker.isProductionReady);
+      if (!participants.length) messages.push(`${stage.stageCode}: لا يوجد عامل جاهز محتسب في تشغيل هذه المرحلة.`);
+      if (stage.compensationMode === 'SharedPercentage' && participants.length) {
+        const invalid = participants.some(worker => worker.percentage === null || worker.percentage <= 0);
+        const total = participants.reduce((sum, worker) => sum + (worker.percentage ?? 0), 0);
         if (invalid || Math.abs(total - 100) > 0.000001) messages.push(`${stage.stageCode}: يجب أن يساوي مجموع نسب العمال 100٪ تمامًا.`);
       }
-      if (stage.compensationMode === 'FixedAmount' && stage.workers.some(worker => worker.fixedAmount === null || worker.fixedAmount < 0)) {
+      if (stage.compensationMode === 'FixedAmount' && participants.some(worker => worker.fixedAmount === null || worker.fixedAmount < 0)) {
         messages.push(`${stage.stageCode}: أدخل قيمة ثابتة صالحة لكل عامل.`);
       }
-      stage.workers.filter(worker => this.workerNeedsOverride(stage, worker)).forEach(worker => {
+      participants.filter(worker => this.workerNeedsOverride(stage, worker)).forEach(worker => {
         if (!this.canOverrideParticipants) messages.push(`${stage.stageCode}: العامل ${worker.workerCode} يحتاج تجاوزًا معتمدًا، ولا تملك صلاحية إدارته.`);
         else if (!worker.manualOverrideReason.trim()) messages.push(`${stage.stageCode}: سبب التجاوز مطلوب للعامل ${worker.workerCode}.`);
       });
@@ -496,7 +573,9 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
   }
 
   private stageInput(stage: EditableDailyStage): DailyProductionStageInput {
-    const workers: DailyProductionWorkerInput[] = stage.workers.map(worker => ({
+    const workers: DailyProductionWorkerInput[] = stage.workers
+      .filter(worker => worker.includedInProduction !== false && worker.isProductionReady)
+      .map(worker => ({
       workerId: worker.workerId,
       percentage: stage.compensationMode === 'SharedPercentage' ? worker.percentage : null,
       fixedAmount: stage.compensationMode === 'FixedAmount' ? worker.fixedAmount : null,
@@ -507,11 +586,44 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
     return { productModelStageId: stage.productModelStageId, workers };
   }
 
+  private applyExistingDraft(draft: DailyProductionDraft): void {
+    const activeWorkers = new Map((this.operations?.activeWorkers ?? []).map(worker => [worker.workerId, worker]));
+    const recordsByStage = new Map(draft.stages.map(record => [record.productModelStageId, record]));
+    this.stages.forEach(stage => {
+      const saved = recordsByStage.get(stage.productModelStageId);
+      const workersById = new Map(stage.workers.map(worker => [worker.workerId, worker]));
+      stage.workers.forEach(worker => worker.includedInProduction = false);
+      for (const allocation of saved?.workers ?? []) {
+        let worker = workersById.get(allocation.workerId);
+        if (!worker) {
+          const active = activeWorkers.get(allocation.workerId);
+          if (!active) continue;
+          worker = this.toEditableWorker({ ...active, isAssignedWorker: false, isDailyOverride: true }, true);
+          stage.workers.push(worker);
+          workersById.set(worker.workerId, worker);
+        }
+        worker.includedInProduction = true;
+        worker.isDailyOverride = worker.isAssignedWorker === false || worker.isDailyOverride === true;
+        worker.percentage = allocation.percentage ?? null;
+        worker.fixedAmount = allocation.fixedAmount ?? null;
+        worker.notes = allocation.notes ?? '';
+        worker.manualOverrideReason = allocation.manualOverrideReason ?? '';
+      }
+      stage.workers = this.uniqueWorkers(stage.workers);
+    });
+    this.lineQuantity = draft.lineQuantity;
+    this.savedDraft = draft;
+  }
+
+  private uniqueWorkers<T extends DailyProductionWorker>(workers: readonly T[]): T[] {
+    return [...new Map(workers.map(worker => [worker.workerId, worker])).values()];
+  }
+
   private invalidatePreview(incrementRevision = true): void {
     if (incrementRevision) this.revision++;
     this.preview = null;
     this.previewRevision = -1;
-    this.savedDraft = null;
+    this.savedDraft = this.operations?.existingDraft ?? null;
   }
 
   private resetOperations(): void {

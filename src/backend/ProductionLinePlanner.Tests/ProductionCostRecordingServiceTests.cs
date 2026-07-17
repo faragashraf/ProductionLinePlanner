@@ -288,6 +288,13 @@ public sealed class ProductionCostRecordingServiceTests
         Assert.Equal(saved.Stages.Single().TotalWorkerEarnings, saved.Stages.Single().Workers.Sum(worker => worker.CalculatedEarning));
         Assert.Equal(1, await fixture.Db.Set<StageProductionRecord>().CountAsync(record => record.ProductionDate == productionDate));
         Assert.NotEqual(saved.ProductionDate.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc), saved.RecordedAtUtc);
+
+        var reloaded = await fixture.Service.LoadDailyOperationsAsync(fixture.Factory.Id, fixture.Line.Id, fixture.Model.Id, productionDate, default);
+        Assert.NotNull(reloaded.ExistingDraft);
+        Assert.Equal(saved.ProductionOrderId, reloaded.ExistingDraft!.ProductionOrderId);
+        Assert.Equal(
+            Assert.Single(reloaded.Stages).Workers.Count,
+            reloaded.Stages.Single().Workers.Select(worker => worker.WorkerId).Distinct().Count());
     }
 
     [Fact]
@@ -304,6 +311,192 @@ public sealed class ProductionCostRecordingServiceTests
         Assert.False(Assert.Single(noCheckInResult.Stages).HasAbsentWorkers);
         Assert.True(Assert.Single(absentResult.Stages).HasAbsentWorkers);
         Assert.False(Assert.Single(absentResult.Stages).HasNoSourceCheckInWorkers);
+        Assert.All(Assert.Single(noCheckInResult.Stages).Workers, worker =>
+        {
+            Assert.True(worker.IsAssignedWorker);
+            Assert.False(worker.IsProductionReady);
+        });
+        Assert.All(Assert.Single(absentResult.Stages).Workers, worker =>
+        {
+            Assert.True(worker.IsAssignedWorker);
+            Assert.False(worker.IsProductionReady);
+            Assert.Equal("Absent", worker.ExclusionReason);
+        });
+    }
+
+    [Fact]
+    public async Task Daily_operations_import_permanent_staffing_without_using_assignment_audit_time()
+    {
+        await using var fixture = await Fixture.CreateAsync("SharedPercentage", 0.50m, 17m);
+        var productionDateBeforeAssignmentsWereCreated = fixture.Today.AddDays(-2);
+
+        var operations = await fixture.Service.LoadDailyOperationsAsync(
+            fixture.Factory.Id,
+            fixture.Line.Id,
+            fixture.Model.Id,
+            productionDateBeforeAssignmentsWereCreated,
+            default);
+
+        var workers = Assert.Single(operations.Stages).Workers;
+        Assert.Equal(3, workers.Count);
+        Assert.All(workers, worker =>
+        {
+            Assert.True(worker.IsAssignedWorker);
+            Assert.True(worker.IsProductionReady);
+            Assert.True(worker.WorkerMinutes > 0);
+        });
+    }
+
+    [Fact]
+    public async Task Daily_operations_keep_an_assigned_worker_with_missing_last_out_visible_and_not_ready()
+    {
+        await using var fixture = await Fixture.CreateAsync("SharedPercentage", 0.50m, 17m);
+        var service = fixture.CreateService(new RecordingAuditEngine(), new IncompleteAttendanceEngine());
+
+        var operations = await service.LoadDailyOperationsAsync(
+            fixture.Factory.Id,
+            fixture.Line.Id,
+            fixture.Model.Id,
+            fixture.Today,
+            default);
+
+        Assert.All(Assert.Single(operations.Stages).Workers, worker =>
+        {
+            Assert.True(worker.IsAssignedWorker);
+            Assert.False(worker.IsProductionReady);
+            Assert.Equal("IncompleteAttendance", worker.ExclusionReason);
+            Assert.Equal(0, worker.WorkerMinutes);
+        });
+    }
+
+    [Fact]
+    public async Task Daily_operations_keep_assigned_workers_visible_when_attendance_has_no_temporal_intersection()
+    {
+        await using var fixture = await Fixture.CreateAsync("SharedPercentage", 0.50m, 17m);
+        var cairo = TimeZoneInfo.FindSystemTimeZoneById("Africa/Cairo");
+        var nextLocalDay = fixture.Today.AddDays(1).ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified);
+        var outsideStart = TimeZoneInfo.ConvertTimeToUtc(nextLocalDay.AddHours(1), cairo);
+        var windows = new[] { fixture.WorkerA.Id, fixture.WorkerB.Id, fixture.WorkerC.Id }
+            .ToDictionary(
+                workerId => workerId,
+                workerId => new AttendancePresenceWindowDto(workerId, AttendanceStatus.Present, outsideStart, outsideStart.AddHours(2), true));
+
+        var operations = await fixture.CreateService(new RecordingAuditEngine(), new WindowAttendanceEngine(windows))
+            .LoadDailyOperationsAsync(fixture.Factory.Id, fixture.Line.Id, fixture.Model.Id, fixture.Today, default);
+
+        Assert.All(Assert.Single(operations.Stages).Workers, worker =>
+        {
+            Assert.True(worker.IsAssignedWorker);
+            Assert.False(worker.IsProductionReady);
+            Assert.Equal("NoTemporalIntersection", worker.ExclusionReason);
+        });
+    }
+
+    [Fact]
+    public async Task Daily_participant_overrides_do_not_mutate_permanent_or_temporary_staffing()
+    {
+        await using var fixture = await Fixture.CreateAsync("SharedPercentage", 0.50m, 17m);
+        var dailyOverride = new Worker(Guid.NewGuid(), "DAILY", "Daily override");
+        fixture.Db.Add(dailyOverride);
+        await fixture.Db.SaveChangesAsync();
+        var productionDate = fixture.Today.AddDays(1);
+        var operations = await fixture.Service.LoadDailyOperationsAsync(fixture.Factory.Id, fixture.Line.Id, fixture.Model.Id, productionDate, default);
+        var stage = Assert.Single(operations.Stages);
+        var participants = stage.Workers.Select(worker =>
+                new WorkerAllocationRequest(worker.WorkerId, worker.SuggestedPercentage, null, null))
+            .Append(new WorkerAllocationRequest(dailyOverride.Id, 1m, null, null, "بديل لهذا اليوم فقط"))
+            .ToArray();
+        var request = new DailyProductionOperationRequest(
+            fixture.Factory.Id, fixture.Line.Id, fixture.Model.Id, productionDate, 500m, Guid.NewGuid(), null, null,
+            [new DailyProductionStageRequest(stage.ProductModelStageId, participants)]);
+
+        var preview = await fixture.Service.PreviewDailyOperationsAsync(request, fixture.ActorId, default);
+
+        Assert.Contains(Assert.Single(preview.Stages).Workers, worker => worker.WorkerId == dailyOverride.Id);
+        Assert.False(await fixture.Db.Set<WorkerDefaultAssignment>().AnyAsync(assignment => assignment.WorkerId == dailyOverride.Id));
+        Assert.False(await fixture.Db.Set<WorkerTemporaryAssignment>().AnyAsync(assignment => assignment.WorkerId == dailyOverride.Id));
+    }
+
+    [Fact]
+    public async Task Daily_operations_use_cairo_day_boundaries_for_overlapping_and_expired_temporary_staffing()
+    {
+        await using var fixture = await Fixture.CreateAsync("SharedPercentage", 0.50m, 17m);
+        var boundaryWorker = new Worker(Guid.NewGuid(), "BOUNDARY", "Boundary worker");
+        var expiredWorker = new Worker(Guid.NewGuid(), "EXPIRED", "Expired worker");
+        var cancelledWorker = new Worker(Guid.NewGuid(), "CANCELLED", "Cancelled worker");
+        var cairo = TimeZoneInfo.FindSystemTimeZoneById("Africa/Cairo");
+        var localStart = fixture.Today.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified);
+        DateTime Utc(DateTime local) => TimeZoneInfo.ConvertTimeToUtc(local, cairo);
+        fixture.Db.AddRange(
+            boundaryWorker,
+            expiredWorker,
+            cancelledWorker,
+            new WorkerTemporaryAssignment(
+                Guid.NewGuid(), boundaryWorker.Id, null, fixture.SubStage.Id,
+                Utc(localStart.AddMinutes(-30)), Utc(localStart.AddMinutes(30)), fixture.ActorId,
+                "Crosses local midnight", participationMode: TemporaryAssignmentMode.AdditionalParticipation, status: "Active"),
+            new WorkerTemporaryAssignment(
+                Guid.NewGuid(), expiredWorker.Id, null, fixture.SubStage.Id,
+                Utc(localStart.AddHours(-6)), Utc(localStart.AddHours(-4)), fixture.ActorId,
+                "Expired before production day", participationMode: TemporaryAssignmentMode.AdditionalParticipation, status: "Active"),
+            new WorkerTemporaryAssignment(
+                Guid.NewGuid(), cancelledWorker.Id, null, fixture.SubStage.Id,
+                Utc(localStart.AddHours(8)), Utc(localStart.AddHours(10)), fixture.ActorId,
+                "Cancelled before daily load", participationMode: TemporaryAssignmentMode.AdditionalParticipation, status: "Cancelled"));
+        await fixture.Db.SaveChangesAsync();
+        var attendance = new WindowAttendanceEngine(new Dictionary<Guid, AttendancePresenceWindowDto>
+        {
+            [boundaryWorker.Id] = new(boundaryWorker.Id, AttendanceStatus.Present, Utc(localStart.AddMinutes(15)), Utc(localStart.AddMinutes(45)), true),
+            [cancelledWorker.Id] = new(cancelledWorker.Id, AttendanceStatus.Present, Utc(localStart.AddHours(8)), Utc(localStart.AddHours(10)), true)
+        });
+
+        var operations = await fixture.CreateService(new RecordingAuditEngine(), attendance)
+            .LoadDailyOperationsAsync(fixture.Factory.Id, fixture.Line.Id, fixture.Model.Id, fixture.Today, default);
+        var workers = Assert.Single(operations.Stages).Workers;
+
+        var boundary = Assert.Single(workers, worker => worker.WorkerId == boundaryWorker.Id);
+        Assert.True(boundary.IsProductionReady);
+        Assert.Equal(15, boundary.WorkerMinutes);
+        Assert.DoesNotContain(workers, worker => worker.WorkerId == expiredWorker.Id);
+        Assert.DoesNotContain(workers, worker => worker.WorkerId == cancelledWorker.Id);
+    }
+
+    [Fact]
+    public async Task Daily_operations_intersect_sequential_assignment_windows_with_actual_presence_and_allocate_by_minutes()
+    {
+        await using var fixture = await Fixture.CreateAsync("SharedPercentage", 1m, 17m);
+        var first = new Worker(Guid.NewGuid(), "T1", "Morning worker");
+        var second = new Worker(Guid.NewGuid(), "T2", "Afternoon worker");
+        var localStart = fixture.Today.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified);
+        var cairo = TimeZoneInfo.FindSystemTimeZoneById("Africa/Cairo");
+        DateTime At(int hour) => TimeZoneInfo.ConvertTimeToUtc(localStart.AddHours(hour), cairo);
+        fixture.Db.AddRange(
+            first,
+            second,
+            new WorkerTemporaryAssignment(Guid.NewGuid(), first.Id, null, fixture.SubStage.Id, At(8), At(13), fixture.ActorId, "Morning coverage", participationMode: TemporaryAssignmentMode.AdditionalParticipation, status: "Active"),
+            new WorkerTemporaryAssignment(Guid.NewGuid(), second.Id, null, fixture.SubStage.Id, At(13), At(16), fixture.ActorId, "Afternoon coverage", participationMode: TemporaryAssignmentMode.AdditionalParticipation, status: "Active"));
+        await fixture.Db.SaveChangesAsync();
+        var attendance = new WindowAttendanceEngine(new Dictionary<Guid, AttendancePresenceWindowDto>
+        {
+            [first.Id] = new(first.Id, AttendanceStatus.Present, At(8), At(13), true),
+            [second.Id] = new(second.Id, AttendanceStatus.Present, At(13), At(16), true)
+        });
+        var service = fixture.CreateService(new RecordingAuditEngine(), attendance);
+
+        var operations = await service.LoadDailyOperationsAsync(fixture.Factory.Id, fixture.Line.Id, fixture.Model.Id, fixture.Today, default);
+        var stage = Assert.Single(operations.Stages);
+        var ready = stage.Workers.Where(worker => worker.IsProductionReady).OrderBy(worker => worker.WorkerCode).ToArray();
+
+        Assert.Equal([300, 180], ready.Select(worker => worker.WorkerMinutes).ToArray());
+        Assert.Equal([62.5m, 37.5m], ready.Select(worker => worker.SuggestedPercentage!.Value).ToArray());
+        var request = new DailyProductionOperationRequest(
+            fixture.Factory.Id, fixture.Line.Id, fixture.Model.Id, fixture.Today, 500m, Guid.NewGuid(), null, null,
+            [new DailyProductionStageRequest(stage.ProductModelStageId, ready.Select(worker => new WorkerAllocationRequest(worker.WorkerId, worker.SuggestedPercentage, null, null)).ToArray())]);
+        var preview = await service.PreviewDailyOperationsAsync(request, fixture.ActorId, default);
+
+        Assert.Equal(500m, preview.Stages.Single().StageQuantity);
+        Assert.Equal(500m, preview.Stages.Single().Workers.Sum(worker => worker.EquivalentQuantity));
+        Assert.Equal([312.5m, 187.5m], preview.Stages.Single().Workers.OrderBy(worker => worker.WorkerCode).Select(worker => worker.EquivalentQuantity).ToArray());
     }
 
     [Fact]
@@ -625,6 +818,13 @@ public sealed class ProductionCostRecordingServiceTests
         public Task<Result<AttendanceSyncResultDto>> SyncTodayAsync(CancellationToken cancellationToken = default) => Task.FromResult(Result<AttendanceSyncResultDto>.Success(new AttendanceSyncResultDto()));
         public Task<Result<AttendanceSyncResultDto>> SyncForProductionDateAsync(DateOnly productionDate, CancellationToken cancellationToken = default) => Task.FromResult(Result<AttendanceSyncResultDto>.Success(new AttendanceSyncResultDto()));
         public virtual Task<Result<Dictionary<Guid, AttendanceStatusRecord>>> GetLatestAttendanceStatusByWorkerAsync(IEnumerable<Guid> workerIds, DateTime? asOfUtc = null, CancellationToken cancellationToken = default) => Task.FromResult(Result<Dictionary<Guid, AttendanceStatusRecord>>.Success(workerIds.Distinct().ToDictionary(id => id, id => new AttendanceStatusRecord(id, AttendanceStatus.Present, asOfUtc ?? DateTime.UtcNow, "test"))));
+        public virtual Task<Result<Dictionary<Guid, AttendancePresenceWindowDto>>> GetPresenceWindowsByWorkerAsync(IEnumerable<Guid> workerIds, DateOnly productionDate, CancellationToken cancellationToken = default)
+        {
+            var start = DateTime.SpecifyKind(productionDate.ToDateTime(TimeOnly.MinValue), DateTimeKind.Utc);
+            return Task.FromResult(Result<Dictionary<Guid, AttendancePresenceWindowDto>>.Success(workerIds.Distinct().ToDictionary(
+                id => id,
+                id => new AttendancePresenceWindowDto(id, AttendanceStatus.Present, start, start.AddDays(1), true))));
+        }
     }
 
     private sealed class AssignmentOverridePermissionService : IPermissionService
@@ -643,11 +843,36 @@ public sealed class ProductionCostRecordingServiceTests
     {
         public override Task<Result<Dictionary<Guid, AttendanceStatusRecord>>> GetLatestAttendanceStatusByWorkerAsync(IEnumerable<Guid> workerIds, DateTime? asOfUtc = null, CancellationToken cancellationToken = default) =>
             Task.FromResult(Result<Dictionary<Guid, AttendanceStatusRecord>>.Success(workerIds.Distinct().ToDictionary(id => id, id => new AttendanceStatusRecord(id, AttendanceStatus.Absent, asOfUtc ?? DateTime.UtcNow, "test"))));
+        public override Task<Result<Dictionary<Guid, AttendancePresenceWindowDto>>> GetPresenceWindowsByWorkerAsync(IEnumerable<Guid> workerIds, DateOnly productionDate, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Result<Dictionary<Guid, AttendancePresenceWindowDto>>.Success(workerIds.Distinct().ToDictionary(id => id, id => new AttendancePresenceWindowDto(id, AttendanceStatus.Absent, null, null, false))));
     }
 
     private sealed class NoCheckInAttendanceEngine : PresentAttendanceEngine
     {
         public override Task<Result<Dictionary<Guid, AttendanceStatusRecord>>> GetLatestAttendanceStatusByWorkerAsync(IEnumerable<Guid> workerIds, DateTime? asOfUtc = null, CancellationToken cancellationToken = default) =>
             Task.FromResult(Result<Dictionary<Guid, AttendanceStatusRecord>>.Success(new Dictionary<Guid, AttendanceStatusRecord>()));
+        public override Task<Result<Dictionary<Guid, AttendancePresenceWindowDto>>> GetPresenceWindowsByWorkerAsync(IEnumerable<Guid> workerIds, DateOnly productionDate, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Result<Dictionary<Guid, AttendancePresenceWindowDto>>.Success(new Dictionary<Guid, AttendancePresenceWindowDto>()));
+    }
+
+    private sealed class IncompleteAttendanceEngine : PresentAttendanceEngine
+    {
+        public override Task<Result<Dictionary<Guid, AttendancePresenceWindowDto>>> GetPresenceWindowsByWorkerAsync(IEnumerable<Guid> workerIds, DateOnly productionDate, CancellationToken cancellationToken = default)
+        {
+            var firstIn = DateTime.SpecifyKind(productionDate.ToDateTime(new TimeOnly(8, 0)), DateTimeKind.Utc);
+            return Task.FromResult(Result<Dictionary<Guid, AttendancePresenceWindowDto>>.Success(workerIds
+                .Distinct()
+                .ToDictionary(
+                    workerId => workerId,
+                    workerId => new AttendancePresenceWindowDto(workerId, AttendanceStatus.Present, firstIn, null, true))));
+        }
+    }
+
+    private sealed class WindowAttendanceEngine(IReadOnlyDictionary<Guid, AttendancePresenceWindowDto> windows) : PresentAttendanceEngine
+    {
+        public override Task<Result<Dictionary<Guid, AttendancePresenceWindowDto>>> GetPresenceWindowsByWorkerAsync(IEnumerable<Guid> workerIds, DateOnly productionDate, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Result<Dictionary<Guid, AttendancePresenceWindowDto>>.Success(workerIds
+                .Where(windows.ContainsKey)
+                .ToDictionary(workerId => workerId, workerId => windows[workerId])));
     }
 }

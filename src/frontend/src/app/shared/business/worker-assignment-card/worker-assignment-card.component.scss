@@ -1,0 +1,95 @@
+:host {
+  display: block;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+}
+
+.plp-worker-assignment-card {
+  align-items: center;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--plp-space-8);
+  inline-size: 100%;
+  max-inline-size: 100%;
+  min-block-size: var(--plp-touch-target-min);
+  min-inline-size: 0;
+  padding: var(--plp-space-8);
+  overflow: hidden;
+  color: var(--plp-color-text);
+  text-align: start;
+  font: inherit;
+  border: var(--plp-border-muted);
+  border-radius: var(--plp-radius-sm);
+  background: var(--plp-color-surface);
+  cursor: pointer;
+  transition: background-color var(--plp-motion-fast) var(--plp-motion-ease-standard), border-color var(--plp-motion-fast) var(--plp-motion-ease-standard), box-shadow var(--plp-motion-fast) var(--plp-motion-ease-standard);
+}
+
+.plp-worker-assignment-card--multiple {
+  grid-template-columns: auto auto minmax(0, 1fr);
+}
+
+.plp-worker-assignment-card:hover:not(.is-disabled),
+.plp-worker-assignment-card.is-selected {
+  border-color: var(--plp-color-selected-border);
+  background: var(--plp-color-surface-selected);
+}
+
+.plp-worker-assignment-card:focus-visible,
+.plp-worker-assignment-card:focus-within {
+  outline: var(--plp-focus-outline);
+  outline-offset: var(--plp-focus-offset);
+}
+
+.plp-worker-assignment-card.is-disabled,
+.plp-worker-assignment-card:disabled {
+  cursor: not-allowed;
+  opacity: var(--plp-disabled-opacity);
+}
+
+.plp-worker-assignment-card__checkbox {
+  inline-size: 1.1rem;
+  block-size: 1.1rem;
+  margin: 0;
+  accent-color: var(--plp-color-primary);
+  cursor: pointer;
+}
+
+.plp-worker-assignment-card__checkbox:disabled {
+  cursor: not-allowed;
+}
+
+.plp-worker-assignment-card__body {
+  display: grid;
+  gap: var(--plp-space-4);
+  min-inline-size: 0;
+  max-inline-size: 100%;
+}
+
+.plp-worker-assignment-card__state-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--plp-space-4);
+  min-inline-size: 0;
+}
+
+.plp-worker-assignment-card__state {
+  padding-inline-start: var(--plp-space-8);
+  color: var(--plp-color-text-soft);
+  font-size: var(--plp-type-caption);
+  line-height: var(--plp-line-height-base);
+  border-inline-start: var(--plp-border-width) solid var(--plp-color-border-strong);
+  overflow-wrap: anywhere;
+}
+
+.plp-worker-assignment-card__state--unavailable {
+  color: var(--plp-color-warning-strong);
+  border-inline-start-color: var(--plp-color-warning);
+}
+
+@media (max-width: 599px) {
+  .plp-worker-assignment-card,
+  .plp-worker-assignment-card--multiple {
+    align-items: start;
+  }
+}

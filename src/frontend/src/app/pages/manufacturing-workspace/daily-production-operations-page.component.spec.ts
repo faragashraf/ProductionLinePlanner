@@ -58,10 +58,12 @@ describe('DailyProductionOperationsPageComponent unified preview', () => {
       productModelStageId: 'stage-1', subStageId: 'sub-stage-1', mainStageName: 'Main', stageCode: 'S1',
       stageName: 'مرحلة 1', stageOrder: 1, piecePrice: .5, compensationMode: 'SharedPercentage',
       staffingStatus: 'Staffed', attendanceStatus: 'Ready', hasAbsentWorkers: false, hasNoSourceCheckInWorkers: false,
-      isFinancialReviewPending: false, isReady: true, originalWorkerIds: ['worker-1'],
+      isFinancialReviewPending: false, isReady: true,
       workers: [{ workerId: 'worker-1', workerCode: 'W1', workerName: 'عامل 1', isOnActiveService: true,
         effectiveAssignmentType: 'Permanent', attendanceStatus: 'Present', hasSourceCheckIn: true, isPresent: true,
-        requiresAuthorizedOverride: false, suggestedPercentage: 100, percentage: 100, fixedAmount: null, notes: '', manualOverrideReason: '' }]
+        requiresAuthorizedOverride: false, suggestedPercentage: 100, contributionStartsAtUtc: '2026-07-16T05:00:00Z', contributionEndsAtUtc: '2026-07-16T13:00:00Z', workerMinutes: 480, isProductionReady: true,
+        isAssignedWorker: true, isDailyOverride: false, includedInProduction: true,
+        percentage: 100, fixedAmount: null, notes: '', manualOverrideReason: '' }]
     } as any];
   });
 
@@ -126,6 +128,94 @@ describe('DailyProductionOperationsPageComponent unified preview', () => {
     expect(firstRequest.clientRequestId).toBe(retryRequest.clientRequestId);
     expect(component.preview).toEqual(preview);
   });
+
+  it('updates the minute-weighted quantity preview immediately when line quantity changes', () => {
+    const stage = component.stages[0];
+    stage.workers[0].percentage = 25;
+    component.lineQuantity = 200;
+
+    component.lineQuantityChanged();
+
+    expect(component.calculatedWorkerQuantity(stage, stage.workers[0])).toBe(50);
+    expect(component.exclusionReasonLabel('NoTemporalIntersection')).toBe('لا يوجد تقاطع زمني');
+  });
+
+  it('imports assigned ready, absent, and incomplete-attendance workers into the stage without manual selection', () => {
+    component.attendanceSyncedForDate = component.productionDate;
+    production.loadDailyOperations.and.returnValue(of({
+      ...component.operations,
+      stages: [{
+        ...component.stages[0],
+        workers: [
+          { ...component.stages[0].workers[0], isProductionReady: true, exclusionReason: null },
+          { ...component.stages[0].workers[0], workerId: 'worker-2', workerCode: 'W2', workerName: 'عامل غائب', attendanceStatus: 'Absent', hasSourceCheckIn: false, isPresent: false, isProductionReady: false, workerMinutes: 0, suggestedPercentage: null, exclusionReason: 'Absent' },
+          { ...component.stages[0].workers[0], workerId: 'worker-3', workerCode: 'W3', workerName: 'حضور غير مكتمل', isProductionReady: false, workerMinutes: 0, suggestedPercentage: null, contributionEndsAtUtc: null, exclusionReason: 'IncompleteAttendance' }
+        ]
+      }]
+    }));
+
+    component.loadTodayOperations();
+
+    expect(production.loadDailyOperations).toHaveBeenCalledTimes(1);
+    expect(component.stages[0].workers.map(worker => worker.workerId)).toEqual(['worker-1', 'worker-2', 'worker-3']);
+    expect(component.stages[0].workers.map(worker => worker.includedInProduction)).toEqual([true, false, false]);
+    expect(component.dailyStaffingLabel(component.stages[0].workers[1])).toBe('مسكن — غائب');
+    expect(component.dailyStaffingLabel(component.stages[0].workers[2])).toBe('مسكن — حضور غير مكتمل');
+  });
+
+  it('deduplicates assigned workers by stable id and keeps daily overrides separate from permanent staffing', () => {
+    const stage = component.stages[0];
+    const override = {
+      ...stage.workers[0],
+      workerId: 'worker-override',
+      workerCode: 'OVR',
+      workerName: 'بديل اليوم',
+      isAssignedWorker: false,
+      isDailyOverride: false,
+      suggestedPercentage: null,
+      workerMinutes: 240
+    };
+    component.operations!.activeWorkers = [override];
+    component.selectedStageId = stage.productModelStageId;
+    component.replacementWorkerId = override.workerId;
+
+    component.addReplacementWorker();
+    const added = stage.workers.find(worker => worker.workerId === override.workerId)!;
+    added.manualOverrideReason = 'بديل لهذا اليوم فقط';
+    production.previewDailyOperations.and.returnValue(of(preview));
+    component.calculatePreview();
+
+    expect(stage.workers[0].isAssignedWorker).toBeTrue();
+    expect(added.isDailyOverride).toBeTrue();
+    const request = production.previewDailyOperations.calls.mostRecent().args[0];
+    expect(request.stages[0].workers.map((worker: any) => worker.workerId)).toEqual(['worker-1', 'worker-override']);
+  });
+
+  it('recomputes shared percentages from ready worker minutes after a daily participant change', () => {
+    const stage = component.stages[0];
+    stage.workers = [
+      { ...stage.workers[0], workerId: 'worker-a', workerMinutes: 300 },
+      { ...stage.workers[0], workerId: 'worker-b', workerMinutes: 180 }
+    ];
+    component.lineQuantity = 500;
+
+    component.applyEqualDistribution(stage, false);
+
+    expect(stage.workers.map(worker => worker.percentage)).toEqual([62.5, 37.5]);
+    expect(stage.workers.reduce((total, worker) => total + component.calculatedWorkerQuantity(stage, worker), 0)).toBe(500);
+  });
+
+  it('loads an existing draft and refuses to overwrite it silently', () => {
+    component.operations!.existingDraft = {
+      productionOrderId: 'order-1', orderNumber: 'DLY-1', productionDate: component.productionDate,
+      recordedAtUtc: '2026-07-16T13:00:00Z', lineQuantity: 500, wasAlreadySaved: true, stages: []
+    };
+
+    component.saveDailyDraft();
+
+    expect(production.saveDailyDraft).not.toHaveBeenCalled();
+    expect(component.error).toContain('لن تُكتب فوقها بصمت');
+  });
 });
 
 describe('DailyProductionOperationsPageComponent visual hierarchy', () => {
@@ -152,10 +242,17 @@ describe('DailyProductionOperationsPageComponent visual hierarchy', () => {
       productModelStageId: 'stage-1', subStageId: 'sub-stage-1', mainStageName: 'التجميع', stageCode: 'ST-01',
       stageName: 'تجميع الكتف', stageOrder: 1, piecePrice: .5, compensationMode: 'SharedPercentage',
       staffingStatus: 'Staffed', attendanceStatus: 'Ready', hasAbsentWorkers: false, hasNoSourceCheckInWorkers: false,
-      isFinancialReviewPending: false, isReady: true, originalWorkerIds: ['worker-1'],
+      isFinancialReviewPending: false, isReady: true,
       workers: [{ workerId: 'worker-1', workerCode: 'W-001', workerName: 'Worker One', isOnActiveService: true,
         effectiveAssignmentType: 'Default', attendanceStatus: 'Present', hasSourceCheckIn: true, isPresent: true,
-        requiresAuthorizedOverride: false, suggestedPercentage: 100, percentage: 100, fixedAmount: null, notes: '', manualOverrideReason: '' }]
+        requiresAuthorizedOverride: false, suggestedPercentage: 100, contributionStartsAtUtc: '2026-07-17T05:00:00Z', contributionEndsAtUtc: '2026-07-17T13:00:00Z', workerMinutes: 480, isProductionReady: true,
+        isAssignedWorker: true, isDailyOverride: false, includedInProduction: true,
+        percentage: 100, fixedAmount: null, notes: '', manualOverrideReason: '' },
+        { workerId: 'worker-2', workerCode: 'W-002', workerName: 'عامل بحضور قديم', isOnActiveService: true,
+          effectiveAssignmentType: 'Default', attendanceStatus: 'Present', hasSourceCheckIn: true, isPresent: true,
+          requiresAuthorizedOverride: false, suggestedPercentage: null, contributionStartsAtUtc: null, contributionEndsAtUtc: null,
+          workerMinutes: 0, isProductionReady: false, exclusionReason: 'IncompleteAttendance', isAssignedWorker: true,
+          isDailyOverride: false, includedInProduction: false, percentage: null, fixedAmount: null, notes: '', manualOverrideReason: '' }]
     } as any;
     component.operations = {
       factoryId: 'factory-1', factoryName: 'مصنع القاهرة', productionLineId: 'line-1', productionLineName: 'خط التجميع',
@@ -229,6 +326,9 @@ describe('DailyProductionOperationsPageComponent visual hierarchy', () => {
       expect(nextCardRect.top).withContext(`viewport ${viewportWidth}`).toBeGreaterThanOrEqual(cardRect.bottom);
     });
     expect(fixture.nativeElement.querySelector('.daily-production-operations__worker plp-responsive-entity-row')).not.toBeNull();
+    expect(fixture.nativeElement.querySelectorAll('.daily-production-operations__staffing-badge')).toHaveSize(2);
+    expect(text).toContain('مسكن وجاهز');
+    expect(text).toContain('مسكن — حضور غير مكتمل');
     expect(fixture.nativeElement.querySelector('.daily-production-operations__preview-stage plp-responsive-entity-row')).not.toBeNull();
     expect(fixture.nativeElement.querySelector('.daily-production-operations__worker-totals p-table')).not.toBeNull();
     expect(workerTotalRow.querySelector('.plp-responsive-entity-row__title')?.textContent).toContain('Worker One');

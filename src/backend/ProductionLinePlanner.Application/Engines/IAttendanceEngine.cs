@@ -30,4 +30,9 @@ public interface IAttendanceEngine
             IEnumerable<Guid> workerIds,
             DateTime? asOfUtc = null,
             CancellationToken cancellationToken = default);
+
+    Task<Result<Dictionary<Guid, AttendancePresenceWindowDto>>> GetPresenceWindowsByWorkerAsync(
+        IEnumerable<Guid> workerIds,
+        DateOnly productionDate,
+        CancellationToken cancellationToken = default);
 }

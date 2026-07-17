@@ -371,6 +371,13 @@ public sealed class ProductionCostRecordingHttpIntegrationTests
         public Task<Result<AttendanceSyncResultDto>> SyncTodayAsync(CancellationToken cancellationToken = default) => Task.FromResult(Result<AttendanceSyncResultDto>.Success(new AttendanceSyncResultDto()));
         public Task<Result<AttendanceSyncResultDto>> SyncForProductionDateAsync(DateOnly productionDate, CancellationToken cancellationToken = default) => Task.FromResult(Result<AttendanceSyncResultDto>.Success(new AttendanceSyncResultDto()));
         public Task<Result<Dictionary<Guid, AttendanceStatusRecord>>> GetLatestAttendanceStatusByWorkerAsync(IEnumerable<Guid> workerIds, DateTime? asOfUtc = null, CancellationToken cancellationToken = default) => Task.FromResult(Result<Dictionary<Guid, AttendanceStatusRecord>>.Success(workerIds.Distinct().ToDictionary(id => id, id => new AttendanceStatusRecord(id, AttendanceStatus.Present, asOfUtc ?? DateTime.UtcNow, "test"))));
+        public Task<Result<Dictionary<Guid, AttendancePresenceWindowDto>>> GetPresenceWindowsByWorkerAsync(IEnumerable<Guid> workerIds, DateOnly productionDate, CancellationToken cancellationToken = default)
+        {
+            var start = DateTime.SpecifyKind(productionDate.ToDateTime(TimeOnly.MinValue), DateTimeKind.Utc);
+            return Task.FromResult(Result<Dictionary<Guid, AttendancePresenceWindowDto>>.Success(workerIds.Distinct().ToDictionary(
+                id => id,
+                id => new AttendancePresenceWindowDto(id, AttendanceStatus.Present, start, start.AddDays(1), true))));
+        }
     }
 
     private sealed class FailingProductionReadinessEngine(Error error) : IProductionReadinessEngine

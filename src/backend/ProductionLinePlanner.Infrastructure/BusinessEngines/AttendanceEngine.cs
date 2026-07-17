@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 using ProductionLinePlanner.Application.Common;
 using ProductionLinePlanner.Application.DTOs;
 using ProductionLinePlanner.Application.Engines;
@@ -87,5 +88,49 @@ public sealed class AttendanceEngine : IAttendanceEngine
             x => new AttendanceStatusRecord(x.WorkerId, x.Entry.AttendanceStatus, x.Entry.AttendanceTimeUtc, x.Entry.Source, x.Entry.SourceRawId));
 
         return Result<Dictionary<Guid, AttendanceStatusRecord>>.Success(result);
+    }
+
+    public async Task<Result<Dictionary<Guid, AttendancePresenceWindowDto>>> GetPresenceWindowsByWorkerAsync(
+        IEnumerable<Guid> workerIds,
+        DateOnly productionDate,
+        CancellationToken cancellationToken = default)
+    {
+        var ids = workerIds.Distinct().ToArray();
+        if (ids.Length == 0)
+            return Result<Dictionary<Guid, AttendancePresenceWindowDto>>.Success([]);
+
+        var localStart = productionDate.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified);
+        var startUtc = TimeZoneInfo.ConvertTimeToUtc(localStart, EgyptTimeZone);
+        var endUtc = TimeZoneInfo.ConvertTimeToUtc(localStart.AddDays(1), EgyptTimeZone);
+        var records = await _dbContext.AttendanceRecords.AsNoTracking()
+            .Where(record => ids.Contains(record.WorkerId) && record.AttendanceTimeUtc >= startUtc && record.AttendanceTimeUtc < endUtc)
+            .OrderBy(record => record.WorkerId)
+            .ThenByDescending(record => record.CreatedAtUtc)
+            .ToArrayAsync(cancellationToken);
+
+        var result = new Dictionary<Guid, AttendancePresenceWindowDto>();
+        foreach (var group in records.GroupBy(record => record.WorkerId))
+        {
+            var record = group.First();
+            var hasCheckIn = record.AttendanceStatus is AttendanceStatus.Present or AttendanceStatus.Late;
+            DateTime? firstIn = hasCheckIn ? record.AttendanceTimeUtc : null;
+            DateTime? lastOut = null;
+            if (hasCheckIn && !string.IsNullOrWhiteSpace(record.SourcePayload))
+            {
+                try
+                {
+                    using var json = JsonDocument.Parse(record.SourcePayload);
+                    if (json.RootElement.TryGetProperty("FirstInUtc", out var first) && first.TryGetDateTime(out var parsedFirst)) firstIn = parsedFirst;
+                    if (json.RootElement.TryGetProperty("LastOutUtc", out var last) && last.ValueKind != JsonValueKind.Null && last.TryGetDateTime(out var parsedLast)) lastOut = parsedLast;
+                }
+                catch (JsonException)
+                {
+                    // Legacy/non-window payloads keep the first-in evidence and
+                    // remain not ready until a source sync supplies LastOut.
+                }
+            }
+            result[group.Key] = new AttendancePresenceWindowDto(group.Key, record.AttendanceStatus, firstIn, lastOut, hasCheckIn);
+        }
+        return Result<Dictionary<Guid, AttendancePresenceWindowDto>>.Success(result);
     }
 }

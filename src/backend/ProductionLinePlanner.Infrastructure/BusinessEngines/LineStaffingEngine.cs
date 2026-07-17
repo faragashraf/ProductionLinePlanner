@@ -157,12 +157,10 @@ public sealed class LineStaffingEngine(
             return Result<LineStaffingStageRefreshDto>.Failure(new Error("NotFound", "The selected stage does not belong to the current line and model."));
         }
 
-        var workers = plan.Workers
-            .Where(worker => worker.Participations.Any(participation => participation.SubStageId == subStageId))
-            .ToArray();
         return Result<LineStaffingStageRefreshDto>.Success(new LineStaffingStageRefreshDto(
             stage,
-            workers,
+            plan.Stages,
+            plan.Workers,
             plan.StagesWithWorkers,
             plan.StagesWithoutWorkers,
             plan.StagesWithTemporaryAssignments,

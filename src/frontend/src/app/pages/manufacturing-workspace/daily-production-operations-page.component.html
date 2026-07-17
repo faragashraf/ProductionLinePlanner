@@ -65,6 +65,9 @@
         </div>
       </div>
       <p class="daily-production-operations__refresh-note" *ngIf="operationsLoading">جارٍ تحديث حالة الحضور والتسكين في الخلفية؛ تبقى بياناتك الحالية ظاهرة.</p>
+      <p class="daily-production-operations__warning plp-inline-feedback plp-inline-feedback--warning" *ngIf="hasExistingDraft">
+        توجد مسودة محفوظة لهذا اليوم وتم تحميل عمالها وتوزيعها. يمكنك مراجعتها هنا، ولن يتم استبدالها بصمت بلقطة تسكين جديدة.
+      </p>
     </p-card>
 
     <section class="daily-production-operations__workspace plp-bounded-workspace plp-bounded-workspace--tablet plp-bounded-workspace--viewport">
@@ -127,27 +130,30 @@
                 <plp-product-metadata-row plp-entity-metadata label="حالة العامل">
                   <plp-product-metadata-item label="التعيين" [value]="assignmentTypeLabel(worker.effectiveAssignmentType)" icon="pi pi-link"></plp-product-metadata-item>
                   <plp-product-metadata-item label="الحضور" [value]="attendanceLabel(worker)" icon="pi pi-check-square"></plp-product-metadata-item>
-                  <plp-product-metadata-item label="الخدمة" [value]="workerServiceLabel(worker)" icon="pi pi-briefcase"></plp-product-metadata-item>
+                  <plp-product-metadata-item label="من" [value]="contributionTime(worker.contributionStartsAtUtc)" icon="pi pi-clock"></plp-product-metadata-item>
+                  <plp-product-metadata-item label="إلى" [value]="contributionTime(worker.contributionEndsAtUtc)" icon="pi pi-clock"></plp-product-metadata-item>
+                  <plp-product-metadata-item label="الدقائق" [value]="worker.workerMinutes" icon="pi pi-stopwatch"></plp-product-metadata-item>
+                  <plp-product-metadata-item *ngIf="stage.compensationMode === 'SharedPercentage'" label="النسبة" [value]="((worker.percentage || 0) | number:'1.0-4') + '٪'" icon="pi pi-percentage"></plp-product-metadata-item>
+                  <plp-product-metadata-item *ngIf="stage.compensationMode === 'SharedPercentage'" label="العدد" [value]="calculatedWorkerQuantity(stage, worker) | number:'1.0-3'" icon="pi pi-box"></plp-product-metadata-item>
                 </plp-product-metadata-row>
-                <label plp-entity-value *ngIf="stage.compensationMode === 'SharedPercentage'">النسبة %
-                  <input type="number" min="0.0001" max="100" step="0.0001" [(ngModel)]="worker.percentage" (ngModelChange)="stageChanged()">
-                </label>
-                <label plp-entity-value *ngIf="stage.compensationMode === 'FixedAmount'">قيمة ثابتة
+                <plp-status-badge plp-entity-status class="daily-production-operations__staffing-badge" [status]="dailyStaffingTone(worker)" [label]="dailyStaffingLabel(worker)" [compact]="true"></plp-status-badge>
+                <label plp-entity-value *ngIf="stage.compensationMode === 'FixedAmount' && worker.includedInProduction && worker.isProductionReady">قيمة ثابتة
                   <input type="number" min="0" step="0.0001" [(ngModel)]="worker.fixedAmount" (ngModelChange)="stageChanged()">
                 </label>
                 <span plp-entity-actions>
                   <label *ngIf="workerNeedsOverride(stage, worker)">سبب التجاوز المعتمد
                     <input pInputText [(ngModel)]="worker.manualOverrideReason" maxlength="500" [disabled]="!canOverrideParticipants" placeholder="الغياب أو البديل يحتاج سببًا واضحًا" (ngModelChange)="stageChanged()">
                   </label>
-                  <button pButton type="button" class="p-button-text p-button-danger" label="إزالة" icon="pi pi-times" [disabled]="!canOverrideParticipants" (click)="removeWorker(stage, worker.workerId)"></button>
+                  <button *ngIf="worker.includedInProduction && worker.isProductionReady" pButton type="button" class="p-button-text p-button-danger" label="استبعاد من اليوم" icon="pi pi-times" [disabled]="!canOverrideParticipants" (click)="removeWorker(stage, worker.workerId)"></button>
+                  <button *ngIf="!worker.includedInProduction && worker.isProductionReady" pButton type="button" class="p-button-text" label="إعادة إلى تشغيل اليوم" icon="pi pi-replay" [disabled]="!canOverrideParticipants" (click)="restoreWorker(stage, worker)"></button>
                 </span>
               </plp-responsive-entity-row>
             </article>
-            <plp-empty-state *ngIf="!stage.workers.length" title="لا يوجد عامل في المرحلة" description="استخدم بديلًا/تجاوزًا معتمدًا أو عالج التسكين في مساحة تسكين الخط."></plp-empty-state>
+            <plp-empty-state *ngIf="!stage.workers.length" title="لا يوجد عامل مسكن في المرحلة" description="عالج التسكين في مساحة تسكين الخط، أو أضف عاملًا كتعديل يومي معتمد دون تغيير التسكين الدائم."></plp-empty-state>
           </div>
 
           <div class="daily-production-operations__stage-actions plp-action-group">
-            <button pButton type="button" class="p-button-outlined" label="توزيع متساوٍ مقترح" icon="pi pi-percentage" *ngIf="stage.compensationMode === 'SharedPercentage'" [disabled]="!stage.workers.length" (click)="applyEqualDistribution(stage)"></button>
+            <button pButton type="button" class="p-button-outlined" label="استعادة توزيع دقائق العمل" icon="pi pi-percentage" *ngIf="stage.compensationMode === 'SharedPercentage'" [disabled]="!stage.workers.length" (click)="applyEqualDistribution(stage)"></button>
             <select [(ngModel)]="replacementWorkerId" [disabled]="!canOverrideParticipants">
               <option value="">اختر بديلًا / عامل تجاوز</option>
               <option *ngFor="let worker of availableReplacementWorkers; trackBy: trackById" [value]="worker.workerId">{{ worker.workerCode }} — {{ worker.workerName }} · {{ attendanceLabel(worker) }}</option>
@@ -179,7 +185,7 @@
         <div class="daily-production-operations__final-actions plp-sticky-action-bar plp-action-group">
           <span>{{ operations.totalStages }} مرحلة · {{ totalEnteredWorkers }} صف عامل. لا يضاعف أي صف كمية الخط أو المرحلة.</span>
           <button pButton type="button" class="p-button-outlined" label="حساب معاينة موحّدة" icon="pi pi-calculator" [loading]="previewing" [disabled]="previewing || saving" (click)="calculatePreview()"></button>
-          <button pButton type="button" label="حفظ مسودة اليوم" icon="pi pi-save" [loading]="saving" [disabled]="!isPreviewCurrent || saving" (click)="saveDailyDraft()"></button>
+          <button pButton type="button" label="حفظ مسودة اليوم" icon="pi pi-save" [loading]="saving" [disabled]="hasExistingDraft || !isPreviewCurrent || saving" (click)="saveDailyDraft()"></button>
         </div>
       </div>
       <ul class="daily-production-operations__validation plp-inline-feedback plp-inline-feedback--error" *ngIf="validationMessages.length" role="alert"><li *ngFor="let message of validationMessages">{{ message }}</li></ul>

@@ -53,8 +53,8 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
   readonly assignmentForm = this.fb.group({
     workerId: ['', Validators.required],
     targetSubStageId: [''],
-    startAtLocal: [''],
-    endAtLocal: [''],
+    startTime: [null as Date | null],
+    endTime: [null as Date | null],
     temporaryParticipationMode: ['AdditionalParticipation' as TemporaryParticipationMode],
     temporarySourceSubStageId: [''],
     reason: ['', [Validators.maxLength(500)]]
@@ -69,7 +69,6 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
   selectedProductionLineId = '';
   selectedProductModelId = '';
   selectedSubStageId = '';
-  referenceDate = this.staffingReferenceDate;
   stageFilter: StageFilter = 'all';
   stageSearch = '';
   workerSearch = '';
@@ -163,7 +162,7 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
   }
 
   get hasCompleteContext(): boolean {
-    return Boolean(this.selectedFactoryId && this.selectedProductionLineId && this.selectedProductModelId && this.referenceDate);
+    return Boolean(this.selectedFactoryId && this.selectedProductionLineId && this.selectedProductModelId);
   }
 
   get activeStaffingSection(): string {
@@ -331,11 +330,6 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
     this.clearPlan();
   }
 
-  changeReferenceDate(referenceDate: string): void {
-    this.referenceDate = referenceDate;
-    this.clearPlan();
-  }
-
   loadProductStages(preserveSelectedStage = false, preserveFeedback = false): void {
     if (!this.hasCompleteContext || this.planLoading) return;
     const requestVersion = ++this.planRequestVersion;
@@ -348,7 +342,7 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
       this.selectedFactoryId,
       this.selectedProductionLineId,
       this.selectedProductModelId,
-      this.referenceDate
+      this.staffingReferenceDate
     )
       .pipe(finalize(() => {
         if (requestVersion === this.planRequestVersion) this.planLoading = false;
@@ -580,8 +574,8 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
     this.assignmentValidationSummary = '';
     const reason = (this.assignmentForm.controls.reason.value ?? '').trim();
     const targetSubStageId = this.assignmentForm.controls.targetSubStageId.value || this.selectedStage.subStageId;
-    const startAtUtc = this.toUtc(this.assignmentForm.controls.startAtLocal.value);
-    const endAtUtc = this.toUtc(this.assignmentForm.controls.endAtLocal.value);
+    const startAtUtc = this.assignmentTimeUtc(this.assignmentForm.controls.startTime.value);
+    const endAtUtc = this.assignmentTimeUtc(this.assignmentForm.controls.endTime.value);
 
     let request$: Observable<unknown>;
     switch (this.assignmentDialogMode) {
@@ -676,27 +670,12 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
       this.selectedProductionLineId,
       this.selectedProductModelId,
       selectedStageId,
-      this.referenceDate
+      this.staffingReferenceDate
     )
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: refreshedStage => {
           if (requestVersion !== this.planRequestVersion || this.plan !== currentPlan) return;
-          const affectedWorkerIds = new Set([
-            ...currentPlan.workers
-              .filter(worker => worker.participations.some(participation => participation.subStageId === selectedStageId))
-              .map(worker => worker.workerId),
-            ...refreshedStage.workers.map(worker => worker.workerId)
-          ]);
-          const refreshedWorkers = new Map(refreshedStage.workers.map(worker => [worker.workerId, worker]));
-          const workers = currentPlan.workers.map(worker =>
-            affectedWorkerIds.has(worker.workerId) ? refreshedWorkers.get(worker.workerId) ?? worker : worker
-          );
-          const knownWorkerIds = new Set(currentPlan.workers.map(worker => worker.workerId));
-          for (const worker of refreshedStage.workers) {
-            if (affectedWorkerIds.has(worker.workerId) && !knownWorkerIds.has(worker.workerId)) workers.push(worker);
-          }
-
           this.plan = {
             ...currentPlan,
             totalStages: currentPlan.totalStages,
@@ -709,8 +688,8 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
             staffingPlanComplete: refreshedStage.staffingPlanComplete,
             operationalAttendanceChecked: refreshedStage.operationalAttendanceChecked,
             financialConfigurationPending: refreshedStage.financialConfigurationPending,
-            stages: currentPlan.stages.map(stage => stage.subStageId === selectedStageId ? refreshedStage.stage : stage),
-            workers
+            stages: refreshedStage.stages,
+            workers: refreshedStage.workers
           };
         },
         error: error => {
@@ -733,7 +712,7 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
   workerElsewhereWarning(worker: LineStaffingWorker): string | null {
     const otherStages = this.otherParticipations(worker);
     return otherStages.length
-      ? `العامل ${this.participationCountLabel(otherStages.length + 1)}: ${otherStages.map(stage => stage.subStageName ?? 'مرحلة أخرى').join('، ')}. الإضافة لا تلغي هذه المشاركات؛ النقل فقط إجراء ناقل.`
+      ? 'للعامل مشاركات مرحلة أخرى ظاهرة ضمن بياناته أعلاه. الإضافة لا تلغي هذه المشاركات؛ النقل فقط إجراء ناقل.'
       : null;
   }
 
@@ -823,8 +802,8 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
     this.assignmentForm.reset({
       workerId: mode === 'move' || mode === 'remove-default' || mode === 'cancel-temporary' ? worker?.workerId ?? '' : '',
       targetSubStageId: '',
-      startAtLocal: mode === 'temporary' || mode === 'replacement' ? this.nowLocalInput() : '',
-      endAtLocal: '',
+      startTime: mode === 'temporary' || mode === 'replacement' ? new Date() : null,
+      endTime: null,
       temporaryParticipationMode: 'AdditionalParticipation',
       temporarySourceSubStageId: mode === 'move' ? participation?.subStageId ?? '' : '',
       reason: ''
@@ -845,8 +824,8 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
     }
     if (this.dialogNeedsTargetStage) rules.push({ control: 'targetSubStageId', message: 'مرحلة النقل مطلوبة' });
     if (this.dialogNeedsTemporaryPeriod) {
-      rules.push({ control: 'startAtLocal', message: 'تاريخ ووقت البداية مطلوب', isMissing: () => !(this.assignmentForm.controls.startAtLocal.value ?? '').trim() });
-      rules.push({ control: 'endAtLocal', message: 'تاريخ ووقت النهاية مطلوب', isMissing: () => !(this.assignmentForm.controls.endAtLocal.value ?? '').trim() });
+      rules.push({ control: 'startTime', message: 'وقت البداية مطلوب', isMissing: () => !this.assignmentForm.controls.startTime.value });
+      rules.push({ control: 'endTime', message: 'وقت النهاية مطلوب', isMissing: () => !this.assignmentForm.controls.endTime.value });
     }
     if (this.assignmentDialogMode === 'temporary') {
       rules.push({ control: 'reason', message: 'سبب التعيين المؤقت مطلوب', isMissing: () => !(this.assignmentForm.controls.reason.value ?? '').trim() });
@@ -863,10 +842,10 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
 
   private assignmentExtraRequirements(): string[] {
     if (!this.dialogNeedsTemporaryPeriod) return [];
-    const start = this.toUtc(this.assignmentForm.controls.startAtLocal.value);
-    const end = this.toUtc(this.assignmentForm.controls.endAtLocal.value);
-    const requirements = start && end && new Date(end).getTime() < new Date(start).getTime()
-      ? ['تاريخ النهاية يجب ألا يسبق تاريخ البداية']
+    const start = this.assignmentTimeUtc(this.assignmentForm.controls.startTime.value);
+    const end = this.assignmentTimeUtc(this.assignmentForm.controls.endTime.value);
+    const requirements = start && end && new Date(end).getTime() <= new Date(start).getTime()
+      ? ['وقت البداية يجب أن يسبق وقت النهاية']
       : [];
     const worker = this.selectedDialogWorker;
     const unavailable = worker ? this.workerSelectionUnavailableMessage(worker) : null;
@@ -877,7 +856,7 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
     const requestVersion = ++this.workerDirectoryRequestVersion;
     this.workerDirectoryLoading = true;
     this.workerDirectoryError = '';
-    this.assignments.getActiveLineStaffingWorkers(this.referenceDate)
+    this.assignments.getActiveLineStaffingWorkers(this.staffingReferenceDate)
       .pipe(finalize(() => {
         if (requestVersion === this.workerDirectoryRequestVersion) this.workerDirectoryLoading = false;
       }), takeUntil(this.destroy$))
@@ -888,7 +867,7 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
         },
         error: error => {
           if (requestVersion !== this.workerDirectoryRequestVersion) return;
-          this.workerDirectoryError = this.formValidation.serverMessage(error, 'تعذر تحميل العمال على رأس العمل. أعد المحاولة.');
+          this.workerDirectoryError = this.formValidation.serverMessage(error, 'تعذر تحميل دليل العمال بالخدمة الفعالة. أعد المحاولة.');
         }
       });
   }
@@ -1241,8 +1220,8 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
   }
 
   private hasTemporaryPeriodOverlap(worker: LineStaffingWorker): boolean {
-    const start = this.toUtc(this.assignmentForm.controls.startAtLocal.value);
-    const end = this.toUtc(this.assignmentForm.controls.endAtLocal.value);
+    const start = this.assignmentTimeUtc(this.assignmentForm.controls.startTime.value);
+    const end = this.assignmentTimeUtc(this.assignmentForm.controls.endTime.value);
     if (!start || !end) return false;
     return worker.participations
       .filter(participation => participation.subStageId === this.selectedStage?.subStageId)
@@ -1256,16 +1235,12 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
     return `الفترة تتداخل مع مشاركة مؤقتة قائمة للعامل في المرحلة المحددة.`;
   }
 
-  private toUtc(value: string | null): string | null {
-    if (!value) return null;
-    const date = new Date(value);
-    return Number.isNaN(date.getTime()) ? null : date.toISOString();
-  }
-
-  private nowLocalInput(): string {
-    const date = new Date();
-    date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
-    return date.toISOString().slice(0, 16);
+  private assignmentTimeUtc(value: Date | null): string | null {
+    if (!value || Number.isNaN(value.getTime())) return null;
+    const hours = String(value.getHours()).padStart(2, '0');
+    const minutes = String(value.getMinutes()).padStart(2, '0');
+    const local = new Date(`${this.staffingReferenceDate}T${hours}:${minutes}:00`);
+    return Number.isNaN(local.getTime()) ? null : local.toISOString();
   }
 
   private egyptToday(): string {
@@ -1284,15 +1259,8 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
     return worker.participations.filter(participation => participation.subStageId !== this.selectedSubStageId);
   }
 
-  workerParticipationContext(worker: LineStaffingWorker): string | null {
-    const stages = this.otherParticipations(worker);
-    return stages.length ? `${this.participationCountLabel(worker.participations.length)}: ${stages.map(stage => stage.subStageName ?? 'مرحلة أخرى').join('، ')}` : null;
-  }
-
-  private participationCountLabel(count: number): string {
-    if (count === 1) return 'مشارك حاليًا في مرحلة واحدة';
-    if (count === 2) return 'مشارك حاليًا في مرحلتين';
-    return `مشارك حاليًا في ${count} مراحل`;
+  workerParticipationStageNames(worker: LineStaffingWorker): string[] {
+    return worker.participations.map(participation => participation.subStageName ?? 'مرحلة أخرى');
   }
 
   temporaryParticipationPeriod(participation: LineStaffingParticipation): string {

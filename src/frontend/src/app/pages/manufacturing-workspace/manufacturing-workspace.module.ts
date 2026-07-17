@@ -5,6 +5,7 @@ import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
 import { TableModule } from 'primeng/table';
 import { DialogModule } from 'primeng/dialog';
+import { CalendarModule } from 'primeng/calendar';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { SharedModule } from '../../shared/shared.module';
 import { ManufacturingWorkspaceLayoutComponent } from './manufacturing-workspace-layout.component';
@@ -46,6 +47,7 @@ import { PlpFormComponent } from '../../shared/product/plp-form.component';
     InputTextModule,
     TableModule,
     DialogModule,
+    CalendarModule,
     FormsModule,
     ReactiveFormsModule,
     PlpResponsiveTableDirective,

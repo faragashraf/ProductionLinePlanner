@@ -1,7 +1,7 @@
 import { FormBuilder } from '@angular/forms';
 import { fakeAsync, flushMicrotasks, tick } from '@angular/core/testing';
 import { ActivatedRoute, Router } from '@angular/router';
-import { BehaviorSubject, Subject, of } from 'rxjs';
+import { BehaviorSubject, Subject, of, throwError } from 'rxjs';
 import { AssignmentsApiService, LineStaffingPlan } from '../../core/services/assignments-api.service';
 import { ManufacturingMasterDataApiService } from '../../core/services/manufacturing-master-data-api.service';
 import { PermissionService } from '../../core/services/permission.service';
@@ -24,7 +24,7 @@ describe('LineStaffingWorkspacePageComponent', () => {
 
   beforeEach(() => {
     masterData = jasmine.createSpyObj<ManufacturingMasterDataApiService>('ManufacturingMasterDataApiService', ['factories', 'allProductionLines', 'models']);
-    assignments = jasmine.createSpyObj<AssignmentsApiService>('AssignmentsApiService', ['getLineStaffingPlan', 'getLineStaffingStageRefresh', 'getActiveLineStaffingWorkers', 'updateStageDefaultAssignments']);
+    assignments = jasmine.createSpyObj<AssignmentsApiService>('AssignmentsApiService', ['getLineStaffingPlan', 'getLineStaffingStageRefresh', 'getActiveLineStaffingWorkers', 'updateStageDefaultAssignments', 'removeDefaultAssignment', 'cancelTemporaryAssignment', 'createTemporaryAssignment', 'createReplacementAssignment', 'moveCurrentAssignment']);
     masterData.factories.and.returnValue(of([{ id: factoryId, code: 'F1', name: 'المصنع', isActive: true }]));
     masterData.allProductionLines.and.returnValue(of([{ id: lineId, factoryId, name: 'خط الخياطة', sequenceOrder: 1, isActive: true }]));
     masterData.models.and.returnValue(of([{ id: modelId, code: 'GER', name: 'جرومان', isActive: true }]));
@@ -32,6 +32,8 @@ describe('LineStaffingWorkspacePageComponent', () => {
     assignments.getLineStaffingStageRefresh.and.callFake(() => of(stageRefresh()));
     assignments.getActiveLineStaffingWorkers.and.returnValue(of(plan().workers));
     assignments.updateStageDefaultAssignments.and.returnValue(of({ subStageId: defaultStageId, addedWorkersCount: 1, removedWorkersCount: 0, activeWorkerIds: ['worker-one', 'worker-two'] }));
+    assignments.removeDefaultAssignment.and.returnValue(of({} as any));
+    assignments.cancelTemporaryAssignment.and.returnValue(of({} as any));
     routeFragments = new BehaviorSubject<string | null>(null);
     route = { fragment: routeFragments.asObservable() } as ActivatedRoute;
     router = jasmine.createSpyObj<Router>('Router', ['navigate']);
@@ -64,9 +66,17 @@ describe('LineStaffingWorkspacePageComponent', () => {
 
     component.loadProductStages();
 
-    expect(assignments.getLineStaffingPlan).toHaveBeenCalledWith(factoryId, lineId, modelId, component.referenceDate);
+    expect(assignments.getLineStaffingPlan).toHaveBeenCalledWith(factoryId, lineId, modelId, component.staffingReferenceDate);
     expect(component.plan?.stages.length).toBe(2);
     expect(component.selectedStage?.subStageId).toBe(defaultStageId);
+  });
+
+  it('keeps the staffing form date-free and exposes time-only assignment controls', () => {
+    expect('referenceDate' in component).toBeFalse();
+    expect(component.assignmentForm.contains('startTime')).toBeTrue();
+    expect(component.assignmentForm.contains('endTime')).toBeTrue();
+    expect(component.assignmentForm.contains('startAtLocal')).toBeFalse();
+    expect(component.assignmentForm.contains('endAtLocal')).toBeFalse();
   });
 
   it('loads every active staffing worker immediately without an attendance prerequisite and filters stages in place', () => {
@@ -74,7 +84,7 @@ describe('LineStaffingWorkspacePageComponent', () => {
     component.openDefaultAssignment();
 
     expect(component.availableWorkers.map(worker => worker.employeeCode)).toEqual(['100', '101']);
-    expect(assignments.getActiveLineStaffingWorkers).toHaveBeenCalledWith(component.referenceDate);
+    expect(assignments.getActiveLineStaffingWorkers).toHaveBeenCalledWith(component.staffingReferenceDate);
     component.stageFilter = 'without-workers';
     expect(component.filteredStages.map(stage => stage.subStageId)).toEqual([temporaryStageId]);
 
@@ -97,9 +107,9 @@ describe('LineStaffingWorkspacePageComponent', () => {
     expect(component.selectedSubStageId).toBe(defaultStageId);
     expect(component.selectedStage).not.toBe(previousSelectedStage);
     expect(component.selectedStageWorkers.map(worker => worker.workerId)).toEqual(['worker-one', 'worker-two']);
-    expect(component.plan!.stages.find(stage => stage.subStageId === temporaryStageId)).toBe(unchangedStage);
+    expect(component.plan!.stages.find(stage => stage.subStageId === temporaryStageId)).toEqual(unchangedStage);
     expect(assignments.getLineStaffingPlan).toHaveBeenCalledTimes(1);
-    expect(assignments.getLineStaffingStageRefresh).toHaveBeenCalledWith(factoryId, lineId, modelId, defaultStageId, component.referenceDate);
+    expect(assignments.getLineStaffingStageRefresh).toHaveBeenCalledWith(factoryId, lineId, modelId, defaultStageId, component.staffingReferenceDate);
     expect(assignments.getActiveLineStaffingWorkers).toHaveBeenCalledTimes(1);
   });
 
@@ -237,14 +247,14 @@ describe('LineStaffingWorkspacePageComponent', () => {
 
     expect(component.assignmentDialogVisible).toBeTrue();
     expect(component.assignmentMissingRequirements).toContain('سبب التعيين المؤقت مطلوب');
-    expect(component.assignmentMissingRequirements).toContain('تاريخ ووقت النهاية مطلوب');
+    expect(component.assignmentMissingRequirements).toContain('وقت النهاية مطلوب');
 
-    component.assignmentForm.controls.startAtLocal.setValue('');
-    expect(component.assignmentMissingRequirements).toContain('تاريخ ووقت البداية مطلوب');
+    component.assignmentForm.controls.startTime.setValue(null);
+    expect(component.assignmentMissingRequirements).toContain('وقت البداية مطلوب');
 
     component.assignmentForm.patchValue({
-      startAtLocal: '2026-07-16T08:00',
-      endAtLocal: '2026-07-16T12:00',
+      startTime: new Date(2026, 6, 16, 8, 0),
+      endTime: new Date(2026, 6, 16, 12, 0),
       reason: 'تغطية مؤقتة'
     });
 
@@ -256,9 +266,9 @@ describe('LineStaffingWorkspacePageComponent', () => {
     initialize(component);
     component.openTemporaryAssignment();
 
-    expect(assignments.getActiveLineStaffingWorkers).toHaveBeenCalledWith(component.referenceDate);
+    expect(assignments.getActiveLineStaffingWorkers).toHaveBeenCalledWith(component.staffingReferenceDate);
     expect(component.availableWorkers.map(worker => worker.employeeCode)).toEqual(['100', '101']);
-    expect(component.assignmentForm.controls.endAtLocal.value).toBe('');
+    expect(component.assignmentForm.controls.endTime.value).toBeNull();
   });
 
   it('navigates both directions through the current filter and problem stages without reloading the plan', () => {
@@ -618,6 +628,37 @@ describe('LineStaffingWorkspacePageComponent', () => {
     expect(assignments.getLineStaffingStageRefresh).toHaveBeenCalledTimes(1);
   }));
 
+  it('removes a cancelled last worker from details and updates the selected stage without a refresh', () => {
+    initialize(component);
+    assignments.getLineStaffingStageRefresh.and.returnValue(of(cancelledStageRefresh()));
+    const worker = component.selectedStageWorkers[0];
+
+    component.openCancellation(worker);
+    component.assignmentForm.controls.reason.setValue('انتهاء المشاركة');
+    component.saveAssignment();
+
+    expect(component.selectedSubStageId).toBe(defaultStageId);
+    expect(component.selectedStageWorkers).toEqual([]);
+    expect(component.selectedStage?.effectiveAssignedWorkersCount).toBe(0);
+    expect(component.selectedStage?.staffingStatus).toBe('NeedsStaffing');
+    expect(component.selectedStage?.workerStatusText).toBe('لا يوجد عمال معينون');
+  });
+
+  it('keeps the previous worker details when cancellation fails', () => {
+    initialize(component);
+    assignments.removeDefaultAssignment.and.returnValue(throwError(() => ({ error: { detail: 'فشل الإلغاء' } })));
+    const worker = component.selectedStageWorkers[0];
+
+    component.openCancellation(worker);
+    component.assignmentForm.controls.reason.setValue('اختبار الفشل');
+    component.saveAssignment();
+
+    expect(component.selectedStageWorkers.map(item => item.workerId)).toEqual(['worker-one']);
+    expect(component.selectedStage?.effectiveAssignedWorkersCount).toBe(1);
+    expect(component.assignmentDialogError).toContain('فشل الإلغاء');
+    expect(assignments.getLineStaffingStageRefresh).not.toHaveBeenCalled();
+  });
+
   it('keeps a worker assigned to another stage selectable as an additional participation', () => {
     initialize(component);
     component.selectStage(temporaryStageId);
@@ -625,7 +666,18 @@ describe('LineStaffingWorkspacePageComponent', () => {
     const worker = component.availableWorkers.find(candidate => candidate.workerId === 'worker-one')!;
 
     expect(component.workerSelectionUnavailableMessage(worker)).toBeNull();
-    expect(component.workerParticipationContext(worker)).toContain('مشارك حاليًا في مرحلة واحدة');
+    expect(component.workerParticipationStageNames(worker)).toEqual(['تجميع']);
+  });
+
+  it('keeps worker search and selection behavior unchanged with structured participation metadata', () => {
+    initialize(component);
+    component.openTemporaryAssignment();
+    component.workerSearch = '101';
+
+    expect(component.availableWorkers.map(worker => worker.workerId)).toEqual(['worker-two']);
+    component.selectDialogWorker(component.availableWorkers[0]);
+    expect(component.selectedDialogWorker?.workerId).toBe('worker-two');
+    expect(component.workerParticipationStageNames(component.selectedDialogWorker!)).toEqual([]);
   });
 
   it('uses only the independently scrollable stage list for explicit next-stage navigation without moving focus', fakeAsync(() => {
@@ -716,9 +768,47 @@ function stageRefresh() {
   };
   return {
     stage: { ...source.stages[0], defaultAssignedWorkersCount: 2, effectiveAssignedWorkersCount: 2, workerStatusText: 'يوجد عاملان', effectiveWorkerIds: ['worker-one', 'worker-two'] },
+    stages: [{ ...source.stages[0], defaultAssignedWorkersCount: 2, effectiveAssignedWorkersCount: 2, workerStatusText: 'يوجد عاملان', effectiveWorkerIds: ['worker-one', 'worker-two'] }, source.stages[1]],
     workers: [source.workers[0], assignedWorker],
     stagesWithWorkers: 1,
     stagesWithoutWorkers: 1,
+    stagesWithTemporaryAssignments: 0,
+    stagesNeedingCompensationReview: 2,
+    stagesNeedingStaffingReview: 0,
+    overallStaffingStatus: 'NeedsStaffing',
+    staffingPlanComplete: false,
+    operationalAttendanceChecked: false,
+    financialConfigurationPending: true
+  };
+}
+
+function cancelledStageRefresh() {
+  const source = plan();
+  const clearedWorker = {
+    ...source.workers[0],
+    defaultSubStageId: null,
+    defaultSubStageName: null,
+    effectiveAssignmentId: null,
+    effectiveAssignmentType: null,
+    effectiveSubStageId: null,
+    effectiveSubStageName: null,
+    participations: []
+  };
+  const stage = {
+    ...source.stages[0],
+    defaultAssignedWorkersCount: 0,
+    effectiveAssignedWorkersCount: 0,
+    temporaryAssignedWorkersCount: 0,
+    staffingStatus: 'NeedsStaffing',
+    workerStatusText: 'لا يوجد عمال معينون',
+    effectiveWorkerIds: []
+  };
+  return {
+    stage,
+    stages: [stage, source.stages[1]],
+    workers: [clearedWorker, source.workers[1]],
+    stagesWithWorkers: 0,
+    stagesWithoutWorkers: 2,
     stagesWithTemporaryAssignments: 0,
     stagesNeedingCompensationReview: 2,
     stagesNeedingStaffingReview: 0,

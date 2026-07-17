@@ -47,9 +47,6 @@
         </select>
       </label>
 
-      <label *ngIf="selectedProductModelId">تاريخ مرجع التسكين
-        <input type="date" [ngModel]="referenceDate" (ngModelChange)="changeReferenceDate($event)" [ngModelOptions]="{ standalone: true }">
-      </label>
         </div>
         <p class="line-staffing-page__note" *ngIf="!selectedFactoryId">ابدأ باختيار المصنع. لا يتم تحميل أي بيانات تابعة قبل اكتمال المسار السابق.</p>
         <p class="line-staffing-page__note" *ngIf="selectedFactoryId && !selectedProductionLineId">اختر خط الإنتاج أولًا.</p>
@@ -66,7 +63,7 @@
       <div class="line-staffing-page__summary-head">
         <div>
           <h2>{{ plan.productModelCode }} — {{ plan.productModelName }}</h2>
-          <p>المصنع: {{ plan.factoryName }} · الخط: {{ plan.productionLineName }} · مرجع التسكين: {{ plan.staffingReferenceDate }}</p>
+          <p>المصنع: {{ plan.factoryName }} · الخط: {{ plan.productionLineName }}</p>
         </div>
         <plp-status-badge [status]="plan.staffingPlanComplete ? 'ready' : 'warning'" [label]="plan.staffingPlanComplete ? 'خطة التسكين مكتملة' : 'تحتاج متابعة' "></plp-status-badge>
       </div>
@@ -168,10 +165,14 @@
                   size="md"
                 ></plp-worker-avatar>
                 <div class="line-staffing-page__worker-data">
-                  <strong>{{ worker.employeeCode }} — {{ worker.fullName }}</strong>
-                  <small>{{ worker.departmentName || 'دون قسم مسجل' }}</small>
-                  <small>{{ workerAssignmentLabel(worker) }}</small>
-                  <small *ngIf="workerParticipationContext(worker)">{{ workerParticipationContext(worker) }}</small>
+                  <plp-worker-assignment-details
+                    [fullName]="worker.fullName"
+                    [employeeCode]="worker.employeeCode"
+                    [productionLineName]="plan.productionLineName"
+                    [isOnActiveService]="worker.isOnActiveService"
+                    [stageNames]="workerParticipationStageNames(worker)"
+                  ></plp-worker-assignment-details>
+                  <small>{{ worker.departmentName || 'دون قسم مسجل' }} · {{ workerAssignmentLabel(worker) }}</small>
                 </div>
                 <div class="line-staffing-page__worker-actions" *ngIf="canManageAssignments">
                   <button pButton type="button" class="p-button-sm p-button-text" label="نقل" (click)="openMove(worker)"></button>
@@ -220,36 +221,29 @@
           <select [(ngModel)]="departmentFilter" [ngModelOptions]="{ standalone: true }"><option value="">كل الأقسام</option><option *ngFor="let department of departments" [value]="department">{{ department }}</option></select>
         </label>
         <p class="line-staffing-page__dialog-note line-staffing-page__wide">{{ selectedDefaultWorkersCount }} عامل محدد للتسكين الدائم في هذه المرحلة. العامل المشارك في مراحل أخرى يظل قابلًا للاختيار.</p>
-        <section class="line-staffing-page__worker-table-wrap line-staffing-page__wide" aria-label="اختيار عمال المرحلة">
+        <section class="line-staffing-page__candidate-list line-staffing-page__wide" aria-label="اختيار عمال المرحلة">
           <plp-loading-skeleton *ngIf="workerDirectoryLoading" [lines]="5" [showAvatar]="true"></plp-loading-skeleton>
           <div class="line-staffing-page__error" *ngIf="workerDirectoryError" role="alert">
             <span>{{ workerDirectoryError }}</span>
             <button pButton type="button" class="p-button-sm p-button-text" label="إعادة المحاولة" (click)="retryActiveStaffingWorkers()"></button>
           </div>
-          <table class="line-staffing-page__worker-table" *ngIf="!workerDirectoryLoading && !workerDirectoryError && availableWorkers.length">
-            <thead><tr><th scope="col">تحديد</th><th scope="col">العامل</th><th scope="col">حالة المشاركة</th></tr></thead>
-            <tbody>
-              <tr *ngFor="let worker of availableWorkers; trackBy: trackById" [class.is-selected]="isDefaultWorkerSelected(worker)" (click)="toggleDefaultWorkerFromRow(worker, $event)">
-                <td>
-                  <input
-                    type="checkbox"
-                    [checked]="isDefaultWorkerSelected(worker)"
-                    [disabled]="!!defaultWorkerSelectionUnavailableMessage(worker)"
-                    [attr.aria-label]="'تحديد ' + worker.fullName"
-                    (click)="$event.stopPropagation()"
-                    (change)="onDefaultWorkerCheckboxChange(worker, $event)"
-                  >
-                </td>
-                <td>
-                  <div class="line-staffing-page__worker-table-identity">
-                    <plp-worker-avatar [fullName]="worker.fullName" [code]="worker.employeeCode" [hasPhoto]="worker.hasPhoto" [photoReference]="worker.photoReference" [photoVersion]="worker.photoVersion" size="sm" [decorative]="true"></plp-worker-avatar>
-                    <span><strong>{{ worker.employeeCode }} — {{ worker.fullName }}</strong><small>{{ worker.departmentName || 'دون قسم' }} · {{ worker.isOnActiveService ? 'على رأس العمل' : 'خارج الخدمة' }}</small></span>
-                  </div>
-                </td>
-                <td><small>{{ defaultWorkerAssignmentStateLabel(worker) }}</small><small *ngIf="workerParticipationContext(worker)">{{ workerParticipationContext(worker) }}</small><small *ngIf="defaultWorkerSelectionUnavailableMessage(worker)">{{ defaultWorkerSelectionUnavailableMessage(worker) }}</small></td>
-              </tr>
-            </tbody>
-          </table>
+          <plp-worker-assignment-card
+            *ngFor="let worker of availableWorkers; trackBy: trackById"
+            selectionMode="multiple"
+            [selected]="isDefaultWorkerSelected(worker)"
+            [disabled]="!!defaultWorkerSelectionUnavailableMessage(worker)"
+            [fullName]="worker.fullName"
+            [employeeCode]="worker.employeeCode"
+            [productionLineName]="plan?.productionLineName || ''"
+            [isOnActiveService]="worker.isOnActiveService"
+            [stageNames]="workerParticipationStageNames(worker)"
+            [hasPhoto]="worker.hasPhoto"
+            [photoReference]="worker.photoReference"
+            [photoVersion]="worker.photoVersion"
+            [statusMessage]="defaultWorkerAssignmentStateLabel(worker)"
+            [unavailableMessage]="defaultWorkerSelectionUnavailableMessage(worker) || ''"
+            (selectionChange)="toggleDefaultWorker(worker, $event)"
+          ></plp-worker-assignment-card>
           <p class="line-staffing-page__note" *ngIf="!workerDirectoryLoading && !workerDirectoryError && !availableWorkers.length">لا توجد نتائج مطابقة للبحث أو القسم المحدد.</p>
         </section>
       </ng-container>
@@ -261,17 +255,30 @@
         <label>القسم
           <select [(ngModel)]="departmentFilter" [ngModelOptions]="{ standalone: true }"><option value="">كل الأقسام</option><option *ngFor="let department of departments" [value]="department">{{ department }}</option></select>
         </label>
-        <p class="line-staffing-page__dialog-note">مصدر هذه القائمة كل العمال على رأس العمل. لا تستخدم حالة الحضور اليومية في التسكين التنظيمي.</p>
-        <section class="line-staffing-page__candidate-list line-staffing-page__wide" aria-label="العمال على رأس العمل">
+        <p class="line-staffing-page__dialog-note">مصدر هذه القائمة دليل العمال بالخدمة الفعالة. لا تستخدم حالة الحضور اليومية في التسكين التنظيمي.</p>
+        <section class="line-staffing-page__candidate-list line-staffing-page__wide" aria-label="العمال المتاحون للتسكين">
           <plp-loading-skeleton *ngIf="workerDirectoryLoading" [lines]="5" [showAvatar]="true"></plp-loading-skeleton>
           <div class="line-staffing-page__error" *ngIf="workerDirectoryError" role="alert">
             <span>{{ workerDirectoryError }}</span>
             <button pButton type="button" class="p-button-sm p-button-text" label="إعادة المحاولة" (click)="retryActiveStaffingWorkers()"></button>
           </div>
-          <button type="button" *ngFor="let worker of availableWorkers; trackBy: trackById" [class.is-selected]="assignmentForm.controls.workerId.value === worker.workerId" [disabled]="!!workerSelectionUnavailableMessage(worker)" (click)="selectDialogWorker(worker)">
-            <plp-worker-avatar [fullName]="worker.fullName" [code]="worker.employeeCode" [hasPhoto]="worker.hasPhoto" [photoReference]="worker.photoReference" [photoVersion]="worker.photoVersion" size="sm" [decorative]="true"></plp-worker-avatar>
-            <span><strong>{{ worker.employeeCode }} — {{ worker.fullName }}</strong><small>{{ worker.departmentName || 'دون قسم' }} · {{ worker.isOnActiveService ? 'على رأس العمل' : 'خارج الخدمة' }}</small><small *ngIf="workerParticipationContext(worker)">{{ workerParticipationContext(worker) }}</small><small *ngIf="!workerParticipationContext(worker)">لا توجد مشاركات مرحلة فعّالة</small><small *ngIf="workerTemporaryAssignmentMessage(worker)">{{ workerTemporaryAssignmentMessage(worker) }}</small><small *ngIf="workerSelectionUnavailableMessage(worker) && !workerTemporaryAssignmentMessage(worker)">{{ workerSelectionUnavailableMessage(worker) }}</small></span>
-          </button>
+          <plp-worker-assignment-card
+            *ngFor="let worker of availableWorkers; trackBy: trackById"
+            selectionMode="single"
+            [selected]="assignmentForm.controls.workerId.value === worker.workerId"
+            [disabled]="!!workerSelectionUnavailableMessage(worker)"
+            [fullName]="worker.fullName"
+            [employeeCode]="worker.employeeCode"
+            [productionLineName]="plan?.productionLineName || ''"
+            [isOnActiveService]="worker.isOnActiveService"
+            [stageNames]="workerParticipationStageNames(worker)"
+            [hasPhoto]="worker.hasPhoto"
+            [photoReference]="worker.photoReference"
+            [photoVersion]="worker.photoVersion"
+            [statusMessage]="workerTemporaryAssignmentMessage(worker) || ''"
+            [unavailableMessage]="workerSelectionUnavailableMessage(worker) && !workerTemporaryAssignmentMessage(worker) ? workerSelectionUnavailableMessage(worker) || '' : ''"
+            (selectionChange)="selectDialogWorker(worker)"
+          ></plp-worker-assignment-card>
           <p class="line-staffing-page__note" *ngIf="!workerDirectoryLoading && !workerDirectoryError && !availableWorkers.length">لا توجد نتائج مطابقة للبحث أو القسم المحدد.</p>
         </section>
         <p class="line-staffing-page__move-warning line-staffing-page__wide" *ngIf="selectedDialogWorker && workerElsewhereWarning(selectedDialogWorker)">{{ workerElsewhereWarning(selectedDialogWorker) }}</p>
@@ -283,8 +290,12 @@
       </label>
 
       <ng-container *ngIf="dialogNeedsTemporaryPeriod">
-        <label>من وقت <input type="datetime-local" formControlName="startAtLocal"></label>
-        <label>إلى وقت <input type="datetime-local" formControlName="endAtLocal"></label>
+        <label>وقت البداية
+          <p-calendar formControlName="startTime" [timeOnly]="true" hourFormat="24" [showIcon]="true" inputId="assignment-start-time"></p-calendar>
+        </label>
+        <label>وقت النهاية
+          <p-calendar formControlName="endTime" [timeOnly]="true" hourFormat="24" [showIcon]="true" inputId="assignment-end-time"></p-calendar>
+        </label>
         <label *ngIf="assignmentDialogMode === 'temporary'">نوع المشاركة المؤقتة
           <select formControlName="temporaryParticipationMode"><option value="AdditionalParticipation">مشاركة مؤقتة إضافية</option><option value="TemporaryMove">نقل مؤقت من مرحلة مصدر</option></select>
         </label>

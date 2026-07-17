@@ -1,5 +1,6 @@
 import { Component } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { PRODUCT_IDENTITY } from '../../core/config/product-identity.config';
 import { PlpBrandLogoComponent, PlpBrandLogoVariant } from './plp-brand-logo.component';
 
 @Component({
@@ -36,12 +37,12 @@ describe('PlpBrandLogoComponent', () => {
   });
 
   it('exposes a concise accessible name for a standalone compact mark', () => {
-    host.label = 'شعار منصة تخطيط خطوط الإنتاج';
+    host.label = PRODUCT_IDENTITY.logoLabelAr;
     fixture.detectChanges();
     const logo = runtimeLogo();
 
     expect(logo.getAttribute('role')).toBe('img');
-    expect(logo.getAttribute('aria-label')).toBe('شعار منصة تخطيط خطوط الإنتاج');
+    expect(logo.getAttribute('aria-label')).toBe(PRODUCT_IDENTITY.logoLabelAr);
     expect(logo.getAttribute('aria-hidden')).toBeNull();
   });
 
@@ -51,7 +52,7 @@ describe('PlpBrandLogoComponent', () => {
     const logo = runtimeLogo();
 
     expect(logo.getAttribute('aria-hidden')).toBeNull();
-    expect(logo.textContent).toContain('منصة تخطيط خطوط الإنتاج');
+    expect(logo.textContent).toContain(PRODUCT_IDENTITY.nameAr);
     expect(logo.querySelector('.plp-brand-logo__wordmark')).not.toBeNull();
   });
 

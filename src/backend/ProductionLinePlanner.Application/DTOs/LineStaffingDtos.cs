@@ -32,6 +32,7 @@ public sealed record LineStaffingPlanDto(
 /// </summary>
 public sealed record LineStaffingStageRefreshDto(
     LineStaffingStageDto Stage,
+    IReadOnlyCollection<LineStaffingStageDto> Stages,
     IReadOnlyCollection<LineStaffingWorkerDto> Workers,
     int StagesWithWorkers,
     int StagesWithoutWorkers,
