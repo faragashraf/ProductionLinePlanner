@@ -1,0 +1,6 @@
+<section class="reports-summary-cards" aria-label="ملخص تقرير الكميات">
+  <plp-statistic-card title="إجمالي إنتاج التشغيل" [value]="summary ? quantity(summary.totalPhysicalProducedQuantity) : '—'" [helper]="summary ? 'يُحتسب مرة واحدة لكل تشغيل يومي ولا يتكرر بالمراحل أو العمال' : 'بانتظار تحميل النطاق'" icon="pi pi-box"></plp-statistic-card>
+  <plp-statistic-card title="عدد العمال" [value]="summary ? quantity(summary.workerCount) : '—'" [helper]="summary ? 'عمال مميزون في السجلات المطابقة' : '—'" icon="pi pi-users"></plp-statistic-card>
+  <plp-statistic-card title="عدد المراحل" [value]="summary ? quantity(summary.stageCount) : '—'" [helper]="summary ? 'مراحل موديل مميزة' : '—'" icon="pi pi-sitemap"></plp-statistic-card>
+  <plp-statistic-card title="عدد السجلات" [value]="summary ? quantity(summary.recordCount) : '—'" [helper]="summary ? 'سجلات إنتاج المرحلة' : '—'" icon="pi pi-list-check"></plp-statistic-card>
+</section>

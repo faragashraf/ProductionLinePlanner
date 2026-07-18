@@ -1,0 +1,12 @@
+<section class="reports-results-toolbar" aria-label="أدوات نتائج التقرير">
+  <div class="reports-results-toolbar__context">
+    <span class="reports-results-toolbar__label">منظور النتائج</span>
+    <p-dropdown [options]="views" optionLabel="label" optionValue="value" [ngModel]="selectedView" (ngModelChange)="viewChange.emit($event)" [disabled]="loading" appendTo="body"></p-dropdown>
+  </div>
+  <div class="reports-results-toolbar__actions">
+    <button pButton type="button" class="p-button-outlined" label="تحديث" icon="pi pi-refresh" [loading]="loading" [disabled]="loading" (click)="refresh.emit()"></button>
+    <button pButton type="button" class="p-button-text" label="الأعمدة" icon="pi pi-sliders-h" disabled aria-label="إدارة الأعمدة ستتوفر لاحقًا"></button>
+    <button pButton type="button" class="p-button-text" label="Excel" icon="pi pi-file-excel" disabled aria-label="تصدير Excel غير متاح في هذه المرحلة"></button>
+    <button pButton type="button" class="p-button-text" label="طباعة" icon="pi pi-print" disabled aria-label="الطباعة غير متاحة في هذه المرحلة"></button>
+  </div>
+</section>

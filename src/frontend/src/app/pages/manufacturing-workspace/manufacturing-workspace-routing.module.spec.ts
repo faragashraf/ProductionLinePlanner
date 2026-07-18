@@ -8,6 +8,7 @@ import { LineStaffingWorkspacePageComponent } from './line-staffing-workspace-pa
 import { DailyProductionOperationsPageComponent } from './daily-production-operations-page.component';
 import { ManufacturingPlaceholderPageComponent } from './manufacturing-placeholder-page.component';
 import { ProductionCostRecordingPageComponent } from './production-cost-recording-page.component';
+import { ReportsWorkspacePageComponent } from '../reports-workspace/reports-workspace-page.component';
 import { MANUFACTURING_WORKSPACE_ROUTES } from './manufacturing-workspace-routing.module';
 
 describe('ManufacturingWorkspaceRoutingModule', () => {
@@ -81,5 +82,14 @@ describe('ManufacturingWorkspaceRoutingModule', () => {
     expect(route?.canMatch).toContain(PermissionCanMatchGuard);
     expect(route?.canActivate).toContain(PermissionCanActivateGuard);
     expect(route?.data?.['requireAll']).toEqual([PERMISSIONS.production.view, PERMISSIONS.production.record]);
+  });
+
+  it('routes reports to the quantities workspace with the dedicated report permission', () => {
+    const route = childRoutes.find(item => item.path === 'reports');
+
+    expect(route?.component).toBe(ReportsWorkspacePageComponent);
+    expect(route?.canMatch).toContain(PermissionCanMatchGuard);
+    expect(route?.canActivate).toContain(PermissionCanActivateGuard);
+    expect(route?.data?.['permission']).toBe(PERMISSIONS.reports.productionView);
   });
 });

@@ -1,0 +1,59 @@
+<section class="reports-filter-bar" aria-labelledby="reports-filter-title">
+  <header class="reports-filter-bar__header">
+    <div>
+      <p class="reports-filter-bar__eyebrow">نطاق التحليل</p>
+      <h2 id="reports-filter-title">حدّد السجلات التي تدخل في التقرير</h2>
+    </div>
+    <p>تُحفظ الفلاتر المعتمدة على هذا الجهاز. لن تُرسل القيم إلا بعد الضغط على تطبيق.</p>
+  </header>
+
+  <div class="reports-filter-bar__grid">
+    <section class="reports-filter-bar__group reports-filter-bar__group--period" aria-label="الفترة وحالة السجل">
+      <label class="reports-filter-bar__field reports-filter-bar__field--date">
+      <span>من تاريخ</span>
+      <input type="date" [ngModel]="filters.from" (ngModelChange)="update({ from: $event })" [disabled]="loading" aria-label="من تاريخ التقرير">
+      </label>
+      <label class="reports-filter-bar__field reports-filter-bar__field--date">
+      <span>إلى تاريخ</span>
+      <input type="date" [ngModel]="filters.to" (ngModelChange)="update({ to: $event })" [disabled]="loading" aria-label="إلى تاريخ التقرير">
+      </label>
+      <label class="reports-filter-bar__field reports-filter-bar__field--status">
+      <span>حالة السجل</span>
+      <p-dropdown [options]="statuses" optionLabel="label" optionValue="value" [ngModel]="filters.status" (ngModelChange)="update({ status: $event })" [disabled]="loading" appendTo="body"></p-dropdown>
+      </label>
+    </section>
+    <section class="reports-filter-bar__group reports-filter-bar__group--context" aria-label="سياق الإنتاج">
+      <label class="reports-filter-bar__field">
+      <span>المصنع</span>
+      <p-dropdown [options]="factories" optionLabel="name" optionValue="id" [ngModel]="filters.factoryId || null" (ngModelChange)="changeFactory($event)" [showClear]="true" [filter]="true" filterBy="name,code" [disabled]="loading" appendTo="body" placeholder="كل المصانع"></p-dropdown>
+      </label>
+      <label class="reports-filter-bar__field">
+      <span>خط الإنتاج</span>
+      <p-dropdown [options]="visibleLines" optionLabel="name" optionValue="id" [ngModel]="filters.productionLineId || null" (ngModelChange)="changeLine($event)" [showClear]="true" [filter]="true" filterBy="name,lineCode" [disabled]="loading" appendTo="body" placeholder="كل الخطوط"></p-dropdown>
+      </label>
+      <label class="reports-filter-bar__field">
+      <span>المنتج / الموديل</span>
+      <p-dropdown [options]="models" optionLabel="name" optionValue="id" [ngModel]="filters.productModelId || null" (ngModelChange)="changeModel($event)" [showClear]="true" [filter]="true" filterBy="name,code" [disabled]="loading" appendTo="body" placeholder="كل الموديلات"></p-dropdown>
+      </label>
+    </section>
+    <section class="reports-filter-bar__group reports-filter-bar__group--target" aria-label="تخصيص التقرير">
+      <label class="reports-filter-bar__field">
+      <span>المرحلة</span>
+      <p-dropdown [options]="stages" optionLabel="subStageName" optionValue="id" [ngModel]="filters.productModelStageId || null" (ngModelChange)="update({ productModelStageId: $event || '' })" [showClear]="true" [filter]="true" filterBy="subStageName,subStageCode" [disabled]="loading || !filters.productModelId || stageLoading" appendTo="body" placeholder="كل مراحل الموديل"></p-dropdown>
+      </label>
+      <label class="reports-filter-bar__field reports-filter-bar__field--worker">
+      <span>العامل</span>
+      <p-dropdown data-report-filter="worker" panelStyleClass="plp-reports-filter-overlay" [options]="workers" optionLabel="fullName" optionValue="id" [ngModel]="filters.workerId || null" (ngModelChange)="update({ workerId: $event || '' })" [showClear]="true" [filter]="true" filterBy="fullName,employeeCode" [disabled]="loading" appendTo="body" placeholder="كل العاملين"></p-dropdown>
+      </label>
+      <label class="reports-filter-bar__field reports-filter-bar__field--order">
+      <span>أمر الإنتاج</span>
+      <p-dropdown data-report-filter="production-order" panelStyleClass="plp-reports-filter-overlay" [options]="orders" optionLabel="orderNumber" optionValue="id" [ngModel]="filters.productionOrderId || null" (ngModelChange)="update({ productionOrderId: $event || '' })" [showClear]="true" [filter]="true" filterBy="orderNumber,productModelCode" [disabled]="loading" appendTo="body" placeholder="كل الأوامر" [attr.title]="selectedOrderTitle"></p-dropdown>
+      </label>
+    </section>
+  </div>
+
+  <footer class="reports-filter-bar__actions">
+    <button pButton type="button" label="تطبيق الفلاتر" icon="pi pi-filter" [loading]="loading" [disabled]="loading || !filters.from || !filters.to" (click)="apply.emit()"></button>
+    <button pButton type="button" class="p-button-text" label="إعادة الضبط" icon="pi pi-replay" [disabled]="loading" (click)="reset.emit()"></button>
+  </footer>
+</section>

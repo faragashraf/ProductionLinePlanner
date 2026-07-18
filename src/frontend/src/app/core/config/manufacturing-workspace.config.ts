@@ -20,6 +20,10 @@ export const DAILY_PRODUCTION_OPERATIONS_ACCESS: PermissionRequirementDescriptor
   requireAll: [PERMISSIONS.production.view, PERMISSIONS.production.record]
 };
 
+export const REPORTS_WORKSPACE_ACCESS: PermissionRequirementDescriptor = {
+  permission: PERMISSIONS.reports.productionView
+};
+
 export const LINE_STAFFING_ACCESS: PermissionRequirementDescriptor = {
   requireAll: [
     PERMISSIONS.factoryStructure.view,
@@ -43,7 +47,8 @@ export const MANUFACTURING_WORKSPACE_ITEMS: readonly ManufacturingWorkspaceItem[
       PERMISSIONS.stages.view,
       PERMISSIONS.models.view,
       PERMISSIONS.compensation.view,
-      PERMISSIONS.production.view
+      PERMISSIONS.production.view,
+      PERMISSIONS.reports.productionView
     ]
   },
   {
@@ -117,6 +122,14 @@ export const MANUFACTURING_WORKSPACE_ITEMS: readonly ManufacturingWorkspaceItem[
     route: '/manufacturing/production-recording',
     icon: 'pi-play-circle',
     ...PRODUCTION_RECORDING_ACCESS
+  },
+  {
+    id: 'reports',
+    label: 'التقارير',
+    description: 'مركز تقارير التشغيل والكميات مع فلاتر محفوظة ومصادر قابلة للتتبع.',
+    route: '/manufacturing/reports',
+    icon: 'pi-chart-bar',
+    ...REPORTS_WORKSPACE_ACCESS
   }
 ];
 
@@ -128,5 +141,6 @@ export const MANUFACTURING_WORKSPACE_VIEW_PERMISSIONS = [
   PERMISSIONS.models.view,
   PERMISSIONS.compensation.view,
   PERMISSIONS.assignments.view,
-  PERMISSIONS.production.view
+  PERMISSIONS.production.view,
+  PERMISSIONS.reports.productionView
 ] as const;

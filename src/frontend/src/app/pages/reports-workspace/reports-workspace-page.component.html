@@ -1,0 +1,98 @@
+<section class="reports-workspace plp-page-frame" data-reports-workspace="quantities-only">
+  <header class="reports-workspace__topbar">
+    <div>
+      <p class="reports-workspace__eyebrow">مركز التقارير التشغيلية</p>
+      <h1>تقارير الإنتاج</h1>
+      <p>راجع كميات سجلات المراحل ومشاركة العاملين من مصدر واحد، دون قيم مالية في هذا الوضع.</p>
+    </div>
+    <div class="reports-workspace__mode" aria-label="وضع العرض الحالي">
+      <i class="pi pi-shield" aria-hidden="true"></i>
+      <span>الكميات فقط</span>
+    </div>
+  </header>
+
+  <section class="reports-workspace__catalog" aria-labelledby="reports-catalog-title">
+    <div class="reports-workspace__section-heading">
+      <div>
+        <p>اختيار التقرير</p>
+        <h2 id="reports-catalog-title">أي منظور تحتاج لاتخاذ القرار؟</h2>
+      </div>
+      <span>يمكن التبديل دون فقدان الفلاتر</span>
+    </div>
+    <div class="reports-workspace__view-grid" role="list" aria-label="أنواع تقارير الكميات">
+      <button *ngFor="let view of views" type="button" class="reports-workspace__view-option" [class.is-selected]="filters.view === view.value" [attr.aria-pressed]="filters.view === view.value" (click)="changeView(view.value)">
+        <i class="pi" [ngClass]="view.icon" aria-hidden="true"></i>
+        <span><strong>{{ view.label }}</strong><small>{{ view.description }}</small></span>
+      </button>
+    </div>
+  </section>
+
+  <app-reports-filter-bar
+    [filters]="filters"
+    [factories]="factories"
+    [productionLines]="productionLines"
+    [models]="models"
+    [stages]="stages"
+    [workers]="workers"
+    [orders]="orders"
+    [loading]="loading"
+    [stageLoading]="stageLoading"
+    (filtersChange)="onFiltersChange($event)"
+    (apply)="applyFilters()"
+    (reset)="resetFilters()"
+  ></app-reports-filter-bar>
+
+  <app-reports-summary-cards *ngIf="result && loadState !== 'error' && loadState !== 'unauthorized'" [summary]="result.summary" [loading]="loading"></app-reports-summary-cards>
+
+  <section class="reports-workspace__results" aria-labelledby="reports-results-title">
+    <div class="reports-workspace__results-heading">
+      <div>
+        <p>نتائج قابلة للتتبع</p>
+        <h2 id="reports-results-title">{{ currentViewLabel }}</h2>
+      </div>
+      <small *ngIf="lastUpdatedAt">آخر تحديث {{ lastUpdatedAt | date:'shortTime' }}</small>
+    </div>
+
+    <app-reports-results-toolbar [views]="views" [selectedView]="filters.view" [loading]="loading" (viewChange)="changeView($event)" (refresh)="refresh()"></app-reports-results-toolbar>
+
+    <plp-empty-state *ngIf="loadState === 'idle'" title="ابدأ بتطبيق الفلاتر" description="اختر الفترة والحالة المطلوبتين ثم اضغط تطبيق الفلاتر. لن تُفسّر الواجهة غياب النتائج قبل تنفيذ الطلب."></plp-empty-state>
+    <plp-loading-skeleton *ngIf="loadState === 'loading'" [lines]="7" [showAvatar]="false" [cardLike]="true"></plp-loading-skeleton>
+    <plp-error-state *ngIf="loadState === 'error' || loadState === 'unauthorized'" [title]="errorTitle" [description]="error" actionText="إعادة المحاولة" (action)="refresh()"></plp-error-state>
+    <div *ngIf="loadState === 'empty'" class="reports-workspace__empty-state">
+      <plp-empty-state title="لا توجد سجلات مطابقة للفلاتر الحالية" description="جرّب توسيع الفترة أو اختيار حالة سجل مختلفة. لا يعني ذلك بالضرورة عدم وجود بيانات إنتاج في النظام."></plp-empty-state>
+      <button pButton type="button" class="p-button-outlined" label="إعادة ضبط الفلاتر" icon="pi pi-replay" (click)="resetFilters()"></button>
+    </div>
+
+    <p-table
+      *ngIf="loadState === 'loaded' && result && rows.length"
+      [value]="rows"
+      [lazy]="true"
+      [totalRecords]="result.totalCount"
+      [rows]="filters.pageSize"
+      [first]="(filters.page - 1) * filters.pageSize"
+      [scrollable]="true"
+      scrollHeight="480px"
+      responsiveLayout="scroll"
+      plpResponsiveTable="scroll"
+      plpTablePagination
+      [plpPaginationPageSize]="filters.pageSize"
+      [plpPaginationResetKey]="filterSignature"
+      (onLazyLoad)="onLazyLoad($event)"
+      styleClass="reports-workspace__table"
+    >
+      <ng-template pTemplate="header">
+        <tr>
+          <th *ngFor="let column of columns" [class.is-numeric]="column.numeric" [pSortableColumn]="column.sortBy || ''">
+            <span>{{ column.label }}</span>
+            <p-sortIcon *ngIf="column.sortBy" [field]="column.sortBy"></p-sortIcon>
+          </th>
+        </tr>
+      </ng-template>
+      <ng-template pTemplate="body" let-row>
+        <tr [attr.data-report-source]="rowKey(row)" [attr.data-report-source-type]="row.source.sourceType">
+          <td *ngFor="let column of columns" [attr.data-label]="column.label" [class.is-numeric]="column.numeric">{{ rowValue(row, column.key) }}</td>
+        </tr>
+      </ng-template>
+    </p-table>
+  </section>
+</section>

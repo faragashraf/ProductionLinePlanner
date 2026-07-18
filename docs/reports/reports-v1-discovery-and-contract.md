@@ -181,7 +181,7 @@ When an older document conflicts with executable code, this document treats curr
 | Stage production quantity | `StageProductionRecord.ProducedQuantity`, one stage record | Persisted snapshot | Non-negative; not derived from workers | May be summed only within a clearly declared stage-record grain. Never multiply or aggregate it by worker rows. |
 | Accepted quantity | `StageProductionRecord.AcceptedQuantity` | Persisted snapshot | Non-negative; `Accepted + Rejected <= Produced` | Same stage-grain constraint as produced quantity. |
 | Rejected quantity | `StageProductionRecord.RejectedQuantity` | Persisted snapshot | Non-negative | Same stage-grain constraint as produced quantity. Daily Operations currently saves zero. |
-| Physical finished-product total | No independent completed-product output entity/terminal-stage rule | **Missing authoritative aggregate** | Not defined | **Open Decision:** do not label a sum across stages as total production. |
+| Physical Daily Operations total | One `ProductionOrderId` for a Daily Operations save, using one persisted stage-output snapshot | Runtime aggregate | The submitted line quantity is repeated on every stage record for that order; include it once per daily order, never once per stage or allocation | Implemented in the quantities summary for orders identified by the `DailyProductionOperations/` source reference. Legacy non-daily multi-stage output still has no authoritative cross-stage aggregate. |
 | Worker count | Distinct `WorkerId` values from allocations after status/filter rules | Runtime projection from persisted allocations | Count distinct workers, not allocation rows, for cross-stage totals | State whether the count is distinct workers or participations. |
 | Participation percentage | `StageProductionWorkerAllocation.Percentage` | Persisted, nullable | Required and totals 100% only in `SharedPercentage` | Not meaningful for `FullRatePerWorker` or `FixedAmount`. |
 | Worker allocated quantity/share | `EquivalentQuantity` | Persisted calculated snapshot | Shared mode: rounded `AcceptedQuantity * Percentage / 100`; other modes currently store zero | Report as nullable/not-applicable outside SharedPercentage; do not present zero as a real physical allocation. |
@@ -464,7 +464,7 @@ The primary numbers use typography, while cadence, proration method, data status
 
 ### 11.2 Conditional/deferred quantity cards
 
-- **Total production:** requires the physical-output aggregation decision. Do not sum repeated daily stage quantities.
+- **Total production:** Daily Operations uses one physical quantity per `ProductionOrderId`; do not sum its repeated stage snapshots. Legacy non-daily multi-stage output remains deferred until its physical-output aggregate is defined.
 - **Working hours:** requires an approved definition using attendance evidence or a persisted contribution snapshot.
 - **Average productivity:** deferred until both a non-duplicated production numerator and authoritative working-hours denominator exist.
 

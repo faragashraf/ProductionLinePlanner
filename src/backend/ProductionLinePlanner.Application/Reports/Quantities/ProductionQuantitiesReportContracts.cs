@@ -50,11 +50,14 @@ public sealed class QuantitiesReportFilterRequest
 }
 
 /// <summary>
-/// All quantity totals are at stage-production-record grain. They are never a
-/// physical finished-product total across multiple stages and are never joined
-/// once per worker allocation.
+/// Physical totals are separated from stage-record totals. Daily Operations
+/// deduplicates its repeated stage snapshots by production order; stage totals
+/// remain at stage-record grain and worker quantities remain allocation shares.
 /// </summary>
 public sealed record QuantitiesReportSummaryDto(
+    decimal TotalPhysicalProducedQuantity,
+    decimal TotalPhysicalAcceptedQuantity,
+    decimal TotalPhysicalRejectedQuantity,
     decimal TotalStageProducedQuantity,
     decimal TotalAcceptedQuantity,
     decimal TotalRejectedQuantity,

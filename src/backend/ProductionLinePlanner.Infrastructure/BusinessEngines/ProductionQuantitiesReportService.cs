@@ -58,7 +58,8 @@ public sealed class ProductionQuantitiesReportService(AppDbContext db) : IProduc
                 record.SnapshotMainStageName,
                 record.SnapshotStageCode,
                 record.SnapshotStageName,
-                record.ProductionOrder!.OrderNumber))
+                record.ProductionOrder!.OrderNumber,
+                record.ProductionOrder.SourceReference))
             .ToArrayAsync(cancellationToken);
 
         var recordIds = recordData.Select(record => record.RecordId).ToArray();
@@ -138,13 +139,31 @@ public sealed class ProductionQuantitiesReportService(AppDbContext db) : IProduc
 
     private static bool HasEmptyId(Guid? value) => value.HasValue && value.Value == Guid.Empty;
 
-    private static QuantitiesReportSummaryDto BuildSummary(IReadOnlyCollection<RecordData> records) => new(
-        records.Sum(record => record.ProducedQuantity),
-        records.Sum(record => record.AcceptedQuantity),
-        records.Sum(record => record.RejectedQuantity),
-        records.Count,
-        records.Select(record => record.ProductModelStageId).Distinct().Count(),
-        records.SelectMany(record => record.Allocations).Select(allocation => allocation.WorkerId).Distinct().Count());
+    private static QuantitiesReportSummaryDto BuildSummary(IReadOnlyCollection<RecordData> records)
+    {
+        // Daily Operations persists one stage snapshot per model stage, all for
+        // the same physical line run. Deduplicate only that verified aggregate
+        // by ProductionOrderId; legacy stage records retain their record grain.
+        var physicalRecords = new List<RecordData>();
+        foreach (var group in records.GroupBy(record => record.ProductionOrderId))
+        {
+            if (group.First().IsDailyOperation)
+                physicalRecords.Add(group.OrderBy(record => record.ProductModelStageId).ThenBy(record => record.RecordId).First());
+            else
+                physicalRecords.AddRange(group);
+        }
+
+        return new QuantitiesReportSummaryDto(
+            physicalRecords.Sum(record => record.ProducedQuantity),
+            physicalRecords.Sum(record => record.AcceptedQuantity),
+            physicalRecords.Sum(record => record.RejectedQuantity),
+            records.Sum(record => record.ProducedQuantity),
+            records.Sum(record => record.AcceptedQuantity),
+            records.Sum(record => record.RejectedQuantity),
+            records.Count,
+            records.Select(record => record.ProductModelStageId).Distinct().Count(),
+            records.SelectMany(record => record.Allocations).Select(allocation => allocation.WorkerId).Distinct().Count());
+    }
 
     private static IReadOnlyCollection<QuantitiesReportRowDto> BuildRows(
         QuantitiesReportView view,
@@ -364,9 +383,11 @@ public sealed class ProductionQuantitiesReportService(AppDbContext db) : IProduc
         string MainStageName,
         string StageCode,
         string StageName,
-        string ProductionOrderNumber)
+        string ProductionOrderNumber,
+        string? ProductionOrderSourceReference)
     {
         public IReadOnlyCollection<AllocationData> Allocations { get; init; } = [];
+        public bool IsDailyOperation => ProductionOrderSourceReference?.StartsWith("DailyProductionOperations/", StringComparison.Ordinal) == true;
     }
 
     private sealed record AllocationData(

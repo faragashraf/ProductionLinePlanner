@@ -1,0 +1,7 @@
+:host { display: block; }
+.reports-results-toolbar { display: flex; justify-content: space-between; gap: var(--plp-space-16); align-items: center; padding: var(--plp-space-12) var(--plp-space-16); background: var(--plp-color-surface-soft); border: var(--plp-border-muted); border-radius: var(--plp-radius-md); }
+.reports-results-toolbar__context { display: flex; align-items: center; gap: var(--plp-space-12); min-inline-size: 16rem; }
+.reports-results-toolbar__label { color: var(--plp-color-text-subtle); font-size: var(--plp-type-caption); font-weight: var(--plp-font-weight-semibold); white-space: nowrap; }
+:host ::ng-deep .reports-results-toolbar__context .p-dropdown { flex: 1; min-block-size: var(--plp-control-height-standard); }
+.reports-results-toolbar__actions { display: flex; flex-wrap: wrap; justify-content: end; gap: var(--plp-space-4); }
+@media (max-width: 800px) { .reports-results-toolbar { align-items: stretch; flex-direction: column; } .reports-results-toolbar__context { inline-size: 100%; } .reports-results-toolbar__actions { justify-content: start; } }

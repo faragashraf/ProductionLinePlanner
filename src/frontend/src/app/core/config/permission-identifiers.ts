@@ -41,6 +41,9 @@ export const PERMISSIONS = {
     record: 'production.record',
     approve: 'production.approve'
   },
+  reports: {
+    productionView: 'reports.production.view'
+  },
   users: {
     view: 'users.view',
     manage: 'users.manage'

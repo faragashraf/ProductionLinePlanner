@@ -1,0 +1,4 @@
+:host { display: block; }
+.reports-summary-cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--plp-space-16); }
+@media (max-width: 1023px) { .reports-summary-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 599px) { .reports-summary-cards { gap: var(--plp-space-12); } }

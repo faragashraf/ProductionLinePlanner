@@ -27,6 +27,7 @@ public sealed class ProductionQuantitiesReportServiceTests
         });
 
         Assert.True(details.IsSuccess);
+        Assert.Equal(600m, details.Value!.Summary.TotalPhysicalProducedQuantity);
         Assert.Equal(600m, details.Value!.Summary.TotalStageProducedQuantity);
         Assert.Equal(550m, details.Value.Summary.TotalAcceptedQuantity);
         Assert.Equal(50m, details.Value.Summary.TotalRejectedQuantity);
@@ -43,6 +44,7 @@ public sealed class ProductionQuantitiesReportServiceTests
 
         Assert.True(stageWorkers.IsSuccess);
         Assert.Equal(4, stageWorkers.Value!.Rows.Count);
+        Assert.Equal(600m, stageWorkers.Value.Summary.TotalPhysicalProducedQuantity);
         Assert.Equal(600m, stageWorkers.Value.Summary.TotalStageProducedQuantity);
         Assert.All(stageWorkers.Value.Rows, row =>
         {
@@ -63,6 +65,68 @@ public sealed class ProductionQuantitiesReportServiceTests
         var workerA = Assert.Single(workers.Value.Rows, row => row.Source.WorkerId == fixture.WorkerA.Id);
         Assert.Equal(2, workerA.RecordCount);
         Assert.Equal(2, workerA.StageCount);
+    }
+
+    [Fact]
+    public async Task Daily_operation_physical_summary_is_deduplicated_by_order_in_every_view_while_worker_quantity_remains_an_allocation_share()
+    {
+        await using var fixture = await QuantitiesFixture.CreateAsync();
+        await fixture.AddRecordAsync(fixture.Primary, fixture.Today, StageProductionRecordStatus.Approved, 500m, 500m, 0m, [fixture.WorkerA], isDailyOperation: true, equivalentQuantityOverride: 500m);
+        await fixture.AddRecordAsync(fixture.Primary, fixture.Today, StageProductionRecordStatus.Approved, 500m, 500m, 0m, [fixture.WorkerA], isDailyOperation: true, equivalentQuantityOverride: 500m);
+        await fixture.AddRecordAsync(fixture.Primary, fixture.Today, StageProductionRecordStatus.Approved, 500m, 500m, 0m, [fixture.WorkerA], isDailyOperation: true, equivalentQuantityOverride: 250m);
+        var service = new ProductionQuantitiesReportService(fixture.Db);
+
+        foreach (var view in Enum.GetValues<QuantitiesReportView>())
+        {
+            var result = await service.QueryAsync(new QuantitiesReportFilterRequest { From = fixture.Today, To = fixture.Today, View = view });
+            Assert.True(result.IsSuccess);
+            Assert.Equal(500m, result.Value!.Summary.TotalPhysicalProducedQuantity);
+            Assert.Equal(500m, result.Value.Summary.TotalPhysicalAcceptedQuantity);
+            Assert.Equal(1500m, result.Value.Summary.TotalStageProducedQuantity);
+        }
+
+        var byWorker = await service.QueryAsync(new QuantitiesReportFilterRequest { From = fixture.Today, To = fixture.Today, View = QuantitiesReportView.ByWorker });
+        var worker = Assert.Single(byWorker.Value!.Rows);
+        Assert.Equal(1250m, worker.WorkerAllocatedQuantity);
+        Assert.Null(worker.ProducedQuantity);
+        Assert.Equal(fixture.WorkerA.Id, worker.Source.WorkerId);
+
+        var details = await service.QueryAsync(new QuantitiesReportFilterRequest { From = fixture.Today, To = fixture.Today, View = QuantitiesReportView.Details });
+        Assert.All(details.Value!.Rows, row => Assert.Equal(500m, row.ProducedQuantity));
+        var dailyOrderId = details.Value.Rows.First().Source.ProductionOrderId;
+        Assert.All(details.Value.Rows, row => Assert.Equal(dailyOrderId, row.Source.ProductionOrderId));
+    }
+
+    [Fact]
+    public async Task Stage_workers_keep_one_stage_snapshot_per_row_without_multiplying_the_daily_physical_summary()
+    {
+        await using var fixture = await QuantitiesFixture.CreateAsync();
+        await fixture.AddRecordAsync(fixture.Primary, fixture.Today, StageProductionRecordStatus.Approved, 500m, 500m, 0m, [fixture.WorkerA, fixture.WorkerB, fixture.WorkerC], isDailyOperation: true);
+        var service = new ProductionQuantitiesReportService(fixture.Db);
+
+        var result = await service.QueryAsync(new QuantitiesReportFilterRequest { From = fixture.Today, To = fixture.Today, View = QuantitiesReportView.StageWorkers });
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(500m, result.Value!.Summary.TotalPhysicalProducedQuantity);
+        Assert.Equal(3, result.Value.Rows.Count);
+        Assert.All(result.Value.Rows, row => Assert.Equal(500m, row.ProducedQuantity));
+        Assert.All(result.Value.Rows, row => Assert.NotNull(row.Source.StageProductionWorkerAllocationId));
+    }
+
+    [Fact]
+    public async Task Independent_daily_operations_with_the_same_quantity_are_counted_once_per_order_not_per_numeric_value()
+    {
+        await using var fixture = await QuantitiesFixture.CreateAsync();
+        await fixture.AddRecordAsync(fixture.Primary, fixture.Today, StageProductionRecordStatus.Approved, 500m, 500m, 0m, [fixture.WorkerA], isDailyOperation: true);
+        var secondary = await fixture.CreateScopeAsync("SECONDARY");
+        await fixture.AddRecordAsync(secondary, fixture.Today, StageProductionRecordStatus.Approved, 500m, 500m, 0m, [fixture.WorkerA], isDailyOperation: true);
+        var service = new ProductionQuantitiesReportService(fixture.Db);
+
+        var result = await service.QueryAsync(new QuantitiesReportFilterRequest { From = fixture.Today, To = fixture.Today, View = QuantitiesReportView.ByWorker });
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(1000m, result.Value!.Summary.TotalPhysicalProducedQuantity);
+        Assert.Equal(1000m, result.Value.Rows.Single().WorkerAllocatedQuantity);
     }
 
     [Fact]
@@ -236,7 +300,9 @@ public sealed class ProductionQuantitiesReportServiceTests
             decimal produced,
             decimal accepted,
             decimal rejected,
-            IReadOnlyCollection<Worker> workers)
+            IReadOnlyCollection<Worker> workers,
+            bool isDailyOperation = false,
+            decimal? equivalentQuantityOverride = null)
         {
             var orderKey = (scope.ProductionLineId, scope.ProductModelId, productionDate);
             if (!_orders.TryGetValue(orderKey, out var order))
@@ -252,6 +318,8 @@ public sealed class ProductionQuantitiesReportServiceTests
                     ActorId,
                     DateTime.UtcNow);
                 _orders.Add(orderKey, order);
+                if (isDailyOperation)
+                    order.MarkDailyOperation($"DailyProductionOperations/{Guid.NewGuid():D}", DateTime.UtcNow);
                 Db.Add(order);
             }
 
@@ -307,7 +375,7 @@ public sealed class ProductionQuantitiesReportServiceTests
                 null,
                 ActorId,
                 DateTime.UtcNow);
-            var equivalentQuantity = workers.Count == 0 ? 0m : accepted / workers.Count;
+            var equivalentQuantity = equivalentQuantityOverride ?? (workers.Count == 0 ? 0m : accepted / workers.Count);
             var allocations = workers.Select(worker =>
             {
                 var allocation = new StageProductionWorkerAllocation(Guid.NewGuid(), worker.Id, worker.EmployeeCode, worker.FullName, null, null, null);

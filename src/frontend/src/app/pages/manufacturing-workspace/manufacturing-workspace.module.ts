@@ -6,6 +6,7 @@ import { InputTextModule } from 'primeng/inputtext';
 import { TableModule } from 'primeng/table';
 import { DialogModule } from 'primeng/dialog';
 import { CalendarModule } from 'primeng/calendar';
+import { DropdownModule } from 'primeng/dropdown';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { SharedModule } from '../../shared/shared.module';
 import { ManufacturingWorkspaceLayoutComponent } from './manufacturing-workspace-layout.component';
@@ -26,6 +27,10 @@ import { PlpDialogComponent } from '../../shared/product/plp-dialog.component';
 import { PlpFormSheetComponent } from '../../shared/product/plp-form-sheet.component';
 import { PlpSectionNavigationComponent } from '../../shared/product/plp-section-navigation.component';
 import { PlpFormComponent } from '../../shared/product/plp-form.component';
+import { ReportsWorkspacePageComponent } from '../reports-workspace/reports-workspace-page.component';
+import { ReportsFilterBarComponent } from '../reports-workspace/reports-filter-bar.component';
+import { ReportsSummaryCardsComponent } from '../reports-workspace/reports-summary-cards.component';
+import { ReportsResultsToolbarComponent } from '../reports-workspace/reports-results-toolbar.component';
 
 @NgModule({
   declarations: [
@@ -37,7 +42,11 @@ import { PlpFormComponent } from '../../shared/product/plp-form.component';
     FactoryStructureFoundationPageComponent,
     ManufacturingCompensationPageComponent,
     LineStaffingWorkspacePageComponent,
-    DailyProductionOperationsPageComponent
+    DailyProductionOperationsPageComponent,
+    ReportsWorkspacePageComponent,
+    ReportsFilterBarComponent,
+    ReportsSummaryCardsComponent,
+    ReportsResultsToolbarComponent
   ],
   imports: [
     CommonModule,
@@ -48,6 +57,7 @@ import { PlpFormComponent } from '../../shared/product/plp-form.component';
     TableModule,
     DialogModule,
     CalendarModule,
+    DropdownModule,
     FormsModule,
     ReactiveFormsModule,
     PlpResponsiveTableDirective,
