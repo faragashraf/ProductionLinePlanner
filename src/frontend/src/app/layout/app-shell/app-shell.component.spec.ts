@@ -69,7 +69,7 @@ describe('AppShellComponent', () => {
     expect(fixture.nativeElement.querySelector('router-outlet')).not.toBeNull();
   });
 
-  it('uses the static shared Flowline mark in the compact header and an Arabic lockup in roomy navigation', () => {
+  it('uses the static shared Flowline mark with the large English name in roomy navigation', () => {
     const topbar = fixture.nativeElement.querySelector('.plp-app-shell__topbar') as HTMLElement;
     const compactLogo = topbar.querySelector('plp-brand-logo [data-plp-brand-variant="header"]') as HTMLElement;
 
@@ -80,10 +80,17 @@ describe('AppShellComponent', () => {
     setViewport(1024);
     component.onResize();
     fixture.detectChanges();
-    const lockup = fixture.nativeElement.querySelector('.plp-app-shell__desktop-nav plp-brand-logo [data-plp-brand-variant="horizontal"]') as HTMLElement;
+    const desktopSidebar = fixture.nativeElement.querySelector('.plp-app-shell__desktop-nav') as HTMLElement;
+    const sidebarHeader = desktopSidebar.querySelector('.plp-app-shell__sidebar-header') as HTMLElement;
+    const sidebarIdentity = sidebarHeader.querySelector('.plp-app-shell__sidebar-identity') as HTMLElement;
+    const sidebarMark = sidebarIdentity.querySelector('plp-brand-logo [data-plp-brand-variant="mark"]') as HTMLElement;
+    const sidebarName = desktopSidebar.querySelector('.plp-app-shell__sidebar-name') as HTMLElement;
 
-    expect(lockup).not.toBeNull();
-    expect(lockup.textContent).toContain(PRODUCT_IDENTITY.nameAr);
+    expect(sidebarMark).not.toBeNull();
+    expect(sidebarHeader.querySelectorAll('.plp-app-shell__sidebar-identity')).toHaveSize(1);
+    expect(sidebarIdentity.textContent?.trim()).toBe(PRODUCT_IDENTITY.nameEn);
+    expect(sidebarName.textContent?.trim()).toBe(PRODUCT_IDENTITY.nameEn);
+    expect(sidebarName.textContent).not.toContain(PRODUCT_IDENTITY.nameAr);
   });
 
   it('renders the centralized static product identity across the enterprise shell', () => {
@@ -144,13 +151,17 @@ describe('AppShellComponent', () => {
 
     let sidebar = getOverlaySidebar();
     const drawer = sidebar.container as HTMLElement;
+    const sidebarHeader = drawer.querySelector('.plp-app-shell__sidebar-header') as HTMLElement;
     const sidebarIdentity = drawer.querySelector('.plp-app-shell__sidebar-identity') as HTMLElement;
+    const sidebarMark = sidebarIdentity.querySelector('plp-brand-logo [data-plp-brand-variant="mark"]') as HTMLElement;
     expect(sidebar.position).toBe('right');
     expect(sidebar.styleClass).toBe('plp-app-shell-overlay-nav');
     expect(drawer.classList.contains('p-sidebar')).toBeTrue();
     expect(drawer.classList.contains('plp-app-shell-overlay-nav')).toBeTrue();
-    expect(sidebarIdentity.textContent).toContain(PRODUCT_IDENTITY.nameAr);
-    expect(sidebarIdentity.textContent).not.toContain(PRODUCT_IDENTITY.nameEn);
+    expect(sidebarHeader.querySelectorAll('.plp-app-shell__sidebar-identity')).toHaveSize(1);
+    expect(sidebarMark).not.toBeNull();
+    expect(sidebarIdentity.textContent?.trim()).toBe(PRODUCT_IDENTITY.nameEn);
+    expect(sidebarIdentity.textContent).not.toContain(PRODUCT_IDENTITY.nameAr);
     expect(component.navigationMode).toBe('phone');
 
     setViewport(600);

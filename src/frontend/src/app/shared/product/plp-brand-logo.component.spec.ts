@@ -56,6 +56,15 @@ describe('PlpBrandLogoComponent', () => {
     expect(logo.querySelector('.plp-brand-logo__wordmark')).not.toBeNull();
   });
 
+  it('omits the Arabic wordmark from the mark-only variant', () => {
+    host.variant = 'mark';
+    fixture.detectChanges();
+    const logo = runtimeLogo();
+
+    expect(logo.querySelector('.plp-brand-logo__wordmark')).toBeNull();
+    expect(logo.textContent).not.toContain(PRODUCT_IDENTITY.nameAr);
+  });
+
   it('only enables the one-time motion class for the Login variant', () => {
     host.variant = 'login';
     host.animated = true;

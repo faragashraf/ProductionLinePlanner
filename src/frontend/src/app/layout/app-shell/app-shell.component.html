@@ -67,11 +67,8 @@
     <div class="plp-app-shell__overlay-focus-trap" pFocusTrap>
       <div id="app-shell-overlay-navigation" class="plp-app-shell__sidebar-header">
         <div class="plp-app-shell__sidebar-identity">
-          <plp-brand-logo class="plp-app-shell__brand-mark" variant="header" size="28px"></plp-brand-logo>
-          <span>
-            <span class="plp-text-supporting">{{ productIdentity.nameAr }}</span>
-            <span class="plp-text-caption">{{ productIdentity.workspaceNameAr }}</span>
-          </span>
+          <plp-brand-logo class="plp-app-shell__brand-mark" variant="mark" size="28px"></plp-brand-logo>
+          <span class="plp-app-shell__sidebar-name" dir="ltr">{{ productIdentity.nameEn }}</span>
         </div>
         <button
           #overlayCloseButton
@@ -90,8 +87,10 @@
 
   <aside id="app-shell-navigation" class="plp-app-shell__desktop-nav">
     <div class="plp-app-shell__sidebar-header">
-      <plp-brand-logo class="plp-app-shell__brand-lockup" variant="horizontal" size="30px" [inverse]="true"></plp-brand-logo>
-      <span class="plp-text-caption">{{ productIdentity.workspaceNameAr }}</span>
+      <div class="plp-app-shell__sidebar-identity">
+        <plp-brand-logo class="plp-app-shell__brand-mark" variant="mark" size="30px" [inverse]="true"></plp-brand-logo>
+        <span class="plp-app-shell__sidebar-name" dir="ltr">{{ productIdentity.nameEn }}</span>
+      </div>
     </div>
     <ng-container *ngTemplateOutlet="navigationMenu; context: { closeAfterNavigation: false }"></ng-container>
   </aside>

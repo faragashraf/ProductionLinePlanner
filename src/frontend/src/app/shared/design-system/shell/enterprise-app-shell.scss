@@ -180,20 +180,16 @@
 
 .plp-app-shell__sidebar-identity {
   gap: var(--plp-space-8);
+  max-inline-size: 100%;
   min-inline-size: 0;
 }
 
-.plp-app-shell__sidebar-header .plp-text-supporting,
-.plp-app-shell__sidebar-header .plp-text-caption {
-  display: block;
-}
-
-.plp-app-shell__sidebar-header .plp-text-supporting {
-  color: var(--plp-color-text);
-}
-
-.plp-app-shell__sidebar-header .plp-text-caption {
-  color: var(--plp-color-text-subtle);
+.plp-app-shell__sidebar-name {
+  font-size: clamp(1.375rem, 1.2rem + 0.35vw, 1.75rem);
+  font-weight: var(--plp-font-weight-bold);
+  letter-spacing: 0.06em;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .plp-app-shell__main {
@@ -339,17 +335,10 @@
 }
 
 .plp-app-shell:is([data-navigation-mode='tablet-landscape'], [data-navigation-mode='desktop']) .plp-app-shell__desktop-nav .plp-app-shell__sidebar-header {
-  align-items: flex-start;
+  align-items: center;
   border-block-end: var(--plp-border-width) solid var(--plp-color-shell-navigation-soft);
-  display: grid;
-  gap: var(--plp-space-4);
-  justify-content: stretch;
+  display: flex;
   padding: var(--plp-space-16);
-}
-
-.plp-app-shell:is([data-navigation-mode='tablet-landscape'], [data-navigation-mode='desktop']) .plp-app-shell__desktop-nav .plp-app-shell__sidebar-header .plp-text-caption {
-  color: var(--plp-color-shell-navigation-muted);
-  padding-inline-start: calc(30px + var(--plp-brand-clear-space));
 }
 
 .plp-app-shell:is([data-navigation-mode='tablet-landscape'], [data-navigation-mode='desktop']) .plp-app-shell__desktop-nav .plp-app-shell__nav-group h2 {
