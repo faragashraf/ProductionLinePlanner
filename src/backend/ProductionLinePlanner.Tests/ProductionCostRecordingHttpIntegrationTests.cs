@@ -236,6 +236,15 @@ public sealed class ProductionCostRecordingHttpIntegrationTests
         Assert.Equal(HttpStatusCode.Forbidden, (await fixture.SendAsync(HttpMethod.Get, "/api/production/reports/daily?from=2026-07-13&to=2026-07-13", permissions: ["production.view"])).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await fixture.SendAsync(HttpMethod.Get, "/api/production/reports/daily?from=2026-07-13&to=2026-07-13", permissions: ["reports.financial.view"])).StatusCode);
 
+        const string financialPath = "/api/reports/production/financial?from=2026-07-13&to=2026-07-13&view=StageWorkers";
+        Assert.Equal(HttpStatusCode.Forbidden, (await fixture.SendAsync(HttpMethod.Get, financialPath, permissions: ["reports.production.view"])).StatusCode);
+        var financial = await fixture.SendAsync(HttpMethod.Get, financialPath, permissions: ["reports.financial.view"]);
+        Assert.Equal(HttpStatusCode.OK, financial.StatusCode);
+        var financialJson = await financial.Content.ReadAsStringAsync();
+        Assert.Contains("totalProductionEarnings", financialJson, StringComparison.Ordinal);
+        foreach (var forbidden in new[] { "salary", "workerSalaryHistory", "baseSalary" })
+            Assert.False(financialJson.Contains(forbidden, StringComparison.OrdinalIgnoreCase));
+
         var orderResponse = await fixture.SendAsync(HttpMethod.Post, "/api/production/orders", new { orderNumber = "AUTH-ORDER", productModelId = fixture.ModelId, productionLineId = fixture.LineId, productionDate = "2026-07-13", plannedQuantity = 500m }, ["production.record"]);
         Assert.Equal(HttpStatusCode.Created, orderResponse.StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await fixture.SendAsync(HttpMethod.Post, "/api/production/orders", new { orderNumber = "NO-RECORD", productModelId = fixture.ModelId, productionLineId = fixture.LineId, productionDate = "2026-07-13", plannedQuantity = 1m }, ["production.approve"])).StatusCode);
@@ -488,6 +497,7 @@ public sealed class ProductionCostRecordingHttpIntegrationTests
             builder.Services.AddScoped<IAttendanceEngine, PresentAttendanceEngine>();
             builder.Services.AddScoped<IProductionCostRecordingService, ProductionCostRecordingService>();
             builder.Services.AddScoped<IProductionQuantitiesReportService, ProductionQuantitiesReportService>();
+            builder.Services.AddScoped<IProductionFinancialReportService, ProductionFinancialReportService>();
             if (readinessError is null)
             {
                 builder.Services.AddScoped<IProductionReadinessEngine, ProductionReadinessEngine>();
@@ -506,7 +516,7 @@ public sealed class ProductionCostRecordingHttpIntegrationTests
                     title: status == StatusCodes.Status409Conflict ? "Conflict" : "Internal Server Error",
                     detail: exception?.Message ?? "An unexpected error occurred.",
                     statusCode: status).ExecuteAsync(context);
-            })); app.UseAuthentication(); app.UseAuthorization(); app.MapProductionCostRecordingEndpoints(); ProductionLinePlanner.Api.Endpoints.ProductionQuantitiesReportEndpoints.MapProductionQuantitiesReportEndpoints(app); await app.StartAsync();
+            })); app.UseAuthentication(); app.UseAuthorization(); app.MapProductionCostRecordingEndpoints(); ProductionLinePlanner.Api.Endpoints.ProductionQuantitiesReportEndpoints.MapProductionQuantitiesReportEndpoints(app); ProductionLinePlanner.Api.Endpoints.ProductionFinancialReportEndpoints.MapProductionFinancialReportEndpoints(app); await app.StartAsync();
             var userId = Guid.NewGuid(); Guid factoryId; Guid modelId; Guid lineId; Guid modelStageId; Guid workerAId; Guid workerBId;
             await using (var scope = app.Services.CreateAsyncScope())
             {

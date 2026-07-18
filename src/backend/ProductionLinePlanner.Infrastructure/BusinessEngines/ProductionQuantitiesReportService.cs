@@ -14,7 +14,6 @@ namespace ProductionLinePlanner.Infrastructure.BusinessEngines;
 /// </summary>
 public sealed class ProductionQuantitiesReportService(AppDbContext db) : IProductionQuantitiesReportService
 {
-    private const int MaximumPageSize = 200;
 
     public async Task<Result<QuantitiesReportResultDto>> QueryAsync(
         QuantitiesReportFilterRequest request,
@@ -26,18 +25,7 @@ public sealed class ProductionQuantitiesReportService(AppDbContext db) : IProduc
 
         var appliedStatus = request.Status ?? StageProductionRecordStatus.Approved;
         var sortBy = request.SortBy ?? DefaultSortBy(request.View);
-        var recordsQuery = db.Set<StageProductionRecord>()
-            .AsNoTracking()
-            .Where(record =>
-                record.ProductionDate >= request.From &&
-                record.ProductionDate <= request.To &&
-                record.Status == appliedStatus &&
-                (!request.FactoryId.HasValue || record.ProductionOrder!.ProductionLine!.FactoryId == request.FactoryId.Value) &&
-                (!request.ProductionLineId.HasValue || record.ProductionOrder!.ProductionLineId == request.ProductionLineId.Value) &&
-                (!request.ProductModelId.HasValue || record.ProductionOrder!.ProductModelId == request.ProductModelId.Value) &&
-                (!request.ProductionOrderId.HasValue || record.ProductionOrderId == request.ProductionOrderId.Value) &&
-                (!request.ProductModelStageId.HasValue || record.ProductModelStageId == request.ProductModelStageId.Value) &&
-                (!request.WorkerId.HasValue || record.WorkerAllocations.Any(allocation => allocation.WorkerId == request.WorkerId.Value)));
+        var recordsQuery = ProductionReportQuerySupport.ApplyFilters(db, request, appliedStatus);
 
         var recordData = await recordsQuery
             .Select(record => new RecordData(
@@ -116,19 +104,9 @@ public sealed class ProductionQuantitiesReportService(AppDbContext db) : IProduc
 
     private static Error? Validate(QuantitiesReportFilterRequest request)
     {
-        if (request.From == default || request.To == default)
-            return new Error("ValidationError", "From and To are required.");
-        if (request.To < request.From)
-            return new Error("ValidationError", "To must be on or after From.");
-        if (request.Page < 1 || request.PageSize < 1 || request.PageSize > MaximumPageSize)
-            return new Error("ValidationError", $"Page must be at least 1 and PageSize must be between 1 and {MaximumPageSize}.");
-        if (!Enum.IsDefined(request.View) || !Enum.IsDefined(request.SortDirection))
-            return new Error("ValidationError", "Unsupported report view or sort direction.");
-        if (request.Status.HasValue && !Enum.IsDefined(request.Status.Value))
-            return new Error("ValidationError", "Unsupported production record status.");
-        if (HasEmptyId(request.FactoryId) || HasEmptyId(request.ProductionLineId) || HasEmptyId(request.ProductModelId) ||
-            HasEmptyId(request.ProductionOrderId) || HasEmptyId(request.ProductModelStageId) || HasEmptyId(request.WorkerId))
-            return new Error("ValidationError", "Filter identifiers cannot be empty.");
+        var commonError = ProductionReportQuerySupport.ValidateCommon(request);
+        if (commonError is not null)
+            return commonError;
 
         var sortBy = request.SortBy ?? DefaultSortBy(request.View);
         if (!Enum.IsDefined(sortBy) || !IsSortAllowed(request.View, sortBy))
@@ -137,21 +115,14 @@ public sealed class ProductionQuantitiesReportService(AppDbContext db) : IProduc
         return null;
     }
 
-    private static bool HasEmptyId(Guid? value) => value.HasValue && value.Value == Guid.Empty;
-
     private static QuantitiesReportSummaryDto BuildSummary(IReadOnlyCollection<RecordData> records)
     {
-        // Daily Operations persists one stage snapshot per model stage, all for
-        // the same physical line run. Deduplicate only that verified aggregate
-        // by ProductionOrderId; legacy stage records retain their record grain.
-        var physicalRecords = new List<RecordData>();
-        foreach (var group in records.GroupBy(record => record.ProductionOrderId))
-        {
-            if (group.First().IsDailyOperation)
-                physicalRecords.Add(group.OrderBy(record => record.ProductModelStageId).ThenBy(record => record.RecordId).First());
-            else
-                physicalRecords.AddRange(group);
-        }
+        var physicalRecords = ProductionReportQuerySupport.SelectPhysicalRunRecords(
+            records,
+            record => record.ProductionOrderId,
+            record => record.IsDailyOperation,
+            record => record.ProductModelStageId,
+            record => record.RecordId);
 
         return new QuantitiesReportSummaryDto(
             physicalRecords.Sum(record => record.ProducedQuantity),
