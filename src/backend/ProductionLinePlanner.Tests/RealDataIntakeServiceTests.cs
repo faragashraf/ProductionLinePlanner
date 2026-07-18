@@ -7,6 +7,7 @@ using ProductionLinePlanner.Domain.Enums;
 using ProductionLinePlanner.Infrastructure.BusinessEngines;
 using ProductionLinePlanner.Infrastructure.Importing;
 using ProductionLinePlanner.Infrastructure.Data;
+using ProductionLinePlanner.Tests.TestInfrastructure;
 
 namespace ProductionLinePlanner.Tests;
 
@@ -148,7 +149,7 @@ public sealed class RealDataIntakeServiceTests
             db.Add(new AttendanceRecord(Guid.NewGuid(), worker.Id, new DateTime(2026, 7, 13, 8, 0, 0, DateTimeKind.Utc), AttendanceStatus.Present, "test", sourceRawId: "1:pilot", attendanceUserId: "1"));
             await db.SaveChangesAsync();
             var audit = new AuditEngine(db);
-            return new IntakeFixture(db, new RealDataIntakeService(db, new ImportNormalizationService(), new AssignmentEngine(db, audit), audit), actor, worker);
+            return new IntakeFixture(db, new RealDataIntakeService(db, new ImportNormalizationService(), new AssignmentEngine(db, audit), audit, TestCairoTimeZoneProvider.Instance), actor, worker);
         }
 
         public RealDataIntakeUpload CreateUpload(decimal salary, decimal? seconds, decimal allocationQuantity, int newUnmappedStageCount = 0)

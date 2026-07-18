@@ -5,6 +5,7 @@ using ProductionLinePlanner.Domain.Entities;
 using ProductionLinePlanner.Domain.Enums;
 using ProductionLinePlanner.Infrastructure.BusinessEngines;
 using ProductionLinePlanner.Infrastructure.Data;
+using ProductionLinePlanner.Tests.TestInfrastructure;
 
 namespace ProductionLinePlanner.Tests;
 
@@ -221,7 +222,7 @@ public sealed class LineStaffingEngineTests
             var assignmentEngine = new AssignmentEngine(db, new NoopAuditEngine());
             return new StaffingFixture(
                 db,
-                new LineStaffingEngine(db, assignmentEngine),
+                new LineStaffingEngine(db, assignmentEngine, TestCairoTimeZoneProvider.Instance),
                 factory,
                 line,
                 model,

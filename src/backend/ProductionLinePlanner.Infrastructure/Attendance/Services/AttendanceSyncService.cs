@@ -19,23 +19,25 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
     private const string TempStatusActive = "Active";
     private const string TempStatusScheduled = "Scheduled";
     private const string SyncAbsentStatus = "sync-no-source";
-    private static readonly TimeZoneInfo EgyptTimeZone = TimeZoneInfo.FindSystemTimeZoneById("Africa/Cairo");
 
     private readonly AppDbContext _appDbContext;
     private readonly AttendanceDbContext _attendanceDbContext;
     private readonly AttendanceSourceOptions _sourceOptions;
     private readonly ILogger<AttendanceSyncService> _logger;
+    private readonly ICairoTimeZoneProvider _cairoTimeZoneProvider;
 
     public AttendanceSyncService(
         AppDbContext appDbContext,
         AttendanceDbContext attendanceDbContext,
         IOptions<AttendanceSourceOptions> sourceOptions,
-        ILogger<AttendanceSyncService> logger)
+        ILogger<AttendanceSyncService> logger,
+        ICairoTimeZoneProvider cairoTimeZoneProvider)
     {
         _appDbContext = appDbContext;
         _attendanceDbContext = attendanceDbContext;
         _sourceOptions = sourceOptions.Value;
         _logger = logger;
+        _cairoTimeZoneProvider = cairoTimeZoneProvider;
     }
 
     public async Task<Result<AttendanceWorkerStateDto[]>> GetTodayAttendanceAsync(
@@ -297,7 +299,7 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
 
     public Task<Result<AttendanceSyncResultDto>> SyncTodayAsync(CancellationToken cancellationToken = default)
     {
-        var cairoNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, EgyptTimeZone);
+        var cairoNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, _cairoTimeZoneProvider.TimeZone);
         return SyncForProductionDateAsync(DateOnly.FromDateTime(cairoNow), cancellationToken);
     }
 
@@ -676,10 +678,10 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
         return NormalizeIdentity(value?.ToString());
     }
 
-    private static DateTime GetDateOnly(DateTime? dateUtc)
+    private DateTime GetDateOnly(DateTime? dateUtc)
     {
         var utc = dateUtc ?? DateTime.UtcNow;
-        var cairo = TimeZoneInfo.ConvertTimeFromUtc(utc.Kind == DateTimeKind.Utc ? utc : utc.ToUniversalTime(), EgyptTimeZone);
+        var cairo = TimeZoneInfo.ConvertTimeFromUtc(utc.Kind == DateTimeKind.Utc ? utc : utc.ToUniversalTime(), _cairoTimeZoneProvider.TimeZone);
         return GetEgyptDayBounds(DateOnly.FromDateTime(cairo)).StartUtc;
     }
 
@@ -738,7 +740,7 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
     {
         var shiftStart = productionStartLocal.Add(_sourceOptions.DayStartTime);
         var lateThreshold = shiftStart.AddMinutes(_sourceOptions.LateThresholdMinutes);
-        var localCheckTime = TimeZoneInfo.ConvertTimeFromUtc(checkTimeUtc, EgyptTimeZone);
+        var localCheckTime = TimeZoneInfo.ConvertTimeFromUtc(checkTimeUtc, _cairoTimeZoneProvider.TimeZone);
         return localCheckTime <= lateThreshold ? AttendanceStatus.Present : AttendanceStatus.Late;
     }
 
@@ -753,7 +755,7 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
             return new Dictionary<Guid, AttendanceRecord>();
         }
 
-        var localDate = TimeZoneInfo.ConvertTimeFromUtc(forDate, EgyptTimeZone);
+        var localDate = TimeZoneInfo.ConvertTimeFromUtc(forDate, _cairoTimeZoneProvider.TimeZone);
         var endUtc = GetEgyptDayBounds(DateOnly.FromDateTime(localDate)).EndUtc;
         var records = await _appDbContext.AttendanceRecords
             .AsNoTracking()
@@ -767,22 +769,22 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
             .ToDictionary(g => g.Key, g => g.First());
     }
 
-    private static (DateTime StartUtc, DateTime EndUtc, DateTime StartLocal, DateTime EndLocal) GetEgyptDayBounds(DateOnly date)
+    private (DateTime StartUtc, DateTime EndUtc, DateTime StartLocal, DateTime EndLocal) GetEgyptDayBounds(DateOnly date)
     {
         var startLocal = date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified);
         var endLocal = startLocal.AddDays(1);
         return (
-            TimeZoneInfo.ConvertTimeToUtc(startLocal, EgyptTimeZone),
-            TimeZoneInfo.ConvertTimeToUtc(endLocal, EgyptTimeZone),
+            TimeZoneInfo.ConvertTimeToUtc(startLocal, _cairoTimeZoneProvider.TimeZone),
+            TimeZoneInfo.ConvertTimeToUtc(endLocal, _cairoTimeZoneProvider.TimeZone),
             startLocal,
             endLocal);
     }
 
-    private static DateTime ToUtcFromEgyptSourceTime(DateTime sourceTime)
+    private DateTime ToUtcFromEgyptSourceTime(DateTime sourceTime)
     {
         if (sourceTime.Kind == DateTimeKind.Utc) return sourceTime;
         var local = DateTime.SpecifyKind(sourceTime, DateTimeKind.Unspecified);
-        return TimeZoneInfo.ConvertTimeToUtc(local, EgyptTimeZone);
+        return TimeZoneInfo.ConvertTimeToUtc(local, _cairoTimeZoneProvider.TimeZone);
     }
 
     private async Task<HashSet<Guid>> GetVisibleWorkerIdsForScopeAsync(

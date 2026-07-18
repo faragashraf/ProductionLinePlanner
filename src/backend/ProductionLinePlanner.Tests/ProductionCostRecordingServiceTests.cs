@@ -10,6 +10,7 @@ using ProductionLinePlanner.Domain.Entities;
 using ProductionLinePlanner.Domain.Enums;
 using ProductionLinePlanner.Infrastructure.BusinessEngines;
 using ProductionLinePlanner.Infrastructure.Data;
+using ProductionLinePlanner.Tests.TestInfrastructure;
 
 namespace ProductionLinePlanner.Tests;
 
@@ -800,7 +801,7 @@ public sealed class ProductionCostRecordingServiceTests
         public ProductionCostRecordingService CreateService(IAuditEngine audit, IAttendanceEngine? attendance = null, IPermissionService? permissions = null) => CreateService(Db, audit, attendance, permissions);
 
         private static ProductionCostRecordingService CreateService(AppDbContext db, IAuditEngine audit, IAttendanceEngine? attendance = null, IPermissionService? permissions = null) =>
-            new(db, audit, new AssignmentEngine(db, audit), attendance ?? new PresentAttendanceEngine(), permissions ?? new AssignmentOverridePermissionService());
+            new(db, audit, new AssignmentEngine(db, audit), attendance ?? new PresentAttendanceEngine(), permissions ?? new AssignmentOverridePermissionService(), TestCairoTimeZoneProvider.Instance);
     }
     private sealed class Client(AppDbContext db, ProductionCostRecordingService service) : IAsyncDisposable
     {

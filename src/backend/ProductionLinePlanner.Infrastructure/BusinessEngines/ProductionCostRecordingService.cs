@@ -20,7 +20,8 @@ public sealed class ProductionCostRecordingService(
     IAuditEngine audit,
     IAssignmentEngine assignmentEngine,
     IAttendanceEngine attendanceEngine,
-    IPermissionService permissionService) : IProductionCostRecordingService
+    IPermissionService permissionService,
+    ICairoTimeZoneProvider cairoTimeZoneProvider) : IProductionCostRecordingService
 {
     private const int QuantityScale = 3;
     private const int MoneyScale = 4;
@@ -1130,16 +1131,17 @@ public sealed class ProductionCostRecordingService(
 
     private static decimal RoundQuantity(decimal value) => decimal.Round(value, QuantityScale, MidpointRounding.AwayFromZero);
     private static decimal RoundMoney(decimal value) => decimal.Round(value, MoneyScale, MidpointRounding.AwayFromZero);
-    private static DateTime ProductionDateEvidenceAtUtc(DateOnly productionDate)
+    private DateTime ProductionDateEvidenceAtUtc(DateOnly productionDate)
     {
         return ProductionDayBoundsUtc(productionDate).EndUtc.AddTicks(-1);
     }
 
-    private static (DateTime StartUtc, DateTime EndUtc) ProductionDayBoundsUtc(DateOnly productionDate)
+    private (DateTime StartUtc, DateTime EndUtc) ProductionDayBoundsUtc(DateOnly productionDate)
     {
-        var egypt = TimeZoneInfo.FindSystemTimeZoneById("Africa/Cairo");
         var localStart = productionDate.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified);
-        return (TimeZoneInfo.ConvertTimeToUtc(localStart, egypt), TimeZoneInfo.ConvertTimeToUtc(localStart.AddDays(1), egypt));
+        return (
+            TimeZoneInfo.ConvertTimeToUtc(localStart, cairoTimeZoneProvider.TimeZone),
+            TimeZoneInfo.ConvertTimeToUtc(localStart.AddDays(1), cairoTimeZoneProvider.TimeZone));
     }
 
     private sealed record CalculatedAllocation(Guid WorkerId, decimal EquivalentQuantity, decimal CalculatedEarning);

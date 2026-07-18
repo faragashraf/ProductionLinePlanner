@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using ProductionLinePlanner.Application.Common;
 using ProductionLinePlanner.Application.DTOs;
 using ProductionLinePlanner.Application.Engines;
+using ProductionLinePlanner.Application.Services;
 using ProductionLinePlanner.Domain.Enums;
 using ProductionLinePlanner.Infrastructure.Data;
 
@@ -13,10 +14,9 @@ namespace ProductionLinePlanner.Infrastructure.BusinessEngines;
 /// </summary>
 public sealed class LineStaffingEngine(
     AppDbContext dbContext,
-    IAssignmentEngine assignmentEngine) : ILineStaffingEngine
+    IAssignmentEngine assignmentEngine,
+    ICairoTimeZoneProvider cairoTimeZoneProvider) : ILineStaffingEngine
 {
-    private static readonly TimeZoneInfo EgyptTimeZone = TimeZoneInfo.FindSystemTimeZoneById("Africa/Cairo");
-
     public async Task<Result<LineStaffingPlanDto>> GetLineStaffingPlanAsync(
         Guid factoryId,
         Guid productionLineId,
@@ -341,10 +341,10 @@ public sealed class LineStaffingEngine(
     private static string? NameFor(Guid? subStageId, IReadOnlyDictionary<Guid, string> names) =>
         subStageId.HasValue && names.TryGetValue(subStageId.Value, out var name) ? name : null;
 
-    private static DateTime StaffingReferenceAtUtc(DateOnly referenceDate)
+    private DateTime StaffingReferenceAtUtc(DateOnly referenceDate)
     {
         var localEnd = referenceDate.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified).AddDays(1);
-        return TimeZoneInfo.ConvertTimeToUtc(localEnd, EgyptTimeZone).AddTicks(-1);
+        return TimeZoneInfo.ConvertTimeToUtc(localEnd, cairoTimeZoneProvider.TimeZone).AddTicks(-1);
     }
 
     private sealed record StageRow(

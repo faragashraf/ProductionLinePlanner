@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using ProductionLinePlanner.Application.Common;
 using ProductionLinePlanner.Application.DTOs;
 using ProductionLinePlanner.Application.Engines;
+using ProductionLinePlanner.Application.Services;
 using ProductionLinePlanner.Domain.Enums;
 using ProductionLinePlanner.Infrastructure.Data;
 
@@ -15,10 +16,9 @@ namespace ProductionLinePlanner.Infrastructure.BusinessEngines;
 public sealed class ProductionReadinessEngine(
     AppDbContext dbContext,
     IAssignmentEngine assignmentEngine,
-    IAttendanceEngine attendanceEngine) : IProductionReadinessEngine
+    IAttendanceEngine attendanceEngine,
+    ICairoTimeZoneProvider cairoTimeZoneProvider) : IProductionReadinessEngine
 {
-    private static readonly TimeZoneInfo EgyptTimeZone = TimeZoneInfo.FindSystemTimeZoneById("Africa/Cairo");
-
     public async Task<Result<ProductProductionReadinessDto>> GetProductReadinessAsync(
         Guid productModelId,
         Guid productionLineId,
@@ -182,10 +182,10 @@ public sealed class ProductionReadinessEngine(
             hasCompensationConfiguration);
     }
 
-    private static DateTime ProductionDateEvidenceAtUtc(DateOnly productionDate)
+    private DateTime ProductionDateEvidenceAtUtc(DateOnly productionDate)
     {
         var localEnd = productionDate.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified).AddDays(1);
-        return TimeZoneInfo.ConvertTimeToUtc(localEnd, EgyptTimeZone).AddTicks(-1);
+        return TimeZoneInfo.ConvertTimeToUtc(localEnd, cairoTimeZoneProvider.TimeZone).AddTicks(-1);
     }
 
     private sealed record StageRow(

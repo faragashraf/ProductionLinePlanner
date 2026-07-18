@@ -11,6 +11,7 @@ using ProductionLinePlanner.Domain.Entities;
 using ProductionLinePlanner.Infrastructure.Attendance;
 using ProductionLinePlanner.Infrastructure.Attendance.Services;
 using ProductionLinePlanner.Infrastructure.Data;
+using ProductionLinePlanner.Tests.TestInfrastructure;
 
 namespace ProductionLinePlanner.Tests;
 
@@ -89,7 +90,7 @@ public sealed class AttendanceSyncReliabilityTests
             sourceOptions);
         appDb.Workers.Add(new Worker(Guid.NewGuid(), "001", "Active", attendanceUserId: "1001"));
         await appDb.SaveChangesAsync();
-        var service = new AttendanceSyncService(appDb, attendanceDb, sourceOptions, NullLogger<AttendanceSyncService>.Instance);
+        var service = new AttendanceSyncService(appDb, attendanceDb, sourceOptions, NullLogger<AttendanceSyncService>.Instance, TestCairoTimeZoneProvider.Instance);
         var date = new DateOnly(2026, 7, 16);
 
         Assert.True((await service.SyncForProductionDateAsync(date)).IsSuccess);
@@ -123,7 +124,7 @@ public sealed class AttendanceSyncReliabilityTests
 
         await using var appDb = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString("N")).Options);
-        var service = new AttendanceSyncService(appDb, attendanceDb, sourceOptions, NullLogger<AttendanceSyncService>.Instance);
+        var service = new AttendanceSyncService(appDb, attendanceDb, sourceOptions, NullLogger<AttendanceSyncService>.Instance, TestCairoTimeZoneProvider.Instance);
 
         var result = await service.SyncForProductionDateAsync(new DateOnly(2026, 7, 16));
 
@@ -155,11 +156,13 @@ public sealed class AttendanceSyncReliabilityTests
             ? new AttendanceSyncCoordinator(
                 provider.GetRequiredService<IServiceScopeFactory>(),
                 Options.Create(new AttendanceSourceOptions()),
-                NullLogger<AttendanceSyncCoordinator>.Instance)
+                NullLogger<AttendanceSyncCoordinator>.Instance,
+                TestCairoTimeZoneProvider.Instance)
             : new AttendanceSyncCoordinator(
                 provider.GetRequiredService<IServiceScopeFactory>(),
                 Options.Create(new AttendanceSourceOptions()),
                 NullLogger<AttendanceSyncCoordinator>.Instance,
+                TestCairoTimeZoneProvider.Instance,
                 afterFailedTryAddAsync);
     }
 

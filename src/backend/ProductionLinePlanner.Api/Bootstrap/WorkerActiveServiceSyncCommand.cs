@@ -50,7 +50,9 @@ public static class WorkerActiveServiceSyncCommand
 
             var productionDate = DateOnly.TryParse(Value(args, "--production-date"), out var selectedDate)
                 ? selectedDate
-                : DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, TimeZoneInfo.FindSystemTimeZoneById("Africa/Cairo")));
+                : DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(
+                    DateTime.UtcNow,
+                    scope.ServiceProvider.GetRequiredService<ICairoTimeZoneProvider>().TimeZone));
             var attendanceSync = scope.ServiceProvider.GetRequiredService<IAttendanceSyncService>();
             var attendanceResult = await attendanceSync.SyncForProductionDateAsync(productionDate);
             object attendancePayload = attendanceResult.IsSuccess

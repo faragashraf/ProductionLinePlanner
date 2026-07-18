@@ -3100,6 +3100,7 @@ assignmentsApi.MapGet("/sub-stages/{subStageId:guid}/worker-context", async (
     AppDbContext dbContext,
     IAssignmentEngine assignmentEngine,
     IAttendanceEngine attendanceEngine,
+    ICairoTimeZoneProvider cairoTimeZoneProvider,
     CancellationToken cancellationToken) =>
 {
     var subStageExists = await dbContext.SubStages
@@ -3116,9 +3117,8 @@ assignmentsApi.MapGet("/sub-stages/{subStageId:guid}/worker-context", async (
         .OrderBy(x => x.EmployeeCode)
         .Select(x => new { x.Id, x.EmployeeCode, x.FullName, x.PhotoReference, x.LocalDepartmentName })
         .ToArrayAsync(cancellationToken);
-    var egyptTimeZone = TimeZoneInfo.FindSystemTimeZoneById("Africa/Cairo");
     var localEndOfProductionDate = productionDate.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified).AddDays(1);
-    var asOfUtc = TimeZoneInfo.ConvertTimeToUtc(localEndOfProductionDate, egyptTimeZone).AddTicks(-1);
+    var asOfUtc = TimeZoneInfo.ConvertTimeToUtc(localEndOfProductionDate, cairoTimeZoneProvider.TimeZone).AddTicks(-1);
     var assignments = await assignmentEngine.ResolveCurrentAssignmentsAsync(workers.Select(x => x.Id), asOfUtc, cancellationToken);
     if (assignments.IsFailure)
     {

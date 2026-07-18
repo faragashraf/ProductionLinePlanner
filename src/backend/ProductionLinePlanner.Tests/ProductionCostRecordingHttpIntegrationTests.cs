@@ -27,6 +27,7 @@ using ProductionLinePlanner.Domain.Enums;
 using ProductionLinePlanner.Infrastructure.BusinessEngines;
 using ProductionLinePlanner.Infrastructure.Data;
 using ProductionLinePlanner.Infrastructure.Importing;
+using ProductionLinePlanner.Tests.TestInfrastructure;
 
 namespace ProductionLinePlanner.Tests;
 
@@ -537,6 +538,7 @@ public sealed class ProductionCostRecordingHttpIntegrationTests
             builder.Services.AddScoped<IPermissionService, HeaderPermissionService>();
             builder.Services.AddDbContext<AppDbContext>(options => options.UseSqlite(connection));
             builder.Services.AddScoped<IAuditEngine, AuditEngine>();
+            builder.Services.AddSingleton<ICairoTimeZoneProvider>(TestCairoTimeZoneProvider.Instance);
             builder.Services.AddScoped<IAssignmentEngine, AssignmentEngine>();
             builder.Services.AddScoped<IAttendanceEngine, PresentAttendanceEngine>();
             builder.Services.AddScoped<IProductionCostRecordingService, ProductionCostRecordingService>();

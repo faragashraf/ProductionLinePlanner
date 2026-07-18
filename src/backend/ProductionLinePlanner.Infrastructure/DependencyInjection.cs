@@ -15,6 +15,7 @@ using ProductionLinePlanner.Infrastructure.Authorization;
 using ProductionLinePlanner.Infrastructure.Bootstrap;
 using ProductionLinePlanner.Infrastructure.BusinessEngines;
 using ProductionLinePlanner.Infrastructure.Importing;
+using ProductionLinePlanner.Infrastructure.Time;
 
 namespace ProductionLinePlanner.Infrastructure;
 
@@ -50,6 +51,7 @@ public static class DependencyInjection
         };
 
         services.AddSingleton(Options.Create(attendanceSourceOptions));
+        services.AddSingleton<ICairoTimeZoneProvider, CairoTimeZoneProvider>();
 
         services.AddDbContext<AppDbContext>(options =>
         {

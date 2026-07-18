@@ -12,19 +12,21 @@ namespace ProductionLinePlanner.Infrastructure.BusinessEngines;
 
 public sealed class AttendanceEngine : IAttendanceEngine
 {
-    private static readonly TimeZoneInfo EgyptTimeZone = TimeZoneInfo.FindSystemTimeZoneById("Africa/Cairo");
     private readonly IAttendanceReadService _attendanceReadService;
     private readonly IAttendanceSyncService _attendanceSyncService;
     private readonly AppDbContext _dbContext;
+    private readonly ICairoTimeZoneProvider _cairoTimeZoneProvider;
 
     public AttendanceEngine(
         IAttendanceReadService attendanceReadService,
         IAttendanceSyncService attendanceSyncService,
-        AppDbContext dbContext)
+        AppDbContext dbContext,
+        ICairoTimeZoneProvider cairoTimeZoneProvider)
     {
         _attendanceReadService = attendanceReadService;
         _attendanceSyncService = attendanceSyncService;
         _dbContext = dbContext;
+        _cairoTimeZoneProvider = cairoTimeZoneProvider;
     }
 
     public Task<Result<AttendanceWorkerStateDto[]>> GetTodayAttendanceAsync(
@@ -65,10 +67,10 @@ public sealed class AttendanceEngine : IAttendanceEngine
         }
 
         var asOf = asOfUtc ?? DateTime.UtcNow;
-        var cairo = TimeZoneInfo.ConvertTimeFromUtc(asOf.Kind == DateTimeKind.Utc ? asOf : asOf.ToUniversalTime(), EgyptTimeZone);
+        var cairo = TimeZoneInfo.ConvertTimeFromUtc(asOf.Kind == DateTimeKind.Utc ? asOf : asOf.ToUniversalTime(), _cairoTimeZoneProvider.TimeZone);
         var localStart = DateOnly.FromDateTime(cairo).ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified);
-        var dateStartUtc = TimeZoneInfo.ConvertTimeToUtc(localStart, EgyptTimeZone);
-        var dateEndUtc = TimeZoneInfo.ConvertTimeToUtc(localStart.AddDays(1), EgyptTimeZone);
+        var dateStartUtc = TimeZoneInfo.ConvertTimeToUtc(localStart, _cairoTimeZoneProvider.TimeZone);
+        var dateEndUtc = TimeZoneInfo.ConvertTimeToUtc(localStart.AddDays(1), _cairoTimeZoneProvider.TimeZone);
 
         var query = await _dbContext.AttendanceRecords
             .AsNoTracking()
@@ -100,8 +102,8 @@ public sealed class AttendanceEngine : IAttendanceEngine
             return Result<Dictionary<Guid, AttendancePresenceWindowDto>>.Success([]);
 
         var localStart = productionDate.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified);
-        var startUtc = TimeZoneInfo.ConvertTimeToUtc(localStart, EgyptTimeZone);
-        var endUtc = TimeZoneInfo.ConvertTimeToUtc(localStart.AddDays(1), EgyptTimeZone);
+        var startUtc = TimeZoneInfo.ConvertTimeToUtc(localStart, _cairoTimeZoneProvider.TimeZone);
+        var endUtc = TimeZoneInfo.ConvertTimeToUtc(localStart.AddDays(1), _cairoTimeZoneProvider.TimeZone);
         var records = await _dbContext.AttendanceRecords.AsNoTracking()
             .Where(record => ids.Contains(record.WorkerId) && record.AttendanceTimeUtc >= startUtc && record.AttendanceTimeUtc < endUtc)
             .OrderBy(record => record.WorkerId)

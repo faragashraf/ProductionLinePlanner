@@ -23,12 +23,11 @@ public sealed class RealDataIntakeService(
     AppDbContext db,
     IImportNormalizationService normalizer,
     IAssignmentEngine assignmentEngine,
-    IAuditEngine audit) : IRealDataIntakeService
+    IAuditEngine audit,
+    ICairoTimeZoneProvider cairoTimeZoneProvider) : IRealDataIntakeService
 {
     private const string Blocking = "blocking";
     private const string Warning = "warning";
-    private static readonly TimeZoneInfo EgyptTimeZone = TimeZoneInfo.FindSystemTimeZoneById("Africa/Cairo");
-
     public async Task<RealDataIntakePreviewDto> PreviewAsync(RealDataIntakeUpload upload, CancellationToken cancellationToken = default)
     {
         var prepared = await PrepareAsync(upload, cancellationToken);
@@ -497,11 +496,11 @@ public sealed class RealDataIntakeService(
         }
     }
 
-    private static (DateTime StartUtc, DateTime EndUtc) EgyptUtcRange(DateOnly date)
+    private (DateTime StartUtc, DateTime EndUtc) EgyptUtcRange(DateOnly date)
     {
         var localStart = date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified);
-        var start = TimeZoneInfo.ConvertTimeToUtc(localStart, EgyptTimeZone);
-        return (start, TimeZoneInfo.ConvertTimeToUtc(localStart.AddDays(1), EgyptTimeZone));
+        var start = TimeZoneInfo.ConvertTimeToUtc(localStart, cairoTimeZoneProvider.TimeZone);
+        return (start, TimeZoneInfo.ConvertTimeToUtc(localStart.AddDays(1), cairoTimeZoneProvider.TimeZone));
     }
 
     private async Task<int> CountOpenReviewIssuesAsync(IReadOnlyCollection<Guid> orderIds, CancellationToken ct)
