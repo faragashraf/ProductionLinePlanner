@@ -46,6 +46,9 @@ public static class PermissionCatalog
         new("production.record", "production", "تسجيل نتائج الإنتاج", "Record production", true),
         new("production.approve", "production", "الموافقة على الإنتاج", "Approve production", true),
 
+        new("reports.production.view", "reports", "عرض تقارير كميات الإنتاج", "View production quantity reports", false),
+        new("reports.financial.view", "reports", "عرض التقارير المالية للإنتاج", "View financial production reports", false),
+
         new("users.view", "users", "عرض المستخدمين", "View users", false),
         new("users.manage", "users", "إدارة المستخدمين", "Manage users", true),
 

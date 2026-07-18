@@ -159,7 +159,8 @@ public sealed class ProductionCostRecordingHttpIntegrationTests
         Assert.Equal(HttpStatusCode.Unauthorized, (await fixture.SendAsync(HttpMethod.Get, "/api/production/records")).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await fixture.SendAsync(HttpMethod.Get, "/api/production/records", permissions: [])).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await fixture.SendAsync(HttpMethod.Get, "/api/production/records", permissions: ["production.view"])).StatusCode);
-        Assert.Equal(HttpStatusCode.OK, (await fixture.SendAsync(HttpMethod.Get, "/api/production/reports/daily?from=2026-07-13&to=2026-07-13", permissions: ["production.view"])).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await fixture.SendAsync(HttpMethod.Get, "/api/production/reports/daily?from=2026-07-13&to=2026-07-13", permissions: ["production.view"])).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await fixture.SendAsync(HttpMethod.Get, "/api/production/reports/daily?from=2026-07-13&to=2026-07-13", permissions: ["reports.financial.view"])).StatusCode);
 
         var orderResponse = await fixture.SendAsync(HttpMethod.Post, "/api/production/orders", new { orderNumber = "AUTH-ORDER", productModelId = fixture.ModelId, productionLineId = fixture.LineId, productionDate = "2026-07-13", plannedQuantity = 500m }, ["production.record"]);
         Assert.Equal(HttpStatusCode.Created, orderResponse.StatusCode);
@@ -212,7 +213,7 @@ public sealed class ProductionCostRecordingHttpIntegrationTests
         var approved = await fixture.SendAsync(HttpMethod.Post, $"/api/production/records/{recordId}/approve", new { concurrencyToken = draftToken }, permissions);
         Assert.Equal(HttpStatusCode.OK, approved.StatusCode);
 
-        var report = await fixture.SendAsync(HttpMethod.Get, "/api/production/reports/daily?from=2026-07-13&to=2026-07-13", permissions: permissions);
+        var report = await fixture.SendAsync(HttpMethod.Get, "/api/production/reports/daily?from=2026-07-13&to=2026-07-13", permissions: ["production.view", "production.record", "production.approve", "reports.financial.view"]);
         var row = (await DataAsync(report)).EnumerateArray().Single();
         Assert.Equal(500m, row.GetProperty("producedQuantity").GetDecimal());
         Assert.Equal(250m, row.GetProperty("stageCost").GetDecimal());
@@ -226,7 +227,7 @@ public sealed class ProductionCostRecordingHttpIntegrationTests
         Assert.Equal("Cancelled", cancelled.GetProperty("status").GetString());
         Assert.Equal("تصحيح اعتماد الإنتاج", cancelled.GetProperty("approvalCancellationReason").GetString());
         Assert.Equal(HttpStatusCode.Conflict, (await fixture.SendAsync(HttpMethod.Post, $"/api/production/records/{recordId}/cancel-production-approval", new { concurrencyToken = cancelled.GetProperty("concurrencyToken").GetGuid(), reason = "تكرار" }, permissions)).StatusCode);
-        var afterCancel = await fixture.SendAsync(HttpMethod.Get, "/api/production/reports/daily?from=2026-07-13&to=2026-07-13", permissions: permissions);
+        var afterCancel = await fixture.SendAsync(HttpMethod.Get, "/api/production/reports/daily?from=2026-07-13&to=2026-07-13", permissions: ["production.view", "production.record", "production.approve", "reports.financial.view"]);
         Assert.Empty((await DataAsync(afterCancel)).EnumerateArray());
     }
 
@@ -288,6 +289,49 @@ public sealed class ProductionCostRecordingHttpIntegrationTests
         return document.RootElement.GetProperty("data").Clone();
     }
 
+    [Fact]
+    public async Task Quantities_report_enforces_its_permission_uses_stage_record_grain_and_has_no_financial_json()
+    {
+        await using var fixture = await ProductionHttpFixture.CreateAsync();
+        var writePermissions = new[] { "production.record", "production.approve" };
+        var order = await fixture.SendAsync(HttpMethod.Post, "/api/production/orders", new
+        {
+            orderNumber = "QUANTITIES-REPORT",
+            productModelId = fixture.ModelId,
+            productionLineId = fixture.LineId,
+            productionDate = "2026-07-13",
+            plannedQuantity = 500m
+        }, writePermissions);
+        var orderId = (await DataAsync(order)).GetProperty("id").GetGuid();
+        Assert.Equal(HttpStatusCode.OK, (await fixture.SendAsync(HttpMethod.Post, $"/api/production/orders/{orderId}/activate", new { }, writePermissions)).StatusCode);
+        var draft = await fixture.SendAsync(HttpMethod.Post, "/api/production/records", fixture.DraftPayload(orderId), writePermissions);
+        var draftData = await DataAsync(draft);
+        Assert.Equal(HttpStatusCode.OK, (await fixture.SendAsync(HttpMethod.Post, $"/api/production/records/{draftData.GetProperty("id").GetGuid()}/approve", new { concurrencyToken = draftData.GetProperty("concurrencyToken").GetGuid() }, writePermissions)).StatusCode);
+
+        const string quantitiesPath = "/api/reports/production/quantities?from=2026-07-13&to=2026-07-13&view=StageWorkers";
+        Assert.Equal(HttpStatusCode.Unauthorized, (await fixture.SendAsync(HttpMethod.Get, quantitiesPath)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await fixture.SendAsync(HttpMethod.Get, quantitiesPath, permissions: [])).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await fixture.SendAsync(HttpMethod.Get, quantitiesPath, permissions: ["production.view"])).StatusCode);
+
+        var report = await fixture.SendAsync(HttpMethod.Get, quantitiesPath, permissions: ["reports.production.view"]);
+        Assert.True(report.StatusCode == HttpStatusCode.OK, await report.Content.ReadAsStringAsync());
+        var reportJson = await report.Content.ReadAsStringAsync();
+        foreach (var forbidden in new[] { "salary", "price", "cost", "earning", "entitlement", "currency", "compensation", "fixedAmount" })
+            Assert.False(reportJson.Contains(forbidden, StringComparison.OrdinalIgnoreCase));
+        using var document = JsonDocument.Parse(reportJson);
+        var data = document.RootElement.GetProperty("data");
+        Assert.Equal(500m, data.GetProperty("summary").GetProperty("totalStageProducedQuantity").GetDecimal());
+        Assert.Equal(2, data.GetProperty("rows").GetArrayLength());
+        Assert.All(data.GetProperty("rows").EnumerateArray(), row =>
+        {
+            Assert.NotEqual(Guid.Empty, row.GetProperty("source").GetProperty("stageProductionRecordId").GetGuid());
+            Assert.NotEqual(Guid.Empty, row.GetProperty("source").GetProperty("stageProductionWorkerAllocationId").GetGuid());
+        });
+
+        Assert.Equal(HttpStatusCode.Forbidden, (await fixture.SendAsync(HttpMethod.Get, "/api/production/reports/daily?from=2026-07-13&to=2026-07-13", permissions: ["production.view"])).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await fixture.SendAsync(HttpMethod.Get, "/api/production/reports/daily?from=2026-07-13&to=2026-07-13", permissions: ["reports.financial.view"])).StatusCode);
+    }
+
     private sealed class ProductionHttpFixture : IAsyncDisposable
     {
         private readonly SqliteConnection _connection;
@@ -314,6 +358,7 @@ public sealed class ProductionCostRecordingHttpIntegrationTests
             builder.Services.AddScoped<IAssignmentEngine, AssignmentEngine>();
             builder.Services.AddScoped<IAttendanceEngine, PresentAttendanceEngine>();
             builder.Services.AddScoped<IProductionCostRecordingService, ProductionCostRecordingService>();
+            builder.Services.AddScoped<IProductionQuantitiesReportService, ProductionQuantitiesReportService>();
             if (readinessError is null)
             {
                 builder.Services.AddScoped<IProductionReadinessEngine, ProductionReadinessEngine>();
@@ -332,7 +377,7 @@ public sealed class ProductionCostRecordingHttpIntegrationTests
                     title: status == StatusCodes.Status409Conflict ? "Conflict" : "Internal Server Error",
                     detail: exception?.Message ?? "An unexpected error occurred.",
                     statusCode: status).ExecuteAsync(context);
-            })); app.UseAuthentication(); app.UseAuthorization(); app.MapProductionCostRecordingEndpoints(); await app.StartAsync();
+            })); app.UseAuthentication(); app.UseAuthorization(); app.MapProductionCostRecordingEndpoints(); ProductionLinePlanner.Api.Endpoints.ProductionQuantitiesReportEndpoints.MapProductionQuantitiesReportEndpoints(app); await app.StartAsync();
             var userId = Guid.NewGuid(); Guid factoryId; Guid modelId; Guid lineId; Guid modelStageId; Guid workerAId; Guid workerBId;
             await using (var scope = app.Services.CreateAsyncScope())
             {

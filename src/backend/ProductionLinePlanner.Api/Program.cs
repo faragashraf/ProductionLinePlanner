@@ -3653,5 +3653,6 @@ static FixedWindowRateLimiterOptions FixedWindowOptions(int permitLimit, int win
 };
 
 ProductionLinePlanner.Api.Endpoints.ProductionCostRecordingEndpoints.MapProductionCostRecordingEndpoints(app);
+ProductionLinePlanner.Api.Endpoints.ProductionQuantitiesReportEndpoints.MapProductionQuantitiesReportEndpoints(app);
 
 app.Run();
