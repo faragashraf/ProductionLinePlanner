@@ -88,8 +88,11 @@ describe('AppShellComponent', () => {
 
   it('renders the centralized static product identity across the enterprise shell', () => {
     const text = fixture.nativeElement.textContent as string;
+    const navbarName = fixture.nativeElement.querySelector('.plp-app-shell__brand-name') as HTMLElement;
 
-    expect(text).toContain(PRODUCT_IDENTITY.nameAr);
+    expect(navbarName.textContent?.trim()).toBe(PRODUCT_IDENTITY.nameEn);
+    expect(navbarName.textContent).not.toContain(PRODUCT_IDENTITY.nameAr);
+    expect(text).toContain(PRODUCT_IDENTITY.nameEn);
     expect(text).toContain(PRODUCT_IDENTITY.platformLabelAr);
     expect(text).toContain(PRODUCT_IDENTITY.workspaceNameAr);
   });
@@ -141,10 +144,13 @@ describe('AppShellComponent', () => {
 
     let sidebar = getOverlaySidebar();
     const drawer = sidebar.container as HTMLElement;
+    const sidebarIdentity = drawer.querySelector('.plp-app-shell__sidebar-identity') as HTMLElement;
     expect(sidebar.position).toBe('right');
     expect(sidebar.styleClass).toBe('plp-app-shell-overlay-nav');
     expect(drawer.classList.contains('p-sidebar')).toBeTrue();
     expect(drawer.classList.contains('plp-app-shell-overlay-nav')).toBeTrue();
+    expect(sidebarIdentity.textContent).toContain(PRODUCT_IDENTITY.nameAr);
+    expect(sidebarIdentity.textContent).not.toContain(PRODUCT_IDENTITY.nameEn);
     expect(component.navigationMode).toBe('phone');
 
     setViewport(600);

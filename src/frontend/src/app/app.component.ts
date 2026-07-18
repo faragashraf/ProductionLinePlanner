@@ -9,6 +9,6 @@ import { PRODUCT_IDENTITY } from './core/config/product-identity.config';
 })
 export class AppComponent {
   constructor(title: Title) {
-    title.setTitle(PRODUCT_IDENTITY.nameAr);
+    title.setTitle(`${PRODUCT_IDENTITY.nameEn} - ${PRODUCT_IDENTITY.nameAr}`);
   }
 }

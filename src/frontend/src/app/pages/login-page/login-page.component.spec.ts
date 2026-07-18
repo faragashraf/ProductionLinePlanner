@@ -56,7 +56,12 @@ describe('LoginPageComponent', () => {
     expect(logo).not.toBeNull();
     expect(logo.classList.contains('plp-brand-logo--animated')).toBeTrue();
     expect(login.querySelectorAll(':scope > svg')).toHaveSize(0);
-    expect(login.textContent).toContain(PRODUCT_IDENTITY.nameAr);
+    const primaryName = login.querySelector('#login-brand-title') as HTMLElement;
+    const secondaryName = login.querySelector('.plp-login__eyebrow') as HTMLElement;
+    expect(primaryName.textContent?.trim()).toBe(PRODUCT_IDENTITY.nameEn);
+    expect(primaryName.textContent).not.toContain(PRODUCT_IDENTITY.nameAr);
+    expect(secondaryName.textContent?.trim()).toBe(PRODUCT_IDENTITY.nameAr);
+    expect(secondaryName.textContent).not.toContain(PRODUCT_IDENTITY.nameEn);
     expect(logo.getAttribute('aria-label')).toBe(PRODUCT_IDENTITY.logoLabelAr);
   });
 
