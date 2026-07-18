@@ -26,6 +26,8 @@ obj/
 coverage/
 artifacts/test-data-bootstrap/
 artifacts/iis/
+artifacts/Dayoub-IIS-Production.zip
+artifacts/Dayoub-IIS-Production.sha256
 
 # OS files
 .DS_Store

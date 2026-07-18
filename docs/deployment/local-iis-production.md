@@ -65,6 +65,18 @@ Artifacts are ignored by Git:
 
 The frontend build stages the contents of Angular's `browser` output directly into `artifacts/iis/frontend`; do not deploy an extra `browser` directory.
 
+### Manual transfer package
+
+For a macOS build host that does not have IIS access, build and verify the artifacts as above, then package the two deployable directories only:
+
+```bash
+cd <repository-root>/artifacts/iis
+zip -r ../Dayoub-IIS-Production.zip frontend backend
+shasum -a 256 ../Dayoub-IIS-Production.zip > ../Dayoub-IIS-Production.sha256
+```
+
+Transfer `artifacts/Dayoub-IIS-Production.zip` and its `.sha256` file to the Windows Server. After validating the checksum, extract it and copy the **contents** of `frontend` to `C:\inetpub\wwwroot\Dayoub\app` and the **contents** of `backend` to `C:\inetpub\wwwroot\Dayoub\api`. Back up both IIS targets, stop the application pools, configure the required external secrets, copy the contents, then start the pools and run the smoke checklist. The archive is intentionally ignored by Git and contains no deployment secrets.
+
 ## IIS deployment and rollback
 
 Copy the repository/artifacts to the Windows IIS server, then run an elevated PowerShell session from the repository root:
