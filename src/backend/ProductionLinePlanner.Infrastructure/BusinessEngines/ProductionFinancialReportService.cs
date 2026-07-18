@@ -42,24 +42,34 @@ public sealed class ProductionFinancialReportService(AppDbContext db) : IProduct
             .ToArrayAsync(cancellationToken);
 
         var recordIds = recordData.Select(record => record.RecordId).ToArray();
-        var allocations = recordIds.Length == 0
+        var allAllocations = recordIds.Length == 0
             ? []
             : await db.Set<StageProductionWorkerAllocation>()
                 .AsNoTracking()
-                .Where(allocation =>
-                    recordIds.Contains(allocation.StageProductionRecordId) &&
-                    (!request.WorkerId.HasValue || allocation.WorkerId == request.WorkerId.Value))
+                .Where(allocation => recordIds.Contains(allocation.StageProductionRecordId))
                 .Select(allocation => new FinancialAllocationData(
                     allocation.Id, allocation.StageProductionRecordId, allocation.WorkerId,
                     allocation.SnapshotWorkerCode, allocation.SnapshotWorkerName,
                     allocation.EquivalentQuantity, allocation.CalculatedEarning))
                 .ToArrayAsync(cancellationToken);
 
-        var allocationsByRecord = allocations
+        var allocationsByRecord = allAllocations
             .GroupBy(allocation => allocation.RecordId)
             .ToDictionary(group => group.Key, group => (IReadOnlyCollection<FinancialAllocationData>)group.ToArray());
         var records = recordData
-            .Select(record => record with { Allocations = allocationsByRecord.GetValueOrDefault(record.RecordId, []) })
+            .Select(record =>
+            {
+                var integrityAllocations = allocationsByRecord.GetValueOrDefault(record.RecordId, []);
+                var visibleAllocations = request.WorkerId.HasValue
+                    ? integrityAllocations.Where(allocation => allocation.WorkerId == request.WorkerId.Value).ToArray()
+                    : integrityAllocations;
+
+                return record with
+                {
+                    Allocations = visibleAllocations,
+                    IntegrityAllocations = integrityAllocations
+                };
+            })
             .ToArray();
         var summary = BuildSummary(records);
         var rows = BuildRows(request.View, records);
@@ -234,9 +244,9 @@ public sealed class ProductionFinancialReportService(AppDbContext db) : IProduct
 
     private static string RecordFinancialStatus(FinancialRecordData record)
     {
-        if (record.Allocations.Count == 0)
+        if (record.IntegrityAllocations.Count == 0)
             return Incomplete;
-        return record.TotalWorkerEarnings == record.Allocations.Sum(allocation => allocation.CalculatedEarning)
+        return record.TotalWorkerEarnings == record.IntegrityAllocations.Sum(allocation => allocation.CalculatedEarning)
             ? Complete
             : ReviewRequired;
     }
@@ -334,6 +344,7 @@ public sealed class ProductionFinancialReportService(AppDbContext db) : IProduct
         CompensationMode CompensationMode)
     {
         public IReadOnlyCollection<FinancialAllocationData> Allocations { get; init; } = [];
+        public IReadOnlyCollection<FinancialAllocationData> IntegrityAllocations { get; init; } = [];
         public bool IsDailyOperation => ProductionOrderSourceReference?.StartsWith("DailyProductionOperations/", StringComparison.Ordinal) == true;
     }
 

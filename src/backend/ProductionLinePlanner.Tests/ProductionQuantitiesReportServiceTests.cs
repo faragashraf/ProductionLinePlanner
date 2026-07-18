@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using ProductionLinePlanner.Application.Reports.Financial;
 using ProductionLinePlanner.Application.Reports.Quantities;
 using ProductionLinePlanner.Domain.Entities;
 using ProductionLinePlanner.Domain.Enums;
@@ -239,6 +240,145 @@ public sealed class ProductionQuantitiesReportServiceTests
             forbidden.Any(fragment => property.Name.Contains(fragment, StringComparison.OrdinalIgnoreCase)));
     }
 
+    [Fact]
+    public void Financial_contract_is_separate_and_excludes_salary_data()
+    {
+        var financialTypes = new[]
+        {
+            typeof(FinancialReportSummaryDto),
+            typeof(FinancialReportRowDto),
+            typeof(FinancialReportResultDto)
+        };
+
+        Assert.DoesNotContain(financialTypes.SelectMany(type => type.GetProperties()), property =>
+            property.Name.Contains("Salary", StringComparison.OrdinalIgnoreCase) ||
+            property.Name.Contains("WorkerSalaryHistory", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task Financial_worker_filter_uses_full_stage_snapshot_for_integrity_and_visible_allocations_for_rows()
+    {
+        await using var fixture = await QuantitiesFixture.CreateAsync();
+        await fixture.AddRecordAsync(
+            fixture.Primary,
+            fixture.Today,
+            StageProductionRecordStatus.Approved,
+            500m,
+            500m,
+            0m,
+            [fixture.WorkerA, fixture.WorkerB],
+            isDailyOperation: true,
+            calculatedEarningPerWorker: 125m);
+        var service = new ProductionFinancialReportService(fixture.Db);
+
+        foreach (var view in new[] { QuantitiesReportView.ByWorker, QuantitiesReportView.WorkerStages, QuantitiesReportView.StageWorkers })
+        {
+            var result = await service.QueryAsync(new QuantitiesReportFilterRequest
+            {
+                From = fixture.Today,
+                To = fixture.Today,
+                WorkerId = fixture.WorkerA.Id,
+                View = view
+            });
+
+            Assert.True(result.IsSuccess);
+            Assert.Equal(500m, result.Value!.Summary.TotalPhysicalProducedQuantity);
+            Assert.Equal(125m, result.Value.Summary.TotalProductionEarnings);
+            Assert.Equal("Complete", result.Value.Summary.FinancialDataStatus);
+            Assert.All(result.Value.Rows, row =>
+            {
+                Assert.Equal(fixture.WorkerA.Id, row.Source.WorkerId);
+                Assert.Equal("Complete", row.FinancialDataStatus);
+            });
+        }
+    }
+
+    [Fact]
+    public async Task Financial_fixtures_preserve_complete_incomplete_and_review_required_statuses()
+    {
+        await using var fixture = await QuantitiesFixture.CreateAsync();
+        await fixture.AddRecordAsync(
+            fixture.Primary,
+            fixture.Today,
+            StageProductionRecordStatus.Approved,
+            500m,
+            500m,
+            0m,
+            [fixture.WorkerA, fixture.WorkerB],
+            isDailyOperation: true,
+            calculatedEarningPerWorker: 125m);
+        await fixture.AddRecordAsync(
+            fixture.Primary,
+            fixture.Today,
+            StageProductionRecordStatus.Approved,
+            500m,
+            500m,
+            0m,
+            [fixture.WorkerA, fixture.WorkerB],
+            isDailyOperation: true,
+            calculatedEarningPerWorker: 125m);
+        await fixture.AddRecordAsync(
+            fixture.Primary,
+            fixture.Today,
+            StageProductionRecordStatus.Approved,
+            500m,
+            500m,
+            0m,
+            [fixture.WorkerA, fixture.WorkerB],
+            isDailyOperation: true,
+            calculatedEarningPerWorker: 125m);
+
+        var incomplete = await fixture.CreateScopeAsync("INCOMPLETE");
+        await fixture.AddRecordAsync(incomplete, fixture.Today, StageProductionRecordStatus.Approved, 10m, 10m, 0m, []);
+        var reviewRequired = await fixture.CreateScopeAsync("REVIEW");
+        await fixture.AddRecordAsync(
+            reviewRequired,
+            fixture.Today,
+            StageProductionRecordStatus.Approved,
+            10m,
+            10m,
+            0m,
+            [fixture.WorkerA],
+            calculatedEarningPerWorker: 10m,
+            persistedTotalWorkerEarningsOverride: 20m);
+        var service = new ProductionFinancialReportService(fixture.Db);
+
+        var complete = await service.QueryAsync(new QuantitiesReportFilterRequest
+        {
+            From = fixture.Today,
+            To = fixture.Today,
+            FactoryId = fixture.Primary.FactoryId,
+            View = QuantitiesReportView.ByWorker
+        });
+        var incompleteResult = await service.QueryAsync(new QuantitiesReportFilterRequest
+        {
+            From = fixture.Today,
+            To = fixture.Today,
+            FactoryId = incomplete.FactoryId,
+            View = QuantitiesReportView.Details
+        });
+        var review = await service.QueryAsync(new QuantitiesReportFilterRequest
+        {
+            From = fixture.Today,
+            To = fixture.Today,
+            FactoryId = reviewRequired.FactoryId,
+            View = QuantitiesReportView.Details
+        });
+
+        Assert.True(complete.IsSuccess);
+        Assert.Equal(500m, complete.Value!.Summary.TotalPhysicalProducedQuantity);
+        Assert.Equal("Complete", complete.Value.Summary.FinancialDataStatus);
+        var workerA = Assert.Single(complete.Value.Rows, row => row.Source.WorkerId == fixture.WorkerA.Id);
+        Assert.Equal(3, workerA.StageCount);
+        Assert.Equal(375m, workerA.ProductionEarning);
+        Assert.True(incompleteResult.IsSuccess);
+        Assert.Equal("Incomplete", incompleteResult.Value!.Summary.FinancialDataStatus);
+        Assert.Null(incompleteResult.Value.Summary.TotalProductionEarnings);
+        Assert.True(review.IsSuccess);
+        Assert.Equal("ReviewRequired", review.Value!.Summary.FinancialDataStatus);
+        Assert.Null(review.Value.Summary.TotalStageProductionCost);
+    }
+
     private sealed class QuantitiesFixture : IAsyncDisposable
     {
         private QuantitiesFixture(SqliteConnection connection, AppDbContext db, Guid actorId, Worker workerA, Worker workerB, Worker workerC)
@@ -302,7 +442,9 @@ public sealed class ProductionQuantitiesReportServiceTests
             decimal rejected,
             IReadOnlyCollection<Worker> workers,
             bool isDailyOperation = false,
-            decimal? equivalentQuantityOverride = null)
+            decimal? equivalentQuantityOverride = null,
+            decimal calculatedEarningPerWorker = 0m,
+            decimal? persistedTotalWorkerEarningsOverride = null)
         {
             var orderKey = (scope.ProductionLineId, scope.ProductModelId, productionDate);
             if (!_orders.TryGetValue(orderKey, out var order))
@@ -379,7 +521,7 @@ public sealed class ProductionQuantitiesReportServiceTests
             var allocations = workers.Select(worker =>
             {
                 var allocation = new StageProductionWorkerAllocation(Guid.NewGuid(), worker.Id, worker.EmployeeCode, worker.FullName, null, null, null);
-                allocation.SetCalculatedAmounts(equivalentQuantity, 0m);
+                allocation.SetCalculatedAmounts(equivalentQuantity, calculatedEarningPerWorker);
                 return allocation;
             }).ToArray();
             record.ReplaceAllocations(allocations);
@@ -392,6 +534,11 @@ public sealed class ProductionQuantitiesReportServiceTests
 
             Db.Add(record);
             await Db.SaveChangesAsync();
+            if (persistedTotalWorkerEarningsOverride.HasValue)
+            {
+                Db.Entry(record).Property(nameof(StageProductionRecord.TotalWorkerEarnings)).CurrentValue = persistedTotalWorkerEarningsOverride.Value;
+                await Db.SaveChangesAsync();
+            }
         }
 
         public async ValueTask DisposeAsync()

@@ -10,7 +10,7 @@ public static class ProductionFinancialReportEndpoints
 {
     public static void MapProductionFinancialReportEndpoints(WebApplication app)
     {
-        app.MapGet("/api/reports/production/financial", async (
+        app.MapGet("/api/reports/production/financials", async (
                 DateOnly from,
                 DateOnly to,
                 IProductionFinancialReportService service,
@@ -50,6 +50,7 @@ public static class ProductionFinancialReportEndpoints
                     : ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.");
             })
             .RequireAuthorization()
+            .RequirePermission("reports.production.view")
             .RequirePermission("reports.financial.view")
             .RequireRateLimiting(ApiRateLimitPolicies.NormalRead)
             .WithTags("Production financial reports")

@@ -236,9 +236,10 @@ public sealed class ProductionCostRecordingHttpIntegrationTests
         Assert.Equal(HttpStatusCode.Forbidden, (await fixture.SendAsync(HttpMethod.Get, "/api/production/reports/daily?from=2026-07-13&to=2026-07-13", permissions: ["production.view"])).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await fixture.SendAsync(HttpMethod.Get, "/api/production/reports/daily?from=2026-07-13&to=2026-07-13", permissions: ["reports.financial.view"])).StatusCode);
 
-        const string financialPath = "/api/reports/production/financial?from=2026-07-13&to=2026-07-13&view=StageWorkers";
+        const string financialPath = "/api/reports/production/financials?from=2026-07-13&to=2026-07-13&view=StageWorkers";
         Assert.Equal(HttpStatusCode.Forbidden, (await fixture.SendAsync(HttpMethod.Get, financialPath, permissions: ["reports.production.view"])).StatusCode);
-        var financial = await fixture.SendAsync(HttpMethod.Get, financialPath, permissions: ["reports.financial.view"]);
+        Assert.Equal(HttpStatusCode.Forbidden, (await fixture.SendAsync(HttpMethod.Get, financialPath, permissions: ["reports.financial.view"])).StatusCode);
+        var financial = await fixture.SendAsync(HttpMethod.Get, financialPath, permissions: ["reports.production.view", "reports.financial.view"]);
         Assert.Equal(HttpStatusCode.OK, financial.StatusCode);
         var financialJson = await financial.Content.ReadAsStringAsync();
         Assert.Contains("totalProductionEarnings", financialJson, StringComparison.Ordinal);
@@ -285,8 +286,8 @@ public sealed class ProductionCostRecordingHttpIntegrationTests
 
         var response = await fixture.SendAsync(
             HttpMethod.Get,
-            "/api/reports/production/financial?from=2026-07-13&to=2026-07-13&view=StageWorkers",
-            permissions: ["reports.financial.view"]);
+            "/api/reports/production/financials?from=2026-07-13&to=2026-07-13&view=StageWorkers",
+            permissions: ["reports.production.view", "reports.financial.view"]);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var json = await response.Content.ReadAsStringAsync();
@@ -492,6 +493,7 @@ public sealed class ProductionCostRecordingHttpIntegrationTests
         Assert.Equal(HttpStatusCode.Unauthorized, (await fixture.SendAsync(HttpMethod.Get, quantitiesPath)).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await fixture.SendAsync(HttpMethod.Get, quantitiesPath, permissions: [])).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await fixture.SendAsync(HttpMethod.Get, quantitiesPath, permissions: ["production.view"])).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await fixture.SendAsync(HttpMethod.Get, quantitiesPath, permissions: ["reports.financial.view"])).StatusCode);
 
         var report = await fixture.SendAsync(HttpMethod.Get, quantitiesPath, permissions: ["reports.production.view"]);
         Assert.True(report.StatusCode == HttpStatusCode.OK, await report.Content.ReadAsStringAsync());
