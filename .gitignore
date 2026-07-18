@@ -25,6 +25,7 @@ obj/
 *.seed
 coverage/
 artifacts/test-data-bootstrap/
+artifacts/iis/
 
 # OS files
 .DS_Store

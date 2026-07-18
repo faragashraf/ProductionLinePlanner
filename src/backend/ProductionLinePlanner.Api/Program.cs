@@ -40,7 +40,10 @@ var allowedCorsOrigins = builder.Configuration
     .Get<string[]>()?
     .Where(origin => !string.IsNullOrWhiteSpace(origin))
     .Select(origin => origin.Trim())
-    .Where(origin => builder.Environment.IsDevelopment() || origin.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+    .Where(origin => builder.Environment.IsDevelopment()
+        || origin.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
+        || (builder.Configuration.GetValue("Cors:AllowInsecureHttpOrigins", false)
+            && origin.StartsWith("http://", StringComparison.OrdinalIgnoreCase)))
     .Distinct(StringComparer.OrdinalIgnoreCase)
     .ToArray() ?? Array.Empty<string>();
 var allowedMethods = builder.Configuration
@@ -50,6 +53,8 @@ var allowedHeaders = builder.Configuration
     .GetSection("Cors:AllowedHeaders")
     .Get<string[]>() ?? ["Accept", "Content-Type", "Authorization", "X-Requested-With"];
 var corsAllowCredentials = builder.Configuration.GetValue("Cors:AllowCredentials", false);
+var enableHsts = builder.Configuration.GetValue("Hosting:EnableHsts", !builder.Environment.IsDevelopment());
+var enableHttpsRedirection = builder.Configuration.GetValue("Hosting:EnableHttpsRedirection", true);
 var rateLimitWindowSeconds = Math.Max(15, builder.Configuration.GetValue("Security:RateLimit:WindowSeconds", 60));
 var rateLimitPermitLimit = Math.Max(1, builder.Configuration.GetValue("Security:RateLimit:PermitLimit", 120));
 var criticalProductionPermitLimit = Math.Max(1, builder.Configuration.GetValue("Security:RateLimit:CriticalProductionPermitLimit", rateLimitPermitLimit));
@@ -259,12 +264,15 @@ if (app.Environment.IsDevelopment())
 
 app.UseExceptionHandler("/api/error");
 
-if (!app.Environment.IsDevelopment())
+if (enableHsts)
 {
     app.UseHsts();
 }
 
-app.UseHttpsRedirection();
+if (enableHttpsRedirection)
+{
+    app.UseHttpsRedirection();
+}
 app.UseCors(SecurityCorsPolicy);
 app.UseAuthentication();
 app.UsePreviewRequestRoutingDiagnostics();
@@ -276,7 +284,10 @@ app.Use(async (context, next) =>
     context.Response.Headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
     context.Response.Headers["Permissions-Policy"] =
         "camera=(), microphone=(), geolocation=(), payment=(), usb=(), magnetometer=(), gyroscope=()";
-    context.Response.Headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload";
+    if (enableHsts)
+    {
+        context.Response.Headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload";
+    }
     await next();
 });
 app.UseAuthorization();
