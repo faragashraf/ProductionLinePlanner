@@ -11,6 +11,7 @@ import {
   DailyProductionStageInput,
   DailyProductionWorker,
   DailyProductionWorkerInput,
+  ProductionWorkerAllocation,
   ProductionCostRecordingApiService
 } from '../../core/services/production-cost-recording-api.service';
 import { FactoryItem, ManufacturingMasterDataApiService, ProductModelItem, ProductionLineOption } from '../../core/services/manufacturing-master-data-api.service';
@@ -26,10 +27,72 @@ type EditableDailyStage = Omit<DailyProductionStage, 'workers'> & {
 type EditableDailyWorker = DailyProductionWorker & {
   includedInProduction: boolean;
   percentage: number | null;
+  quantity: number | null;
   fixedAmount: number | null;
   notes: string;
   manualOverrideReason: string;
 };
+
+interface StageWorkerProjection {
+  workerId: string;
+  workerCode: string;
+  workerName: string;
+  participationType: string;
+  attendance: string;
+  readiness: string;
+  contributionStartsAtUtc: string | null;
+  contributionEndsAtUtc: string | null;
+  workerMinutes: number;
+  percentage: number | null;
+  allocatedQuantity: number;
+  calculatedEarning: number;
+  exclusionReason: string | null;
+  isCalculated: boolean;
+}
+
+interface StageAllocationProjection {
+  stageId: string;
+  stageCode: string;
+  stageName: string;
+  stageQuantity: number;
+  participantCount: number;
+  distribution: string;
+  totalEntitlement: number;
+  status: string;
+  statusTone: string;
+  warnings: readonly string[];
+  workers: StageWorkerProjection[];
+}
+
+interface WorkerStageProjection {
+  stageId: string;
+  stageCode: string;
+  stageName: string;
+  stageQuantity: number;
+  allocatedQuantity: number;
+  percentage: number | null;
+  workerMinutes: number;
+  calculatedEarning: number;
+  distribution: string;
+  participationType: string;
+  readiness: string;
+}
+
+interface WorkerAllocationProjection {
+  workerId: string;
+  workerCode: string;
+  workerName: string;
+  contributionStartsAtUtc: string | null;
+  contributionEndsAtUtc: string | null;
+  workerMinutes: number;
+  participationType: string;
+  stageCount: number;
+  visibleStageNames: string[];
+  hiddenStageCount: number;
+  totalAllocatedQuantity: number;
+  totalEntitlement: number;
+  stages: WorkerStageProjection[];
+}
 
 @Component({
   selector: 'app-daily-production-operations-page',
@@ -44,8 +107,22 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
   productModels: ProductModelItem[] = [];
   operations: DailyProductionOperations | null = null;
   stages: EditableDailyStage[] = [];
-  preview: DailyProductionPreview | null = null;
   savedDraft: DailyProductionDraft | null = null;
+  stageAllocationRows: StageAllocationProjection[] = [];
+  workerAllocationRows: WorkerAllocationProjection[] = [];
+  expandedStageRows: Record<string, boolean> = {};
+  expandedWorkerRows: Record<string, boolean> = {};
+
+  private previewValue: DailyProductionPreview | null = null;
+
+  get preview(): DailyProductionPreview | null {
+    return this.previewValue;
+  }
+
+  set preview(value: DailyProductionPreview | null) {
+    this.previewValue = value;
+    this.rebuildAllocationProjection();
+  }
 
   productionDate = this.egyptToday();
   selectedFactoryId = '';
@@ -320,7 +397,26 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
 
     stage.workers.forEach(worker => worker.percentage = null);
     shares.forEach(share => share.worker.percentage = share.units / 10_000);
+    this.synchronizeStageQuantities(stage);
     if (markChanged) this.stageChanged();
+  }
+
+  updateWorkerPercentage(stage: EditableDailyStage, worker: EditableDailyWorker, value: number | null): void {
+    worker.percentage = this.numericValue(value);
+    worker.quantity = this.isValidLineQuantity() && worker.percentage !== null
+      ? this.roundQuantity(this.lineQuantity! * worker.percentage / 100)
+      : null;
+    this.reconcileQuantityRounding(stage, worker);
+    this.stageChanged();
+  }
+
+  updateWorkerQuantity(stage: EditableDailyStage, worker: EditableDailyWorker, value: number | null): void {
+    worker.quantity = this.numericValue(value);
+    worker.percentage = this.isValidLineQuantity() && worker.quantity !== null
+      ? this.roundPercentage(worker.quantity / this.lineQuantity! * 100)
+      : null;
+    this.reconcilePercentageRounding(stage, worker);
+    this.stageChanged();
   }
 
   stageChanged(): void {
@@ -330,6 +426,7 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
   }
 
   lineQuantityChanged(): void {
+    this.stages.forEach(stage => this.synchronizeStageQuantities(stage));
     this.stageChanged();
   }
 
@@ -433,13 +530,31 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
     return stage.workers.reduce((total, worker) => total + worker.calculatedEarning, 0);
   }
 
+  get savedDraftTitle(): string {
+    if (!this.savedDraft) return '';
+    return `تم حفظ مسودة تشغيل يوم ${this.productionDateLabel(this.savedDraft.productionDate)} بنجاح.`;
+  }
+
+  get savedDraftDetail(): string {
+    return this.savedDraft ? `تم حفظ ${this.savedDraft.stages.length} مرحلة مع بيانات العمال والتكلفة.` : '';
+  }
+
   attendanceLabel(worker: DailyProductionWorker): string {
     return productionDisplayLabel(worker.attendanceStatus, 'لا توجد بصمة مصدر');
   }
 
   contributionTime(value: string | null | undefined): string {
     if (!value) return '—';
-    return new Intl.DateTimeFormat('ar-EG', { timeZone: 'Africa/Cairo', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(value));
+    return new Intl.DateTimeFormat('en-GB', { timeZone: 'Africa/Cairo', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(value));
+  }
+
+  contributionDuration(value: number | null | undefined): string {
+    const minutes = Math.max(0, Math.round(value ?? 0));
+    const hours = Math.floor(minutes / 60);
+    const remainingMinutes = minutes % 60;
+    if (!hours) return `${remainingMinutes} دقيقة`;
+    if (!remainingMinutes) return `${hours} ساعة`;
+    return `${hours} ساعة ${remainingMinutes} دقيقة`;
   }
 
   exclusionReasonLabel(reason: string | null | undefined): string {
@@ -453,8 +568,51 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
   }
 
   calculatedWorkerQuantity(stage: EditableDailyStage, worker: EditableDailyWorker): number {
-    if (worker.includedInProduction === false || !worker.isProductionReady || !this.lineQuantity || stage.compensationMode !== 'SharedPercentage' || !worker.percentage) return 0;
-    return Math.round(this.lineQuantity * worker.percentage / 100 * 1000) / 1000;
+    if (worker.includedInProduction === false || !worker.isProductionReady || !this.lineQuantity || stage.compensationMode !== 'SharedPercentage' || worker.percentage === null) return 0;
+    return worker.quantity ?? this.roundQuantity(this.lineQuantity * worker.percentage / 100);
+  }
+
+  stageAllocationPercentage(stage: EditableDailyStage): number {
+    return this.roundPercentage(this.allocationParticipants(stage).reduce((total, worker) => total + (worker.percentage ?? 0), 0));
+  }
+
+  stageAllocationQuantity(stage: EditableDailyStage): number {
+    return this.roundQuantity(this.allocationParticipants(stage).reduce((total, worker) => total + (worker.quantity ?? 0), 0));
+  }
+
+  stageIncludedWorkerCount(stage: EditableDailyStage): number {
+    return this.allocationParticipants(stage).length;
+  }
+
+  stageSummaryCost(stage: EditableDailyStage): number | null {
+    return this.stagePreview(stage.productModelStageId)?.stageCost ?? null;
+  }
+
+  stageAllocationStatusLabel(stage: EditableDailyStage): string {
+    if (stage.compensationMode !== 'SharedPercentage') return this.stageStatusLabel(stage);
+    if (!this.isValidLineQuantity()) return 'أدخل كمية الخط';
+    return this.stageAllocationError(stage) || 'التوزيع متوازن';
+  }
+
+  stageAllocationStatusTone(stage: EditableDailyStage): string {
+    return this.stageAllocationStatusLabel(stage) === 'التوزيع متوازن' ? 'ready' : 'warning';
+  }
+
+  workerAllocationError(stage: EditableDailyStage, worker: EditableDailyWorker): string {
+    if (stage.compensationMode !== 'SharedPercentage' || worker.includedInProduction === false || !worker.isProductionReady) return '';
+    if (worker.percentage === null || worker.percentage <= 0 || worker.percentage > 100) return 'النسبة يجب أن تكون أكبر من 0 ولا تتجاوز 100٪.';
+    if (worker.quantity === null || worker.quantity <= 0) return 'أدخل كمية صحيحة للعامل.';
+    if (this.isValidLineQuantity() && worker.quantity > this.lineQuantity! + .001) return 'كمية العامل لا يمكن أن تتجاوز كمية المرحلة.';
+    return '';
+  }
+
+  stageAllocationError(stage: EditableDailyStage): string {
+    if (stage.compensationMode !== 'SharedPercentage' || !this.isValidLineQuantity()) return '';
+    const participants = this.allocationParticipants(stage);
+    if (participants.some(worker => this.workerAllocationError(stage, worker))) return 'راجع قيم العمال';
+    if (Math.abs(this.stageAllocationPercentage(stage) - 100) > .0001) return 'مجموع النسب يجب أن يساوي 100٪';
+    if (Math.abs(this.stageAllocationQuantity(stage) - this.lineQuantity!) > .001) return 'مجموع الكميات يجب أن يساوي كمية المرحلة';
+    return '';
   }
 
   dailyStaffingLabel(worker: EditableDailyWorker): string {
@@ -473,8 +631,8 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
     return worker.attendanceStatus === 'Absent' || worker.exclusionReason === 'Absent' ? 'critical' : 'warning';
   }
 
-  trackById(_: number, item: { productModelStageId?: string; workerId?: string; id?: string }): string {
-    return item.productModelStageId ?? item.workerId ?? item.id ?? String(_);
+  trackById(_: number, item: { productModelStageId?: string; stageId?: string; workerId?: string; id?: string }): string {
+    return item.productModelStageId ?? item.stageId ?? item.workerId ?? item.id ?? String(_);
   }
 
   private loadFactories(): void {
@@ -528,6 +686,7 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
       ...worker,
       includedInProduction,
       percentage: worker.suggestedPercentage ?? null,
+      quantity: null,
       fixedAmount: null,
       notes: '',
       manualOverrideReason: ''
@@ -543,9 +702,8 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
       const participants = stage.workers.filter(worker => worker.includedInProduction !== false && worker.isProductionReady);
       if (!participants.length) messages.push(`${stage.stageCode}: لا يوجد عامل جاهز محتسب في تشغيل هذه المرحلة.`);
       if (stage.compensationMode === 'SharedPercentage' && participants.length) {
-        const invalid = participants.some(worker => worker.percentage === null || worker.percentage <= 0);
-        const total = participants.reduce((sum, worker) => sum + (worker.percentage ?? 0), 0);
-        if (invalid || Math.abs(total - 100) > 0.000001) messages.push(`${stage.stageCode}: يجب أن يساوي مجموع نسب العمال 100٪ تمامًا.`);
+        const allocationError = this.stageAllocationError(stage);
+        if (allocationError) messages.push(`${stage.stageCode}: ${allocationError}.`);
       }
       if (stage.compensationMode === 'FixedAmount' && participants.some(worker => worker.fixedAmount === null || worker.fixedAmount < 0)) {
         messages.push(`${stage.stageCode}: أدخل قيمة ثابتة صالحة لكل عامل.`);
@@ -605,6 +763,7 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
         worker.includedInProduction = true;
         worker.isDailyOverride = worker.isAssignedWorker === false || worker.isDailyOverride === true;
         worker.percentage = allocation.percentage ?? null;
+        worker.quantity = allocation.inputQuantity ?? null;
         worker.fixedAmount = allocation.fixedAmount ?? null;
         worker.notes = allocation.notes ?? '';
         worker.manualOverrideReason = allocation.manualOverrideReason ?? '';
@@ -612,11 +771,209 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
       stage.workers = this.uniqueWorkers(stage.workers);
     });
     this.lineQuantity = draft.lineQuantity;
+    this.stages.forEach(stage => this.synchronizeStageQuantities(stage));
     this.savedDraft = draft;
+  }
+
+  private allocationParticipants(stage: EditableDailyStage): EditableDailyWorker[] {
+    return stage.workers.filter(worker => worker.includedInProduction !== false && worker.isProductionReady);
+  }
+
+  private synchronizeStageQuantities(stage: EditableDailyStage): void {
+    if (stage.compensationMode !== 'SharedPercentage') return;
+    const participants = this.allocationParticipants(stage);
+    participants.forEach(worker => {
+      worker.quantity = this.isValidLineQuantity() && worker.percentage !== null
+        ? this.roundQuantity(this.lineQuantity! * worker.percentage / 100)
+        : null;
+    });
+    const lastParticipant = participants.at(-1);
+    if (lastParticipant) this.reconcileQuantityRounding(stage, lastParticipant);
+  }
+
+  private reconcileQuantityRounding(stage: EditableDailyStage, editedWorker: EditableDailyWorker): void {
+    if (!this.isValidLineQuantity() || editedWorker.percentage === null) return;
+    const participants = this.allocationParticipants(stage);
+    const totalPercentage = participants.reduce((total, worker) => total + (worker.percentage ?? 0), 0);
+    if (Math.abs(totalPercentage - 100) > .0001) return;
+    const otherQuantity = participants
+      .filter(worker => worker.workerId !== editedWorker.workerId)
+      .reduce((total, worker) => total + (worker.quantity ?? 0), 0);
+    editedWorker.quantity = this.roundQuantity(this.lineQuantity! - otherQuantity);
+  }
+
+  private reconcilePercentageRounding(stage: EditableDailyStage, editedWorker: EditableDailyWorker): void {
+    if (!this.isValidLineQuantity() || editedWorker.quantity === null) return;
+    const participants = this.allocationParticipants(stage);
+    const totalQuantity = participants.reduce((total, worker) => total + (worker.quantity ?? 0), 0);
+    if (Math.abs(totalQuantity - this.lineQuantity!) > .001) return;
+    const otherPercentage = participants
+      .filter(worker => worker.workerId !== editedWorker.workerId)
+      .reduce((total, worker) => total + (worker.percentage ?? 0), 0);
+    editedWorker.percentage = this.roundPercentage(100 - otherPercentage);
+  }
+
+  private numericValue(value: number | null): number | null {
+    if (value === null || value === undefined || value === ('' as unknown as number)) return null;
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : null;
+  }
+
+  private isValidLineQuantity(): boolean {
+    return this.lineQuantity !== null && Number.isFinite(this.lineQuantity) && this.lineQuantity > 0;
+  }
+
+  private roundPercentage(value: number): number {
+    return Math.round((value + Number.EPSILON) * 10_000) / 10_000;
+  }
+
+  private roundQuantity(value: number): number {
+    return Math.round((value + Number.EPSILON) * 1_000) / 1_000;
   }
 
   private uniqueWorkers<T extends DailyProductionWorker>(workers: readonly T[]): T[] {
     return [...new Map(workers.map(worker => [worker.workerId, worker])).values()];
+  }
+
+  workerOverviewStatus(worker: StageWorkerProjection): string {
+    if (worker.isCalculated) return 'جاهز';
+    const attendance = worker.attendance.trim();
+    return attendance.includes('غائب') || attendance.includes('غياب') ? 'غائب' : 'غير جاهز';
+  }
+
+  private rebuildAllocationProjection(): void {
+    if (!this.previewValue) {
+      this.stageAllocationRows = [];
+      this.workerAllocationRows = [];
+      this.expandedStageRows = {};
+      this.expandedWorkerRows = {};
+      return;
+    }
+
+    const currentStages = new Map(this.stages.map(stage => [stage.productModelStageId, stage]));
+    const activeWorkers = new Map((this.operations?.activeWorkers ?? []).map(worker => [worker.workerId, worker]));
+    this.stageAllocationRows = this.previewValue.stages.map(previewStage => {
+      const currentStage = currentStages.get(previewStage.productModelStageId);
+      const currentWorkers = new Map((currentStage?.workers ?? []).map(worker => [worker.workerId, worker]));
+      const calculatedWorkers = new Map(previewStage.workers.map(worker => [worker.workerId, worker]));
+      const workerIds = [...new Set([
+        ...(currentStage?.workers ?? []).map(worker => worker.workerId),
+        ...previewStage.workers.map(worker => worker.workerId)
+      ])];
+      const workers = workerIds
+        .map(workerId => this.projectStageWorker(
+          workerId,
+          currentWorkers.get(workerId) ?? activeWorkers.get(workerId),
+          calculatedWorkers.get(workerId)
+        ))
+        .filter(worker => this.hasValidWorkerIdentity(worker));
+
+      return {
+        stageId: previewStage.productModelStageId,
+        stageCode: previewStage.stageCode,
+        stageName: previewStage.stageName,
+        stageQuantity: previewStage.stageQuantity,
+        participantCount: workers.filter(worker => worker.isCalculated).length,
+        distribution: this.compensationModeLabel(previewStage.compensationMode),
+        totalEntitlement: this.roundMoney(workers.reduce((total, worker) => total + worker.calculatedEarning, 0)),
+        status: currentStage ? this.stageStatusLabel(currentStage) : (previewStage.warnings.length ? 'تحتاج مراجعة' : 'جاهزة'),
+        statusTone: currentStage ? this.stageStatusTone(currentStage) : (previewStage.warnings.length ? 'warning' : 'ready'),
+        warnings: previewStage.warnings,
+        workers
+      };
+    });
+
+    const workerTotals = new Map(this.previewValue.workerTotals.map(worker => [worker.workerId, worker.totalEntitlement]));
+    const workerRows = new Map<string, WorkerAllocationProjection>();
+    this.stageAllocationRows.forEach(stage => stage.workers.filter(worker => worker.isCalculated).forEach(worker => {
+      const row = workerRows.get(worker.workerId) ?? {
+        workerId: worker.workerId,
+        workerCode: worker.workerCode,
+        workerName: worker.workerName,
+        contributionStartsAtUtc: worker.contributionStartsAtUtc,
+        contributionEndsAtUtc: worker.contributionEndsAtUtc,
+        workerMinutes: worker.workerMinutes,
+        participationType: worker.participationType,
+        stageCount: 0,
+        visibleStageNames: [],
+        hiddenStageCount: 0,
+        totalAllocatedQuantity: 0,
+        totalEntitlement: workerTotals.get(worker.workerId) ?? 0,
+        stages: []
+      };
+      row.stages.push({
+        stageId: stage.stageId,
+        stageCode: stage.stageCode,
+        stageName: stage.stageName,
+        stageQuantity: stage.stageQuantity,
+        allocatedQuantity: worker.allocatedQuantity,
+        percentage: worker.percentage,
+        workerMinutes: worker.workerMinutes,
+        calculatedEarning: worker.calculatedEarning,
+        distribution: stage.distribution,
+        participationType: worker.participationType,
+        readiness: worker.readiness
+      });
+      workerRows.set(worker.workerId, row);
+    }));
+
+    this.workerAllocationRows = [...workerRows.values()].map(worker => {
+      const stageNames = worker.stages.map(stage => stage.stageName);
+      return {
+        ...worker,
+        stageCount: worker.stages.length,
+        visibleStageNames: stageNames.slice(0, 2),
+        hiddenStageCount: Math.max(0, stageNames.length - 2),
+        totalAllocatedQuantity: this.roundQuantity(worker.stages.reduce((total, stage) => total + stage.allocatedQuantity, 0)),
+        totalEntitlement: workerTotals.get(worker.workerId) ?? this.roundMoney(worker.stages.reduce((total, stage) => total + stage.calculatedEarning, 0))
+      };
+    });
+  }
+
+  private projectStageWorker(
+    workerId: string,
+    worker: DailyProductionWorker | undefined,
+    allocation: ProductionWorkerAllocation | undefined
+  ): StageWorkerProjection {
+    return {
+      workerId: workerId.trim(),
+      workerCode: (worker?.workerCode ?? allocation?.workerCode ?? '').trim(),
+      workerName: (worker?.workerName ?? allocation?.workerName ?? '').trim(),
+      participationType: this.participationTypeLabel(worker),
+      attendance: worker ? this.attendanceLabel(worker) : '—',
+      readiness: allocation ? 'جاهز ومحتسب' : 'غير جاهز وغير محتسب',
+      contributionStartsAtUtc: worker?.contributionStartsAtUtc ?? null,
+      contributionEndsAtUtc: worker?.contributionEndsAtUtc ?? null,
+      workerMinutes: worker?.workerMinutes ?? 0,
+      percentage: allocation?.percentage ?? null,
+      allocatedQuantity: allocation?.equivalentQuantity ?? 0,
+      calculatedEarning: allocation?.calculatedEarning ?? 0,
+      exclusionReason: worker?.exclusionReason ?? null,
+      isCalculated: !!allocation
+    };
+  }
+
+  private hasValidWorkerIdentity(worker: StageWorkerProjection): boolean {
+    return !!worker.workerId && !!worker.workerCode && !!worker.workerName;
+  }
+
+  private participationTypeLabel(worker: DailyProductionWorker | undefined): string {
+    if (worker?.isDailyOverride) return 'إضافة يومية';
+    if ((worker?.effectiveAssignmentType ?? '').toLocaleLowerCase().includes('temporary')) return 'تعيين مؤقت';
+    return 'تسكين أساسي';
+  }
+
+  private productionDateLabel(value: string): string {
+    return new Intl.DateTimeFormat('ar-EG', {
+      timeZone: 'Africa/Cairo',
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric'
+    }).format(new Date(`${value}T12:00:00+03:00`));
+  }
+
+  private roundMoney(value: number): number {
+    return Math.round((value + Number.EPSILON) * 10_000) / 10_000;
   }
 
   private invalidatePreview(incrementRevision = true): void {

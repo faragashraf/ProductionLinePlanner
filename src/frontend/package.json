@@ -10,7 +10,8 @@
     "start:full": "concurrently -k -n API,WEB \"npm run start:api\" \"npm run start:web\"",
     "build": "ng build",
     "watch": "ng build --watch --configuration development",
-    "test": "ng test"
+    "test": "ng test",
+    "test:visual": "playwright test --config=playwright.config.ts"
   },
   "private": true,
   "dependencies": {
@@ -35,14 +36,15 @@
     "@angular-devkit/build-angular": "^17.3.12",
     "@angular/cli": "^17.3.12",
     "@angular/compiler-cli": "^17.3.0",
+    "@playwright/test": "^1.61.1",
     "@types/jasmine": "~5.1.0",
+    "concurrently": "^9.2.1",
     "jasmine-core": "~5.1.0",
     "karma": "~6.4.0",
     "karma-chrome-launcher": "~3.2.0",
     "karma-coverage": "~2.2.0",
     "karma-jasmine": "~5.1.0",
     "karma-jasmine-html-reporter": "~2.1.0",
-    "typescript": "~5.4.2",
-    "concurrently": "^9.2.1"
+    "typescript": "~5.4.2"
   }
 }

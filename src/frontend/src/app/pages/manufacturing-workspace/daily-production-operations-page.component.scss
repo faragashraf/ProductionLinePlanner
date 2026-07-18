@@ -1,6 +1,8 @@
 .daily-production-operations {
   display: grid;
   gap: var(--plp-space-16);
+  min-inline-size: 0;
+  overflow-x: clip;
 }
 
 .daily-production-operations__context,
@@ -11,8 +13,7 @@
 }
 
 .daily-production-operations__context {
-  gap: var(--plp-space-12);
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(12, minmax(0, 1fr));
 }
 
 .daily-production-operations label,
@@ -24,10 +25,27 @@
   gap: var(--plp-space-4);
 }
 
+.daily-production-operations__context-field { grid-column: span 4; }
+
+.daily-production-operations__context-field--date,
+.daily-production-operations__context-field--factory {
+  grid-column: span 3;
+}
+
+.daily-production-operations__context-field--attendance {
+  grid-column: span 6;
+}
+
 .daily-production-operations input,
 .daily-production-operations select {
   inline-size: 100%;
   min-inline-size: 0;
+}
+
+.daily-production-operations__workspace {
+  align-items: stretch;
+  grid-template-columns: 1fr;
+  overflow: visible;
 }
 
 .daily-production-operations small,
@@ -67,6 +85,14 @@
   margin-block-end: var(--plp-space-12);
 }
 
+.daily-production-operations__workspace,
+.daily-production-operations__detail-panel,
+.daily-production-operations__detail-shell,
+.daily-production-operations__stage-list,
+.daily-production-operations__worker-list {
+  min-inline-size: 0;
+}
+
 .daily-production-operations__stage {
   color: var(--plp-color-text);
   cursor: pointer;
@@ -78,10 +104,6 @@
 .daily-production-operations__stage.is-selected {
   background: var(--plp-color-primary-soft);
   border-color: var(--plp-color-primary);
-}
-
-.daily-production-operations__worker-list {
-  margin-block: var(--plp-space-16);
 }
 
 .daily-production-operations__worker {
@@ -100,18 +122,14 @@
   flex: 1 1 16rem;
 }
 
-.daily-production-operations__stage-actions {
-  margin-block-start: var(--plp-space-16);
-}
-
 .daily-production-operations__stage-actions select,
 .daily-production-operations__final-actions > span {
   flex: 1 1 14rem;
 }
 
-.daily-production-operations__stage-preview {
-  display: grid;
-  gap: var(--plp-space-8);
+.daily-production-operations__stage-header--compact {
+  border-block-end: var(--plp-border-muted);
+  padding-block-end: var(--plp-space-8);
 }
 
 .daily-production-operations__final-entry {
@@ -129,24 +147,50 @@
   margin-block-start: var(--plp-space-16);
 }
 
-.daily-production-operations__preview-stage [plp-entity-value] small {
-  font-size: var(--plp-type-caption);
-  font-weight: var(--plp-font-weight-medium);
-}
+@media (min-width: 1024px) {
+  .daily-production-operations__workspace {
+    grid-template-columns: minmax(17rem, .72fr) minmax(0, 1.68fr);
+  }
 
-@media (min-width: 768px) {
-  .daily-production-operations__workspace.plp-bounded-workspace--tablet {
-    grid-template-columns: minmax(18rem, 0.9fr) minmax(25rem, 1.4fr);
+  .daily-production-operations__stage-panel,
+  .daily-production-operations__detail-panel {
+    block-size: 52rem;
   }
 }
 
-@media (min-width: 600px) and (max-width: 767px) {
+@media (min-width: 1280px) {
+  .daily-production-operations__workspace {
+    grid-template-columns: minmax(19rem, .68fr) minmax(0, 1.82fr);
+  }
+
+  .daily-production-operations__stage-panel,
+  .daily-production-operations__detail-panel {
+    block-size: 54rem;
+  }
+}
+
+@media (min-width: 600px) and (max-width: 1023px) {
   .daily-production-operations__context {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .daily-production-operations__context-field,
+  .daily-production-operations__context-field--date,
+  .daily-production-operations__context-field--attendance,
+  .daily-production-operations__context-field--factory {
+    grid-column: span 1;
+  }
+
   .daily-production-operations__workspace {
     grid-template-columns: 1fr;
+  }
+
+  .daily-production-operations__stage-panel {
+    block-size: 22rem;
+  }
+
+  .daily-production-operations__detail-panel {
+    block-size: 54rem;
   }
 }
 
@@ -158,7 +202,35 @@
   }
 
   .daily-production-operations__stage-list {
-    max-block-size: 65dvh;
+    max-block-size: 20rem;
+  }
+
+  .daily-production-operations__context-field,
+  .daily-production-operations__context-field--date,
+  .daily-production-operations__context-field--attendance,
+  .daily-production-operations__context-field--factory {
+    grid-column: auto;
+  }
+
+  .daily-production-operations__detail-panel {
+    block-size: auto;
+  }
+
+  .daily-production-operations__worker-list {
+    max-block-size: 32rem;
+  }
+
+  .daily-production-operations__allocation-editor,
+  .daily-production-operations__stage-summary {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .daily-production-operations__allocation-link {
+    display: none;
+  }
+
+  .daily-production-operations__allocation-error {
+    grid-column: 1 / -1;
   }
 
   .daily-production-operations__final-actions {
