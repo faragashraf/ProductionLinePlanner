@@ -42,7 +42,8 @@ export const PERMISSIONS = {
     approve: 'production.approve'
   },
   reports: {
-    productionView: 'reports.production.view'
+    productionView: 'reports.production.view',
+    financialView: 'reports.financial.view'
   },
   users: {
     view: 'users.view',

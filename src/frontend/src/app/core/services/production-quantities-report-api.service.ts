@@ -88,42 +88,48 @@ export interface QuantitiesReportResult {
   sortDirection: QuantitiesReportSortDirection;
 }
 
+export function buildProductionReportQuery(filter: QuantitiesReportFilter): URLSearchParams {
+  const query = new URLSearchParams({
+    from: filter.from,
+    to: filter.to,
+    view: filter.view,
+    page: String(filter.page),
+    pageSize: String(filter.pageSize),
+    sortDirection: filter.sortDirection
+  });
+
+  optionalReportFilter(query, 'factoryId', filter.factoryId);
+  optionalReportFilter(query, 'productionLineId', filter.productionLineId);
+  optionalReportFilter(query, 'productModelId', filter.productModelId);
+  optionalReportFilter(query, 'productionOrderId', filter.productionOrderId);
+  optionalReportFilter(query, 'productModelStageId', filter.productModelStageId);
+  optionalReportFilter(query, 'workerId', filter.workerId);
+  optionalReportFilter(query, 'status', filter.status);
+  optionalReportFilter(query, 'sortBy', filter.sortBy);
+
+  return query;
+}
+
+export function unwrapProductionReportResponse<T>(response: ApiResponse<T>, fallbackMessage: string): T {
+  if (!response.success || response.data === undefined || response.data === null) {
+    throw new Error(response.error?.message || fallbackMessage);
+  }
+  return response.data;
+}
+
 @Injectable({ providedIn: 'root' })
 export class ProductionQuantitiesReportApiService {
   constructor(private readonly http: HttpClient) {}
 
   query(filter: QuantitiesReportFilter): Observable<QuantitiesReportResult> {
-    const query = new URLSearchParams({
-      from: filter.from,
-      to: filter.to,
-      view: filter.view,
-      page: String(filter.page),
-      pageSize: String(filter.pageSize),
-      sortDirection: filter.sortDirection
-    });
-
-    this.optional(query, 'factoryId', filter.factoryId);
-    this.optional(query, 'productionLineId', filter.productionLineId);
-    this.optional(query, 'productModelId', filter.productModelId);
-    this.optional(query, 'productionOrderId', filter.productionOrderId);
-    this.optional(query, 'productModelStageId', filter.productModelStageId);
-    this.optional(query, 'workerId', filter.workerId);
-    this.optional(query, 'status', filter.status);
-    this.optional(query, 'sortBy', filter.sortBy);
+    const query = buildProductionReportQuery(filter);
 
     return this.http
       .get<ApiResponse<QuantitiesReportResult>>(buildApiUrl(`/api/reports/production/quantities?${query.toString()}`))
-      .pipe(timeout(STANDARD_API_TIMEOUT_MS), map(response => this.unwrap(response)));
+      .pipe(timeout(STANDARD_API_TIMEOUT_MS), map(response => unwrapProductionReportResponse(response, 'تعذر تحميل تقرير الكميات.')));
   }
+}
 
-  private optional(query: URLSearchParams, key: string, value: string | undefined): void {
-    if (value) query.set(key, value);
-  }
-
-  private unwrap<T>(response: ApiResponse<T>): T {
-    if (!response.success || response.data === undefined || response.data === null) {
-      throw new Error(response.error?.message || 'تعذر تحميل تقرير الكميات.');
-    }
-    return response.data;
-  }
+function optionalReportFilter(query: URLSearchParams, key: string, value: string | undefined): void {
+  if (value) query.set(key, value);
 }

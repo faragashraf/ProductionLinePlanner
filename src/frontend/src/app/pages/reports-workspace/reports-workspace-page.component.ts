@@ -1,10 +1,13 @@
 import { HttpErrorResponse } from '@angular/common/http';
 import { Component, OnDestroy, OnInit } from '@angular/core';
-import { Subject, catchError, finalize, forkJoin, of, takeUntil } from 'rxjs';
+import { Observable, Subject, catchError, finalize, forkJoin, of, takeUntil } from 'rxjs';
 import { FactoryItem, ManufacturingMasterDataApiService, ModelStageItem, ProductModelItem, ProductionLineOption } from '../../core/services/manufacturing-master-data-api.service';
 import { ProductionOrder, ProductionCostRecordingApiService, WorkerOption } from '../../core/services/production-cost-recording-api.service';
-import { ProductionQuantitiesReportApiService, QuantitiesReportResult, QuantitiesReportRow, QuantitiesReportSortBy, QuantitiesReportView } from '../../core/services/production-quantities-report-api.service';
-import { ReportsWorkspaceFilters, ReportsWorkspaceViewOption } from './reports-workspace.models';
+import { ProductionFinancialReportApiService } from '../../core/services/production-financial-report-api.service';
+import { ProductionQuantitiesReportApiService, QuantitiesReportRow, QuantitiesReportSortBy, QuantitiesReportView } from '../../core/services/production-quantities-report-api.service';
+import { PERMISSIONS } from '../../core/config/permission-identifiers';
+import { PermissionService } from '../../core/services/permission.service';
+import { ReportPresentationMode, ReportsWorkspaceFilters, ReportsWorkspaceResult, ReportsWorkspaceViewOption } from './reports-workspace.models';
 import { ReportsWorkspaceStateService } from './reports-workspace-state.service';
 
 interface ReportsColumn {
@@ -37,8 +40,11 @@ export class ReportsWorkspacePageComponent implements OnInit, OnDestroy {
   stages: ModelStageItem[] = [];
   workers: WorkerOption[] = [];
   orders: ProductionOrder[] = [];
-  result: QuantitiesReportResult | null = null;
+  result: ReportsWorkspaceResult | null = null;
+  presentationMode: ReportPresentationMode = 'QuantitiesOnly';
   loading = false;
+  modeLoading = false;
+  modeMessage = '';
   lookupsLoading = false;
   stageLoading = false;
   error = '';
@@ -51,14 +57,18 @@ export class ReportsWorkspacePageComponent implements OnInit, OnDestroy {
   private readonly destroy$ = new Subject<void>();
 
   constructor(
-    private readonly reports: ProductionQuantitiesReportApiService,
+    private readonly quantitiesReports: ProductionQuantitiesReportApiService,
+    private readonly financialReports: ProductionFinancialReportApiService,
     private readonly masterData: ManufacturingMasterDataApiService,
     private readonly production: ProductionCostRecordingApiService,
-    private readonly state: ReportsWorkspaceStateService
+    private readonly state: ReportsWorkspaceStateService,
+    private readonly permissions: PermissionService
   ) {}
 
   ngOnInit(): void {
-    this.filters = this.state.restore(this.defaultFilters());
+    const restored = this.state.restore(this.defaultFilters(), this.canUseFinancialMode);
+    this.filters = restored.filters;
+    this.presentationMode = restored.presentationMode;
     this.loadLookups();
     if (this.filters.productModelId) this.loadStages(this.filters.productModelId);
   }
@@ -70,6 +80,22 @@ export class ReportsWorkspacePageComponent implements OnInit, OnDestroy {
 
   get rows(): QuantitiesReportRow[] {
     return this.result?.rows ?? [];
+  }
+
+  get canUseFinancialMode(): boolean {
+    return this.permissions.hasAll([PERMISSIONS.reports.productionView, PERMISSIONS.reports.financialView]);
+  }
+
+  get isFinancialMode(): boolean {
+    return this.presentationMode === 'QuantitiesAndFinancials';
+  }
+
+  get modeDescription(): string {
+    if (this.modeMessage) return this.modeMessage;
+    if (!this.canUseFinancialMode) return 'تحتاج صلاحية عرض القيم المالية لتفعيل هذا الوضع.';
+    return this.isFinancialMode
+      ? 'وضع القيم المالية مرتبط الآن بالعقد الآمن؛ ستُضاف امتدادات العرض في الجولة التالية.'
+      : 'يعرض هذا الوضع الكميات التشغيلية فقط دون قيم مالية.';
   }
 
   get columns(): readonly ReportsColumn[] {
@@ -142,7 +168,7 @@ export class ReportsWorkspacePageComponent implements OnInit, OnDestroy {
       return;
     }
     this.filters = { ...this.filters, page: 1, sortBy: undefined, sortDirection: 'Ascending' };
-    this.state.save(this.filters);
+    this.persistState();
     this.hasAppliedFilters = true;
     this.loadReport();
   }
@@ -158,13 +184,24 @@ export class ReportsWorkspacePageComponent implements OnInit, OnDestroy {
     this.errorTitle = '';
     this.loadState = 'idle';
     this.hasAppliedFilters = false;
+    this.presentationMode = 'QuantitiesOnly';
+    this.modeLoading = false;
+    this.modeMessage = '';
   }
 
   changeView(view: QuantitiesReportView): void {
     if (view === this.filters.view) return;
     this.filters = { ...this.filters, view, page: 1, sortBy: undefined, sortDirection: 'Ascending' };
-    this.state.save(this.filters);
+    this.persistState();
     if (this.hasAppliedFilters) this.loadReport();
+  }
+
+  changePresentationMode(mode: ReportPresentationMode): void {
+    if (mode === this.presentationMode || (mode === 'QuantitiesAndFinancials' && !this.canUseFinancialMode)) return;
+    this.presentationMode = mode;
+    this.modeMessage = '';
+    this.persistState();
+    if (this.hasAppliedFilters) this.loadReport(true);
   }
 
   refresh(): void {
@@ -239,16 +276,28 @@ export class ReportsWorkspacePageComponent implements OnInit, OnDestroy {
       .subscribe(stages => this.stages = stages.filter(stage => stage.isActive));
   }
 
-  private loadReport(): void {
+  private loadReport(preserveCurrentResult = false): void {
     if (!this.filters.from || !this.filters.to) return;
     const request = ++this.requestVersion;
+    const useFinancialProjection = this.isFinancialMode && this.canUseFinancialMode;
     this.loading = true;
+    this.modeLoading = preserveCurrentResult && this.result !== null;
     this.error = '';
     this.errorTitle = '';
-    this.result = null;
-    this.loadState = 'loading';
-    this.reports.query(this.filters)
-      .pipe(finalize(() => { if (request === this.requestVersion) this.loading = false; }), takeUntil(this.destroy$))
+    if (!this.modeLoading) {
+      this.result = null;
+      this.loadState = 'loading';
+    }
+    const reportRequest: Observable<ReportsWorkspaceResult> = useFinancialProjection
+      ? this.financialReports.query(this.filters)
+      : this.quantitiesReports.query(this.filters);
+    reportRequest
+      .pipe(finalize(() => {
+        if (request === this.requestVersion) {
+          this.loading = false;
+          this.modeLoading = false;
+        }
+      }), takeUntil(this.destroy$))
       .subscribe({
         next: result => {
           if (request !== this.requestVersion) return;
@@ -258,8 +307,15 @@ export class ReportsWorkspacePageComponent implements OnInit, OnDestroy {
         },
         error: (error: unknown) => {
           if (request !== this.requestVersion) return;
-          this.result = null;
           const status = error instanceof HttpErrorResponse ? error.status : (error as { status?: number })?.status;
+          if (status === 403 && useFinancialProjection) {
+            this.presentationMode = 'QuantitiesOnly';
+            this.modeMessage = 'تم الرجوع إلى الكميات فقط لأن صلاحية عرض القيم المالية غير متاحة.';
+            this.persistState();
+            this.loadReport(true);
+            return;
+          }
+          this.result = null;
           if (status === 401) {
             this.loadState = 'unauthorized';
             this.errorTitle = 'انتهت جلسة الدخول';
@@ -274,9 +330,15 @@ export class ReportsWorkspacePageComponent implements OnInit, OnDestroy {
           }
           this.loadState = 'error';
           this.errorTitle = 'تعذر تحميل التقرير';
-          this.error = 'تعذر تحميل تقرير الكميات. تحقق من الفلاتر والاتصال ثم أعد المحاولة.';
+          this.error = useFinancialProjection
+            ? 'تعذر تحميل تقرير القيم المالية. تحقق من الفلاتر والاتصال ثم أعد المحاولة.'
+            : 'تعذر تحميل تقرير الكميات. تحقق من الفلاتر والاتصال ثم أعد المحاولة.';
         }
       });
+  }
+
+  private persistState(): void {
+    this.state.save(this.filters, this.presentationMode, this.canUseFinancialMode);
   }
 
   private defaultFilters(): ReportsWorkspaceFilters {

@@ -1,5 +1,8 @@
 import { HttpErrorResponse } from '@angular/common/http';
 import { of, throwError } from 'rxjs';
+import { PERMISSIONS } from '../../core/config/permission-identifiers';
+import { PermissionService } from '../../core/services/permission.service';
+import { FinancialReportResult, ProductionFinancialReportApiService } from '../../core/services/production-financial-report-api.service';
 import { ProductionQuantitiesReportApiService, QuantitiesReportResult } from '../../core/services/production-quantities-report-api.service';
 import { ManufacturingMasterDataApiService } from '../../core/services/manufacturing-master-data-api.service';
 import { ProductionCostRecordingApiService } from '../../core/services/production-cost-recording-api.service';
@@ -44,8 +47,35 @@ describe('ReportsWorkspacePageComponent', () => {
     sortBy: 'ProductionDate',
     sortDirection: 'Ascending'
   };
+  const financialResult: FinancialReportResult = {
+    ...result,
+    summary: {
+      totalPhysicalProducedQuantity: 480,
+      totalPhysicalAcceptedQuantity: 450,
+      totalPhysicalRejectedQuantity: 30,
+      recordCount: 3,
+      stageCount: 2,
+      workerCount: 4,
+      totalProductionEarnings: 250,
+      totalStageProductionCost: 250,
+      averageProductionEarningPerWorker: 62.5,
+      averageCostPerPhysicalUnit: 0.52,
+      incompleteFinancialRecordCount: 0,
+      financialDataStatus: 'Complete',
+      currencyCode: 'EGP'
+    },
+    rows: result.rows.map(row => ({
+      ...row,
+      stageProductionCost: 250,
+      productionEarning: null,
+      compensationMode: 'SharedPercentage',
+      financialDataStatus: 'Complete'
+    }))
+  };
 
   let reports: jasmine.SpyObj<ProductionQuantitiesReportApiService>;
+  let financialReports: jasmine.SpyObj<ProductionFinancialReportApiService>;
+  let permissions: jasmine.SpyObj<PermissionService>;
   let state: ReportsWorkspaceStateService;
   let component: ReportsWorkspacePageComponent;
 
@@ -53,9 +83,14 @@ describe('ReportsWorkspacePageComponent', () => {
     localStorage.removeItem('plp.reports-workspace.filters.v1');
     reports = jasmine.createSpyObj<ProductionQuantitiesReportApiService>('ProductionQuantitiesReportApiService', ['query']);
     reports.query.and.returnValue(of(result));
+    financialReports = jasmine.createSpyObj<ProductionFinancialReportApiService>('ProductionFinancialReportApiService', ['query']);
+    financialReports.query.and.returnValue(of(financialResult));
+    permissions = jasmine.createSpyObj<PermissionService>('PermissionService', ['hasAll']);
+    permissions.hasAll.and.callFake(required => required.includes(PERMISSIONS.reports.financialView));
     state = new ReportsWorkspaceStateService();
     component = new ReportsWorkspacePageComponent(
       reports,
+      financialReports,
       {
         factories: () => of([]),
         allProductionLines: () => of([]),
@@ -66,7 +101,8 @@ describe('ReportsWorkspacePageComponent', () => {
         listWorkers: () => of([]),
         listOrders: () => of([])
       } as unknown as ProductionCostRecordingApiService,
-      state
+      state,
+      permissions
     );
   });
 
@@ -77,6 +113,7 @@ describe('ReportsWorkspacePageComponent', () => {
 
     expect(reports.query).not.toHaveBeenCalled();
     expect(component.loadState).toBe('idle');
+    expect(component.presentationMode).toBe('QuantitiesOnly');
     expect(component.filters.from).toMatch(/^\d{4}-\d{2}-01$/);
 
     component.applyFilters();
@@ -116,6 +153,49 @@ describe('ReportsWorkspacePageComponent', () => {
     expect(component.filters).toEqual(jasmine.objectContaining({ factoryId: '', productionLineId: '', status: 'Approved', view: 'Details', page: 1 }));
     expect(component.loadState).toBe('idle');
     expect(reports.query).toHaveBeenCalledTimes(1);
+  });
+
+  it('switches to the financial endpoint without losing applied filters, sorting, or pagination', () => {
+    component.ngOnInit();
+    component.onFiltersChange({ ...component.filters, factoryId: 'factory-1', workerId: 'worker-1' });
+    component.applyFilters();
+    component.onLazyLoad({ rows: 20, first: 20, sortField: 'StageCode', sortOrder: 1 });
+
+    component.changePresentationMode('QuantitiesAndFinancials');
+
+    expect(component.presentationMode).toBe('QuantitiesAndFinancials');
+    expect(financialReports.query).toHaveBeenCalledOnceWith(jasmine.objectContaining({
+      factoryId: 'factory-1', workerId: 'worker-1', page: 2, pageSize: 20, sortBy: 'StageCode', sortDirection: 'Ascending'
+    }));
+    expect(localStorage.getItem('plp.reports-workspace.filters.v1')).toContain('QuantitiesAndFinancials');
+    expect(component.result?.summary.totalPhysicalProducedQuantity).toBe(480);
+  });
+
+  it('keeps financial mode disabled and never requests the financial API without permission', () => {
+    permissions.hasAll.and.returnValue(false);
+    localStorage.setItem('plp.reports-workspace.filters.v1', JSON.stringify({ presentationMode: 'QuantitiesAndFinancials' }));
+
+    component.ngOnInit();
+    component.changePresentationMode('QuantitiesAndFinancials');
+
+    expect(component.canUseFinancialMode).toBeFalse();
+    expect(component.presentationMode).toBe('QuantitiesOnly');
+    expect(financialReports.query).not.toHaveBeenCalled();
+    expect(component.modeDescription).toContain('صلاحية عرض القيم المالية');
+  });
+
+  it('falls back to quantities with a clear message when financial access is rejected', () => {
+    financialReports.query.and.returnValue(throwError(() => new HttpErrorResponse({ status: 403 })));
+    component.ngOnInit();
+    component.applyFilters();
+    reports.query.calls.reset();
+
+    component.changePresentationMode('QuantitiesAndFinancials');
+
+    expect(financialReports.query).toHaveBeenCalled();
+    expect(component.presentationMode).toBe('QuantitiesOnly');
+    expect(component.modeMessage).toContain('تم الرجوع إلى الكميات فقط');
+    expect(reports.query).toHaveBeenCalledOnceWith(jasmine.objectContaining({ status: 'Approved', view: 'Details' }));
   });
 
   it('uses the quantity projection values without treating worker allocations as stage production', () => {

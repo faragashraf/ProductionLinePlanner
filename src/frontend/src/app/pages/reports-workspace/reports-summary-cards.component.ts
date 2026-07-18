@@ -1,5 +1,5 @@
 import { Component, Input } from '@angular/core';
-import { QuantitiesReportSummary } from '../../core/services/production-quantities-report-api.service';
+import { ReportsWorkspaceSummary } from './reports-workspace.models';
 
 @Component({
   selector: 'app-reports-summary-cards',
@@ -7,7 +7,7 @@ import { QuantitiesReportSummary } from '../../core/services/production-quantiti
   styleUrls: ['./reports-summary-cards.component.scss']
 })
 export class ReportsSummaryCardsComponent {
-  @Input() summary: QuantitiesReportSummary | null = null;
+  @Input() summary: ReportsWorkspaceSummary | null = null;
   @Input() loading = false;
 
   quantity(value: number | null | undefined): string {

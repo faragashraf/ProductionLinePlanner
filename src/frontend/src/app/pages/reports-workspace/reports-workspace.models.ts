@@ -1,4 +1,6 @@
-import { QuantitiesReportSortBy, QuantitiesReportSortDirection, QuantitiesReportStatus, QuantitiesReportView } from '../../core/services/production-quantities-report-api.service';
+import { QuantitiesReportRow, QuantitiesReportSortBy, QuantitiesReportSortDirection, QuantitiesReportStatus, QuantitiesReportView } from '../../core/services/production-quantities-report-api.service';
+
+export type ReportPresentationMode = 'QuantitiesOnly' | 'QuantitiesAndFinancials';
 
 export interface ReportsWorkspaceFilters {
   from: string;
@@ -22,4 +24,26 @@ export interface ReportsWorkspaceViewOption {
   label: string;
   description: string;
   icon: string;
+}
+
+export interface ReportsWorkspaceSummary {
+  totalPhysicalProducedQuantity: number;
+  totalPhysicalAcceptedQuantity: number;
+  totalPhysicalRejectedQuantity: number;
+  recordCount: number;
+  stageCount: number;
+  workerCount: number;
+}
+
+export interface ReportsWorkspaceResult {
+  summary: ReportsWorkspaceSummary;
+  rows: QuantitiesReportRow[];
+  page: number;
+  pageSize: number;
+  totalCount: number;
+  totalPages: number;
+  appliedStatus: string;
+  view: QuantitiesReportView;
+  sortBy: QuantitiesReportSortBy;
+  sortDirection: QuantitiesReportSortDirection;
 }
