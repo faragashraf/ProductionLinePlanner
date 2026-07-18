@@ -13,6 +13,8 @@ public sealed record CreateStageProductionRecordRequest(Guid ProductionOrderId, 
 public sealed record UpdateStageProductionRecordRequest(DateOnly ProductionDate, decimal ProducedQuantity, decimal AcceptedQuantity, decimal RejectedQuantity, Guid ConcurrencyToken, string? Notes, IReadOnlyCollection<WorkerAllocationRequest> Workers);
 public sealed record RecordActionRequest(Guid ConcurrencyToken);
 public sealed record CancelProductionApprovalRequest(Guid ConcurrencyToken, string Reason);
+public sealed record DailyStageApprovalRequest(Guid StageProductionRecordId, Guid ConcurrencyToken);
+public sealed record DailyProductionApprovalRequest(IReadOnlyCollection<DailyStageApprovalRequest> StageApprovals);
 
 /// <summary>
 /// A single physical line quantity is deliberately supplied once and expanded

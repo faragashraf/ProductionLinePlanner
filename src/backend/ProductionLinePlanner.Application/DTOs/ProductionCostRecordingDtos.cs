@@ -103,3 +103,9 @@ public sealed record DailyProductionDraftDto(
     decimal LineQuantity,
     bool WasAlreadySaved,
     IReadOnlyCollection<StageProductionRecordDto> Stages);
+
+public sealed record DailyProductionApprovalDto(
+    Guid ProductionOrderId,
+    string OrderStatus,
+    DateTime ApprovedAtUtc,
+    int ApprovedStageCount);

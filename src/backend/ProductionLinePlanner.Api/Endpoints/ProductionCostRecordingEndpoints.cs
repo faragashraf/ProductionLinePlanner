@@ -99,6 +99,30 @@ public static class ProductionCostRecordingEndpoints
             .RequirePermission("production.record")
             .RequireRateLimiting(ApiRateLimitPolicies.CriticalProductionWrite)
             .WithName("SaveDailyProductionDraft");
+        dailyOperations.MapPost("/{productionOrderId:guid}/approve", async (
+            Guid productionOrderId,
+            DailyProductionApprovalRequest request,
+            IProductionCostRecordingService service,
+            ICurrentUserService user,
+            CancellationToken ct) =>
+        {
+            if (productionOrderId == Guid.Empty)
+            {
+                return ApiResponse.Failure("ValidationError", "معرّف تشغيل اليوم مطلوب.", StatusCodes.Status400BadRequest);
+            }
+
+            if (request.StageApprovals is null || request.StageApprovals.Count == 0 ||
+                request.StageApprovals.Any(stage => stage.StageProductionRecordId == Guid.Empty || stage.ConcurrencyToken == Guid.Empty) ||
+                request.StageApprovals.Select(stage => stage.StageProductionRecordId).Distinct().Count() != request.StageApprovals.Count)
+            {
+                return ApiResponse.Failure("ValidationError", "يجب إرسال معرّف وتزامن كل مرحلة محفوظة لاعتماد تشغيل اليوم.", StatusCodes.Status400BadRequest);
+            }
+
+            return Results.Ok(ApiResponse.Success(await service.ApproveDailyOperationAsync(productionOrderId, request, RequireUser(user), ct)));
+        })
+            .RequirePermission("production.approve")
+            .RequireRateLimiting(ApiRateLimitPolicies.CriticalProductionWrite)
+            .WithName("ApproveDailyProductionOperation");
         // The generic workbook workflow is intentionally deferred for the first
         // real-data pilot. Keep the earlier capability dormant unless it is
         // deliberately enabled in a later release.

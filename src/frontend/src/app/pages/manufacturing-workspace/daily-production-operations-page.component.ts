@@ -11,6 +11,7 @@ import {
   DailyProductionStageInput,
   DailyProductionWorker,
   DailyProductionWorkerInput,
+  DailyStageApprovalInput,
   ProductionWorkerAllocation,
   ProductionCostRecordingApiService
 } from '../../core/services/production-cost-recording-api.service';
@@ -108,6 +109,7 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
   operations: DailyProductionOperations | null = null;
   stages: EditableDailyStage[] = [];
   savedDraft: DailyProductionDraft | null = null;
+  approving = false;
   stageAllocationRows: StageAllocationProjection[] = [];
   workerAllocationRows: WorkerAllocationProjection[] = [];
   expandedStageRows: Record<string, boolean> = {};
@@ -225,7 +227,28 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
   }
 
   get hasExistingDraft(): boolean {
-    return !!this.operations?.existingDraft;
+    return !!this.currentDailyDraft;
+  }
+
+  get isDailyOperationApproved(): boolean {
+    const draft = this.currentDailyDraft;
+    return !!draft && draft.stages.length > 0 && draft.stages.every(stage => stage.status === 'Approved');
+  }
+
+  get isDailyOperationReadOnly(): boolean {
+    const draft = this.currentDailyDraft;
+    return !!draft && draft.stages.some(stage => stage.status !== 'Draft');
+  }
+
+  get canApproveDailyOperation(): boolean {
+    const draft = this.currentDailyDraft;
+    return this.permissionsService.hasPermission(this.permissions.production.approve) &&
+      !!draft &&
+      draft.stages.length > 0 &&
+      draft.stages.every(stage => stage.status === 'Draft') &&
+      !this.operationsLoading &&
+      !this.saving &&
+      !this.approving;
   }
 
   get totalEnteredWorkers(): number {
@@ -298,7 +321,7 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
       });
   }
 
-  loadTodayOperations(): void {
+  loadTodayOperations(feedback?: { kind: 'success' | 'error'; message: string }): void {
     if (!this.canLoadOperations) {
       this.error = this.attendanceSyncedForDate !== this.productionDate
         ? 'نفّذ مزامنة الحضور يدويًا لتاريخ الإنتاج المحدد قبل تحميل تشغيل اليوم.'
@@ -332,7 +355,12 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
           this.invalidatePreview(false);
           if (operations.existingDraft) {
             this.applyExistingDraft(operations.existingDraft);
-            this.successMessage = 'تم تحميل مسودة اليوم المحفوظة فوق لقطة التسكين الحالية دون إعادة بنائها أو الكتابة فوقها.';
+            this.successMessage = feedback?.kind === 'success'
+              ? feedback.message
+              : 'تم تحميل مسودة اليوم المحفوظة فوق لقطة التسكين الحالية دون إعادة بنائها أو الكتابة فوقها.';
+          }
+          if (feedback?.kind === 'error') {
+            this.error = feedback.message;
           }
         },
         error: error => {
@@ -478,6 +506,48 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
             : 'تم حفظ مسودة تشغيل اليوم كاملة في معاملة واحدة؛ بقي تاريخ الإنتاج منفصلًا عن وقت التسجيل.';
         },
         error: error => this.error = this.formValidation.serverMessage(error, 'تعذر حفظ مسودة تشغيل اليوم.')
+      });
+  }
+
+  approveDailyOperation(): void {
+    const draft = this.currentDailyDraft;
+    if (!draft || !this.canApproveDailyOperation) return;
+
+    const context = this.operations;
+    const message = [
+      `سيتم اعتماد تشغيل يوم ${this.productionDateLabel(draft.productionDate)}.`,
+      `المصنع والخط: ${context?.factoryName ?? '—'} / ${context?.productionLineName ?? '—'}.`,
+      `عدد المراحل: ${draft.stages.length}.`,
+      'سيتم تثبيت الكميات والتوزيعات، ولن يعود التشغيل قابلاً للتعديل.'
+    ].join('\n');
+    if (!window.confirm(message)) return;
+
+    const stageApprovals: DailyStageApprovalInput[] = draft.stages.map(stage => ({
+      stageProductionRecordId: stage.id,
+      concurrencyToken: stage.concurrencyToken
+    }));
+    this.approving = true;
+    this.error = '';
+    this.successMessage = '';
+    this.production.approveDailyOperation(draft.productionOrderId, stageApprovals)
+      .pipe(finalize(() => this.approving = false), takeUntil(this.destroy$))
+      .subscribe({
+        next: () => this.loadTodayOperations({
+          kind: 'success',
+          message: 'تم اعتماد تشغيل اليوم بنجاح. أصبحت بيانات التشغيل للقراءة فقط.'
+        }),
+        error: error => {
+          if (error?.status === 409) {
+            this.loadTodayOperations({
+              kind: 'error',
+              message: 'تغيرت حالة المسودة أو لم تعد صالحة للاعتماد. تم تحديث بيانات تشغيل اليوم.'
+            });
+            return;
+          }
+          this.error = error?.status === 403
+            ? 'لا تملك صلاحية اعتماد تشغيل اليوم.'
+            : this.formValidation.serverMessage(error, 'تعذر اعتماد تشغيل اليوم.');
+        }
       });
   }
 
@@ -773,6 +843,10 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
     this.lineQuantity = draft.lineQuantity;
     this.stages.forEach(stage => this.synchronizeStageQuantities(stage));
     this.savedDraft = draft;
+  }
+
+  private get currentDailyDraft(): DailyProductionDraft | null {
+    return this.savedDraft ?? this.operations?.existingDraft ?? null;
   }
 
   private allocationParticipants(stage: EditableDailyStage): EditableDailyWorker[] {

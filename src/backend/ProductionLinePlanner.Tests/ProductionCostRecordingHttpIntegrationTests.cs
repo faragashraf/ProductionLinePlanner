@@ -56,6 +56,80 @@ public sealed class ProductionCostRecordingHttpIntegrationTests
     }
 
     [Fact]
+    public async Task Daily_approval_approves_the_saved_daily_operation()
+    {
+        await using var fixture = await ProductionHttpFixture.CreateAsync();
+        var draft = await CreateDailyDraftAsync(fixture);
+        var stage = draft.GetProperty("stages").EnumerateArray().Single();
+        var approvalRequest = DailyApprovalPayload(stage);
+        const string quantitiesPath = "/api/reports/production/quantities?from=2026-07-16&to=2026-07-16&view=Details";
+
+        var beforeApproval = await fixture.SendAsync(HttpMethod.Get, quantitiesPath, permissions: ["reports.production.view"]);
+        Assert.Equal(HttpStatusCode.OK, beforeApproval.StatusCode);
+        Assert.Empty((await DataAsync(beforeApproval)).GetProperty("rows").EnumerateArray());
+
+        var response = await fixture.SendAsync(
+            HttpMethod.Post,
+            $"/api/production/daily-operations/{draft.GetProperty("productionOrderId").GetGuid()}/approve",
+            approvalRequest,
+            permissions: ["production.approve"]);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var approved = await DataAsync(response);
+        Assert.Equal("Completed", approved.GetProperty("orderStatus").GetString());
+        Assert.Equal(1, approved.GetProperty("approvedStageCount").GetInt32());
+
+        var record = await fixture.SendAsync(HttpMethod.Get, $"/api/production/records/{stage.GetProperty("id").GetGuid()}", permissions: ["production.view"]);
+        Assert.Equal("Approved", (await DataAsync(record)).GetProperty("status").GetString());
+
+        var afterApproval = await fixture.SendAsync(HttpMethod.Get, quantitiesPath, permissions: ["reports.production.view"]);
+        Assert.Equal(HttpStatusCode.OK, afterApproval.StatusCode);
+        Assert.Single((await DataAsync(afterApproval)).GetProperty("rows").EnumerateArray());
+    }
+
+    [Fact]
+    public async Task Individual_approval_rejects_a_stage_belonging_to_daily_operations()
+    {
+        await using var fixture = await ProductionHttpFixture.CreateAsync();
+        var draft = await CreateDailyDraftAsync(fixture);
+        var stage = draft.GetProperty("stages").EnumerateArray().Single();
+
+        var response = await fixture.SendAsync(
+            HttpMethod.Post,
+            $"/api/production/records/{stage.GetProperty("id").GetGuid()}/approve",
+            new { concurrencyToken = stage.GetProperty("concurrencyToken").GetGuid() },
+            permissions: ["production.approve"]);
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Daily_approval_rejects_an_empty_production_order_id_as_bad_request()
+    {
+        await using var fixture = await ProductionHttpFixture.CreateAsync();
+        var response = await fixture.SendAsync(
+            HttpMethod.Post,
+            "/api/production/daily-operations/00000000-0000-0000-0000-000000000000/approve",
+            new { stageApprovals = new[] { new { stageProductionRecordId = Guid.NewGuid(), concurrencyToken = Guid.NewGuid() } } },
+            permissions: ["production.approve"]);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Daily_approval_rejects_a_repeated_approval_without_creating_a_second_transition()
+    {
+        await using var fixture = await ProductionHttpFixture.CreateAsync();
+        var draft = await CreateDailyDraftAsync(fixture);
+        var stage = draft.GetProperty("stages").EnumerateArray().Single();
+        var approvalRequest = DailyApprovalPayload(stage);
+        var path = $"/api/production/daily-operations/{draft.GetProperty("productionOrderId").GetGuid()}/approve";
+
+        Assert.Equal(HttpStatusCode.OK, (await fixture.SendAsync(HttpMethod.Post, path, approvalRequest, permissions: ["production.approve"])).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await fixture.SendAsync(HttpMethod.Post, path, approvalRequest, permissions: ["production.approve"])).StatusCode);
+    }
+
+    [Fact]
     public async Task Draft_preview_contract_is_post_only_and_returns_the_current_payload_calculation_for_new_and_reopened_drafts()
     {
         await using var fixture = await ProductionHttpFixture.CreateAsync(piecePrice: 0.38m);
@@ -288,6 +362,61 @@ public sealed class ProductionCostRecordingHttpIntegrationTests
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         return document.RootElement.GetProperty("data").Clone();
     }
+
+    private static async Task<JsonElement> CreateDailyDraftAsync(ProductionHttpFixture fixture)
+    {
+        var clientRequestId = Guid.NewGuid();
+        var stageInputs = new[]
+        {
+            new
+            {
+                productModelStageId = fixture.ModelStageId,
+                workers = new[]
+                {
+                    new { workerId = fixture.WorkerAId, percentage = 50m },
+                    new { workerId = fixture.WorkerBId, percentage = 50m }
+                }
+            }
+        };
+        var previewInput = new
+        {
+            factoryId = fixture.FactoryId,
+            productionLineId = fixture.LineId,
+            productModelId = fixture.ModelId,
+            productionDate = "2026-07-16",
+            lineQuantity = 500m,
+            clientRequestId,
+            stages = stageInputs
+        };
+        var preview = await fixture.SendAsync(HttpMethod.Post, "/api/production/daily-operations/preview", previewInput, permissions: ["production.record"]);
+        Assert.Equal(HttpStatusCode.OK, preview.StatusCode);
+        var previewToken = (await DataAsync(preview)).GetProperty("previewToken").GetString();
+        var saved = await fixture.SendAsync(HttpMethod.Post, "/api/production/daily-operations/drafts", new
+        {
+            previewInput.factoryId,
+            previewInput.productionLineId,
+            previewInput.productModelId,
+            previewInput.productionDate,
+            previewInput.lineQuantity,
+            previewInput.clientRequestId,
+            previewToken,
+            previewInput.stages
+        }, permissions: ["production.record"]);
+        Assert.Equal(HttpStatusCode.Created, saved.StatusCode);
+        return await DataAsync(saved);
+    }
+
+    private static object DailyApprovalPayload(JsonElement stage) => new
+    {
+        stageApprovals = new[]
+        {
+            new
+            {
+                stageProductionRecordId = stage.GetProperty("id").GetGuid(),
+                concurrencyToken = stage.GetProperty("concurrencyToken").GetGuid()
+            }
+        }
+    };
 
     [Fact]
     public async Task Quantities_report_enforces_its_permission_uses_stage_record_grain_and_has_no_financial_json()

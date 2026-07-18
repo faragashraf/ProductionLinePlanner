@@ -117,6 +117,8 @@ public sealed class ProductionCostRecordingService(
     {
         await using var transaction = db.Database.IsRelational() ? await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct) : null;
         var record = await RecordAsync(id, ct);
+        if (IsDailyOperation(record.ProductionOrder!))
+            throw new ProductionConflictException("يجب اعتماد مسودة تشغيل اليوم كاملة من إجراء اعتماد تشغيل اليوم.");
         if (record.ProductionOrder!.SourceImportBatchId.HasValue) throw new ProductionConflictException("Imported production stages can only be approved with their complete production day.");
         EnsureCurrentVersion(record, concurrencyToken);
         if (record.Status == StageProductionRecordStatus.Approved) return ToRecordDto(record);
@@ -273,6 +275,83 @@ public sealed class ProductionCostRecordingService(
 
             throw new ProductionConflictException("تعذر حفظ مسودة تشغيل اليوم بسبب تعارض متزامن. حدّث البيانات وحاول مرة أخرى.");
         }
+    }
+
+    public async Task<DailyProductionApprovalDto> ApproveDailyOperationAsync(
+        Guid productionOrderId,
+        DailyProductionApprovalRequest request,
+        Guid actorId,
+        CancellationToken ct)
+    {
+        if (productionOrderId == Guid.Empty)
+            throw new ArgumentException("معرّف تشغيل اليوم مطلوب.", nameof(productionOrderId));
+        if (request.StageApprovals is null || request.StageApprovals.Count == 0 ||
+            request.StageApprovals.Any(stage => stage.StageProductionRecordId == Guid.Empty || stage.ConcurrencyToken == Guid.Empty) ||
+            request.StageApprovals.Select(stage => stage.StageProductionRecordId).Distinct().Count() != request.StageApprovals.Count)
+            throw new ArgumentException("يجب إرسال معرّف وتزامن كل مرحلة محفوظة لاعتماد تشغيل اليوم.", nameof(request));
+
+        await using var transaction = db.Database.IsRelational()
+            ? await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct)
+            : null;
+
+        var order = await db.Set<ProductionOrder>()
+            .Include(current => current.StageProductionRecords)
+                .ThenInclude(record => record.WorkerAllocations)
+            .SingleOrDefaultAsync(current => current.Id == productionOrderId, ct)
+            ?? throw new KeyNotFoundException("لم يتم العثور على تشغيل اليوم المطلوب.");
+
+        if (!IsDailyOperation(order))
+            throw new ProductionConflictException("هذا الأمر ليس مسودة تشغيل يومي مدعومة للاعتماد الذري.");
+        if (order.Status == ProductionOrderStatus.Cancelled)
+            throw new ProductionConflictException("لا يمكن اعتماد تشغيل يوم ملغى.");
+        if (order.Status != ProductionOrderStatus.Draft)
+            throw new ProductionConflictException("لم تعد مسودة تشغيل اليوم في حالة قابلة للاعتماد.");
+
+        var records = order.StageProductionRecords.OrderBy(record => record.Id).ToArray();
+        if (records.Length == 0)
+            throw new ProductionConflictException("لا يمكن اعتماد تشغيل يوم بلا مراحل محفوظة.");
+
+        var suppliedTokens = request.StageApprovals.ToDictionary(stage => stage.StageProductionRecordId, stage => stage.ConcurrencyToken);
+        if (suppliedTokens.Count != records.Length || records.Any(record => !suppliedTokens.ContainsKey(record.Id)))
+            throw new ProductionConflictException("تغيرت مراحل المسودة أو لم تُرسل جميع رموز التزامن. حدّث التشغيل وحاول مرة أخرى.");
+
+        // Validate all records before changing any status. A daily line quantity is
+        // intentionally repeated as a stage snapshot, so it is never summed here.
+        foreach (var record in records)
+        {
+            if (record.Status != StageProductionRecordStatus.Draft)
+                throw new ProductionConflictException("تغيرت حالة إحدى مراحل تشغيل اليوم. حدّث التشغيل وحاول مرة أخرى.");
+            if (record.ConcurrencyToken != suppliedTokens[record.Id])
+                throw new ProductionConflictException("تغيرت إحدى مراحل تشغيل اليوم. حدّث التشغيل وحاول مرة أخرى.");
+
+            db.Entry(record).Property(current => current.ConcurrencyToken).OriginalValue = suppliedTokens[record.Id];
+            EnsurePersistedFinancialConsistency(record);
+        }
+
+        var now = DateTime.UtcNow;
+        var orderBefore = DailyApprovalOrderAudit(order, records.Length);
+        var recordBefore = records.ToDictionary(record => record.Id, record => DailyApprovalRecordAudit(record, records.Length));
+
+        foreach (var record in records)
+            record.Approve(actorId, now);
+        order.ApproveDay(actorId, now);
+
+        foreach (var record in records)
+            await AuditAsync(actorId, AuditActionType.Update, "StageProductionRecord", record.Id, recordBefore[record.Id], DailyApprovalRecordAudit(record, records.Length), ct);
+        await AuditAsync(actorId, AuditActionType.Update, "ProductionOrder", order.Id, orderBefore, DailyApprovalOrderAudit(order, records.Length), ct);
+
+        try
+        {
+            await db.SaveChangesAsync(ct);
+            if (transaction is not null)
+                await transaction.CommitAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            throw new ProductionConflictException("تغيرت مسودة تشغيل اليوم أثناء الاعتماد. حدّث البيانات وحاول مرة أخرى.");
+        }
+
+        return new DailyProductionApprovalDto(order.Id, order.Status.ToString(), order.ApprovedAtUtc!.Value, records.Length);
     }
 
     private async Task<DailyPreview> BuildDailyPreviewAsync(
@@ -789,6 +868,7 @@ public sealed class ProductionCostRecordingService(
 
     private static string DailySourceReference(Guid clientRequestId) => $"DailyProductionOperations/{clientRequestId:D}";
     private static string DailyOrderNumber(DateOnly date, Guid lineId, Guid modelId) => $"DLY-{date:yyyyMMdd}-{lineId:N}-{modelId:N}";
+    private static bool IsDailyOperation(ProductionOrder order) => !order.SourceImportBatchId.HasValue && !string.IsNullOrWhiteSpace(order.SourceReference);
 
     private sealed record ActiveWorker(Guid Id, string Code, string Name);
     private sealed record DailyWorkerContext(
@@ -1009,6 +1089,8 @@ public sealed class ProductionCostRecordingService(
     private static ProductionWorkerAllocationDto ToAllocationDto(StageProductionWorkerAllocation x) => new(x.WorkerId, x.SnapshotWorkerCode, x.SnapshotWorkerName, x.Percentage, x.FixedAmount, x.InputQuantity, x.EquivalentQuantity, x.CalculatedEarning, x.Notes, x.ManualOverrideReason);
     private async Task AuditAsync(Guid actorId, AuditActionType action, string entityType, Guid entityId, object? before, object? after, CancellationToken ct) { var result = await audit.RecordAsync(actorId, action, entityType, entityId.ToString(), before, after, "ProductionCostRecording", ct); if (result.IsFailure) throw new InvalidOperationException(result.Error?.Message ?? "Production audit failed."); }
     private static object OrderAudit(ProductionOrder x) => new { x.Id, x.OrderNumber, x.Status, x.ProductionDate, x.PlannedQuantity, x.ConcurrencyToken, Result = "Success" };
+    private static object DailyApprovalOrderAudit(ProductionOrder x, int stageCount) => new { x.Id, x.Status, x.ProductionDate, x.ProductionLineId, x.ProductModelId, StageCount = stageCount, x.ApprovedBy, x.ApprovedAtUtc, x.ConcurrencyToken, Result = "Success" };
+    private static object DailyApprovalRecordAudit(StageProductionRecord x, int stageCount) => new { x.Id, x.ProductionOrderId, x.ProductModelStageId, x.Status, x.ProductionDate, StageCount = stageCount, x.ApprovedBy, x.ApprovedAtUtc, x.ConcurrencyToken, Result = "Success" };
     private static object RecordAudit(StageProductionRecord x) => new { x.Id, x.ProductionOrderId, x.ProductModelStageId, x.Status, x.ProductionDate, x.ProducedQuantity, x.AcceptedQuantity, x.RejectedQuantity, x.SnapshotProductModelCode, x.SnapshotProductModelName, x.SnapshotFactoryCode, x.SnapshotFactoryName, x.SnapshotProductionLineCode, x.SnapshotProductionLineName, x.SnapshotMainStageName, x.SnapshotStageCode, x.SnapshotStageName, x.SnapshotPiecePrice, x.SnapshotStandardSeconds, x.SnapshotCompensationMode, x.TotalWorkerEarnings, x.ApprovedBy, x.ApprovedAtUtc, x.CancelledBy, x.CancelledAtUtc, x.ApprovalCancellationReason, x.ClientRequestId, x.ConcurrencyToken, Result = "Success" };
     private static object AllocationAudit(StageProductionRecord x) => new { x.Id, x.Status, WorkerCount = x.WorkerAllocations.Count, TotalEarnings = x.WorkerAllocations.Sum(a => a.CalculatedEarning), Result = "Success" };
     private static object FinancialAudit(StageProductionRecord x) => new { RecordId = x.Id, OrderId = x.ProductionOrderId, OrderNumber = x.ProductionOrder?.OrderNumber, x.SnapshotProductModelCode, x.SnapshotProductModelName, x.SnapshotFactoryCode, x.SnapshotFactoryName, x.SnapshotProductionLineCode, x.SnapshotProductionLineName, x.SnapshotMainStageName, x.SnapshotStageCode, x.SnapshotStageName, x.SnapshotPiecePrice, x.SnapshotStandardSeconds, CompensationMode = x.SnapshotCompensationMode, x.Status, x.ProducedQuantity, x.AcceptedQuantity, x.RejectedQuantity, TotalEarnings = x.TotalWorkerEarnings, x.ApprovedBy, x.ApprovedAtUtc, x.CancelledBy, x.CancelledAtUtc, x.ApprovalCancellationReason, x.ClientRequestId, Allocations = x.WorkerAllocations.Take(100).Select(a => new { a.WorkerId, a.SnapshotWorkerCode, a.SnapshotWorkerName, a.Percentage, a.FixedAmount, a.EquivalentQuantity, a.CalculatedEarning, a.ManualOverrideReason }).ToArray(), Result = "Success" };

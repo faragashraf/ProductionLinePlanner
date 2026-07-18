@@ -21,4 +21,5 @@ public interface IProductionCostRecordingService
     Task<DailyProductionOperationsDto> LoadDailyOperationsAsync(Guid factoryId, Guid productionLineId, Guid productModelId, DateOnly productionDate, CancellationToken cancellationToken);
     Task<DailyProductionPreviewDto> PreviewDailyOperationsAsync(DailyProductionOperationRequest request, Guid actorId, CancellationToken cancellationToken);
     Task<DailyProductionDraftDto> SaveDailyDraftAsync(DailyProductionOperationRequest request, Guid actorId, CancellationToken cancellationToken);
+    Task<DailyProductionApprovalDto> ApproveDailyOperationAsync(Guid productionOrderId, DailyProductionApprovalRequest request, Guid actorId, CancellationToken cancellationToken);
 }

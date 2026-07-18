@@ -31,6 +31,8 @@ export interface DailyProductionStagePreview { productModelStageId: string; stag
 export interface DailyProductionWorkerTotal { workerId: string; workerCode: string; workerName: string; totalEntitlement: number; }
 export interface DailyProductionPreview { productionDate: string; lineQuantity: number; previewToken: string; totalWorkerEntitlements: number; stages: DailyProductionStagePreview[]; workerTotals: DailyProductionWorkerTotal[]; warnings: string[]; }
 export interface DailyProductionDraft { productionOrderId: string; orderNumber: string; productionDate: string; recordedAtUtc: string; lineQuantity: number; wasAlreadySaved: boolean; stages: StageProductionRecord[]; }
+export interface DailyStageApprovalInput { stageProductionRecordId: string; concurrencyToken: string; }
+export interface DailyProductionApproval { productionOrderId: string; orderStatus: string; approvedAtUtc: string; approvedStageCount: number; }
 
 @Injectable({ providedIn: 'root' })
 export class ProductionCostRecordingApiService {
@@ -43,6 +45,7 @@ export class ProductionCostRecordingApiService {
   loadDailyOperations(factoryId: string, productionLineId: string, productModelId: string, productionDate: string): Observable<DailyProductionOperations> { const query = new URLSearchParams({ factoryId, productionLineId, productModelId, productionDate }); return this.get<DailyProductionOperations>(`/api/production/daily-operations?${query.toString()}`); }
   previewDailyOperations(value: DailyProductionOperationInput): Observable<DailyProductionPreview> { return this.post('/api/production/daily-operations/preview', value, DAILY_PRODUCTION_OPERATION_TIMEOUT_MS); }
   saveDailyDraft(value: DailyProductionOperationInput): Observable<DailyProductionDraft> { return this.post('/api/production/daily-operations/drafts', value, DAILY_PRODUCTION_OPERATION_TIMEOUT_MS); }
+  approveDailyOperation(productionOrderId: string, stageApprovals: DailyStageApprovalInput[]): Observable<DailyProductionApproval> { return this.post(`/api/production/daily-operations/${encodeURIComponent(productionOrderId)}/approve`, { stageApprovals }, DAILY_PRODUCTION_OPERATION_TIMEOUT_MS); }
   createOrder(value: unknown): Observable<ProductionOrder> { return this.post('/api/production/orders', value); }
   updateOrder(id: string, value: unknown): Observable<ProductionOrder> { return this.http.put<ApiResponse<ProductionOrder>>(buildApiUrl(`/api/production/orders/${id}`), value).pipe(timeout(STANDARD_API_TIMEOUT_MS), map((response) => this.unwrap(response))); }
   transitionOrder(id: string, action: 'activate' | 'complete' | 'cancel'): Observable<ProductionOrder> { return this.post(`/api/production/orders/${id}/${action}`, {}); }
