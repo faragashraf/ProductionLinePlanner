@@ -3,6 +3,7 @@ using ProductionLinePlanner.Application.Common;
 using ProductionLinePlanner.Application.Reports.Financial;
 using ProductionLinePlanner.Application.Reports.Quantities;
 using ProductionLinePlanner.Application.Services;
+using ProductionLinePlanner.Domain.Entities;
 using ProductionLinePlanner.Domain.Enums;
 using ProductionLinePlanner.Infrastructure.Data;
 
@@ -92,8 +93,8 @@ public sealed class ProductionFinancialReportService(AppDbContext db) : IProduct
         var financialStatus = ResolveFinancialStatus(records);
         var financialIsComplete = financialStatus == Complete;
         var workerCount = records.SelectMany(record => record.Allocations).Select(allocation => allocation.WorkerId).Distinct().Count();
-        var totalEarnings = financialIsComplete ? records.Sum(record => record.Allocations.Sum(allocation => allocation.CalculatedEarning)) : null;
-        var totalCost = financialIsComplete ? records.Sum(record => record.TotalWorkerEarnings) : null;
+        decimal? totalEarnings = financialIsComplete ? records.Sum(record => record.Allocations.Sum(allocation => allocation.CalculatedEarning)) : null;
+        decimal? totalCost = financialIsComplete ? records.Sum(record => record.TotalWorkerEarnings) : null;
         var physicalQuantity = physicalRecords.Sum(record => record.ProducedQuantity);
 
         return new FinancialReportSummaryDto(
@@ -132,7 +133,7 @@ public sealed class ProductionFinancialReportService(AppDbContext db) : IProduct
     private static FinancialReportRowDto ToDetailsRow(FinancialRecordData record)
     {
         var financialStatus = RecordFinancialStatus(record);
-        var amount = financialStatus == Complete ? record.TotalWorkerEarnings : null;
+        decimal? amount = financialStatus == Complete ? record.TotalWorkerEarnings : null;
         return ToRow(
             new ReportSourceReferenceDto("StageProductionRecord", record.RecordId, null, record.ProductionOrderId, record.ProductModelStageId, null),
             record, null, null, record.ProducedQuantity, record.AcceptedQuantity, record.RejectedQuantity, null,
@@ -145,7 +146,7 @@ public sealed class ProductionFinancialReportService(AppDbContext db) : IProduct
         var records = group.ToArray();
         var first = records.OrderBy(record => record.ProductionDate).ThenBy(record => record.RecordId).First();
         var financialStatus = ResolveFinancialStatus(records);
-        var amount = financialStatus == Complete ? records.Sum(record => record.TotalWorkerEarnings) : null;
+        decimal? amount = financialStatus == Complete ? records.Sum(record => record.TotalWorkerEarnings) : null;
         return ToRow(
             new ReportSourceReferenceDto("ProductModelStage", null, null, null, first.ProductModelStageId, null),
             first, null, null, records.Sum(record => record.ProducedQuantity), records.Sum(record => record.AcceptedQuantity), records.Sum(record => record.RejectedQuantity), null,

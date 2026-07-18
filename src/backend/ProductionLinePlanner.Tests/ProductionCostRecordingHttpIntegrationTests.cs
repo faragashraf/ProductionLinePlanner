@@ -264,6 +264,48 @@ public sealed class ProductionCostRecordingHttpIntegrationTests
     }
 
     [Fact]
+    public async Task Financial_report_projects_approved_persisted_snapshots_without_salary_data()
+    {
+        await using var fixture = await ProductionHttpFixture.CreateAsync();
+        var writePermissions = new[] { "production.record", "production.approve" };
+        var order = await fixture.SendAsync(HttpMethod.Post, "/api/production/orders", new
+        {
+            orderNumber = "FINANCIAL-REPORT",
+            productModelId = fixture.ModelId,
+            productionLineId = fixture.LineId,
+            productionDate = "2026-07-13",
+            plannedQuantity = 500m
+        }, writePermissions);
+        var orderId = (await DataAsync(order)).GetProperty("id").GetGuid();
+        Assert.Equal(HttpStatusCode.OK, (await fixture.SendAsync(HttpMethod.Post, $"/api/production/orders/{orderId}/activate", new { }, writePermissions)).StatusCode);
+
+        var draft = await fixture.SendAsync(HttpMethod.Post, "/api/production/records", fixture.DraftPayload(orderId), writePermissions);
+        var draftData = await DataAsync(draft);
+        Assert.Equal(HttpStatusCode.OK, (await fixture.SendAsync(HttpMethod.Post, $"/api/production/records/{draftData.GetProperty("id").GetGuid()}/approve", new { concurrencyToken = draftData.GetProperty("concurrencyToken").GetGuid() }, writePermissions)).StatusCode);
+
+        var response = await fixture.SendAsync(
+            HttpMethod.Get,
+            "/api/reports/production/financial?from=2026-07-13&to=2026-07-13&view=StageWorkers",
+            permissions: ["reports.financial.view"]);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var json = await response.Content.ReadAsStringAsync();
+        foreach (var forbidden in new[] { "salary", "workerSalaryHistory", "baseSalary" })
+            Assert.False(json.Contains(forbidden, StringComparison.OrdinalIgnoreCase));
+
+        using var document = JsonDocument.Parse(json);
+        var data = document.RootElement.GetProperty("data");
+        Assert.Equal(500m, data.GetProperty("summary").GetProperty("totalPhysicalProducedQuantity").GetDecimal());
+        Assert.Equal(250m, data.GetProperty("summary").GetProperty("totalProductionEarnings").GetDecimal());
+        Assert.Equal(2, data.GetProperty("rows").GetArrayLength());
+        Assert.All(data.GetProperty("rows").EnumerateArray(), row =>
+        {
+            Assert.Equal("Complete", row.GetProperty("financialDataStatus").GetString());
+            Assert.Equal(125m, row.GetProperty("productionEarning").GetDecimal());
+        });
+    }
+
+    [Fact]
     public async Task Production_record_permission_can_load_read_only_lookups_without_master_data_permissions()
     {
         await using var fixture = await ProductionHttpFixture.CreateAsync();
