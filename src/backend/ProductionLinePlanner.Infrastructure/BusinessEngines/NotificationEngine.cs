@@ -121,7 +121,12 @@ public sealed class NotificationEngine : INotificationEngine
                 nameof(Notification),
                 notification.Id.ToString(),
                 before,
-                notification,
+                new
+                {
+                    notification.Id,
+                    notification.IsRead,
+                    notification.ReadAtUtc
+                },
                 cancellationToken: cancellationToken);
             await _dbContext.SaveChangesAsync(cancellationToken);
         }

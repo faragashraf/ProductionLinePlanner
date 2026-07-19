@@ -1,4 +1,4 @@
-import { NgModule } from '@angular/core';
+import { APP_INITIALIZER, NgModule } from '@angular/core';
 import { HTTP_INTERCEPTORS, HttpClientModule } from '@angular/common/http';
 import { BrowserModule } from '@angular/platform-browser';
 import { BrowserAnimationsModule } from '@angular/platform-browser/animations';
@@ -26,6 +26,21 @@ import { ConfirmationService, MessageService, PrimeNGConfig } from 'primeng/api'
 import { ToastModule } from 'primeng/toast';
 import { configureProductionPrimeNg } from './shared/design-system/layering/production-z-index';
 import { ProductExperienceModule } from './shared/product/product-experience.module';
+import { RealtimeService } from './core/services/realtime.service';
+import { NotificationInboxService } from './core/services/notification-inbox.service';
+import { NotificationPresentationService } from './core/services/notification-presentation.service';
+
+export function initializeRealtimeNotifications(
+  realtimeService: RealtimeService,
+  notificationInboxService: NotificationInboxService,
+  notificationPresentationService: NotificationPresentationService
+): () => void {
+  return () => {
+    realtimeService.initialize();
+    notificationInboxService.initialize();
+    notificationPresentationService.initialize();
+  };
+}
 
 @NgModule({
   declarations: [
@@ -58,6 +73,12 @@ import { ProductExperienceModule } from './shared/product/product-experience.mod
   providers: [
     ConfirmationService,
     MessageService,
+    {
+      provide: APP_INITIALIZER,
+      useFactory: initializeRealtimeNotifications,
+      deps: [RealtimeService, NotificationInboxService, NotificationPresentationService],
+      multi: true
+    },
     {
       provide: HTTP_INTERCEPTORS,
       useClass: AuthTokenInterceptor,
