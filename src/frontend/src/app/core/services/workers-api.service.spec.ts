@@ -85,4 +85,38 @@ describe('WorkersApiService', () => {
 
     expect(updated).toEqual(jasmine.objectContaining({ id: 'worker-1', code: 'E-1', fullName: 'عامل محدّث', phone: '01012345678' }));
   });
+
+  it('loads one authoritative worker and preserves local photo metadata', () => {
+    let worker: WorkerPageItem | undefined;
+    service.getWorker('worker-1').subscribe(value => worker = value);
+    const request = http.expectOne(item => item.url.endsWith('/api/workers/worker-1'));
+    expect(request.request.method).toBe('GET');
+    request.flush({ success: true, data: {
+      id: 'worker-1', employeeCode: 'E-1', fullName: 'عامل', isActive: true, employmentStatus: 'Active',
+      badgeNumber: 'B-1', attendanceUserId: '99', hasPhoto: true, photoReference: '/api/workers/worker-1/photo?v=abc', photoVersion: 'abc'
+    } });
+    expect(worker).toEqual(jasmine.objectContaining({ badgeNumber: 'B-1', attendanceUserId: '99', photoReference: jasmine.stringContaining('?v=') }));
+  });
+
+  it('uses protected worker photo routes for upload, replacement, delete, and local employment status', () => {
+    const file = new File(['valid image bytes'], 'worker.png', { type: 'image/png' });
+    service.uploadWorkerPhoto('worker-1', file).subscribe();
+    const upload = http.expectOne(item => item.url.endsWith('/api/workers/worker-1/photo'));
+    expect(upload.request.method).toBe('PUT');
+    const uploaded = (upload.request.body as FormData).get('photo') as File;
+    expect(uploaded.name).toBe('worker.png');
+    expect(uploaded.type).toBe('image/png');
+    upload.flush({ success: true, data: { photo: { version: 'a'.repeat(64) } } });
+
+    service.deleteWorkerPhoto('worker-1').subscribe();
+    const remove = http.expectOne(item => item.url.endsWith('/api/workers/worker-1/photo'));
+    expect(remove.request.method).toBe('DELETE');
+    remove.flush(null, { status: 204, statusText: 'No Content' });
+
+    service.setEmploymentStatus('worker-1', { employmentStatus: 'Suspended' }).subscribe();
+    const status = http.expectOne(item => item.url.endsWith('/api/workers/worker-1/employment-status'));
+    expect(status.request.method).toBe('PATCH');
+    expect(status.request.body).toEqual({ employmentStatus: 'Suspended' });
+    status.flush({ success: true, data: { id: 'worker-1', employeeCode: 'E-1', fullName: 'عامل', isActive: false, employmentStatus: 'Suspended' } });
+  });
 });

@@ -1,86 +1,97 @@
 import { CommonModule } from '@angular/common';
+import { HttpErrorResponse } from '@angular/common/http';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { ReactiveFormsModule } from '@angular/forms';
 import { NO_ERRORS_SCHEMA } from '@angular/core';
-import { WORKER_MANAGEMENT_FIXTURES } from './worker-management.fixtures';
+import { ReactiveFormsModule } from '@angular/forms';
+import { of, throwError } from 'rxjs';
+import { WorkerManagementFacade } from './worker-management.facade';
 import { WorkerManagementProfile } from './worker-management.models';
 import { WorkerProfileWorkspaceComponent } from './worker-profile-workspace.component';
 
 describe('WorkerProfileWorkspaceComponent', () => {
   let fixture: ComponentFixture<WorkerProfileWorkspaceComponent>;
   let component: WorkerProfileWorkspaceComponent;
+  let facade: jasmine.SpyObj<WorkerManagementFacade>;
+
+  const worker: WorkerManagementProfile = {
+    id: '11111111-1111-1111-1111-111111111111',
+    local: { displayName: 'عامل محلي طويل الاسم', photoUrl: null, salary: null, profileStatus: 'complete', employmentStatus: 'active' },
+    source: { sourceName: null, badgeNumber: 'B-1', employeeCode: 'EMP-1', employmentStatus: null, department: null, shift: null, lastObservedAt: null, linkStatus: 'linked' },
+    assignments: [], history: [], sourcePreview: [], assignmentStatus: 'unassigned', defaultSubStageId: null
+  };
 
   beforeEach(async () => {
+    facade = jasmine.createSpyObj<WorkerManagementFacade>('WorkerManagementFacade', ['saveLocalProfile', 'uploadPhoto', 'deletePhoto']);
+    facade.saveLocalProfile.and.returnValue(of(worker));
+    facade.uploadPhoto.and.returnValue(of({ ...worker, local: { ...worker.local, photoUrl: '/api/workers/11111111-1111-1111-1111-111111111111/photo?v=' + 'a'.repeat(64) } }));
+    facade.deletePhoto.and.returnValue(of(worker));
     await TestBed.configureTestingModule({
-      declarations: [WorkerProfileWorkspaceComponent],
-      imports: [CommonModule, ReactiveFormsModule],
-      schemas: [NO_ERRORS_SCHEMA]
+      declarations: [WorkerProfileWorkspaceComponent], imports: [CommonModule, ReactiveFormsModule],
+      providers: [{ provide: WorkerManagementFacade, useValue: facade }], schemas: [NO_ERRORS_SCHEMA]
     }).compileComponents();
     fixture = TestBed.createComponent(WorkerProfileWorkspaceComponent);
     component = fixture.componentInstance;
-    component.worker = clone(WORKER_MANAGEMENT_FIXTURES[0]);
+    component.worker = structuredClone(worker);
     component.canManage = true;
-    component.canViewAssignments = true;
     component.ngOnChanges({ worker: { currentValue: component.worker, previousValue: null, firstChange: true, isFirstChange: () => true } });
     fixture.detectChanges();
   });
 
-  it('keeps the local name primary and labels source data as secondary', () => {
+  it('renders application data and marks unavailable source values explicitly', () => {
     const text = fixture.nativeElement.textContent as string;
-    expect(text).toContain(component.worker.local.displayName);
-    expect(text).toContain('الاسم المرصود من نظام البصمة');
-    expect(text).toContain(component.worker.source.sourceName!);
-    expect(text).toContain('بيانات محلية');
-    expect(text).toContain('من نظام البصمة');
-  });
-
-  it('renders every source field read-only', () => {
+    expect(text).toContain(worker.local.displayName);
+    expect(text).toContain('لا تقرأ هذه الشاشة نظام البصمة مباشرةً');
     component.selectSection('source');
     fixture.detectChanges();
-    const fields = Array.from(fixture.nativeElement.querySelectorAll('[data-profile-section="source"] input')) as HTMLInputElement[];
-    expect(fields.length).toBe(7);
-    expect(fields.every(field => field.readOnly)).toBeTrue();
+    const sourceName = fixture.nativeElement.querySelectorAll('[data-profile-section="source"] input')[2] as HTMLInputElement;
+    expect(sourceName.value).toBe('غير متاح من قاعدة بيانات التطبيق');
   });
 
-  it('keeps local draft edits isolated from the fixture profile', () => {
-    const originalName = component.worker.local.displayName;
-    component.draftForm.patchValue({ displayName: 'اسم محلي داخل المسودة', salaryAmount: 12000 });
+  it('saves local name and employment status through the facade', () => {
+    component.draftForm.patchValue({ displayName: 'اسم محلي محفوظ', employmentStatus: 'inactive' });
     component.saveDraft();
-    expect(component.draftMessage).toContain('لم يتغير السجل الأصلي');
-    expect(component.worker.local.displayName).toBe(originalName);
-    expect(component.worker.local.salary?.amount).not.toBe(12000);
+    expect(facade.saveLocalProfile).toHaveBeenCalledWith(jasmine.any(Object), { displayName: 'اسم محلي محفوظ', employmentStatus: 'inactive' });
+    expect(component.saveMessage).toContain('تم حفظ البيانات المحلية');
   });
 
-  it('shows the missing-photo placeholder explanation and long Arabic names without truncating the value', () => {
-    component.worker = clone(WORKER_MANAGEMENT_FIXTURES.find(worker => worker.id === 'worker-long-arabic-name')!);
-    component.ngOnChanges({ worker: { currentValue: component.worker, previousValue: null, firstChange: false, isFirstChange: () => false } });
-    fixture.detectChanges();
-    expect(fixture.nativeElement.textContent).toContain(component.worker.local.displayName);
-    expect(fixture.nativeElement.textContent).toContain('لا توجد — يظهر البديل القياسي');
+  it('rejects an unsupported photo before the API call', () => {
+    const input = document.createElement('input');
+    Object.defineProperty(input, 'files', { value: [new File(['plain'], 'worker.gif', { type: 'image/gif' })] });
+    component.onPhotoSelected(input);
+    expect(component.photoError).toContain('JPEG');
+    expect(facade.uploadPhoto).not.toHaveBeenCalled();
   });
 
-  it('announces identity conflict without relying on color alone', () => {
-    component.worker = clone(WORKER_MANAGEMENT_FIXTURES.find(worker => worker.id === 'worker-identity-conflict')!);
-    component.ngOnChanges({ worker: { currentValue: component.worker, previousValue: null, firstChange: false, isFirstChange: () => false } });
-    fixture.detectChanges();
-    const alert = fixture.nativeElement.querySelector('[role="alert"]') as HTMLElement;
-    expect(alert).not.toBeNull();
-    expect(alert.textContent).toContain('تعارض يحتاج مراجعة هوية');
+  it('rejects a photo larger than 5 MiB before the API call', () => {
+    const input = document.createElement('input');
+    const oversized = new File([new Uint8Array((5 * 1024 * 1024) + 1)], 'worker.png', { type: 'image/png' });
+    Object.defineProperty(input, 'files', { value: [oversized] });
+    component.onPhotoSelected(input);
+    expect(component.photoError).toContain('5 MiB');
+    expect(facade.uploadPhoto).not.toHaveBeenCalled();
   });
 
-  it('exposes a no-action source preview and closes back to the list', () => {
-    component.selectSection('source-preview');
-    fixture.detectChanges();
-    const preview = fixture.nativeElement.querySelector('[data-profile-section="source-preview"]') as HTMLElement;
-    expect(component.activeSection).toBe('source-preview');
-    expect(preview.textContent).toContain('BadgeNumber');
-    expect(preview.querySelector('button')).toBeNull();
-    spyOn(component.closed, 'emit');
-    component.closed.emit();
-    expect(component.closed.emit).toHaveBeenCalled();
+  it('uploads a selected valid photo and emits the cache-busted profile', () => {
+    const input = document.createElement('input');
+    Object.defineProperty(input, 'files', { value: [new File(['bitmap'], 'worker.bmp', { type: 'image/bmp' })] });
+    component.onPhotoSelected(input);
+    component.uploadSelectedPhoto();
+    expect(facade.uploadPhoto).toHaveBeenCalled();
+    expect(component.worker.local.photoUrl).toContain('?v=');
+  });
+
+  it('maps a server failure to a safe message without exposing backend detail', () => {
+    facade.uploadPhoto.and.returnValue(throwError(() => new HttpErrorResponse({
+      status: 500,
+      error: { message: 'SQL connection details must not reach the user' }
+    })));
+    const input = document.createElement('input');
+    Object.defineProperty(input, 'files', { value: [new File(['bitmap'], 'worker.bmp', { type: 'image/bmp' })] });
+    component.onPhotoSelected(input);
+
+    component.uploadSelectedPhoto();
+
+    expect(component.photoError).toBe('تعذر رفع الصورة.');
+    expect(component.photoError).not.toContain('SQL');
   });
 });
-
-function clone(profile: WorkerManagementProfile): WorkerManagementProfile {
-  return JSON.parse(JSON.stringify(profile)) as WorkerManagementProfile;
-}

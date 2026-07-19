@@ -19,8 +19,8 @@ import { PlpResponsiveTableDirective } from '../../shared/product/plp-responsive
 import { PlpSectionNavigationComponent } from '../../shared/product/plp-section-navigation.component';
 import { PlpProductToolbarComponent } from '../../shared/product/plp-toolbar.component';
 import { WORKER_MANAGEMENT_DATA_SOURCE } from './worker-management.data-source';
+import { WorkerManagementApiDataSource } from './worker-management-api-data-source';
 import { WorkerManagementFacade } from './worker-management.facade';
-import { WorkerManagementMockDataSource } from './worker-management.mock-data-source';
 import { WorkerProfileWorkspaceComponent } from './worker-profile-workspace.component';
 import { WorkersPageComponent } from './workers-page.component';
 
@@ -60,8 +60,8 @@ export const WORKERS_ROUTES: Routes = [
   ],
   providers: [
     WorkerManagementFacade,
-    WorkerManagementMockDataSource,
-    { provide: WORKER_MANAGEMENT_DATA_SOURCE, useExisting: WorkerManagementMockDataSource }
+    WorkerManagementApiDataSource,
+    { provide: WORKER_MANAGEMENT_DATA_SOURCE, useExisting: WorkerManagementApiDataSource }
   ]
 })
 export class WorkersPageModule {}

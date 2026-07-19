@@ -7,7 +7,6 @@ import {
   WorkerAssignmentStatus,
   WorkerLocalEmploymentStatus,
   WorkerLocalProfileStatus,
-  WorkerManagementFilterOptions,
   WorkerManagementListItem,
   WorkerManagementPage,
   WorkerManagementProfile,
@@ -27,8 +26,6 @@ interface PaginatorChange {
   rows?: number;
 }
 
-const EMPTY_FILTER_OPTIONS: WorkerManagementFilterOptions = { factories: [], productionLines: [] };
-
 @Component({
   selector: 'app-workers-page',
   templateUrl: './workers-page.component.html',
@@ -42,41 +39,14 @@ export class WorkersPageComponent implements OnInit, OnDestroy {
   private loadSequence = 0;
 
   readonly permissions = PERMISSIONS;
-  readonly localProfileStatuses = [
-    { value: '', label: 'كل حالات الملف' },
-    { value: 'complete', label: 'ملف مكتمل' },
-    { value: 'needs-review', label: 'يحتاج مراجعة' },
-    { value: 'source-pending', label: 'جديد بانتظار المراجعة' }
-  ];
-  readonly sourceLinkStatuses = [
-    { value: '', label: 'كل حالات الربط' },
-    { value: 'linked', label: 'مرتبط بالمصدر' },
-    { value: 'unlinked', label: 'غير مرتبط' },
-    { value: 'conflict', label: 'تعارض هوية' },
-    { value: 'new-source', label: 'جديد من المصدر' },
-    { value: 'missing-source', label: 'غير ظاهر في آخر قراءة' }
-  ];
-  readonly assignmentStatuses = [
-    { value: '', label: 'كل حالات التسكين' },
-    { value: 'assigned', label: 'مسكن' },
-    { value: 'unassigned', label: 'غير مسكن' },
-    { value: 'mixed', label: 'دائم ومؤقت' }
-  ];
   readonly employmentStatuses = [
     { value: '', label: 'كل حالات العمل المحلية' },
     { value: 'active', label: 'نشط محليًا' },
-    { value: 'inactive', label: 'غير نشط محليًا' },
-    { value: 'not-set', label: 'غير محددة محليًا' }
+    { value: 'inactive', label: 'غير نشط محليًا' }
   ];
 
   workers: WorkerManagementListItem[] = [];
-  filterOptions: WorkerManagementFilterOptions = EMPTY_FILTER_OPTIONS;
   search = '';
-  localProfileStatus: WorkerLocalProfileStatus | '' = '';
-  sourceLinkStatus: WorkerSourceLinkStatus | '' = '';
-  factoryId = '';
-  productionLineId = '';
-  assignmentStatus: WorkerAssignmentStatus | '' = '';
   localEmploymentStatus: WorkerLocalEmploymentStatus | '' = '';
   page = 1;
   pageSize = 6;
@@ -158,11 +128,6 @@ export class WorkersPageComponent implements OnInit, OnDestroy {
   get activeFilterCount(): number {
     return [
       this.search.trim(),
-      this.localProfileStatus,
-      this.sourceLinkStatus,
-      this.factoryId,
-      this.productionLineId,
-      this.assignmentStatus,
       this.localEmploymentStatus
     ].filter(Boolean).length;
   }
@@ -182,31 +147,6 @@ export class WorkersPageComponent implements OnInit, OnDestroy {
     this.search$.next(value.trim());
   }
 
-  onLocalProfileStatusChange(value: string): void {
-    this.localProfileStatus = value as WorkerLocalProfileStatus | '';
-    this.reload(1);
-  }
-
-  onSourceLinkStatusChange(value: string): void {
-    this.sourceLinkStatus = value as WorkerSourceLinkStatus | '';
-    this.reload(1);
-  }
-
-  onFactoryChange(value: string): void {
-    this.factoryId = value;
-    this.reload(1);
-  }
-
-  onProductionLineChange(value: string): void {
-    this.productionLineId = value;
-    this.reload(1);
-  }
-
-  onAssignmentStatusChange(value: string): void {
-    this.assignmentStatus = value as WorkerAssignmentStatus | '';
-    this.reload(1);
-  }
-
   onEmploymentStatusChange(value: string): void {
     this.localEmploymentStatus = value as WorkerLocalEmploymentStatus | '';
     this.reload(1);
@@ -214,11 +154,6 @@ export class WorkersPageComponent implements OnInit, OnDestroy {
 
   resetFilters(): void {
     this.search = '';
-    this.localProfileStatus = '';
-    this.sourceLinkStatus = '';
-    this.factoryId = '';
-    this.productionLineId = '';
-    this.assignmentStatus = '';
     this.localEmploymentStatus = '';
     localStorage.removeItem(this.storageKey);
     this.reload(1);
@@ -262,6 +197,20 @@ export class WorkersPageComponent implements OnInit, OnDestroy {
     this.selectedProfile = null;
   }
 
+  onProfileChanged(profile: WorkerManagementProfile): void {
+    this.selectedProfile = profile;
+    this.workers = this.workers.map(worker => worker.id !== profile.id
+      ? worker
+      : {
+        ...worker,
+        localName: profile.local.displayName,
+        photoUrl: profile.local.photoUrl,
+        localEmploymentStatus: profile.local.employmentStatus,
+        assignmentStatus: profile.assignmentStatus,
+        assignmentLabel: profile.assignmentStatus === 'assigned' ? 'مرتبط بمرحلة محلية' : 'لا يوجد تسكين افتراضي نشط'
+      });
+  }
+
   localProfileStatusMeta(status: WorkerLocalProfileStatus) { return localProfileStatusPresentation(status); }
   sourceLinkStatusMeta(status: WorkerSourceLinkStatus) { return sourceLinkStatusPresentation(status); }
   assignmentStatusMeta(status: WorkerAssignmentStatus) { return assignmentStatusPresentation(status); }
@@ -280,11 +229,6 @@ export class WorkersPageComponent implements OnInit, OnDestroy {
       page: this.page,
       pageSize: this.pageSize,
       search: this.search.trim(),
-      localProfileStatus: this.localProfileStatus,
-      sourceLinkStatus: this.sourceLinkStatus,
-      factoryId: this.factoryId,
-      productionLineId: this.productionLineId,
-      assignmentStatus: this.assignmentStatus,
       localEmploymentStatus: this.localEmploymentStatus
     };
   }
@@ -295,18 +239,12 @@ export class WorkersPageComponent implements OnInit, OnDestroy {
     this.page = payload.page;
     this.pageSize = payload.pageSize;
     this.totalPages = payload.totalPages;
-    this.filterOptions = payload.filterOptions;
     this.hasError = false;
   }
 
   private persistFilters(): void {
     localStorage.setItem(this.storageKey, JSON.stringify({
       search: this.search,
-      localProfileStatus: this.localProfileStatus,
-      sourceLinkStatus: this.sourceLinkStatus,
-      factoryId: this.factoryId,
-      productionLineId: this.productionLineId,
-      assignmentStatus: this.assignmentStatus,
       localEmploymentStatus: this.localEmploymentStatus
     }));
   }
@@ -315,12 +253,7 @@ export class WorkersPageComponent implements OnInit, OnDestroy {
     try {
       const value = JSON.parse(localStorage.getItem(this.storageKey) ?? '{}') as Record<string, unknown>;
       this.search = this.stringValue(value['search']);
-      this.localProfileStatus = this.allowedValue(value['localProfileStatus'], ['complete', 'needs-review', 'source-pending']);
-      this.sourceLinkStatus = this.allowedValue(value['sourceLinkStatus'], ['linked', 'unlinked', 'conflict', 'new-source', 'missing-source']);
-      this.factoryId = this.stringValue(value['factoryId']);
-      this.productionLineId = this.stringValue(value['productionLineId']);
-      this.assignmentStatus = this.allowedValue(value['assignmentStatus'], ['assigned', 'unassigned', 'mixed']);
-      this.localEmploymentStatus = this.allowedValue(value['localEmploymentStatus'], ['active', 'inactive', 'not-set']);
+      this.localEmploymentStatus = this.allowedValue(value['localEmploymentStatus'], ['active', 'inactive']);
     } catch {
       localStorage.removeItem(this.storageKey);
     }

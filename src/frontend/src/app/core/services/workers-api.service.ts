@@ -31,6 +31,10 @@ export interface WorkerIdentityUpdate {
   phone?: string;
 }
 
+export interface WorkerEmploymentStatusUpdate {
+  employmentStatus: 'Active' | 'Suspended' | 'LeftEmployment';
+}
+
 @Injectable({
   providedIn: 'root'
 })
@@ -97,6 +101,50 @@ export class WorkersApiService {
       );
   }
 
+  getWorker(workerId: string): Observable<WorkerPageItem> {
+    return this.http
+      .get<ApiResponse<unknown>>(buildApiUrl(`/api/workers/${encodeURIComponent(workerId)}`))
+      .pipe(
+        timeout(STANDARD_API_TIMEOUT_MS),
+        map(response => this.mapWorker(this.normalizeObject(this.extractPayload(response)), 0))
+      );
+  }
+
+  setEmploymentStatus(workerId: string, update: WorkerEmploymentStatusUpdate): Observable<WorkerPageItem> {
+    return this.http
+      .patch<ApiResponse<unknown>>(
+        buildApiUrl(`/api/workers/${encodeURIComponent(workerId)}/employment-status`),
+        update
+      )
+      .pipe(
+        timeout(STANDARD_API_TIMEOUT_MS),
+        map(response => this.mapWorker(this.normalizeObject(this.extractPayload(response)), 0))
+      );
+  }
+
+  uploadWorkerPhoto(workerId: string, photo: File): Observable<void> {
+    const form = new FormData();
+    form.append('photo', photo, photo.name);
+    return this.http
+      .put<ApiResponse<unknown>>(buildApiUrl(`/api/workers/${encodeURIComponent(workerId)}/photo`), form)
+      .pipe(
+        timeout(STANDARD_API_TIMEOUT_MS),
+        map(response => {
+          this.extractPayload(response);
+          return undefined;
+        })
+      );
+  }
+
+  deleteWorkerPhoto(workerId: string): Observable<void> {
+    return this.http
+      .delete(buildApiUrl(`/api/workers/${encodeURIComponent(workerId)}/photo`), { observe: 'response' })
+      .pipe(
+        timeout(STANDARD_API_TIMEOUT_MS),
+        map(() => undefined)
+      );
+  }
+
   private buildWorkersParams(page: number, pageSize: number, search: string, serviceStatus: WorkersApiQuery['serviceStatus']): HttpParams {
     let params = new HttpParams().set('page', String(page)).set('pageSize', String(pageSize));
 
@@ -128,6 +176,9 @@ export class WorkersApiService {
     const hasPhotoValue = this.pickFirst(safeRecord, ['hasPhoto']);
     const hasPhoto = typeof hasPhotoValue === 'boolean' ? hasPhotoValue : Boolean(photoReference);
     const photoVersion = this.pickString(safeRecord, ['photoVersion']);
+    const attendanceUserId = this.pickString(safeRecord, ['attendanceUserId']);
+    const badgeNumber = this.pickString(safeRecord, ['badgeNumber']);
+    const defaultSubStageId = this.pickString(safeRecord, ['defaultSubStageId']);
 
     return {
       id: this.pickString(safeRecord, ['id', 'workerId', '_id']),
@@ -141,7 +192,10 @@ export class WorkersApiService {
       ...(phone ? { phone } : {}),
       ...(photoReference ? { photoReference } : {}),
       hasPhoto,
-      ...(photoVersion ? { photoVersion } : {})
+      ...(photoVersion ? { photoVersion } : {}),
+      ...(attendanceUserId ? { attendanceUserId } : {}),
+      ...(badgeNumber ? { badgeNumber } : {}),
+      ...(defaultSubStageId ? { defaultSubStageId } : {})
     };
   }
 

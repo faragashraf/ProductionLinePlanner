@@ -2,12 +2,12 @@
   <ng-container *ngIf="!profileViewOpen; else profileWorkspace">
     <plp-product-page-header
       title="إدارة العاملين"
-      subtitle="مركز موحد لملفات العاملين المحلية وبيانات المصدر المرصودة والسياق التشغيلي."
+      subtitle="ملفات العاملين من قاعدة بيانات ProductionLinePlanner، مع مرجع الهوية الخارجي والسياق التشغيلي المحلي."
       [showBreadcrumb]="false"
     >
       <div plp-page-metadata class="worker-management-page__header-note">
         <i class="pi pi-info-circle" aria-hidden="true"></i>
-        <span>نسخة Frontend تجريبية ببيانات غير حقيقية؛ لا يوجد حفظ أو مزامنة فعلية.</span>
+        <span>البيانات المعروضة محلية من قاعدة التطبيق؛ لا توجد قراءة مباشرة من نظام البصمة.</span>
       </div>
       <button plp-primary-action pButton type="button" icon="pi pi-user-plus" label="إضافة عامل لاحقًا" disabled title="إنشاء العامل خارج نطاق هذه الجولة"></button>
     </plp-product-page-header>
@@ -30,7 +30,7 @@
     <plp-product-toolbar
       searchInputId="workerManagementSearch"
       searchLabel="بحث في ملفات العاملين"
-      searchPlaceholder="الاسم المحلي أو اسم المصدر أو BadgeNumber أو EmployeeCode"
+      searchPlaceholder="الاسم المحلي أو EmployeeCode"
       [searchValue]="search"
       (searchValueChange)="onSearch($event)"
     >
@@ -40,33 +40,6 @@
     </plp-product-toolbar>
 
     <section class="worker-management-page__filters plp-filter-toolbar" aria-label="فلاتر ملفات العاملين">
-      <label for="workerLocalProfileStatus">حالة الملف المحلي
-        <select id="workerLocalProfileStatus" [value]="localProfileStatus" (change)="onLocalProfileStatusChange($any($event.target).value)">
-          <option *ngFor="let option of localProfileStatuses" [value]="option.value">{{ option.label }}</option>
-        </select>
-      </label>
-      <label for="workerSourceLinkStatus">حالة الربط بالمصدر
-        <select id="workerSourceLinkStatus" [value]="sourceLinkStatus" (change)="onSourceLinkStatusChange($any($event.target).value)">
-          <option *ngFor="let option of sourceLinkStatuses" [value]="option.value">{{ option.label }}</option>
-        </select>
-      </label>
-      <label for="workerFactory">المصنع
-        <select id="workerFactory" [value]="factoryId" (change)="onFactoryChange($any($event.target).value)">
-          <option value="">كل المصانع</option>
-          <option *ngFor="let option of filterOptions.factories" [value]="option.value">{{ option.label }}</option>
-        </select>
-      </label>
-      <label for="workerProductionLine">خط الإنتاج
-        <select id="workerProductionLine" [value]="productionLineId" (change)="onProductionLineChange($any($event.target).value)">
-          <option value="">كل الخطوط</option>
-          <option *ngFor="let option of filterOptions.productionLines" [value]="option.value">{{ option.label }}</option>
-        </select>
-      </label>
-      <label for="workerAssignmentStatus">حالة التسكين
-        <select id="workerAssignmentStatus" [value]="assignmentStatus" (change)="onAssignmentStatusChange($any($event.target).value)">
-          <option *ngFor="let option of assignmentStatuses" [value]="option.value">{{ option.label }}</option>
-        </select>
-      </label>
       <label for="workerLocalEmploymentStatus">حالة العمل المحلية
         <select id="workerLocalEmploymentStatus" [value]="localEmploymentStatus" (change)="onEmploymentStatusChange($any($event.target).value)">
           <option *ngFor="let option of employmentStatuses" [value]="option.value">{{ option.label }}</option>
@@ -132,15 +105,15 @@
                 <plp-worker-avatar
                   [fullName]="worker.localName"
                   [code]="worker.employeeCode || worker.badgeNumber || ''"
-                  [imageUrl]="worker.photoUrl"
+                  [photoReference]="worker.photoUrl"
                   [hasPhoto]="!!worker.photoUrl"
                   size="md"
                 ></plp-worker-avatar>
                 <div>
                   <strong>{{ worker.localName }}</strong>
                   <span><i class="pi pi-home" aria-hidden="true"></i> الاسم المحلي الرئيسي</span>
-                  <small *ngIf="worker.sourceName" dir="auto">من المصدر: {{ worker.sourceName }}</small>
-                  <small *ngIf="!worker.sourceName">اسم المصدر غير متاح</small>
+                  <small *ngIf="worker.badgeNumber">مرجع خارجي: {{ worker.badgeNumber }}</small>
+                  <small *ngIf="!worker.badgeNumber">لا يتوفر مرجع خارجي محفوظ</small>
                 </div>
               </div>
             </td>
@@ -210,6 +183,7 @@
       [worker]="selectedProfile"
       [canManage]="canManage"
       [canViewAssignments]="canViewAssignments"
+      (changed)="onProfileChanged($event)"
       (closed)="closeProfile()"
     ></app-worker-profile-workspace>
   </ng-template>
