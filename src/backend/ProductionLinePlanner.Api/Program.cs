@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
 using System.Diagnostics;
@@ -20,12 +21,14 @@ using ProductionLinePlanner.Application.DTOs;
 using ProductionLinePlanner.Application.Engines;
 using ProductionLinePlanner.Application.Services;
 using ProductionLinePlanner.Application.Requests;
+using ProductionLinePlanner.Application.Realtime;
 using ProductionLinePlanner.Application.Workers;
 using ProductionLinePlanner.Api.Security;
 using ProductionLinePlanner.Api.Authorization;
 using ProductionLinePlanner.Api.Bootstrap;
 using ProductionLinePlanner.Api.Diagnostics;
 using ProductionLinePlanner.Api.Endpoints;
+using ProductionLinePlanner.Api.Realtime;
 using ProductionLinePlanner.Domain.Entities;
 using ProductionLinePlanner.Domain.Enums;
 using ProductionLinePlanner.Domain.Authorization;
@@ -167,6 +170,9 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUserService, CurrentUserService>();
 builder.Services.AddSingleton<IPasswordHasher<AppUser>, PasswordHasher<AppUser>>();
 builder.Services.AddSingleton<IUserPasswordHasher, UserPasswordHasher>();
+builder.Services.AddSignalR(options => options.EnableDetailedErrors = false);
+builder.Services.AddSingleton<IUserIdProvider, AuthenticatedUserIdProvider>();
+builder.Services.AddScoped<INotificationLiveDispatcher, SignalRNotificationLiveDispatcher>();
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
@@ -182,6 +188,21 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidateLifetime = true,
             ClockSkew = TimeSpan.FromMinutes(1),
             RoleClaimType = ClaimTypes.Role
+        };
+        options.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                var hubAccessToken = RealtimeAccessTokenResolver.Resolve(
+                    context.HttpContext.Request.Path,
+                    context.HttpContext.Request.Query);
+                if (!string.IsNullOrWhiteSpace(hubAccessToken))
+                {
+                    context.Token = hubAccessToken;
+                }
+
+                return Task.CompletedTask;
+            }
         };
     });
 
@@ -291,6 +312,11 @@ app.Use(async (context, next) =>
     await next();
 });
 app.UseAuthorization();
+
+app.MapHub<NotificationsHub>(
+        RealtimeEndpointPaths.NotificationsHub,
+        options => options.CloseOnAuthenticationExpiration = true)
+    .RequireAuthorization();
 
 var factoriesApi = app.MapGroup("/api/factories").RequireAuthorization().RequireRateLimiting(ApiRateLimitPolicies.NormalRead);
 var productionLinesApi = app.MapGroup("/api/production-lines").RequireAuthorization().RequireRateLimiting(ApiRateLimitPolicies.NormalRead);

@@ -16,6 +16,8 @@ using ProductionLinePlanner.Infrastructure.Bootstrap;
 using ProductionLinePlanner.Infrastructure.BusinessEngines;
 using ProductionLinePlanner.Infrastructure.Importing;
 using ProductionLinePlanner.Infrastructure.Time;
+using ProductionLinePlanner.Application.Realtime;
+using ProductionLinePlanner.Infrastructure.Realtime;
 
 namespace ProductionLinePlanner.Infrastructure;
 
@@ -74,6 +76,8 @@ public static class DependencyInjection
         services.AddScoped<IAssignmentRecommendationEngine, AssignmentRecommendationEngine>();
         services.AddScoped<IReadinessEngine, ReadinessEngine>();
         services.AddScoped<INotificationEngine, NotificationEngine>();
+        services.AddScoped<ICapabilityGroupResolver, CapabilityGroupResolver>();
+        services.AddScoped<INotificationPublisher, NotificationPublisher>();
         services.AddScoped<IAuditEngine, AuditEngine>();
         services.AddScoped<IWorkerInitialSyncService, WorkerInitialSyncService>();
         services.AddScoped<IPermissionService, PermissionService>();
