@@ -688,7 +688,7 @@ p-dropdown[data-report-filter='production-order'] .p-dropdown-label {
 }
 
 .p-skeleton {
-  background: var(--plp-color-surface-soft);
+  background: color-mix(in oklab, var(--plp-color-border) 72%, var(--plp-color-surface));
   border-radius: var(--plp-radius-sm);
 }
 

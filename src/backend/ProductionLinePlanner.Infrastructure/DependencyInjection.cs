@@ -70,6 +70,7 @@ public static class DependencyInjection
         services.AddSingleton<IAttendanceSyncService, AttendanceSyncCoordinator>();
         services.AddScoped<IAttendanceEngine, AttendanceEngine>();
         services.AddScoped<IAssignmentEngine, AssignmentEngine>();
+        services.AddScoped<IAttendanceWorkforceEngine, AttendanceWorkforceEngine>();
         services.AddScoped<IAssignmentRecommendationEngine, AssignmentRecommendationEngine>();
         services.AddScoped<IReadinessEngine, ReadinessEngine>();
         services.AddScoped<INotificationEngine, NotificationEngine>();

@@ -15,7 +15,7 @@ import { SkeletonModule } from 'primeng/skeleton';
       [attr.aria-busy]="true"
     >
       <span class="plp-sr-only">{{ label }}</span>
-      <article *ngFor="let row of rows" class="plp-product-loading__row">
+      <article *ngFor="let row of rows" class="plp-product-loading__row" [class.plp-product-loading__row--with-avatar]="showAvatar">
         <p-skeleton *ngIf="showAvatar" shape="circle" size="2.5rem"></p-skeleton>
         <span class="plp-product-loading__body">
           <p-skeleton width="34%" height="0.75rem"></p-skeleton>

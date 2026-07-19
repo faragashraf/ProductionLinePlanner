@@ -3481,25 +3481,7 @@ attendanceApi.MapPost("/sync/today", async (
     .WithTags("Attendance")
     .WithName("SyncAttendanceToday");
 
-attendanceApi.MapPost("/sync/production-date/{productionDate}", async (
-    DateOnly productionDate,
-    IAttendanceEngine attendanceEngine,
-    CancellationToken cancellationToken) =>
-{
-    var result = await attendanceEngine.SyncForProductionDateAsync(productionDate, cancellationToken);
-    if (result.IsFailure)
-    {
-        return ApiResponse.Failure(
-            result.Error?.Code ?? "AttendanceSyncFailed",
-            result.Error?.Message ?? "Unable to sync attendance data.",
-            MapFailureStatusCode(result.Error?.Code));
-    }
-
-    return Results.Ok(ApiResponse.Success(result.Value));
-})
-    .RequirePermission("attendance.sync")
-    .WithTags("Attendance")
-    .WithName("SyncAttendanceForProductionDate");
+attendanceApi.MapAttendanceWorkforceEndpoints();
 
 attendanceApi.MapGet("/today", async (
     IAttendanceEngine attendanceEngine,

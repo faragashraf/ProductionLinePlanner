@@ -175,9 +175,22 @@
   min-inline-size: 0;
 }
 
+.plp-product-loading__row:not(.plp-product-loading__row--with-avatar) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .plp-product-loading__body {
   display: grid;
   gap: var(--plp-space-8);
+  min-inline-size: 0;
+}
+
+// PrimeNG renders `p-skeleton` as an inline Angular host. Make the host a
+// block only within the shared loading state so its visual child receives the
+// row width and height promised by the loading layout.
+.plp-product-loading p-skeleton {
+  display: block;
+  inline-size: 100%;
   min-inline-size: 0;
 }
 

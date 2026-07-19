@@ -33,6 +33,7 @@ export const APP_NAVIGATION_ITEMS: AppNavigationItem[] = [
     requireAll: [PERMISSIONS.factoryStructure.view, PERMISSIONS.stages.view]
   },
   { id: 'workers', label: 'العاملون', route: '/workers', icon: 'pi-users', order: 50, group: 'workspace', permission: PERMISSIONS.workers.view },
+  { id: 'attendance-workforce', label: 'الحضور والتسكين اليومي', route: '/attendance/workforce', icon: 'pi-clock', order: 55, group: 'workspace', requireAll: [PERMISSIONS.attendance.view, PERMISSIONS.assignments.view] },
   { id: 'notifications', label: 'الإشعارات', route: '/notifications', icon: 'pi-bell', order: 90, group: 'workspace' },
   { id: 'admin-users', label: 'إدارة المستخدمين', route: '/admin/users', icon: 'pi-id-card', order: 100, group: 'administration', permission: PERMISSIONS.users.view },
   { id: 'admin-roles', label: 'إدارة الأدوار', route: '/admin/roles', icon: 'pi-lock', order: 110, group: 'administration', permission: PERMISSIONS.roles.view },

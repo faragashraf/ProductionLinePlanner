@@ -49,6 +49,13 @@ export const APP_ROUTES: Routes = [
         loadChildren: () => import('./pages/workers-page/workers-page.module').then((module) => module.WorkersPageModule)
       },
       {
+        path: 'attendance/workforce',
+        loadChildren: () => import('./pages/attendance-workforce-page/attendance-workforce-page.module').then((module) => module.AttendanceWorkforcePageModule),
+        canMatch: [PermissionCanMatchGuard],
+        canActivate: [PermissionCanActivateGuard],
+        data: { title: 'الحضور والتسكين اليومي', breadcrumb: 'الحضور والتسكين اليومي', requireAll: [PERMISSIONS.attendance.view, PERMISSIONS.assignments.view] }
+      },
+      {
         path: 'admin',
         loadChildren: () => import('./pages/admin/iam-admin.module').then((module) => module.IamAdminModule),
         canMatch: [PermissionCanMatchGuard],
