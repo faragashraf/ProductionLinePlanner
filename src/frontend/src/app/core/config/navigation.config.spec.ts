@@ -84,4 +84,11 @@ describe('navigation filtering', () => {
     expect(onlyFactoryStructure).not.toContain('factory-map');
     expect(completeAccess).toContain('factory-map');
   });
+
+  it('places the worker management workspace behind workers.view', () => {
+    const workers = APP_NAVIGATION_ITEMS.find(item => item.id === 'workers');
+    expect(workers?.label).toBe('إدارة العاملين');
+    expect(workers?.route).toBe('/workers');
+    expect(workers?.permission).toBe(PERMISSIONS.workers.view);
+  });
 });

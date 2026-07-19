@@ -1,205 +1,216 @@
-<section class="page-frame workers-page">
-  <plp-page-header title="العاملون" description="عرض وعرض تفاصيل بيانات العاملين مع بحث فوري." [compact]="true">
-    <plp-product-metadata-row
-      *ngIf="hasLoadedOnce"
-      header-metadata
-      plp-page-metadata
-      label="ملخص قائمة العاملين"
+<section class="plp-page-frame worker-management-page">
+  <ng-container *ngIf="!profileViewOpen; else profileWorkspace">
+    <plp-product-page-header
+      title="إدارة العاملين"
+      subtitle="مركز موحد لملفات العاملين المحلية وبيانات المصدر المرصودة والسياق التشغيلي."
+      [showBreadcrumb]="false"
     >
-      <plp-product-metadata-item label="إجمالي العاملين" [value]="totalRecords"></plp-product-metadata-item>
-      <plp-product-metadata-item label="المعروض الآن" [value]="workers.length"></plp-product-metadata-item>
-    </plp-product-metadata-row>
-    <div header-actions>
-      <button
-        pButton
-        pRipple
-        class="p-button-sm p-button-outlined"
-        type="button"
-        icon="pi pi-refresh"
-        label="تحديث"
-        [disabled]="isLoading"
-        (click)="onRefresh()"
-        aria-label="تحديث قائمة العاملين"
-      ></button>
+      <div plp-page-metadata class="worker-management-page__header-note">
+        <i class="pi pi-info-circle" aria-hidden="true"></i>
+        <span>نسخة Frontend تجريبية ببيانات غير حقيقية؛ لا يوجد حفظ أو مزامنة فعلية.</span>
+      </div>
+      <button plp-primary-action pButton type="button" icon="pi pi-user-plus" label="إضافة عامل لاحقًا" disabled title="إنشاء العامل خارج نطاق هذه الجولة"></button>
+    </plp-product-page-header>
+
+    <section class="worker-management-page__ownership" aria-label="حدود البيانات في مساحة إدارة العاملين">
+      <article>
+        <i class="pi pi-home" aria-hidden="true"></i>
+        <div><strong>بيانات محلية</strong><span>الاسم المعروض والصورة والراتب والحالة المحلية.</span></div>
+      </article>
+      <article>
+        <i class="pi pi-eye" aria-hidden="true"></i>
+        <div><strong>من نظام البصمة</strong><span>بيانات مرصودة للعرض والمراجعة فقط.</span></div>
+      </article>
+      <article>
+        <i class="pi pi-sitemap" aria-hidden="true"></i>
+        <div><strong>تشغيل ProductionLinePlanner</strong><span>التسكين والمصنع والخط والمراحل.</span></div>
+      </article>
+    </section>
+
+    <plp-product-toolbar
+      searchInputId="workerManagementSearch"
+      searchLabel="بحث في ملفات العاملين"
+      searchPlaceholder="الاسم المحلي أو اسم المصدر أو BadgeNumber أو EmployeeCode"
+      [searchValue]="search"
+      (searchValueChange)="onSearch($event)"
+    >
+      <div plp-toolbar-actions>
+        <button pButton pRipple type="button" class="p-button-outlined" icon="pi pi-replay" label="إعادة ضبط الفلاتر" [disabled]="activeFilterCount === 0 || isLoading" (click)="resetFilters()"></button>
+      </div>
+    </plp-product-toolbar>
+
+    <section class="worker-management-page__filters plp-filter-toolbar" aria-label="فلاتر ملفات العاملين">
+      <label for="workerLocalProfileStatus">حالة الملف المحلي
+        <select id="workerLocalProfileStatus" [value]="localProfileStatus" (change)="onLocalProfileStatusChange($any($event.target).value)">
+          <option *ngFor="let option of localProfileStatuses" [value]="option.value">{{ option.label }}</option>
+        </select>
+      </label>
+      <label for="workerSourceLinkStatus">حالة الربط بالمصدر
+        <select id="workerSourceLinkStatus" [value]="sourceLinkStatus" (change)="onSourceLinkStatusChange($any($event.target).value)">
+          <option *ngFor="let option of sourceLinkStatuses" [value]="option.value">{{ option.label }}</option>
+        </select>
+      </label>
+      <label for="workerFactory">المصنع
+        <select id="workerFactory" [value]="factoryId" (change)="onFactoryChange($any($event.target).value)">
+          <option value="">كل المصانع</option>
+          <option *ngFor="let option of filterOptions.factories" [value]="option.value">{{ option.label }}</option>
+        </select>
+      </label>
+      <label for="workerProductionLine">خط الإنتاج
+        <select id="workerProductionLine" [value]="productionLineId" (change)="onProductionLineChange($any($event.target).value)">
+          <option value="">كل الخطوط</option>
+          <option *ngFor="let option of filterOptions.productionLines" [value]="option.value">{{ option.label }}</option>
+        </select>
+      </label>
+      <label for="workerAssignmentStatus">حالة التسكين
+        <select id="workerAssignmentStatus" [value]="assignmentStatus" (change)="onAssignmentStatusChange($any($event.target).value)">
+          <option *ngFor="let option of assignmentStatuses" [value]="option.value">{{ option.label }}</option>
+        </select>
+      </label>
+      <label for="workerLocalEmploymentStatus">حالة العمل المحلية
+        <select id="workerLocalEmploymentStatus" [value]="localEmploymentStatus" (change)="onEmploymentStatusChange($any($event.target).value)">
+          <option *ngFor="let option of employmentStatuses" [value]="option.value">{{ option.label }}</option>
+        </select>
+      </label>
+    </section>
+
+    <div class="worker-management-page__results" role="status" aria-live="polite">
+      <span><strong>{{ totalRecords }}</strong> نتيجة</span>
+      <span *ngIf="activeFilterCount">{{ activeFilterCount }} فلتر/بحث نشط</span>
+      <span *ngIf="totalRecords">صفحة {{ page }} من {{ totalPages }}</span>
     </div>
-  </plp-page-header>
 
-  <p class="workers-source-note" role="status">تُنشأ سجلات العاملين من مصدر الحضور المعتمد. يمكن تعديل بيانات الهوية المتاحة هنا دون إعادة تحميل القائمة.</p>
+    <plp-product-loading-state
+      *ngIf="isLoading && !hasLoaded"
+      label="جارٍ تحميل ملفات العاملين"
+      [lines]="6"
+      [showAvatar]="true"
+      [cardLike]="true"
+    ></plp-product-loading-state>
 
-  <div class="workers-toolbar plp-filter-toolbar">
-    <label class="sr-only" for="workersSearch">بحث</label>
-    <input
-      id="workersSearch"
-      class="workers-search"
-      type="search"
-      [value]="searchTerm"
-      placeholder="ابحث باسم العامل أو الكود"
-      aria-label="بحث في العاملين"
-      (input)="onSearch($event)"
-    />
-    <label class="sr-only" for="workersServiceStatus">حالة الخدمة</label>
-    <select
-      id="workersServiceStatus"
-      class="workers-status-filter"
-      [ngModel]="serviceStatus"
-      [ngModelOptions]="{ standalone: true }"
-      (ngModelChange)="onServiceStatusChange($event)"
-      aria-label="تصفية العاملين حسب حالة الخدمة"
-    >
-      <option value="all">الكل</option>
-      <option value="active">على رأس العمل</option>
-      <option value="inactive">خارج الخدمة</option>
-    </select>
-  </div>
+    <plp-product-error-state
+      *ngIf="hasError && !isLoading"
+      title="تعذر تحميل إدارة العاملين"
+      [description]="errorMessage"
+      (retry)="retry()"
+    ></plp-product-error-state>
 
-  <plp-loading-skeleton *ngIf="isLoading && !hasLoadedOnce" [lines]="7" [showAvatar]="false"></plp-loading-skeleton>
-
-  <plp-error-state
-    *ngIf="hasAnyError && hasLoadedOnce && !isLoading"
-    [title]="'تعذر تحميل قائمة العاملين'"
-    [description]="errorMessage"
-    [actionText]="errorRetryText"
-    (action)="onRefresh()"
-  ></plp-error-state>
-
-  <section class="workers-empty" *ngIf="isEmpty && hasLoadedOnce && !hasAnyError && !isLoading">
-    <plp-empty-state
-      title="لا يوجد موظفون"
-      description="لا توجد بيانات عاملين حالياً."
-      actionText="تحديث"
-      (action)="onRefresh()"
-    ></plp-empty-state>
-  </section>
-
-  <section class="workers-empty" *ngIf="isSearchableEmpty && !hasAnyError && !isLoading">
-    <plp-empty-state
+    <plp-product-empty-state
+      *ngIf="isEmpty"
       title="لا توجد نتائج"
-      [description]="'لا توجد نتائج مطابقة لكلمة البحث: ' + searchTerm"
-      actionText="مسح البحث"
-      (action)="onClearSearch()"
-    ></plp-empty-state>
-  </section>
+      [description]="emptyDescription"
+      [actionLabel]="activeFilterCount ? 'إعادة ضبط الفلاتر' : ''"
+      (action)="resetFilters()"
+    ></plp-product-empty-state>
 
-  <section class="workers-table-shell" *ngIf="!isLoading && !hasAnyError && workers.length > 0">
-    <p-table
-      plpResponsiveTable="stack"
-      plpTablePagination
-      [plpStickyActions]="true"
-      [value]="workers"
-      dataKey="code"
-      [rows]="rows"
-      [totalRecords]="totalRecords"
-      [first]="first"
-      [lazy]="isServerSidePagination"
-      [loading]="isTableLoading"
-      [plpPaginationPageSize]="rows"
-      [plpPaginationResetKey]="searchTerm + ':' + serviceStatus"
-      (onLazyLoad)="onLazyLoad($event)"
-      responsiveLayout="scroll"
-      [scrollHeight]="'auto'"
-    >
-      <ng-template pTemplate="header">
-        <tr>
-          <th>العامل</th>
-          <th>التواصل</th>
-          <th>الإجراءات</th>
-        </tr>
-      </ng-template>
-      <ng-template pTemplate="body" let-worker>
-        <tr [class.workers-row--selected]="selectedWorker?.id === worker.id || selectedWorker?.code === worker.code">
-          <td data-plp-label="العامل">
-            <div class="workers-identity">
-              <plp-worker-avatar [fullName]="worker.fullName" [code]="worker.code" [photoReference]="worker.photoReference" [hasPhoto]="worker.hasPhoto" [photoVersion]="worker.photoVersion" size="sm"></plp-worker-avatar>
-              <div class="workers-identity__content">
-                <strong class="workers-identity__name">{{ worker.fullName }}</strong>
-                <plp-product-metadata-row [label]="'بيانات العامل ' + worker.fullName">
-                  <plp-product-metadata-item label="الكود" [value]="worker.code"></plp-product-metadata-item>
-                  <plp-product-metadata-item label="القسم" [value]="worker.department || 'غير محدد'"></plp-product-metadata-item>
-                  <plp-product-metadata-item label="الحالة" [value]="worker.state"></plp-product-metadata-item>
-                </plp-product-metadata-row>
+    <section class="worker-management-page__table" *ngIf="workers.length > 0 && !hasError" [attr.aria-busy]="isLoading || null">
+      <p-table
+        plpResponsiveTable="stack"
+        [value]="workers"
+        dataKey="id"
+        [lazy]="true"
+        [rows]="pageSize"
+        [totalRecords]="totalRecords"
+        responsiveLayout="scroll"
+      >
+        <ng-template pTemplate="header">
+          <tr>
+            <th>العامل</th>
+            <th>BadgeNumber</th>
+            <th>EmployeeCode</th>
+            <th>التسكين الحالي</th>
+            <th>المصنع / الخط</th>
+            <th>الربط بالمصدر</th>
+            <th>حالة الملف</th>
+            <th>الإجراء</th>
+          </tr>
+        </ng-template>
+        <ng-template pTemplate="body" let-worker>
+          <tr [class.worker-management-page__row--conflict]="worker.hasIdentityConflict">
+            <td data-plp-label="العامل">
+              <div class="worker-management-page__identity">
+                <plp-worker-avatar
+                  [fullName]="worker.localName"
+                  [code]="worker.employeeCode || worker.badgeNumber || ''"
+                  [imageUrl]="worker.photoUrl"
+                  [hasPhoto]="!!worker.photoUrl"
+                  size="md"
+                ></plp-worker-avatar>
+                <div>
+                  <strong>{{ worker.localName }}</strong>
+                  <span><i class="pi pi-home" aria-hidden="true"></i> الاسم المحلي الرئيسي</span>
+                  <small *ngIf="worker.sourceName" dir="auto">من المصدر: {{ worker.sourceName }}</small>
+                  <small *ngIf="!worker.sourceName">اسم المصدر غير متاح</small>
+                </div>
               </div>
-            </div>
-          </td>
-          <td data-plp-label="التواصل">
-            <div class="workers-contact">
-              <span *ngIf="worker.phone">{{ worker.phone }}</span>
-              <span *ngIf="!worker.phone && worker.email">{{ worker.email }}</span>
-              <span *ngIf="!worker.phone && !worker.email">-</span>
-            </div>
-          </td>
-          <td data-plp-label="الإجراءات" class="workers-table__actions">
-            <button
-              pButton
-              pRipple
-              class="p-button-sm p-button-text"
-              type="button"
-              icon="pi pi-eye"
-              label="عرض التفاصيل"
-              (click)="openWorkerDetails(worker)"
-              *plpCan="permissions.workers.view"
-            ></button>
-            <button
-              pButton
-              pRipple
-              class="p-button-sm p-button-text"
-              type="button"
-              icon="pi pi-pencil"
-              label="تعديل"
-              [disabled]="!worker.id || workerSaving"
-              (click)="openWorkerEdit(worker)"
-              *plpCan="permissions.workers.manage"
-            ></button>
-          </td>
-        </tr>
-      </ng-template>
-      <ng-template pTemplate="emptymessage">
-        <tr>
-          <td colspan="3">لا يوجد عناصر لعرضها.</td>
-        </tr>
-      </ng-template>
-    </p-table>
-  </section>
+            </td>
+            <td data-plp-label="BadgeNumber"><bdi class="plp-code">{{ worker.badgeNumber || '—' }}</bdi></td>
+            <td data-plp-label="EmployeeCode"><bdi class="plp-code">{{ worker.employeeCode || '—' }}</bdi></td>
+            <td data-plp-label="التسكين الحالي">
+              <div class="worker-management-page__assignment">
+                <plp-status-badge
+                  [status]="assignmentStatusMeta(worker.assignmentStatus).tone"
+                  [label]="assignmentStatusMeta(worker.assignmentStatus).label"
+                ></plp-status-badge>
+                <span>{{ worker.assignmentLabel }}</span>
+              </div>
+            </td>
+            <td data-plp-label="المصنع / الخط">{{ worker.factoryLineLabel }}</td>
+            <td data-plp-label="الربط بالمصدر">
+              <plp-status-badge
+                [status]="sourceLinkStatusMeta(worker.sourceLinkStatus).tone"
+                [label]="sourceLinkStatusMeta(worker.sourceLinkStatus).label"
+              ></plp-status-badge>
+            </td>
+            <td data-plp-label="حالة الملف">
+              <plp-status-badge
+                [status]="localProfileStatusMeta(worker.localProfileStatus).tone"
+                [label]="localProfileStatusMeta(worker.localProfileStatus).label"
+              ></plp-status-badge>
+            </td>
+            <td data-plp-label="الإجراء" class="worker-management-page__actions">
+              <button
+                pButton
+                pRipple
+                type="button"
+                class="p-button-sm p-button-outlined"
+                icon="pi pi-folder-open"
+                label="فتح الملف"
+                (click)="openProfile(worker)"
+              ></button>
+            </td>
+          </tr>
+        </ng-template>
+      </p-table>
 
-  <plp-form-sheet
-    [visible]="workerSheetVisible"
-    [title]="workerSheetMode === 'edit' ? 'تعديل بيانات العامل' : 'تفاصيل العامل'"
-    [subtitle]="selectedWorker ? selectedWorker.code + ' — ' + selectedWorker.fullName : ''"
-    size="standard"
-    [saving]="workerSaving"
-    [saveDisabled]="workerForm.invalid"
-    [error]="workerSaveError"
-    [readOnly]="workerSheetMode === 'details'"
-    [successMessage]="workerSuccessMessage"
-    saveLabel="حفظ التعديل"
-    closeLabel="إغلاق التفاصيل"
-    (visibleChange)="onWorkerSheetVisibilityChange($event)"
-    (cancel)="closeWorkerSheet()"
-    (save)="saveWorker()"
-  >
-    <ng-container *ngIf="selectedWorker as worker">
-      <section class="workers-sheet-profile" *ngIf="workerSheetMode === 'details'">
-        <plp-worker-avatar [fullName]="worker.fullName" [code]="worker.code" [photoReference]="worker.photoReference" [hasPhoto]="worker.hasPhoto" [photoVersion]="worker.photoVersion" size="lg"></plp-worker-avatar>
-        <dl class="workers-sheet-profile__facts">
-          <div><dt>الاسم</dt><dd>{{ worker.fullName }}</dd></div>
-          <div><dt>الكود</dt><dd>{{ worker.code }}</dd></div>
-          <div><dt>الحالة</dt><dd>{{ worker.state }}</dd></div>
-          <div><dt>القسم</dt><dd>{{ worker.department || '-' }}</dd></div>
-          <div><dt>الهاتف</dt><dd>{{ worker.phone || '-' }}</dd></div>
-          <div><dt>البريد الإلكتروني</dt><dd>{{ worker.email || '-' }}</dd></div>
-        </dl>
-      </section>
+      <p-paginator
+        *ngIf="totalRecords > pageSize"
+        styleClass="plp-table-pagination"
+        [first]="firstRecordIndex"
+        [rows]="pageSize"
+        [totalRecords]="totalRecords"
+        [showCurrentPageReport]="true"
+        currentPageReportTemplate="{first}–{last} من {totalRecords}"
+        (onPageChange)="onPageChange($event)"
+      ></p-paginator>
+    </section>
+  </ng-container>
 
-      <plp-form *ngIf="workerSheetMode === 'edit'" [formGroup]="workerForm" [columns]="1" [busy]="workerSaving" (submitted)="saveWorker()">
-        <label class="workers-sheet-field">الاسم الكامل <span aria-hidden="true">*</span>
-          <input pInputText type="text" formControlName="fullName" autocomplete="name" maxlength="200" [attr.aria-invalid]="workerForm.controls.fullName.invalid && workerForm.controls.fullName.touched" aria-describedby="workerFullNameError">
-          <small id="workerFullNameError" class="workers-sheet-field__validation" [class.is-visible]="workerForm.controls.fullName.invalid && workerForm.controls.fullName.touched" [attr.role]="workerForm.controls.fullName.invalid && workerForm.controls.fullName.touched ? 'alert' : null">{{ workerForm.controls.fullName.invalid && workerForm.controls.fullName.touched ? 'اسم العامل مطلوب.' : '' }}</small>
-        </label>
-        <label class="workers-sheet-field">رقم الهاتف
-          <input pInputText type="tel" formControlName="phone" autocomplete="tel" maxlength="50">
-          <small>يُترك كما هو إن لم يكن متاحًا للتعديل.</small>
-        </label>
-        <p class="workers-sheet-context">الكود والقسم والحالة تأتي من المصدر المعتمد ولا تتغير من هذه الشاشة.</p>
-      </plp-form>
-    </ng-container>
-  </plp-form-sheet>
+  <ng-template #profileWorkspace>
+    <div class="worker-management-page__profile-state" *ngIf="profileLoading">
+      <button pButton pRipple type="button" class="p-button-text" icon="pi pi-arrow-right" label="العودة إلى قائمة العاملين" (click)="closeProfile()"></button>
+      <plp-product-loading-state label="جارٍ تحميل ملف العامل" [lines]="7" [showAvatar]="true" [cardLike]="true"></plp-product-loading-state>
+    </div>
+    <div class="worker-management-page__profile-state" *ngIf="profileError && !profileLoading">
+      <button pButton pRipple type="button" class="p-button-text" icon="pi pi-arrow-right" label="العودة إلى قائمة العاملين" (click)="closeProfile()"></button>
+      <plp-product-error-state title="تعذر فتح ملف العامل" [description]="profileError" (retry)="closeProfile()"></plp-product-error-state>
+    </div>
+    <app-worker-profile-workspace
+      *ngIf="selectedProfile && !profileLoading"
+      [worker]="selectedProfile"
+      [canManage]="canManage"
+      [canViewAssignments]="canViewAssignments"
+      (closed)="closeProfile()"
+    ></app-worker-profile-workspace>
+  </ng-template>
 </section>

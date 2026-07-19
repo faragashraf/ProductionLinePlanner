@@ -46,7 +46,10 @@ export const APP_ROUTES: Routes = [
       },
       {
         path: 'workers',
-        loadChildren: () => import('./pages/workers-page/workers-page.module').then((module) => module.WorkersPageModule)
+        loadChildren: () => import('./pages/workers-page/workers-page.module').then((module) => module.WorkersPageModule),
+        canMatch: [PermissionCanMatchGuard],
+        canActivate: [PermissionCanActivateGuard],
+        data: { title: 'إدارة العاملين', breadcrumb: 'إدارة العاملين', permission: PERMISSIONS.workers.view }
       },
       {
         path: 'attendance/workforce',

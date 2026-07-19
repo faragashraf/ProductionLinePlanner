@@ -1,18 +1,33 @@
 import { Component, OnDestroy, OnInit } from '@angular/core';
-import { FormBuilder, Validators } from '@angular/forms';
-import { catchError, finalize, Subject, debounceTime, distinctUntilChanged, map, merge, of, switchMap, takeUntil, tap } from 'rxjs';
+import { PermissionService } from '../../core/services/permission.service';
 import { PERMISSIONS } from '../../core/config/permission-identifiers';
-import { TableLazyLoadEvent } from 'primeng/table';
-import { WorkerPageItem } from '../../shared/models/worker.model';
-import { WorkersApiData, WorkersApiQuery, WorkersApiService } from '../../core/services/workers-api.service';
+import { Subject, catchError, debounceTime, distinctUntilChanged, finalize, map, of, switchMap, takeUntil } from 'rxjs';
+import { WorkerManagementFacade } from './worker-management.facade';
+import {
+  WorkerAssignmentStatus,
+  WorkerLocalEmploymentStatus,
+  WorkerLocalProfileStatus,
+  WorkerManagementFilterOptions,
+  WorkerManagementListItem,
+  WorkerManagementPage,
+  WorkerManagementProfile,
+  WorkerManagementQuery,
+  WorkerSourceLinkStatus
+} from './worker-management.models';
+import {
+  assignmentStatusPresentation,
+  localProfileStatusPresentation,
+  sourceLinkStatusPresentation
+} from './worker-management.presentation';
 
-type WorkersLoadResult = { payload: WorkersApiData; query: WorkersApiRequest; error?: undefined } | { payload: WorkersApiData; query: WorkersApiRequest; error: unknown };
+type WorkerPageResult = { payload: WorkerManagementPage; requestId: number; error: null } | { payload: null; requestId: number; error: unknown };
 
-interface WorkersApiRequest extends WorkersApiQuery {
-  force?: boolean;
+interface PaginatorChange {
+  page?: number;
+  rows?: number;
 }
 
-type WorkerSheetMode = 'details' | 'edit';
+const EMPTY_FILTER_OPTIONS: WorkerManagementFilterOptions = { factories: [], productionLines: [] };
 
 @Component({
   selector: 'app-workers-page',
@@ -20,113 +35,107 @@ type WorkerSheetMode = 'details' | 'edit';
   styleUrls: ['./workers-page.component.scss']
 })
 export class WorkersPageComponent implements OnInit, OnDestroy {
-  readonly permissions = PERMISSIONS;
-
   private readonly destroy$ = new Subject<void>();
-  private readonly loadQueue$ = new Subject<WorkersApiRequest>();
-  private readonly searchTerm$ = new Subject<string>();
+  private readonly load$ = new Subject<WorkerManagementQuery>();
+  private readonly search$ = new Subject<string>();
+  private readonly storageKey = 'plp.worker-management.filters.v1';
+  private loadSequence = 0;
 
-  workers: WorkerPageItem[] = [];
-  selectedWorker: WorkerPageItem | null = null;
-  workerSheetVisible = false;
-  workerSheetMode: WorkerSheetMode = 'details';
-  workerSaving = false;
-  workerSaveError = '';
-  workerSuccessMessage = 'تم تحديث بيانات العامل.';
-  searchTerm = '';
-  serviceStatus: 'all' | 'active' | 'inactive' = 'all';
-  isLoading = false;
-  hasLoadedOnce = false;
-  hasError = false;
-  errorMessage = 'تعذر تحميل بيانات العمال، يرجى المحاولة مرة أخرى.';
-  isServerSidePagination = false;
-  first = 0;
-  rows = 10;
+  readonly permissions = PERMISSIONS;
+  readonly localProfileStatuses = [
+    { value: '', label: 'كل حالات الملف' },
+    { value: 'complete', label: 'ملف مكتمل' },
+    { value: 'needs-review', label: 'يحتاج مراجعة' },
+    { value: 'source-pending', label: 'جديد بانتظار المراجعة' }
+  ];
+  readonly sourceLinkStatuses = [
+    { value: '', label: 'كل حالات الربط' },
+    { value: 'linked', label: 'مرتبط بالمصدر' },
+    { value: 'unlinked', label: 'غير مرتبط' },
+    { value: 'conflict', label: 'تعارض هوية' },
+    { value: 'new-source', label: 'جديد من المصدر' },
+    { value: 'missing-source', label: 'غير ظاهر في آخر قراءة' }
+  ];
+  readonly assignmentStatuses = [
+    { value: '', label: 'كل حالات التسكين' },
+    { value: 'assigned', label: 'مسكن' },
+    { value: 'unassigned', label: 'غير مسكن' },
+    { value: 'mixed', label: 'دائم ومؤقت' }
+  ];
+  readonly employmentStatuses = [
+    { value: '', label: 'كل حالات العمل المحلية' },
+    { value: 'active', label: 'نشط محليًا' },
+    { value: 'inactive', label: 'غير نشط محليًا' },
+    { value: 'not-set', label: 'غير محددة محليًا' }
+  ];
+
+  workers: WorkerManagementListItem[] = [];
+  filterOptions: WorkerManagementFilterOptions = EMPTY_FILTER_OPTIONS;
+  search = '';
+  localProfileStatus: WorkerLocalProfileStatus | '' = '';
+  sourceLinkStatus: WorkerSourceLinkStatus | '' = '';
+  factoryId = '';
+  productionLineId = '';
+  assignmentStatus: WorkerAssignmentStatus | '' = '';
+  localEmploymentStatus: WorkerLocalEmploymentStatus | '' = '';
+  page = 1;
+  pageSize = 6;
   totalRecords = 0;
-  errorRetryText = 'إعادة المحاولة';
+  totalPages = 1;
+  isLoading = true;
+  hasLoaded = false;
+  hasError = false;
+  errorMessage = 'تعذر تحميل مساحة إدارة العاملين.';
 
-  readonly workerForm = this.formBuilder.nonNullable.group({
-    fullName: ['', [Validators.required, Validators.maxLength(200)]],
-    phone: ['', [Validators.maxLength(50)]]
-  });
+  profileViewOpen = false;
+  profileLoading = false;
+  profileError = '';
+  selectedProfile: WorkerManagementProfile | null = null;
 
   constructor(
-    private readonly workersApiService: WorkersApiService,
-    private readonly formBuilder: FormBuilder
+    private readonly facade: WorkerManagementFacade,
+    private readonly permissionService: PermissionService
   ) {}
 
   ngOnInit(): void {
-    merge(
-      this.searchTerm$.pipe(
-        debounceTime(300),
-        distinctUntilChanged(),
-        map((search) => ({
-          page: 1,
-          pageSize: this.rows,
-          search,
-          serviceStatus: this.serviceStatus,
-          force: false
-        }))
-      ),
-      this.loadQueue$
-    )
-      .pipe(
-        map((request) => ({
-          ...request,
-          page: Math.max(Math.trunc(request.page ?? 1), 1),
-          pageSize: Math.max(Math.trunc(request.pageSize ?? 20), 1),
-          search: (request.search ?? '').trim(),
-          serviceStatus: request.serviceStatus ?? this.serviceStatus,
-          force: request.force ?? false
-        })),
-        distinctUntilChanged((previous, current) => {
-          if (current.force || previous.force) {
-            return false;
-          }
-
-          return (
-            previous.page === current.page &&
-            previous.pageSize === current.pageSize &&
-            previous.search === current.search &&
-            previous.serviceStatus === current.serviceStatus &&
-            previous.force === current.force
-          );
-        }),
-        tap(() => {
-          this.isLoading = true;
-          this.hasError = false;
-        }),
-        switchMap((query) =>
-          this.workersApiService.loadWorkers({
-            page: query.page,
-            pageSize: query.pageSize,
-            search: query.search,
-            serviceStatus: query.serviceStatus
+    this.restoreFilters();
+    this.load$.pipe(
+      switchMap(query => {
+        const requestId = ++this.loadSequence;
+        this.isLoading = true;
+        this.hasError = false;
+        this.persistFilters();
+        return this.facade.loadWorkers(query).pipe(
+          map(payload => ({ payload, requestId, error: null }) as WorkerPageResult),
+          catchError(error => of({ payload: null, requestId, error } as WorkerPageResult)),
+          finalize(() => {
+            if (requestId === this.loadSequence) {
+              this.isLoading = false;
+              this.hasLoaded = true;
+            }
           })
-            .pipe(
-              map((payload) => ({ payload, query })),
-              catchError((error) => of({ payload: this.createEmptyWorkersPayload(query), query, error })),
-              finalize(() => {
-                this.isLoading = false;
-                this.hasLoadedOnce = true;
-              })
-            )
-        ),
-        takeUntil(this.destroy$)
-      )
-      .subscribe((result: WorkersLoadResult) => {
-        const payload = result.payload;
-        if ('error' in result) {
-          this.hasError = true;
-          this.errorMessage = this.extractErrorMessage(result.error);
-          this.workers = [];
-        } else {
-          this.hasError = false;
-          this.processWorkersPayload(payload, result.query.search);
-        }
-      });
+        );
+      }),
+      takeUntil(this.destroy$)
+    ).subscribe(result => {
+      if (result.requestId !== this.loadSequence) return;
+      if (result.error || !result.payload) {
+        this.hasError = true;
+        this.workers = [];
+        this.totalRecords = 0;
+        this.errorMessage = result.error instanceof Error ? result.error.message : 'تعذر تحميل مساحة إدارة العاملين.';
+        return;
+      }
+      this.applyPage(result.payload);
+    });
 
-    this.loadQueue$.next({ page: 1, pageSize: this.rows, serviceStatus: this.serviceStatus });
+    this.search$.pipe(
+      debounceTime(250),
+      distinctUntilChanged(),
+      takeUntil(this.destroy$)
+    ).subscribe(() => this.reload(1));
+
+    this.reload(this.page);
   }
 
   ngOnDestroy(): void {
@@ -134,210 +143,194 @@ export class WorkersPageComponent implements OnInit, OnDestroy {
     this.destroy$.complete();
   }
 
-  get isTableLoading(): boolean {
-    return this.isLoading && this.hasLoadedOnce;
+  get canManage(): boolean {
+    return this.permissionService.hasPermission(PERMISSIONS.workers.manage);
   }
 
-  get isSearchableEmpty(): boolean {
-    return !this.isLoading && !this.hasError && this.workers.length === 0 && this.searchTerm.trim().length > 0;
-  }
-
-  get hasAnyError(): boolean {
-    return this.hasError;
+  get canViewAssignments(): boolean {
+    return this.permissionService.hasPermission(PERMISSIONS.assignments.view);
   }
 
   get isEmpty(): boolean {
-    return !this.isLoading && !this.hasError && this.workers.length === 0 && this.searchTerm.trim().length === 0;
+    return this.hasLoaded && !this.isLoading && !this.hasError && this.workers.length === 0;
   }
 
-  onSearch(event: Event): void {
-    const searchTerm = ((event.target as HTMLInputElement).value ?? '').trim();
-    this.searchTerm = searchTerm;
-    this.first = 0;
-    this.selectedWorker = null;
-    this.searchTerm$.next(this.searchTerm);
+  get activeFilterCount(): number {
+    return [
+      this.search.trim(),
+      this.localProfileStatus,
+      this.sourceLinkStatus,
+      this.factoryId,
+      this.productionLineId,
+      this.assignmentStatus,
+      this.localEmploymentStatus
+    ].filter(Boolean).length;
   }
 
-  onClearSearch(): void {
-    this.searchTerm = '';
-    this.first = 0;
-    this.selectedWorker = null;
-    this.searchTerm$.next('');
+  get firstRecordIndex(): number {
+    return (this.page - 1) * this.pageSize;
   }
 
-  onServiceStatusChange(status: 'all' | 'active' | 'inactive'): void {
-    this.serviceStatus = status;
-    this.first = 0;
-    this.selectedWorker = null;
-    this.loadQueue$.next({
-      page: 1,
-      pageSize: this.rows,
-      search: this.searchTerm,
-      serviceStatus: status,
-      force: false
+  get emptyDescription(): string {
+    return this.activeFilterCount
+      ? 'لا توجد ملفات مطابقة للبحث والفلاتر الحالية. أعد ضبط الفلاتر لعرض القائمة الكاملة.'
+      : 'لا توجد ملفات عاملين في مصدر البيانات الحالي.';
+  }
+
+  onSearch(value: string): void {
+    this.search = value;
+    this.search$.next(value.trim());
+  }
+
+  onLocalProfileStatusChange(value: string): void {
+    this.localProfileStatus = value as WorkerLocalProfileStatus | '';
+    this.reload(1);
+  }
+
+  onSourceLinkStatusChange(value: string): void {
+    this.sourceLinkStatus = value as WorkerSourceLinkStatus | '';
+    this.reload(1);
+  }
+
+  onFactoryChange(value: string): void {
+    this.factoryId = value;
+    this.reload(1);
+  }
+
+  onProductionLineChange(value: string): void {
+    this.productionLineId = value;
+    this.reload(1);
+  }
+
+  onAssignmentStatusChange(value: string): void {
+    this.assignmentStatus = value as WorkerAssignmentStatus | '';
+    this.reload(1);
+  }
+
+  onEmploymentStatusChange(value: string): void {
+    this.localEmploymentStatus = value as WorkerLocalEmploymentStatus | '';
+    this.reload(1);
+  }
+
+  resetFilters(): void {
+    this.search = '';
+    this.localProfileStatus = '';
+    this.sourceLinkStatus = '';
+    this.factoryId = '';
+    this.productionLineId = '';
+    this.assignmentStatus = '';
+    this.localEmploymentStatus = '';
+    localStorage.removeItem(this.storageKey);
+    this.reload(1);
+  }
+
+  retry(): void {
+    this.reload(this.page);
+  }
+
+  onPageChange(event: PaginatorChange): void {
+    const pageSize = Math.max(1, event.rows ?? this.pageSize);
+    const page = Math.max(1, (event.page ?? 0) + 1);
+    if (page === this.page && pageSize === this.pageSize) return;
+    this.pageSize = pageSize;
+    this.reload(page);
+  }
+
+  openProfile(worker: WorkerManagementListItem): void {
+    this.profileViewOpen = true;
+    this.profileLoading = true;
+    this.profileError = '';
+    this.selectedProfile = null;
+    this.facade.loadProfile(worker.id).pipe(
+      finalize(() => this.profileLoading = false),
+      takeUntil(this.destroy$)
+    ).subscribe({
+      next: profile => {
+        this.selectedProfile = profile;
+        if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' });
+      },
+      error: error => {
+        this.profileError = error instanceof Error ? error.message : 'تعذر تحميل ملف العامل.';
+      }
     });
   }
 
-  onLazyLoad(event: TableLazyLoadEvent): void {
-    if (!this.isServerSidePagination || !this.hasLoadedOnce) {
-      return;
-    }
-
-    const first = event.first ?? 0;
-    const rows = event.rows ?? this.rows;
-    const page = Math.floor(first / Math.max(rows, 1)) + 1;
-    const normalizedRows = Math.max(rows, 1);
-
-    if (event.first === this.first && normalizedRows === this.rows) {
-      return;
-    }
-
-    this.loadQueue$.next({
-      page,
-      pageSize: rows,
-      search: this.searchTerm,
-      serviceStatus: this.serviceStatus,
-      force: false
-    });
+  closeProfile(): void {
+    this.profileViewOpen = false;
+    this.profileLoading = false;
+    this.profileError = '';
+    this.selectedProfile = null;
   }
 
-  openWorkerDetails(worker: WorkerPageItem): void {
-    this.selectedWorker = worker;
-    this.workerSheetMode = 'details';
-    this.workerSaveError = '';
-    this.workerSheetVisible = true;
+  localProfileStatusMeta(status: WorkerLocalProfileStatus) { return localProfileStatusPresentation(status); }
+  sourceLinkStatusMeta(status: WorkerSourceLinkStatus) { return sourceLinkStatusPresentation(status); }
+  assignmentStatusMeta(status: WorkerAssignmentStatus) { return assignmentStatusPresentation(status); }
+
+  trackWorker(_: number, worker: WorkerManagementListItem): string {
+    return worker.id;
   }
 
-  openWorkerEdit(worker: WorkerPageItem): void {
-    if (!worker.id) {
-      this.selectedWorker = worker;
-      this.workerSaveError = 'تعذر تعديل هذا العامل لأن معرفه غير متاح في البيانات المعروضة.';
-      this.workerSheetMode = 'details';
-      this.workerSheetVisible = true;
-      return;
-    }
-
-    this.selectedWorker = worker;
-    this.workerSheetMode = 'edit';
-    this.workerSaveError = '';
-    this.workerForm.reset({ fullName: worker.fullName, phone: worker.phone ?? '' });
-    this.workerSheetVisible = true;
+  private reload(page: number): void {
+    this.page = Math.max(1, page);
+    this.load$.next(this.currentQuery());
   }
 
-  closeWorkerSheet(force = false): void {
-    if (this.workerSaving && !force) return;
-    this.workerSheetVisible = false;
-    this.workerSaveError = '';
-  }
-
-  onWorkerSheetVisibilityChange(visible: boolean): void {
-    if (!visible) this.closeWorkerSheet();
-  }
-
-  saveWorker(): void {
-    const worker = this.selectedWorker;
-    if (this.workerSaving || !worker?.id) return;
-
-    if (this.workerForm.invalid) {
-      this.workerForm.markAllAsTouched();
-      this.workerSaveError = 'راجع الحقول المطلوبة قبل الحفظ.';
-      return;
-    }
-
-    const value = this.workerForm.getRawValue();
-    const update = {
-      fullName: value.fullName.trim(),
-      ...(value.phone.trim() ? { phone: value.phone.trim() } : {})
-    };
-    this.workerSaving = true;
-    this.workerSaveError = '';
-    this.workersApiService.updateWorker(worker.id, update)
-      .pipe(finalize(() => this.workerSaving = false), takeUntil(this.destroy$))
-      .subscribe({
-        next: updatedWorker => {
-          this.workers = this.workers.map(candidate => this.sameWorker(candidate, worker) ? updatedWorker : candidate);
-          this.selectedWorker = updatedWorker;
-          this.workerSuccessMessage = `تم تحديث بيانات ${updatedWorker.fullName}.`;
-          this.closeWorkerSheet(true);
-        },
-        error: error => this.workerSaveError = this.extractErrorMessage(error)
-      });
-  }
-
-  private get currentPage(): number {
-    return Math.floor(this.first / Math.max(this.rows, 1)) + 1;
-  }
-
-  onRefresh(): void {
-    const currentPage = this.currentPage;
-    this.loadQueue$.next({
-      page: currentPage,
-      pageSize: this.rows,
-      search: this.searchTerm,
-      serviceStatus: this.serviceStatus,
-      force: true
-    });
-  }
-
-  private processWorkersPayload(payload: WorkersApiData, search?: string): void {
-    if (!payload.hasUsableBackendData) {
-      this.workers = [];
-    } else {
-      this.workers = payload.workers;
-    }
-
-    if (search && !this.isServerSidePagination && payload.hasUsableBackendData) {
-      this.workers = this.filterWorkers(payload.workers, search);
-    }
-
-    this.totalRecords = Math.max(payload.totalCount, this.workers.length);
-    this.rows = payload.pageSize;
-    this.isServerSidePagination = payload.supportsServerPagination && this.totalRecords > this.rows;
-    this.first = (Math.max(1, payload.page) - 1) * this.rows;
-  }
-
-  private filterWorkers(list: WorkerPageItem[], searchTerm: string): WorkerPageItem[] {
-    if (!searchTerm.trim()) {
-      return list;
-    }
-
-    const normalized = searchTerm.trim().toLowerCase();
-    return list.filter((worker) => {
-      return (
-        worker.code.toLowerCase().includes(normalized) ||
-        worker.fullName.toLowerCase().includes(normalized) ||
-        this.withFallback(worker.department, '').toLowerCase().includes(normalized) ||
-        this.withFallback(worker.email, '').toLowerCase().includes(normalized) ||
-        this.withFallback(worker.phone, '').toLowerCase().includes(normalized)
-      );
-    });
-  }
-
-  private withFallback(value: string | undefined, fallback: string): string {
-    return value?.trim() || fallback;
-  }
-
-  private sameWorker(left: WorkerPageItem, right: WorkerPageItem): boolean {
-    return Boolean(left.id && right.id) ? left.id === right.id : left.code === right.code;
-  }
-
-  private createEmptyWorkersPayload(query: WorkersApiQuery): WorkersApiData {
+  private currentQuery(): WorkerManagementQuery {
     return {
-      workers: [],
-      hasBackendData: false,
-      hasUsableBackendData: false,
-      totalCount: 0,
-      page: query.page ?? this.currentPage,
-      pageSize: query.pageSize ?? this.rows,
-      totalPages: 1,
-      supportsServerPagination: false
+      page: this.page,
+      pageSize: this.pageSize,
+      search: this.search.trim(),
+      localProfileStatus: this.localProfileStatus,
+      sourceLinkStatus: this.sourceLinkStatus,
+      factoryId: this.factoryId,
+      productionLineId: this.productionLineId,
+      assignmentStatus: this.assignmentStatus,
+      localEmploymentStatus: this.localEmploymentStatus
     };
   }
 
-  private extractErrorMessage(error: unknown): string {
-    if (error instanceof Error && error.message.length > 0) {
-      return error.message;
+  private applyPage(payload: WorkerManagementPage): void {
+    this.workers = payload.items;
+    this.totalRecords = payload.totalCount;
+    this.page = payload.page;
+    this.pageSize = payload.pageSize;
+    this.totalPages = payload.totalPages;
+    this.filterOptions = payload.filterOptions;
+    this.hasError = false;
+  }
+
+  private persistFilters(): void {
+    localStorage.setItem(this.storageKey, JSON.stringify({
+      search: this.search,
+      localProfileStatus: this.localProfileStatus,
+      sourceLinkStatus: this.sourceLinkStatus,
+      factoryId: this.factoryId,
+      productionLineId: this.productionLineId,
+      assignmentStatus: this.assignmentStatus,
+      localEmploymentStatus: this.localEmploymentStatus
+    }));
+  }
+
+  private restoreFilters(): void {
+    try {
+      const value = JSON.parse(localStorage.getItem(this.storageKey) ?? '{}') as Record<string, unknown>;
+      this.search = this.stringValue(value['search']);
+      this.localProfileStatus = this.allowedValue(value['localProfileStatus'], ['complete', 'needs-review', 'source-pending']);
+      this.sourceLinkStatus = this.allowedValue(value['sourceLinkStatus'], ['linked', 'unlinked', 'conflict', 'new-source', 'missing-source']);
+      this.factoryId = this.stringValue(value['factoryId']);
+      this.productionLineId = this.stringValue(value['productionLineId']);
+      this.assignmentStatus = this.allowedValue(value['assignmentStatus'], ['assigned', 'unassigned', 'mixed']);
+      this.localEmploymentStatus = this.allowedValue(value['localEmploymentStatus'], ['active', 'inactive', 'not-set']);
+    } catch {
+      localStorage.removeItem(this.storageKey);
     }
-    return 'حدث خطأ غير متوقع أثناء تحميل البيانات.';
+  }
+
+  private stringValue(value: unknown): string {
+    return typeof value === 'string' ? value : '';
+  }
+
+  private allowedValue<T extends string>(value: unknown, allowed: readonly T[]): T | '' {
+    return typeof value === 'string' && allowed.includes(value as T) ? value as T : '';
   }
 }

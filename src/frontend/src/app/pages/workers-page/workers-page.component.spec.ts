@@ -1,203 +1,141 @@
 import { fakeAsync, tick } from '@angular/core/testing';
-import { FormBuilder } from '@angular/forms';
-import { Observable, of, throwError } from 'rxjs';
+import { Subject, of, throwError } from 'rxjs';
+import { PermissionService } from '../../core/services/permission.service';
+import { WorkerManagementFacade } from './worker-management.facade';
+import { WORKER_MANAGEMENT_FIXTURES } from './worker-management.fixtures';
+import { WorkerManagementListItem, WorkerManagementPage, WorkerManagementQuery } from './worker-management.models';
 import { WorkersPageComponent } from './workers-page.component';
-import { WorkersApiData } from '../../core/services/workers-api.service';
-import { WorkersApiService } from '../../core/services/workers-api.service';
 
 describe('WorkersPageComponent', () => {
-  const samplePayload: WorkersApiData = {
-    workers: [
-      {
-        id: 'w-1',
-        code: 'E-1',
-        fullName: 'عامل تجريبي',
-        state: 'على رأس العمل',
-        employmentStatus: 'Active',
-        isActive: true
-      }
-    ],
-    hasBackendData: true,
-    hasUsableBackendData: true,
-    totalCount: 1,
-    page: 1,
-    pageSize: 10,
-    totalPages: 1,
-    supportsServerPagination: false
+  const listItem: WorkerManagementListItem = {
+    id: 'worker-1',
+    localName: 'عامل محلي',
+    sourceName: 'Source Worker',
+    photoUrl: null,
+    badgeNumber: 'B-1',
+    employeeCode: 'EMP-1',
+    assignmentLabel: 'تسكين أساسي حالي',
+    factoryLineLabel: 'مصنع / خط',
+    sourceLinkStatus: 'linked',
+    localProfileStatus: 'complete',
+    assignmentStatus: 'assigned',
+    localEmploymentStatus: 'active',
+    factoryId: 'factory-1',
+    productionLineId: 'line-1',
+    hasIdentityConflict: false
+  };
+  const page: WorkerManagementPage = {
+    items: [listItem], totalCount: 1, page: 1, pageSize: 6, totalPages: 1,
+    filterOptions: { factories: [{ value: 'factory-1', label: 'مصنع' }], productionLines: [{ value: 'line-1', label: 'خط' }] }
   };
 
-  function createComponent(
-    loadWorkers$: Observable<WorkersApiData> = of(samplePayload)
-  ) {
-    const workersApi = jasmine.createSpyObj<WorkersApiService>('WorkersApiService', ['loadWorkers', 'updateWorker']);
-    workersApi.loadWorkers.and.returnValue(loadWorkers$);
-    workersApi.updateWorker.and.returnValue(of({ ...samplePayload.workers[0], fullName: 'عامل محدّث', phone: '01012345678' }));
+  let facade: jasmine.SpyObj<WorkerManagementFacade>;
+  let permissions: jasmine.SpyObj<PermissionService>;
 
-    return {
-      component: new WorkersPageComponent(workersApi, new FormBuilder()),
-      workersApi
-    };
+  beforeEach(() => {
+    localStorage.clear();
+    sessionStorage.clear();
+    facade = jasmine.createSpyObj<WorkerManagementFacade>('WorkerManagementFacade', ['loadWorkers', 'loadProfile']);
+    facade.loadWorkers.and.returnValue(of(page));
+    facade.loadProfile.and.returnValue(of(WORKER_MANAGEMENT_FIXTURES[0]));
+    permissions = jasmine.createSpyObj<PermissionService>('PermissionService', ['hasPermission']);
+    permissions.hasPermission.and.callFake(permission => permission === 'workers.manage' || permission === 'assignments.view');
+  });
+
+  function createComponent(): WorkersPageComponent {
+    return new WorkersPageComponent(facade, permissions);
   }
 
-  function buildInput(value: string): Event {
-    return {
-      target: {
-        value
-      }
-    } as unknown as Event;
-  }
-
-  it('loads workers exactly once when opening the page', () => {
-    const { component, workersApi } = createComponent();
+  it('shows the initial loading state until the facade completes', () => {
+    const response = new Subject<WorkerManagementPage>();
+    facade.loadWorkers.and.returnValue(response);
+    const component = createComponent();
 
     component.ngOnInit();
+    expect(component.isLoading).toBeTrue();
+    expect(component.hasLoaded).toBeFalse();
 
-    expect(workersApi.loadWorkers).toHaveBeenCalledTimes(1);
+    response.next(page);
+    response.complete();
+    expect(component.isLoading).toBeFalse();
+    expect(component.workers).toEqual([listItem]);
   });
 
-  it('ignores duplicated lazy events for the same state', () => {
-    const { component, workersApi } = createComponent();
+  it('represents empty and API-like error results explicitly', () => {
+    facade.loadWorkers.and.returnValue(of({ ...page, items: [], totalCount: 0 }));
+    const empty = createComponent();
+    empty.ngOnInit();
+    expect(empty.isEmpty).toBeTrue();
 
-    component.ngOnInit();
-    component.hasLoadedOnce = true;
-    component.isServerSidePagination = true;
-    component.first = 0;
-    component.rows = 10;
-
-    component.onLazyLoad({ first: 0, rows: 10 } as any);
-    component.onLazyLoad({ first: 0, rows: 10 } as any);
-
-    expect(workersApi.loadWorkers).toHaveBeenCalledTimes(1);
+    facade.loadWorkers.and.returnValue(throwError(() => new Error('offline')));
+    const error = createComponent();
+    error.ngOnInit();
+    expect(error.hasError).toBeTrue();
+    expect(error.errorMessage).toContain('offline');
   });
 
-  it('sends one request when page changes', () => {
-    const { component, workersApi } = createComponent();
-
+  it('debounces search across local/source names and source identifiers through the facade query', fakeAsync(() => {
+    const component = createComponent();
     component.ngOnInit();
-    component.hasLoadedOnce = true;
-    component.isServerSidePagination = true;
-    component.first = 0;
-    component.rows = 10;
+    facade.loadWorkers.calls.reset();
 
-    component.onLazyLoad({ first: 10, rows: 10 } as any);
+    component.onSearch('B-4108');
+    tick(249);
+    expect(facade.loadWorkers).not.toHaveBeenCalled();
+    tick(1);
 
-    expect(workersApi.loadWorkers).toHaveBeenCalledTimes(2);
-  });
-
-  it('debounces search into a single request', fakeAsync(() => {
-    const { component, workersApi } = createComponent();
-
-    component.ngOnInit();
-    expect(workersApi.loadWorkers).toHaveBeenCalledTimes(1);
-
-    component.onSearch(buildInput('a'));
-    tick(100);
-    component.onSearch(buildInput('al'));
-    tick(100);
-    component.onSearch(buildInput('ali'));
-
-    expect(workersApi.loadWorkers).toHaveBeenCalledTimes(1);
-
-    tick(300);
-    expect(workersApi.loadWorkers).toHaveBeenCalledTimes(2);
+    const query = facade.loadWorkers.calls.mostRecent().args[0] as WorkerManagementQuery;
+    expect(query.search).toBe('B-4108');
+    expect(query.page).toBe(1);
   }));
 
-  it('forces a new request on manual refresh', () => {
-    const { component, workersApi } = createComponent();
-
+  it('applies filters and resets all persisted filter values', () => {
+    const component = createComponent();
     component.ngOnInit();
-    expect(workersApi.loadWorkers).toHaveBeenCalledTimes(1);
+    component.onSourceLinkStatusChange('conflict');
+    component.onAssignmentStatusChange('unassigned');
+    component.onFactoryChange('factory-1');
+    expect(component.activeFilterCount).toBe(3);
 
-    component.onRefresh();
-    expect(workersApi.loadWorkers).toHaveBeenCalledTimes(2);
-
-    component.onRefresh();
-    expect(workersApi.loadWorkers).toHaveBeenCalledTimes(3);
+    component.resetFilters();
+    expect(component.activeFilterCount).toBe(0);
+    expect(component.sourceLinkStatus).toBe('');
+    expect(component.assignmentStatus).toBe('');
+    expect(component.factoryId).toBe('');
   });
 
-  it('reloads all directory workers by the selected service-status filter', () => {
-    const { component, workersApi } = createComponent();
-
+  it('opens a profile through the facade and closes back to the preserved list', () => {
+    const component = createComponent();
     component.ngOnInit();
-    component.onServiceStatusChange('inactive');
 
-    expect(workersApi.loadWorkers).toHaveBeenCalledWith(jasmine.objectContaining({ serviceStatus: 'inactive' }));
+    component.openProfile(listItem);
+    expect(facade.loadProfile).toHaveBeenCalledWith(listItem.id);
+    expect(component.profileViewOpen).toBeTrue();
+    expect(component.selectedProfile?.id).toBe(WORKER_MANAGEMENT_FIXTURES[0].id);
+
+    component.closeProfile();
+    expect(component.profileViewOpen).toBeFalse();
+    expect(component.workers).toEqual([listItem]);
   });
 
-  it('switching Active or Former back to All clears the status constraint, resets pagination, and preserves search', () => {
-    const { component, workersApi } = createComponent();
+  it('uses workers.manage for drafts and assignments.view for the operational link', () => {
+    const component = createComponent();
+    expect(component.canManage).toBeTrue();
+    expect(component.canViewAssignments).toBeTrue();
+    permissions.hasPermission.and.returnValue(false);
+    expect(component.canManage).toBeFalse();
+    expect(component.canViewAssignments).toBeFalse();
+  });
+
+  it('tears down list subscriptions and ignores emissions after destroy', () => {
+    const response = new Subject<WorkerManagementPage>();
+    facade.loadWorkers.and.returnValue(response);
+    const component = createComponent();
     component.ngOnInit();
-    component.searchTerm = 'علي';
-    component.first = 30;
+    component.ngOnDestroy();
 
-    component.onServiceStatusChange('active');
-    component.first = 20;
-    component.onServiceStatusChange('all');
-
-    expect(component.first).toBe(0);
-    expect(workersApi.loadWorkers).toHaveBeenCalledWith(jasmine.objectContaining({
-      page: 1,
-      search: 'علي',
-      serviceStatus: 'all'
-    }));
-
-    component.onServiceStatusChange('inactive');
-    component.first = 10;
-    component.onServiceStatusChange('all');
-
-    expect(component.first).toBe(0);
-    expect(workersApi.loadWorkers).toHaveBeenCalledTimes(5);
-  });
-
-  it('opens edit in the shared sheet state and reconciles only the changed worker without reloading filters or paging', () => {
-    const { component, workersApi } = createComponent();
-    component.ngOnInit();
-    component.searchTerm = 'عامل';
-    component.serviceStatus = 'active';
-    component.first = 20;
-    component.workers = [...samplePayload.workers];
-
-    component.openWorkerEdit(samplePayload.workers[0]);
-    component.workerForm.setValue({ fullName: 'عامل محدّث', phone: '01012345678' });
-    component.saveWorker();
-
-    expect(component.workerSheetVisible).toBeFalse();
-    expect(component.workerSheetMode).toBe('edit');
-    expect(workersApi.updateWorker).toHaveBeenCalledWith('w-1', { fullName: 'عامل محدّث', phone: '01012345678' });
-    expect(workersApi.loadWorkers).toHaveBeenCalledTimes(1);
-    expect(component.workers[0]).toEqual(jasmine.objectContaining({ fullName: 'عامل محدّث', phone: '01012345678' }));
-    expect(component.searchTerm).toBe('عامل');
-    expect(component.serviceStatus).toBe('active');
-    expect(component.first).toBe(20);
-  });
-
-  it('keeps the edit sheet and entered values open after a failed targeted save', () => {
-    const { component, workersApi } = createComponent();
-    workersApi.updateWorker.and.returnValue(throwError(() => new Error('network')));
-    component.workers = [...samplePayload.workers];
-    component.openWorkerEdit(samplePayload.workers[0]);
-    component.workerForm.setValue({ fullName: 'عامل محفوظ', phone: '01000000000' });
-
-    component.saveWorker();
-
-    expect(component.workerSheetVisible).toBeTrue();
-    expect(component.workerForm.getRawValue()).toEqual({ fullName: 'عامل محفوظ', phone: '01000000000' });
-    expect(component.workerSaveError).toContain('network');
-  });
-
-  it('opens both details and edit through the shared sheet state without changing the loaded row set', () => {
-    const { component } = createComponent();
-    component.workers = [...samplePayload.workers];
-
-    component.openWorkerDetails(samplePayload.workers[0]);
-    expect(component.workerSheetVisible).toBeTrue();
-    expect(component.workerSheetMode).toBe('details');
-
-    component.closeWorkerSheet();
-    component.openWorkerEdit(samplePayload.workers[0]);
-    expect(component.workerSheetVisible).toBeTrue();
-    expect(component.workerSheetMode).toBe('edit');
-    expect(component.workerForm.getRawValue()).toEqual({ fullName: 'عامل تجريبي', phone: '' });
-    expect(component.workers).toEqual(samplePayload.workers);
+    response.next(page);
+    response.complete();
+    expect(component.workers).toEqual([]);
   });
 });

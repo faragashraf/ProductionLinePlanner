@@ -35,7 +35,7 @@ export class PlpResponsiveTableDirective implements AfterViewInit, OnDestroy {
   ) {}
 
   ngAfterViewInit(): void {
-    if (!isPlatformBrowser(this.platformId) || this.plpResponsiveTable !== 'scroll') {
+    if (!isPlatformBrowser(this.platformId)) {
       return;
     }
 
