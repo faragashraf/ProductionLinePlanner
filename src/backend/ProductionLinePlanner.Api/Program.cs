@@ -62,6 +62,7 @@ var rateLimitWindowSeconds = Math.Max(15, builder.Configuration.GetValue("Securi
 var rateLimitPermitLimit = Math.Max(1, builder.Configuration.GetValue("Security:RateLimit:PermitLimit", 120));
 var criticalProductionPermitLimit = Math.Max(1, builder.Configuration.GetValue("Security:RateLimit:CriticalProductionPermitLimit", rateLimitPermitLimit));
 var workerPhotoPermitLimit = Math.Max(1, builder.Configuration.GetValue("Security:RateLimit:WorkerPhotoPermitLimit", 120));
+var workerPhotoWritePermitLimit = Math.Max(1, builder.Configuration.GetValue("Security:RateLimit:WorkerPhotoWritePermitLimit", 20));
 var normalReadPermitLimit = Math.Max(1, builder.Configuration.GetValue("Security:RateLimit:NormalReadPermitLimit", 240));
 const string SecurityCorsPolicy = "ProductionLinePlannerCors";
 const string SecurityBootstrapEndpoint = "/api/admin/bootstrap";
@@ -144,6 +145,10 @@ builder.Services.AddRateLimiter(options =>
         RateLimitPartition.GetFixedWindowLimiter(
             GetRateLimitPartitionKey(context),
             _ => FixedWindowOptions(workerPhotoPermitLimit, rateLimitWindowSeconds)));
+    options.AddPolicy(ApiRateLimitPolicies.WorkerPhotoWrite, context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            GetRateLimitPartitionKey(context),
+            _ => FixedWindowOptions(workerPhotoWritePermitLimit, rateLimitWindowSeconds)));
     options.AddPolicy(ApiRateLimitPolicies.NormalRead, context =>
         RateLimitPartition.GetFixedWindowLimiter(
             GetRateLimitPartitionKey(context),
@@ -1911,19 +1916,7 @@ workersApi.MapGet("", async (
     .WithTags("Workers")
     .WithName("GetWorkers");
 
-app.MapGet("/api/workers/{workerId:guid}/photo", async (
-    Guid workerId,
-    AppDbContext dbContext,
-    IWorkerPhotoCache workerPhotoCache,
-    HttpContext httpContext,
-    CancellationToken cancellationToken) =>
-    await WorkerPhotoEndpoint.GetAsync(workerId, dbContext, workerPhotoCache, httpContext, cancellationToken))
-    .RequireAuthorization()
-    .RequirePermission("workers.view")
-    .RequireRateLimiting(ApiRateLimitPolicies.WorkerPhotoRead)
-    .WithTags("Workers")
-    .WithName("GetWorkerPhoto");
-
+workersApi.MapWorkerPhotoEndpoints();
 workersApi.MapWorkerSyncEndpoints();
 
 workersApi.MapGet("/{workerId:guid}", async (

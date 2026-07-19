@@ -88,7 +88,8 @@ public static class DependencyInjection
         services.AddScoped<AttendanceDirectoryService>();
         services.AddScoped<IAttendanceEmployeeReader>(provider => provider.GetRequiredService<AttendanceDirectoryService>());
         services.AddScoped<IAttendanceWorkerPhotoReader>(provider => provider.GetRequiredService<AttendanceDirectoryService>());
-        services.AddSingleton<IWorkerPhotoCache, LocalWorkerPhotoCache>();
+        services.AddSingleton<IWorkerPhotoStorage, LocalWorkerPhotoStorage>();
+        services.AddScoped<IWorkerPhotoService, WorkerPhotoService>();
         services.AddScoped<IAttendanceDepartmentReader>(provider => provider.GetRequiredService<AttendanceDirectoryService>());
 
         services.AddWorkerSyncFoundation();

@@ -62,18 +62,26 @@ public sealed class EmployeeMasterDataServiceTests
     public async Task Worker_directory_exposes_photo_metadata_only_for_a_managed_cached_photo_reference()
     {
         var managedWorker = new Worker(Guid.NewGuid(), "119", "Worker 119");
-        managedWorker.SetPhotoReference($"/api/workers/{managedWorker.Id:D}/photo?v=photo-version", DateTime.UtcNow);
+        var photoVersion = new string('a', 64);
+        managedWorker.SetPhotoReference($"/api/workers/{managedWorker.Id:D}/photo?v={photoVersion}", DateTime.UtcNow);
+        var legacyManagedWorker = new Worker(Guid.NewGuid(), "121", "Legacy managed photo");
+        var legacyPhotoVersion = new string('b', 16);
+        legacyManagedWorker.SetPhotoReference($"/api/workers/{legacyManagedWorker.Id:D}/photo?v={legacyPhotoVersion}", DateTime.UtcNow);
         var legacyWorker = new Worker(Guid.NewGuid(), "120", "Legacy photo", photoReference: "legacy-photo.png");
-        await using var fixture = await EmployeeMasterDataFixture.CreateAsync([managedWorker, legacyWorker]);
+        await using var fixture = await EmployeeMasterDataFixture.CreateAsync([managedWorker, legacyManagedWorker, legacyWorker]);
 
         var result = await fixture.Service.GetWorkersAsync(null, null, page: 1, pageSize: 10);
 
         Assert.True(result.IsSuccess);
-        var managed = result.Value!.Single(worker => worker.Id == managedWorker.Id);
-        var legacy = result.Value!.Single(worker => worker.Id == legacyWorker.Id);
+        var workers = result.Value!;
+        var managed = workers.Single(worker => worker.Id == managedWorker.Id);
+        var legacy = workers.Single(worker => worker.Id == legacyWorker.Id);
         Assert.True(managed.HasPhoto);
-        Assert.Equal("photo-version", managed.PhotoVersion);
-        Assert.Equal($"/api/workers/{managedWorker.Id:D}/photo?v=photo-version", managed.PhotoReference);
+        Assert.Equal(photoVersion, managed.PhotoVersion);
+        Assert.Equal($"/api/workers/{managedWorker.Id:D}/photo?v={photoVersion}", managed.PhotoReference);
+        var legacyManaged = workers.Single(worker => worker.Id == legacyManagedWorker.Id);
+        Assert.True(legacyManaged.HasPhoto);
+        Assert.Equal(legacyPhotoVersion, legacyManaged.PhotoVersion);
         Assert.False(legacy.HasPhoto);
         Assert.Null(legacy.PhotoReference);
         Assert.Null(legacy.PhotoVersion);

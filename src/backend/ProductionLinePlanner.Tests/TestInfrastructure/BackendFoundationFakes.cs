@@ -138,45 +138,53 @@ public sealed class RecordingAuditEngine : IAuditEngine
     }
 }
 
-public sealed class InMemoryWorkerPhotoCache : IWorkerPhotoCache
+public sealed class InMemoryWorkerPhotoStorage : IWorkerPhotoStorage
 {
-    private readonly Dictionary<Guid, WorkerPhotoCacheEntry> _entries = [];
+    private readonly Dictionary<(Guid WorkerId, string Version), WorkerPhotoStorageObject> entries = [];
 
-    public int GetCalls { get; private set; }
+    public int ReadCalls { get; private set; }
     public int StoreCalls { get; private set; }
-    public int RemoveCalls { get; private set; }
+    public int DeleteCalls { get; private set; }
 
-    public Task<WorkerPhotoCacheEntry?> GetAsync(Guid workerId, CancellationToken cancellationToken = default)
+    public Task<WorkerPhotoStorageObject?> ReadAsync(
+        Guid workerId,
+        string version,
+        CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        GetCalls++;
-        return Task.FromResult(_entries.TryGetValue(workerId, out var entry) ? entry : null);
+        ReadCalls++;
+        return Task.FromResult(entries.TryGetValue((workerId, version), out var entry) ? entry : null);
     }
 
-    public Task<WorkerPhotoCacheStoreResult> StoreAsync(Guid workerId, byte[] photo, CancellationToken cancellationToken = default)
+    public Task<WorkerPhotoStorageWriteResult> StoreAsync(
+        Guid workerId,
+        string version,
+        ReadOnlyMemory<byte> content,
+        CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         StoreCalls++;
-        if (!WorkerPhotoFormat.TryGetContentType(photo, out var contentType))
+        if (!WorkerPhotoFormat.TryDetect(content.Span, out var format))
         {
-            throw new InvalidOperationException("Worker photo format is invalid or unsupported.");
+            throw new InvalidOperationException("Worker photo content is invalid or unsupported.");
         }
 
-        var version = Convert.ToHexString(SHA256.HashData(photo)).ToLowerInvariant()[..16];
-        if (_entries.TryGetValue(workerId, out var current) && current.Version == version)
+        var actualVersion = Convert.ToHexString(SHA256.HashData(content.Span)).ToLowerInvariant();
+        if (!actualVersion.Equals(version, StringComparison.OrdinalIgnoreCase))
         {
-            return Task.FromResult(new WorkerPhotoCacheStoreResult(contentType, version, false, false, true));
+            throw new InvalidOperationException("Worker photo version does not match its content.");
         }
 
-        _entries[workerId] = new WorkerPhotoCacheEntry(photo.ToArray(), contentType, version);
-        return Task.FromResult(new WorkerPhotoCacheStoreResult(contentType, version, current is null, current is not null, false));
+        var created = !entries.ContainsKey((workerId, actualVersion));
+        entries[(workerId, actualVersion)] = new WorkerPhotoStorageObject(content.ToArray(), format.ContentType, actualVersion);
+        return Task.FromResult(new WorkerPhotoStorageWriteResult(created));
     }
 
-    public Task RemoveAsync(Guid workerId, CancellationToken cancellationToken = default)
+    public Task DeleteAsync(Guid workerId, string version, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        RemoveCalls++;
-        _entries.Remove(workerId);
+        DeleteCalls++;
+        entries.Remove((workerId, version));
         return Task.CompletedTask;
     }
 }
