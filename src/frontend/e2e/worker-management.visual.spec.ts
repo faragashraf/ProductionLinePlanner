@@ -32,6 +32,24 @@ async function prepareWorkspace(page: Page, scenario: Scenario = 'default'): Pro
     sessionStorage.setItem(storageKey, selectedScenario);
   }, { storedPermissions: permissions, selectedScenario: scenario, storageKey: scenarioKey });
 
+  await page.routeWebSocket('**/hubs/notifications**', socket => {
+    socket.onMessage(message => {
+      if (typeof message === 'string' && message.includes('"protocol"')) {
+        socket.send('{}\u001e');
+      }
+    });
+  });
+  await page.route('**/hubs/notifications/negotiate**', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      negotiateVersion: 1,
+      connectionId: 'worker-management-visual-connection',
+      connectionToken: 'worker-management-visual-token',
+      availableTransports: [{ transport: 'WebSockets', transferFormats: ['Text', 'Binary'] }]
+    })
+  }));
+
   await page.route('**/api/**', async route => {
     const pathname = new URL(route.request().url()).pathname;
     if (pathname.startsWith('/api/workers')) diagnostics.workerApiCalls += 1;
@@ -63,6 +81,11 @@ async function expectViewportSafe(page: Page): Promise<void> {
   const openButton = openButtons.first();
   const box = await openButton.boundingBox();
   expect(box?.height ?? 0).toBeGreaterThanOrEqual(40);
+  const minimumFilterControlHeight = await page.evaluate(() => Math.min(
+    ...Array.from(document.querySelectorAll('.worker-management-page__filters select'))
+      .map(control => control.getBoundingClientRect().height)
+  ));
+  expect(minimumFilterControlHeight).toBeGreaterThanOrEqual(43.5);
 }
 
 test('renders an RTL, overflow-safe worker table at the required viewports', async ({ page }) => {
@@ -96,6 +119,7 @@ test('renders an RTL, overflow-safe worker table at the required viewports', asy
     await expect(identities).toHaveCount(6);
     await expect(identities.first()).toContainText('الاسم المحلي الرئيسي');
     await expect(identities.first()).toContainText('من المصدر');
+    if (width <= 1023) await page.locator('.worker-management-page__table').scrollIntoViewIfNeeded();
     await page.screenshot({ path: path.join(visualOutput, `${name}.png`), fullPage: true });
   }
 
@@ -185,6 +209,7 @@ test('asserts loading, empty, and error states rather than only capturing screen
   const skeletons = loading.locator('.p-skeleton');
   await expect(skeletons).toHaveCount(24);
   await expect(skeletons.first()).toBeVisible();
+  await loading.scrollIntoViewIfNeeded();
   await page.screenshot({ path: path.join(visualOutput, 'mobile-loading.png'), fullPage: true });
 });
 
@@ -192,8 +217,10 @@ test('shows an explicit empty state', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   const diagnostics = await prepareWorkspace(page, 'empty');
   await page.goto('/workers');
-  await expect(page.getByText('لا توجد نتائج')).toBeVisible();
+  const emptyState = page.getByText('لا توجد نتائج');
+  await expect(emptyState).toBeVisible();
   await expect(page.locator('.worker-management-page__table')).toHaveCount(0);
+  await emptyState.scrollIntoViewIfNeeded();
   await page.screenshot({ path: path.join(visualOutput, 'mobile-empty.png'), fullPage: true });
   expect(diagnostics.consoleErrors).toEqual([]);
 });
@@ -206,6 +233,7 @@ test('shows an actionable API-like error state', async ({ page }) => {
   await expect(error).toBeVisible();
   await expect(error).toContainText('تعذر تحميل إدارة العاملين');
   await expect(page.getByRole('button', { name: 'إعادة المحاولة' })).toBeVisible();
+  await error.scrollIntoViewIfNeeded();
   await page.screenshot({ path: path.join(visualOutput, 'mobile-error.png'), fullPage: true });
   expect(diagnostics.consoleErrors).toEqual([]);
 });

@@ -68,6 +68,7 @@
 
 .worker-management-page__filters select {
   inline-size: 100%;
+  min-block-size: var(--plp-control-height-standard);
 }
 
 .worker-management-page__results {
