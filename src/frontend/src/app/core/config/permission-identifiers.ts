@@ -58,6 +58,9 @@ export const PERMISSIONS = {
   },
   audit: {
     view: 'audit.view'
+  },
+  notifications: {
+    policiesManage: 'notifications.policies.manage'
   }
 } as const;
 

@@ -20,17 +20,21 @@ import { PlpFormFieldComponent } from '../../shared/product/plp-form-field.compo
 import { PlpProductEmptyStateComponent } from '../../shared/product/plp-empty-state.component';
 import { PlpProductErrorStateComponent } from '../../shared/product/plp-error-state.component';
 import { PlpProductPageHeaderComponent } from '../../shared/product/plp-page-header.component';
+import { PlpProductLoadingStateComponent } from '../../shared/product/plp-loading-state.component';
+import { InputTextareaModule } from 'primeng/inputtextarea';
+import { NotificationPolicyStudioPageComponent } from './notification-policy-studio-page/notification-policy-studio-page.component';
 
 export const IAM_ADMIN_ROUTES: Routes = [
   { path: 'users', component: AdminUsersPageComponent, canActivate: [PermissionCanActivateGuard], data: { title: 'إدارة المستخدمين', breadcrumb: 'إدارة المستخدمين', permission: PERMISSIONS.users.view } },
   { path: 'users/:id', component: UserAuthorizationPageComponent, canActivate: [PermissionCanActivateGuard], data: { title: 'صلاحيات المستخدم', breadcrumb: 'صلاحيات المستخدم', permission: PERMISSIONS.users.view } },
   { path: 'roles', component: AdminRolesPageComponent, canActivate: [PermissionCanActivateGuard], data: { title: 'إدارة الأدوار', breadcrumb: 'إدارة الأدوار', permission: PERMISSIONS.roles.view } },
   { path: 'permissions', component: PermissionCatalogPageComponent, canActivate: [PermissionCanActivateGuard], data: { title: 'كتالوج الصلاحيات', breadcrumb: 'كتالوج الصلاحيات', permission: PERMISSIONS.permissions.assign } },
+  { path: 'notification-policies', component: NotificationPolicyStudioPageComponent, canActivate: [PermissionCanActivateGuard], data: { title: 'سياسات الإشعارات', breadcrumb: 'سياسات الإشعارات', permission: PERMISSIONS.notifications.policiesManage } },
   { path: '', pathMatch: 'full', redirectTo: 'users' }
 ];
 
 @NgModule({
-  declarations: [AdminUsersPageComponent, UserAuthorizationPageComponent, AdminRolesPageComponent, PermissionCatalogPageComponent],
+  declarations: [AdminUsersPageComponent, UserAuthorizationPageComponent, AdminRolesPageComponent, PermissionCatalogPageComponent, NotificationPolicyStudioPageComponent],
   imports: [
     CommonModule,
     FormsModule,
@@ -39,6 +43,7 @@ export const IAM_ADMIN_ROUTES: Routes = [
     ButtonModule,
     CheckboxModule,
     InputTextModule,
+    InputTextareaModule,
     MultiSelectModule,
     RippleModule,
     TagModule,
@@ -47,6 +52,7 @@ export const IAM_ADMIN_ROUTES: Routes = [
     PlpFormFieldComponent,
     PlpProductEmptyStateComponent,
     PlpProductErrorStateComponent,
+    PlpProductLoadingStateComponent,
     PlpProductPageHeaderComponent
   ]
 })

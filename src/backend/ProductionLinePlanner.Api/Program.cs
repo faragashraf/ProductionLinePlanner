@@ -22,6 +22,7 @@ using ProductionLinePlanner.Application.Engines;
 using ProductionLinePlanner.Application.Services;
 using ProductionLinePlanner.Application.Requests;
 using ProductionLinePlanner.Application.Realtime;
+using ProductionLinePlanner.Application.Notifications;
 using ProductionLinePlanner.Application.Workers;
 using ProductionLinePlanner.Api.Security;
 using ProductionLinePlanner.Api.Authorization;
@@ -275,6 +276,12 @@ if (!isEfDesignTime)
     await using var seedScope = app.Services.CreateAsyncScope();
     var permissionSeedService = seedScope.ServiceProvider.GetRequiredService<IRolePermissionSeedService>();
     await permissionSeedService.EnsureSeedAsync();
+    var notificationPolicyReconciler = seedScope.ServiceProvider.GetRequiredService<INotificationPolicyCatalogReconciler>();
+    var notificationPolicyReconciliation = await notificationPolicyReconciler.EnsureDefaultsAsync();
+    if (notificationPolicyReconciliation.IsFailure)
+    {
+        throw new InvalidOperationException(notificationPolicyReconciliation.Error?.Message ?? "Notification policy catalog reconciliation failed.");
+    }
 }
 
 if (app.Environment.IsDevelopment())
@@ -935,6 +942,7 @@ authApi.MapPost("/logout", async (
     .WithName("AuthLogout");
 
 app.MapIamAdminEndpoints();
+app.MapNotificationPolicyAdminEndpoints();
 factoriesApi.MapGet("", async (
     AppDbContext dbContext,
     CancellationToken cancellationToken,

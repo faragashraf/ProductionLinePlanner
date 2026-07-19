@@ -16,6 +16,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<AttendanceRecord> AttendanceRecords => Set<AttendanceRecord>();
     public DbSet<StageReadinessSnapshot> StageReadinessSnapshots => Set<StageReadinessSnapshot>();
     public DbSet<Notification> Notifications => Set<Notification>();
+    public DbSet<NotificationPolicy> NotificationPolicies => Set<NotificationPolicy>();
+    public DbSet<NotificationPolicyRecipientRule> NotificationPolicyRecipientRules => Set<NotificationPolicyRecipientRule>();
     public DbSet<AppUser> AppUsers => Set<AppUser>();
     public DbSet<AppRole> AppRoles => Set<AppRole>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();

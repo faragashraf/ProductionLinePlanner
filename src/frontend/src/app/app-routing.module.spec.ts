@@ -15,7 +15,8 @@ describe('IAM routing', () => {
     expect(admin?.data?.['requireAny']).toEqual([
       PERMISSIONS.users.view,
       PERMISSIONS.roles.view,
-      PERMISSIONS.permissions.assign
+      PERMISSIONS.permissions.assign,
+      PERMISSIONS.notifications.policiesManage
     ]);
   });
 
@@ -41,6 +42,13 @@ describe('IAM routing', () => {
 
     expect(permissions?.canActivate).toContain(PermissionCanActivateGuard);
     expect(permissions?.data?.['permission']).toBe(PERMISSIONS.permissions.assign);
+  });
+
+  it('requires notification policy permission for the policy studio route', () => {
+    const policies = IAM_ADMIN_ROUTES.find((route) => route.path === 'notification-policies');
+
+    expect(policies?.canActivate).toContain(PermissionCanActivateGuard);
+    expect(policies?.data?.['permission']).toBe(PERMISSIONS.notifications.policiesManage);
   });
 
   it('contains exact navigation routes for IAM screens', () => {

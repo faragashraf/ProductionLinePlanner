@@ -18,6 +18,8 @@ using ProductionLinePlanner.Infrastructure.Importing;
 using ProductionLinePlanner.Infrastructure.Time;
 using ProductionLinePlanner.Application.Realtime;
 using ProductionLinePlanner.Infrastructure.Realtime;
+using ProductionLinePlanner.Application.Notifications;
+using ProductionLinePlanner.Infrastructure.Notifications;
 
 namespace ProductionLinePlanner.Infrastructure;
 
@@ -76,6 +78,12 @@ public static class DependencyInjection
         services.AddScoped<IAssignmentRecommendationEngine, AssignmentRecommendationEngine>();
         services.AddScoped<IReadinessEngine, ReadinessEngine>();
         services.AddScoped<INotificationEngine, NotificationEngine>();
+        services.AddSingleton<INotificationEventCatalog, CodeNotificationEventCatalog>();
+        services.AddSingleton<INotificationTemplateResolver, NotificationTemplateResolver>();
+        services.AddScoped<INotificationRecipientResolver, NotificationRecipientResolver>();
+        services.AddScoped<INotificationPolicyEngine, NotificationPolicyEngine>();
+        services.AddScoped<INotificationPolicyCatalogReconciler, NotificationPolicyCatalogReconciler>();
+        services.AddScoped<INotificationPolicyAdminService, NotificationPolicyAdminService>();
         services.AddScoped<ICapabilityGroupResolver, CapabilityGroupResolver>();
         services.AddScoped<INotificationPublisher, NotificationPublisher>();
         services.AddScoped<IAuditEngine, AuditEngine>();

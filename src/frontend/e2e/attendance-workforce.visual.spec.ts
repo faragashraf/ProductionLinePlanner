@@ -18,6 +18,23 @@ async function prepareWorkforce(page: Page, requests: { workforce: number; detai
     localStorage.setItem('plp.accessToken', 'attendance-workforce-visual-token');
     localStorage.setItem('plp.currentUser', JSON.stringify({ id: 'visual-user', fullName: 'مراجع الواجهة', email: 'visual@local.test', roles: ['Administrator'], permissions: userPermissions }));
   }, { userPermissions: permissions });
+  await page.routeWebSocket('**/hubs/notifications**', socket => {
+    socket.onMessage(message => {
+      if (typeof message === 'string' && message.includes('"protocol"')) {
+        socket.send('{}\u001e');
+      }
+    });
+  });
+  await page.route('**/hubs/notifications/negotiate**', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      negotiateVersion: 1,
+      connectionId: 'attendance-workforce-visual-connection',
+      connectionToken: 'attendance-workforce-visual-token',
+      availableTransports: [{ transport: 'WebSockets', transferFormats: ['Text', 'Binary'] }]
+    })
+  }));
   await page.route('**/api/**', async route => {
     const url = new URL(route.request().url());
     const pathname = url.pathname;
