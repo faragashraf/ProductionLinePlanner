@@ -1,7 +1,7 @@
 <section class="line-staffing-page" dir="rtl" [attr.aria-busy]="planLoading || assignmentSaving">
   <plp-page-header
     title="تسكين خط الإنتاج"
-    description="خطة تنظيمية للتعيين الدائم والمؤقت. حضور اليوم لا يدخل في هذه الشاشة."
+    description="خطة تنظيمية للتسكين الدائم والمؤقت. حضور اليوم لا يدخل في هذه الشاشة."
     [compact]="true"
   ></plp-page-header>
 
@@ -71,7 +71,7 @@
         <span>إجمالي المراحل: <strong>{{ plan.totalStages }}</strong></span>
         <span>بها عمال: <strong>{{ plan.stagesWithWorkers }}</strong></span>
         <span>بدون عمال: <strong>{{ plan.stagesWithoutWorkers }}</strong></span>
-        <span>بها تعيين مؤقت: <strong>{{ plan.stagesWithTemporaryAssignments }}</strong></span>
+        <span>بها تسكين مؤقت: <strong>{{ plan.stagesWithTemporaryAssignments }}</strong></span>
         <span>مراحل تحتاج مراجعة تكلفة: <strong>{{ plan.stagesNeedingCompensationReview }}</strong></span>
       </div>
       <div class="line-staffing-page__summary-notes">
@@ -91,8 +91,8 @@
           <select [(ngModel)]="stageFilter" [ngModelOptions]="{ standalone: true }" aria-label="تصفية مراحل التسكين">
             <option value="all">كل المراحل</option>
             <option value="without-workers">بدون عمال</option>
-            <option value="default">بها تعيين دائم</option>
-            <option value="temporary">بها تعيين مؤقت</option>
+            <option value="default">بها تسكين دائم</option>
+            <option value="temporary">بها تسكين مؤقت</option>
             <option value="review">تحتاج مراجعة</option>
           </select>
           <div class="line-staffing-page__stage-navigation" aria-label="التنقل بين المراحل">
@@ -144,7 +144,7 @@
                 </div>
               </div>
               <p class="line-staffing-page__note" *ngIf="stage.hasAuthoritativeRequiredWorkerCount">العدد المخطط المعتمد لهذه المرحلة: {{ stage.requiredWorkers }}. لا يتم اختراع عدد مطلوب عندما لا يكون محفوظًا.</p>
-              <p class="line-staffing-page__note" *ngIf="!stage.hasAuthoritativeRequiredWorkerCount">لا يوجد عدد عمال مطلوب معتمد؛ تظهر أعداد التعيين الفعلية فقط.</p>
+              <p class="line-staffing-page__note" *ngIf="!stage.hasAuthoritativeRequiredWorkerCount">لا يوجد عدد تسكين مرحلة معتمد؛ تظهر أعداد التسكين الفعلية فقط.</p>
               <p class="line-staffing-page__note" *ngIf="stage.isFinancialReviewPending">{{ stageCostTerminology.provisionalHelp }}</p>
               <p class="line-staffing-page__note" *ngIf="stage.compensationMode === 'SharedPercentage'">طريقة احتساب التكلفة الحالية هي توزيع نسبي: عند تسجيل دفعة بعامل واحد تكون النسبة المطلوبة 100٪. لا تغيّر هذه الشاشة إعداد تكلفة المرحلة أو المراجعة المالية.</p>
 
@@ -177,13 +177,13 @@
                 <div class="line-staffing-page__worker-actions" *ngIf="canManageAssignments">
                   <button pButton type="button" class="p-button-sm p-button-text" label="نقل" (click)="openMove(worker)"></button>
                   <button pButton type="button" class="p-button-sm p-button-text" label="استبدال" [disabled]="participationForStage(worker)?.assignmentType !== 'Default'" (click)="openReplacement(worker)"></button>
-                  <button pButton type="button" class="p-button-sm p-button-text p-button-danger" [label]="participationForStage(worker)?.assignmentType === 'Temporary' || participationForStage(worker)?.assignmentType === 'Replacement' ? 'إلغاء المؤقت' : 'إلغاء التعيين'" (click)="openCancellation(worker)"></button>
+                  <button pButton type="button" class="p-button-sm p-button-text p-button-danger" [label]="participationForStage(worker)?.assignmentType === 'Temporary' || participationForStage(worker)?.assignmentType === 'Replacement' ? 'إلغاء التسكين المؤقت' : 'إلغاء التسكين'" (click)="openCancellation(worker)"></button>
                 </div>
               </article>
             </div>
-            <ng-template #noAssignedWorkers><plp-empty-state title="لا يوجد عمال معينون" description="أضف تعيينًا دائمًا أو مؤقتًا لهذه المرحلة دون مغادرة مساحة التسكين."></plp-empty-state></ng-template>
+            <ng-template #noAssignedWorkers><plp-empty-state title="لا يوجد عمال مسكنون" description="أضف تسكينًا دائمًا أو مؤقتًا لهذه المرحلة دون مغادرة مساحة التسكين."></plp-empty-state></ng-template>
 
-            <p class="line-staffing-page__note" *ngIf="!canManageAssignments">تملك صلاحية العرض فقط. حفظ تغييرات التسكين يتطلب صلاحية إدارة التعيينات.</p>
+            <p class="line-staffing-page__note" *ngIf="!canManageAssignments">تملك صلاحية العرض فقط. حفظ تغييرات التسكين يتطلب صلاحية إدارة التسكين.</p>
           </div>
         </p-card>
         <ng-template #stageGuidance><p-card header="عمال المرحلة المحددة"><p class="line-staffing-page__note">اختر مرحلة من قائمة الموديل لعرض عمالها وإدارة التسكين.</p></p-card></ng-template>
@@ -210,7 +210,7 @@
     <plp-form [formGroup]="assignmentForm" [columns]="2" [busy]="assignmentSaving" (submitted)="onAssignmentFormSubmitted()">
       <p class="line-staffing-page__dialog-note line-staffing-page__wide" *ngIf="assignmentDialogMode === 'default'">حدّد عمال المرحلة دفعة واحدة. الاختيار يضيف مشاركة دائمة لهذه المرحلة فقط، وإلغاء الاختيار يزيل مشاركة هذا العامل من هذه المرحلة فقط دون تغيير مراحله الأخرى. لا يلزم سبب للإضافة.</p>
       <p class="line-staffing-page__dialog-note line-staffing-page__wide" *ngIf="assignmentDialogMode === 'temporary'">حدّد بوضوح هل المشاركة المؤقتة إضافية أم نقل مؤقت من مرحلة مصدر. انتهاء الفترة يزيل المشاركة المؤقتة فقط.</p>
-      <p class="line-staffing-page__dialog-note line-staffing-page__wide" *ngIf="assignmentDialogMode === 'replacement' && pendingWorker">العامل المستبدَل: {{ pendingWorker.employeeCode }} — {{ pendingWorker.fullName }}. يبقى سجل تعيينه الدائم محفوظًا.</p>
+      <p class="line-staffing-page__dialog-note line-staffing-page__wide" *ngIf="assignmentDialogMode === 'replacement' && pendingWorker">العامل المستبدَل: {{ pendingWorker.employeeCode }} — {{ pendingWorker.fullName }}. يبقى سجل تسكينه الدائم محفوظًا.</p>
       <p class="line-staffing-page__dialog-note line-staffing-page__wide" *ngIf="assignmentDialogMode === 'move' && pendingWorker">العامل: {{ pendingWorker.employeeCode }} — {{ pendingWorker.fullName }}. النقل يسري الآن ويُراجع المصدر في الخادم قبل الحفظ.</p>
       <p class="line-staffing-page__dialog-note line-staffing-page__wide" *ngIf="(assignmentDialogMode === 'remove-default' || assignmentDialogMode === 'cancel-temporary') && pendingWorker">العامل: {{ pendingWorker.employeeCode }} — {{ pendingWorker.fullName }}. لن يتغير أي سجل إنتاج تاريخي.</p>
       <ng-container *ngIf="isBulkDefaultAssignmentDialog">

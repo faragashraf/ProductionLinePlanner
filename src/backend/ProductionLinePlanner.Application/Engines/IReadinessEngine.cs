@@ -17,5 +17,8 @@ public interface IReadinessEngine
         Guid subStageId,
         DateTime? asOfUtc = null,
         CancellationToken cancellationToken = default);
-}
 
+    Task<Result<IReadOnlyCollection<SubStageAttendanceSummaryDto>>> GetActiveSubStageAttendanceSummariesAsync(
+        DateTime? asOfUtc = null,
+        CancellationToken cancellationToken = default);
+}

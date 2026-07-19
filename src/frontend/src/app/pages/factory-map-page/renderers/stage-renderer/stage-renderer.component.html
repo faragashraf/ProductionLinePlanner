@@ -32,26 +32,49 @@
     [name]="mainStage.name"
     [workersCurrent]="mainStage.workersCurrent ?? 0"
     [workersRequired]="mainStage.workersRequired ?? 0"
+    [workerRequirementDefined]="mainStage.workerRequirementDefined !== false"
     [status]="mainStage.status ?? 'info'"
     [note]="mainStage.note ?? ''"
   ></plp-main-stage-card>
 
   <ng-container *ngIf="mode === 'stage'">
-    <p class="plp-stage-renderer__subtitle">اختر مرحلة فرعية لعرض العاملين، ثم انتقل مباشرة للتعيينات إذا وجدت عجز.</p>
+    <p class="plp-stage-renderer__subtitle">اختر مرحلة فرعية لعرض العاملين، ثم افتح تسكين الخط عند الحاجة إلى تعديل التغطية.</p>
     <a
       class="plp-stage-renderer__journey-link p-button p-button-text p-button-sm"
-      [routerLink]="['/assignments']"
-      [queryParams]="mainStageAssignmentQueryParams"
-      aria-label="بدء توصية لهذه المرحلة"
+      [routerLink]="['/manufacturing/line-staffing']"
+      aria-label="فتح تسكين الخط"
     >
-      بدء التوصية من هذه المرحلة
+      فتح تسكين الخط من هذه المرحلة
       <i [class]="forwardIcon" aria-hidden="true"></i>
     </a>
-    <plp-responsive-grid class="plp-stage-renderer__substages-grid" [minItemWidth]="240" [gap]="'var(--plp-spacing-2)'">
+    <div class="plp-stage-renderer__filter" aria-label="تصفية المراحل حسب حضور اليوم">
+      <label for="sub-stage-attendance-filter">تصفية المراحل</label>
+      <select
+        id="sub-stage-attendance-filter"
+        [value]="attendanceFilter"
+        (change)="setAttendanceFilter($any($event.target).value)"
+      >
+        <option value="all">كل المراحل ({{ mainStage.subStages.length }})</option>
+        <option value="has-absence">بها غياب</option>
+        <option value="fully-present">حضور كامل</option>
+        <option value="partially-present">حضور جزئي</option>
+        <option value="all-absent">جميع المسكنين غائبون</option>
+        <option value="needs-sync">تحتاج مزامنة</option>
+        <option value="no-assignments">لا يوجد تسكين</option>
+      </select>
+      <span class="plp-stage-renderer__filter-count" *ngIf="attendanceFilter !== 'all'">{{ filteredSubStages.length }} نتيجة</span>
+    </div>
+
+    <plp-responsive-grid
+      *ngIf="hasFilteredSubStages; else noMatchingSubStages"
+      class="plp-stage-renderer__substages-grid"
+      [minItemWidth]="280"
+      [gap]="'var(--plp-spacing-2)'"
+    >
       <button
         type="button"
         class="plp-stage-renderer__substage-button"
-        *ngFor="let subStage of mainStage.subStages; trackBy: trackBySubStage"
+        *ngFor="let subStage of filteredSubStages; trackBy: trackBySubStage"
         (click)="onSubStageSelected(subStage.id)"
         [attr.aria-label]="'عرض العمال في ' + subStage.name"
       >
@@ -59,11 +82,21 @@
           [name]="subStage.name"
           [workersCurrent]="subStage.workersCurrent ?? 0"
           [workersRequired]="subStage.workersRequired ?? 0"
+          [workerRequirementDefined]="subStage.workerRequirementDefined !== false"
+          [presentAssignedWorkers]="subStage.presentAssignedWorkers ?? 0"
+          [attendanceStatus]="subStage.attendanceStatus ?? 'Unavailable'"
           [status]="subStage.status ?? 'info'"
         ></plp-sub-stage-card>
         <span class="plp-stage-renderer__action">عرض العمال</span>
       </button>
     </plp-responsive-grid>
+
+    <ng-template #noMatchingSubStages>
+      <div class="plp-stage-renderer__filter-empty" role="status">
+        <span>لا توجد مراحل مطابقة للفلتر المحدد.</span>
+        <button type="button" class="p-button p-button-sm p-button-text" (click)="clearAttendanceFilter()">عرض كل المراحل</button>
+      </div>
+    </ng-template>
   </ng-container>
 
   <ng-container *ngIf="mode === 'worker' && subStage">
@@ -71,20 +104,22 @@
       [name]="subStage.name"
       [workersCurrent]="subStage.workersCurrent ?? 0"
       [workersRequired]="subStage.workersRequired ?? 0"
+      [workerRequirementDefined]="subStage.workerRequirementDefined !== false"
+      [presentAssignedWorkers]="subStage.presentAssignedWorkers ?? 0"
+      [attendanceStatus]="subStage.attendanceStatus ?? 'Unavailable'"
       [status]="subStage.status ?? 'info'"
     ></plp-sub-stage-card>
 
     <a
       class="plp-stage-renderer__journey-link p-button p-button-text p-button-sm"
-      [routerLink]="['/assignments']"
-      [queryParams]="subStageAssignmentQueryParams"
-      [attr.aria-label]="'فتح التعيينات لمرحلة ' + subStage.name"
+      [routerLink]="['/manufacturing/line-staffing']"
+      aria-label="فتح تسكين الخط"
     >
-      فتح التعيينات لهذه المرحلة
+      فتح تسكين الخط لهذه المرحلة
       <i [class]="forwardIcon" aria-hidden="true"></i>
     </a>
 
-    <p class="plp-stage-renderer__workers-title">العاملون في {{ subStage.name }}</p>
+    <p class="plp-stage-renderer__workers-title">المسكنون في {{ subStage.name }}</p>
 
     <section class="plp-stage-renderer__workers" *ngIf="subStage.workers.length > 0">
       <plp-worker-card
@@ -98,7 +133,7 @@
     </section>
 
     <p class="plp-stage-renderer__empty" *ngIf="subStage.workers.length === 0">
-      لا يوجد عاملين مخصصين لهذه المرحلة الفرعية حاليًا.
+      لا يوجد عمال مسكنون لهذه المرحلة الفرعية حاليًا.
     </p>
   </ng-container>
 </section>

@@ -1033,7 +1033,7 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
 
   private participationTypeLabel(worker: DailyProductionWorker | undefined): string {
     if (worker?.isDailyOverride) return 'إضافة يومية';
-    if ((worker?.effectiveAssignmentType ?? '').toLocaleLowerCase().includes('temporary')) return 'تعيين مؤقت';
+    if ((worker?.effectiveAssignmentType ?? '').toLocaleLowerCase().includes('temporary')) return 'تسكين مؤقت';
     return 'تسكين أساسي';
   }
 

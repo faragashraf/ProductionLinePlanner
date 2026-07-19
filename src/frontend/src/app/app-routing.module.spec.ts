@@ -81,4 +81,13 @@ describe('IAM routing', () => {
       PERMISSIONS.stages.view
     ]);
   });
+
+  it('removes legacy stages, production-lines, and assignments routes', () => {
+    const shell = APP_ROUTES.find((route) => route.path === '');
+    const legacyPaths = ['stages', 'production-lines', 'assignments'];
+
+    legacyPaths.forEach((path) => {
+      expect(shell?.children?.some((route) => route.path === path)).toBeFalse();
+    });
+  });
 });

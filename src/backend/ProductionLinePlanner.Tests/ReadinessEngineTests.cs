@@ -81,6 +81,48 @@ public sealed class ReadinessEngineTests
         Assert.Equal("Unavailable", result.Value.AttendanceDataStatus);
     }
 
+    [Fact]
+    public async Task Batch_sub_stage_attendance_keeps_structural_assignment_separate_from_absence()
+    {
+        await using var fixture = await ReadinessFixture.CreateAsync(1, [AttendanceStatus.Absent]);
+
+        var result = await fixture.Engine.GetActiveSubStageAttendanceSummariesAsync(fixture.AsOfUtc);
+
+        var stage = Assert.Single(result.Value!);
+        Assert.Equal(1, stage.AssignedWorkersCount);
+        Assert.Equal(0, stage.PresentAssignedWorkersCount);
+        Assert.Equal(1, stage.AbsentAssignedWorkersCount);
+        Assert.Equal("Complete", stage.AttendanceDataStatus);
+        Assert.Equal("AllAbsent", stage.AttendanceStatus);
+    }
+
+    [Fact]
+    public async Task Batch_sub_stage_attendance_reports_partial_presence_without_reclassifying_staffing()
+    {
+        await using var fixture = await ReadinessFixture.CreateAsync(3, [AttendanceStatus.Present, AttendanceStatus.Late, AttendanceStatus.Absent]);
+
+        var result = await fixture.Engine.GetActiveSubStageAttendanceSummariesAsync(fixture.AsOfUtc);
+
+        var stage = Assert.Single(result.Value!);
+        Assert.Equal(3, stage.AssignedWorkersCount);
+        Assert.Equal(2, stage.PresentAssignedWorkersCount);
+        Assert.Equal(1, stage.LateAssignedWorkersCount);
+        Assert.Equal(1, stage.AbsentAssignedWorkersCount);
+        Assert.Equal("PartiallyPresent", stage.AttendanceStatus);
+    }
+
+    [Fact]
+    public async Task Batch_sub_stage_attendance_requires_sync_when_no_today_evidence_exists()
+    {
+        await using var fixture = await ReadinessFixture.CreateAsync(1, [null]);
+
+        var result = await fixture.Engine.GetActiveSubStageAttendanceSummariesAsync(fixture.AsOfUtc);
+
+        var stage = Assert.Single(result.Value!);
+        Assert.Equal("Unavailable", stage.AttendanceDataStatus);
+        Assert.Equal("NeedsSync", stage.AttendanceStatus);
+    }
+
     private sealed class ReadinessFixture : IAsyncDisposable
     {
         private ReadinessFixture(AppDbContext db, ReadinessEngine engine, Guid subStageId, DateTime asOfUtc)
@@ -164,7 +206,13 @@ public sealed class ReadinessEngineTests
             Task.FromResult(Result<Dictionary<Guid, WorkerAssignmentState>>.Success(assignments.Where(x => workerIds.Contains(x.Key)).ToDictionary(x => x.Key, x => x.Value)));
 
         public Task<Result<CurrentWorkerAssignmentDto>> GetCurrentAssignmentAsync(Guid workerId, DateTime? asOfUtc = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
-        public Task<Result<Dictionary<Guid, IReadOnlyCollection<WorkerAssignmentState>>>> ResolveEffectiveAssignmentsAsync(IEnumerable<Guid> workerIds, DateTime asOfUtc, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<Result<Dictionary<Guid, IReadOnlyCollection<WorkerAssignmentState>>>> ResolveEffectiveAssignmentsAsync(IEnumerable<Guid> workerIds, DateTime asOfUtc, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Result<Dictionary<Guid, IReadOnlyCollection<WorkerAssignmentState>>>.Success(
+                assignments
+                    .Where(x => workerIds.Contains(x.Key))
+                    .ToDictionary(
+                        x => x.Key,
+                        x => (IReadOnlyCollection<WorkerAssignmentState>)[x.Value])));
         public Task<Result<int>> FinalizeCompletedTemporaryAssignmentsAsync(DateTime? asOfUtc = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<Result<AssignmentActionResultDto>> CreateOrUpdateDefaultAssignmentAsync(CreateDefaultAssignmentRequest request, Guid actorUserId, string? requestMeta = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<Result<StageDefaultAssignmentsUpdateResultDto>> UpdateStageDefaultAssignmentsAsync(Guid subStageId, IReadOnlyCollection<Guid>? workerIds, Guid actorUserId, string? requestMeta = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
@@ -175,5 +223,6 @@ public sealed class ReadinessEngineTests
         public Task<Result<CancelTemporaryAssignmentResultDto>> CancelTemporaryAssignmentAsync(Guid assignmentId, string reason, Guid actorUserId, string? requestMeta = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<Result<PagedResult<AssignmentTimelineDto>>> GetWorkerTimelineAsync(Guid workerId, int page = 1, int pageSize = 50, DateTime? fromDate = null, DateTime? toDate = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<Result<SubStageCurrentWorkersDto>> GetSubStageWorkersAsync(Guid subStageId, DateTime? asOfUtc = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<Result<IReadOnlyCollection<SubStageAssignmentCoverageDto>>> GetActiveSubStageAssignmentCoverageAsync(DateTime? asOfUtc = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
     }
 }

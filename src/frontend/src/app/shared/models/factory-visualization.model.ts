@@ -19,6 +19,12 @@ export interface LayoutNode {
   readinessPercent?: number;
   workersCurrent?: number;
   workersRequired?: number;
+  workerRequirementDefined?: boolean;
+  staffingSummaryAvailable?: boolean;
+  attendanceSummaryAvailable?: boolean;
+  presentAssignedWorkers?: number;
+  absentAssignedWorkers?: number;
+  attendanceStatus?: string;
   position?: LayoutPosition;
   description?: string;
 }

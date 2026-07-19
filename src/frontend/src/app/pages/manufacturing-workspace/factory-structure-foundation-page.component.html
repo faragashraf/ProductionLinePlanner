@@ -1,5 +1,5 @@
 <section class="page-frame factory-structure-page" dir="rtl">
-  <plp-page-header title="بنية المصنع" description="إدارة علاقات المصنع والخطوط والمراحل وتعيين العاملين." [compact]="true">
+  <plp-page-header title="بنية المصنع" description="إدارة علاقات المصنع والخطوط والمراحل وتسكين العاملين." [compact]="true">
     <div header-actions>
       <button pButton class="p-button-sm p-button-outlined" type="button" icon="pi pi-refresh" label="تحديث" [disabled]="isLoading || isSaving" (click)="reload()"></button>
     </div>
@@ -188,14 +188,14 @@
             <input name="subCode" [(ngModel)]="subStageDraft.code" placeholder="الكود" required>
             <input name="subName" [(ngModel)]="subStageDraft.name" placeholder="اسم المرحلة الفرعية" required>
             <input name="subOrder" [(ngModel)]="subStageDraft.defaultOrder" type="number" placeholder="الترتيب">
-            <input name="subCapacity" [(ngModel)]="subStageDraft.capacity" type="number" placeholder="السعة">
+            <input name="subCapacity" [(ngModel)]="subStageDraft.capacity" type="number" placeholder="عدد تسكين المرحلة">
             <button pButton type="submit" [label]="subStageDraft.id ? 'تحديث الفرعية' : 'إضافة فرعية'" [disabled]="isSaving"></button>
           </form>
         </plp-expandable-form>
 
         <p-table plpResponsiveTable="scroll" plpTablePagination [plpPaginationPageSize]="10" [plpPaginationResetKey]="selectedMainStageId" [plpStickyActions]="true" [value]="visibleSubStages" dataKey="id" responsiveLayout="scroll">
           <ng-template pTemplate="header">
-            <tr><th>الكود</th><th>الاسم</th><th>الترتيب</th><th>السعة</th><th>الحالة</th><th></th></tr>
+          <tr><th>الكود</th><th>الاسم</th><th>الترتيب</th><th>عدد تسكين المرحلة</th><th>الحالة</th><th></th></tr>
           </ng-template>
           <ng-template pTemplate="body" let-stage>
             <tr [class.factory-structure-selected]="stage.id === selectedSubStageId">
@@ -230,9 +230,9 @@
         ></button>
       </div>
       <plp-expandable-form
-        title="العاملون المعينون للمرحلة الفرعية"
-        [summary]="selectedSubStageId ? assignedWorkers.length + ' عاملًا معينًا' : 'اختر مرحلة فرعية أولًا'"
-        openLabel="تعيين عامل"
+        title="العاملون المسكنون للمرحلة الفرعية"
+        [summary]="selectedSubStageId ? assignedWorkers.length + ' عاملًا مسكنًا' : 'اختر مرحلة فرعية أولًا'"
+        openLabel="تسكين عامل"
         [canExpand]="canManage"
         [expanded]="activeForm === 'assignment'"
         [saving]="isSaving"
@@ -253,7 +253,7 @@
             id="factoryStructureAssignWorkerButton"
             pButton
             type="button"
-            label="تعيين العامل"
+            label="تسكين العامل"
             [disabled]="isSaving || !selectedSubStageId || !selectedWorkerId"
             (click)="assignWorker()"></button>
         </form>
@@ -261,13 +261,13 @@
 
       <p-table plpResponsiveTable="scroll" plpTablePagination [plpPaginationPageSize]="10" [plpPaginationMobilePageSize]="5" [plpPaginationResetKey]="selectedSubStageId" [value]="assignedWorkers" dataKey="id" responsiveLayout="scroll">
         <ng-template pTemplate="header">
-          <tr><th>الكود</th><th>العامل</th><th>نوع التعيين</th></tr>
+          <tr><th>الكود</th><th>العامل</th><th>نوع التسكين</th></tr>
         </ng-template>
         <ng-template pTemplate="body" let-worker>
           <tr><td>{{ worker.code }}</td><td>{{ worker.fullName }}</td><td>{{ worker.assignmentType }}</td></tr>
         </ng-template>
         <ng-template pTemplate="emptymessage">
-          <tr><td colspan="3">لا يوجد عاملون معينون لهذه المرحلة.</td></tr>
+          <tr><td colspan="3">لا يوجد عاملون مسكنون لهذه المرحلة.</td></tr>
         </ng-template>
       </p-table>
     </section>

@@ -97,6 +97,15 @@ public interface IAssignmentEngine
         Guid subStageId,
         DateTime? asOfUtc = null,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Returns structural staffing coverage for every active sub-stage in one batch.
+    /// The result uses the same effective-assignment rules as line staffing and
+    /// intentionally does not evaluate attendance.
+    /// </summary>
+    Task<Result<IReadOnlyCollection<SubStageAssignmentCoverageDto>>> GetActiveSubStageAssignmentCoverageAsync(
+        DateTime? asOfUtc = null,
+        CancellationToken cancellationToken = default);
 }
 
 public sealed record WorkerAssignmentState(

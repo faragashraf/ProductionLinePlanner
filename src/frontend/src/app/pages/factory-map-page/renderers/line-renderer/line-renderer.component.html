@@ -13,11 +13,11 @@
       <plp-status-badge [status]="line.status ?? 'info'" [label]="line.statusText" [compact]="true"></plp-status-badge>
     </header>
     <plp-product-metadata-row class="plp-line-renderer__summary-meta" [label]="'بيانات خط ' + line.name">
-      <plp-product-metadata-item label="الجاهزية التشغيلية" [value]="(line.readinessPercent ?? 0) + '%'"></plp-product-metadata-item>
+      <plp-product-metadata-item label="تغطية التسكين" [value]="line.workerRequirementDefined === false ? 'الاحتياج غير محدد' : (line.readinessPercent ?? 0) + '%'"></plp-product-metadata-item>
       <plp-product-metadata-item label="المراحل" [value]="line.stages.length"></plp-product-metadata-item>
       <plp-product-metadata-item label="المرحلة النشطة" [value]="line.activeStageName || 'غير محدد'"></plp-product-metadata-item>
     </plp-product-metadata-row>
-    <plp-completion-bar [value]="line.readinessPercent ?? 0" [status]="line.status ?? 'info'" label="الجاهزية التشغيلية للخط"></plp-completion-bar>
+    <plp-completion-bar [value]="line.readinessPercent ?? 0" [status]="line.status ?? 'info'" label="تغطية تسكين الخط"></plp-completion-bar>
   </article>
 
   <plp-responsive-grid class="plp-line-renderer__stages-grid" [minItemWidth]="240" [gap]="'var(--plp-spacing-2)'">
@@ -32,6 +32,7 @@
         [name]="stage.name"
         [workersCurrent]="stage.workersCurrent ?? 0"
         [workersRequired]="stage.workersRequired ?? 0"
+        [workerRequirementDefined]="stage.workerRequirementDefined !== false"
         [status]="stage.status ?? 'info'"
         [note]="stage.note ?? ''"
       ></plp-main-stage-card>

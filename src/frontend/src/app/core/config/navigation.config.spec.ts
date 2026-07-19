@@ -67,8 +67,9 @@ describe('navigation filtering', () => {
     expect(items).toContain('manufacturing-workspace');
     expect(items).toContain('workers');
     expect(items).toContain('factory-map');
-    expect(items).toContain('stages');
-    expect(items).toContain('assignments');
+    expect(items).not.toContain('stages');
+    expect(items).not.toContain('production-lines');
+    expect(items).not.toContain('assignments');
     expect(items).not.toContain('models');
   });
 

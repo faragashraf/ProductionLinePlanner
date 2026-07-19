@@ -152,7 +152,7 @@ public sealed class ProductionReadinessEngine(
                         : "Ready";
 
         var workerStatusText = assignedWorkerIds.Length == 0
-            ? "لا يوجد عمال معينون"
+            ? "لا يوجد عمال مسكنون"
             : hasAuthoritativeRequiredWorkerCount
                 ? $"{eligibleWorkers} / {stage.Capacity} عمال مؤهلون للإنتاج"
                 : eligibleWorkers == 1

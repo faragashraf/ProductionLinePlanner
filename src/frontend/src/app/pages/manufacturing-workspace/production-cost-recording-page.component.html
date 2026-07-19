@@ -33,7 +33,7 @@
     <p class="production-page__context-note" *ngIf="!selectedFactoryId">ابدأ باختيار المصنع. لن تظهر أي بيانات تابعة قبل تحديد المسار السابق.</p>
     <p class="production-page__context-note" *ngIf="selectedFactoryId && !selectedProductionLineId">اختر خط الإنتاج لعرض المراحل الرئيسية المتاحة فقط.</p>
     <p class="production-page__context-note" *ngIf="selectedProductionLineId && !selectedMainStageId">اختر المرحلة الرئيسية لعرض مراحلها الفرعية.</p>
-    <p class="production-page__context-note" *ngIf="selectedMainStageId && !selectedSubStageId">اختر المرحلة الفرعية لفتح تعيين العمال وتسجيل الإنتاج.</p>
+    <p class="production-page__context-note" *ngIf="selectedMainStageId && !selectedSubStageId">اختر المرحلة الفرعية لفتح تسكين العمال وتسجيل الإنتاج.</p>
     <div class="production-page__selected-context" *ngIf="selectedFactoryId || selectedProductionLineId || selectedProductModelId || selectedMainStageId || selectedSubStageId">
       <plp-product-metadata-row label="مسار الإنتاج المحدد">
         <plp-product-metadata-item label="المصنع" [value]="selectedFactoryLabel"></plp-product-metadata-item>
@@ -69,7 +69,7 @@
       <ng-template #noWorkflowOrders><p class="production-page__context-note">اختر خط إنتاج لعرض أو إنشاء أوامر هذا الخط. لا يتم خلط أوامر الخطوط المختلفة.</p></ng-template>
     </p-card>
 
-    <p-card header="تعيين عمال المرحلة" *ngIf="showWorkerPanel; else assignmentBlocked">
+    <p-card header="تسكين عمال المرحلة" *ngIf="showWorkerPanel; else assignmentBlocked">
       <section class="production-page__attendance" [attr.aria-busy]="attendanceLoading || attendanceSyncing">
         <div class="production-page__allocation-head">
           <div>
@@ -126,7 +126,7 @@
           <p class="production-page__context-note" *ngIf="!stageReadiness.hasAuthoritativeRequiredWorkerCount">لا يوجد عدد عمال مطلوب معتمد لهذه المرحلة؛ يظهر العدد الفعلي فقط دون افتراض هدف.</p>
           <p class="production-page__financial-note" *ngIf="stageReadiness.isFinancialReviewPending">إعداد SharedPercentage لهذه المرحلة مؤقت ويحتاج مراجعة مالية؛ لا يمنع اختبار سير العمل أو حفظ مسودة مستوفية للشروط التشغيلية.</p>
         </section>
-        <p class="production-page__context-note" *ngIf="loadingWorkers">جارٍ تحميل التعيين الحالي وحالة الحضور…</p>
+        <p class="production-page__context-note" *ngIf="loadingWorkers">جارٍ تحميل التسكين الحالي وحالة الحضور…</p>
         <div class="production-page__error" *ngIf="workerContextError" role="alert">
           {{ workerContextError }}
           <button pButton type="button" class="p-button-text" label="إعادة المحاولة" (click)="retryWorkerContext()" [disabled]="loadingWorkers"></button>
@@ -142,22 +142,22 @@
               <plp-product-metadata-item label="الكود" [value]="worker.employeeCode"></plp-product-metadata-item>
               <plp-product-metadata-item label="الحضور" [value]="workerAttendanceLabel(worker)"></plp-product-metadata-item>
               <plp-product-metadata-item *ngIf="worker.departmentName" label="القسم" [value]="worker.departmentName"></plp-product-metadata-item>
-              <plp-product-metadata-item label="التعيين" [value]="worker.assignmentType === 'Temporary' ? 'نقل مؤقت ساري' : worker.assignmentType === 'Replacement' ? 'بديل مؤقت' : 'تعيين حالي'"></plp-product-metadata-item>
+              <plp-product-metadata-item label="التسكين" [value]="worker.assignmentType === 'Temporary' ? 'نقل مؤقت ساري' : worker.assignmentType === 'Replacement' ? 'بديل مؤقت' : 'تسكين حالي'"></plp-product-metadata-item>
             </plp-product-metadata-row>
             <div class="production-page__inline-actions">
               <button pButton type="button" class="p-button-text" [label]="isRecordableWorker(worker) ? 'إضافته لدفعة الإنتاج' : 'غير متاح للإنتاج بسبب الحضور'" (click)="addWorker(worker)" [disabled]="!isRecordableWorker(worker) || isRecordReadOnly || saving"></button>
               <button pButton type="button" *ngIf="canManageAssignments && worker.assignmentId" class="p-button-text" label="نقل العامل" (click)="openMoveDialog(worker)" [disabled]="assignmentSaving"></button>
               <button pButton type="button" *ngIf="canManageAssignments && worker.assignmentId" class="p-button-text" label="استبدال العامل" (click)="openReplaceDialog(worker)" [disabled]="assignmentSaving"></button>
-              <button pButton type="button" *ngIf="canManageAssignments && worker.assignmentId" class="p-button-text p-button-danger" label="إلغاء التعيين" (click)="openUnassignDialog(worker)" [disabled]="assignmentSaving"></button>
+              <button pButton type="button" *ngIf="canManageAssignments && worker.assignmentId" class="p-button-text p-button-danger" label="إلغاء التسكين" (click)="openUnassignDialog(worker)" [disabled]="assignmentSaving"></button>
             </div>
           </article>
         </div>
-        <ng-template #noCurrentWorkers><p class="production-page__context-note" *ngIf="!loadingWorkers && !workerContextError">لا يوجد عمال معينون حاليًا لهذه المرحلة. استخدم نموذج التعيين أدناه.</p></ng-template>
+        <ng-template #noCurrentWorkers><p class="production-page__context-note" *ngIf="!loadingWorkers && !workerContextError">لا يوجد عمال مسكنون حاليًا لهذه المرحلة. استخدم نموذج التسكين أدناه.</p></ng-template>
 
         <form *ngIf="canManageAssignments" [formGroup]="assignmentForm" (ngSubmit)="applyAssignment()" class="production-page__assignment-form">
           <h3>إضافة أو نقل عامل حاضر</h3>
           <label>بحث العامل <input pInputText [(ngModel)]="workerSearch" [ngModelOptions]="{standalone: true}" placeholder="الكود أو الاسم"></label>
-          <div class="production-page__wide production-page__candidate-list" aria-label="العمال الحاضرون المؤهلون للتعيين">
+          <div class="production-page__wide production-page__candidate-list" aria-label="العمال الحاضرون المؤهلون للتسكين">
             <button type="button" *ngFor="let worker of assignmentCandidates; trackBy: trackByWorkerId" [class.is-selected]="assignmentForm.controls.workerId.value === worker.workerId" (click)="selectReplacementWorker(worker)">
               <plp-worker-avatar [fullName]="worker.fullName" [code]="worker.employeeCode" [photoReference]="worker.photoReference" size="sm" [decorative]="true"></plp-worker-avatar>
               <span>
@@ -171,19 +171,19 @@
             </button>
             <p class="production-page__context-note" *ngIf="!assignmentCandidates.length">لا يوجد عامل حاضر مؤهل للإضافة في تاريخ الإنتاج المحدد. راجع عدد البصمات المؤكدة أعلاه ثم حدّث الحضور إذا كانت لديك الصلاحية.</p>
           </div>
-          <label>نوع التعيين <select formControlName="mode"><option value="default">تعيين حالي</option><option value="temporary">نقل مؤقت</option></select></label>
+          <label>نوع التسكين <select formControlName="mode"><option value="default">تسكين حالي</option><option value="temporary">نقل مؤقت</option></select></label>
           <label>السبب <input pInputText formControlName="reason" [placeholder]="assignmentForm.controls.mode.value === 'temporary' ? 'سبب النقل المؤقت (إلزامي)' : 'سبب النقل عند تغيير المرحلة'"></label>
           <ng-container *ngIf="assignmentForm.controls.mode.value === 'temporary'"><label>من وقت <input type="datetime-local" formControlName="startAtLocal"></label><label>إلى وقت <input type="datetime-local" formControlName="endAtLocal"></label></ng-container>
           <ul class="production-page__validation-summary production-page__wide" *ngIf="assignmentMissingRequirements.length" role="status">
             <li *ngFor="let message of assignmentMissingRequirements">{{ message }}</li>
           </ul>
-          <button pButton type="submit" label="حفظ التعيين" [disabled]="assignmentSaving"></button>
+          <button pButton type="submit" label="حفظ التسكين" [disabled]="assignmentSaving"></button>
         </form>
         <p class="production-page__context-note" *ngIf="workerContext && workerContext.unavailableWorkersCount">العامل غير الحاضر لا يظهر كمرشح. العامل الحاضر المعيّن بمرحلة أخرى يتطلب نقلًا أو استبدالًا صريحًا؛ وجود سجل حضور محلي لا يساوي بصمة حضور مؤكدة.</p>
       </ng-container>
-      <ng-template #assignmentPermission><p class="production-page__context-note">لا تملك صلاحية عرض تعيينات العمال لهذه المرحلة.</p></ng-template>
+      <ng-template #assignmentPermission><p class="production-page__context-note">لا تملك صلاحية عرض تسكينات العمال لهذه المرحلة.</p></ng-template>
     </p-card>
-    <ng-template #assignmentBlocked><p-card header="تعيين عمال المرحلة"><p class="production-page__context-note">اختر المرحلة الفرعية أولًا. لن يتم طلب أو عرض العمال قبل ذلك.</p></p-card></ng-template>
+    <ng-template #assignmentBlocked><p-card header="تسكين عمال المرحلة"><p class="production-page__context-note">اختر المرحلة الفرعية أولًا. لن يتم طلب أو عرض العمال قبل ذلك.</p></p-card></ng-template>
 
     <p-card header="ملخص جاهزية المنتج والخط">
       <p class="production-page__context-note" *ngIf="!hasProductReadinessContext">اختر الخط والموديل وتاريخ الإنتاج لعرض الجاهزية.</p>
@@ -250,10 +250,10 @@
         <label>المرفوض <input type="number" formControlName="rejectedQuantity"></label>
         <label class="production-page__wide">ملاحظات <input pInputText formControlName="notes"></label>
         <section class="production-page__wide production-page__allocations" formArrayName="workers">
-          <div class="production-page__allocation-head"><h3>العمال الفعليون في الدفعة</h3><button pButton type="button" label="إضافة من التعيين الحالي" class="p-button-outlined" (click)="addWorker()" [disabled]="!currentWorkers.length || isRecordReadOnly"></button></div>
-          <p>الكمية تُحفظ مرة واحدة للدفعة. أضف فقط العمال المعينين حاليًا لهذه المرحلة؛ حساب الاستحقاق النهائي يأتي من الخادم والإعدادات الفعلية.</p>
+          <div class="production-page__allocation-head"><h3>العمال الفعليون في الدفعة</h3><button pButton type="button" label="إضافة من التسكين الحالي" class="p-button-outlined" (click)="addWorker()" [disabled]="!currentWorkers.length || isRecordReadOnly"></button></div>
+          <p>الكمية تُحفظ مرة واحدة للدفعة. أضف فقط العمال المسكنين حاليًا لهذه المرحلة؛ حساب الاستحقاق النهائي يأتي من الخادم والإعدادات الفعلية.</p>
           <div *ngFor="let worker of workers.controls; let i = index" [formGroupName]="i" class="production-page__worker">
-            <select formControlName="workerId"><option value="">اختر العامل من التعيين الحالي</option><option *ngFor="let option of recordingWorkers; trackBy: trackByWorkerId" [value]="option.workerId" [disabled]="!canSelectWorker(option.workerId, i)">{{ option.employeeCode }} — {{ option.fullName }}</option></select>
+            <select formControlName="workerId"><option value="">اختر العامل من التسكين الحالي</option><option *ngFor="let option of recordingWorkers; trackBy: trackByWorkerId" [value]="option.workerId" [disabled]="!canSelectWorker(option.workerId, i)">{{ option.employeeCode }} — {{ option.fullName }}</option></select>
             <input *ngIf="selectedStage()?.compensationMode === 'SharedPercentage'" type="number" placeholder="النسبة %" formControlName="percentage"><input *ngIf="selectedStage()?.compensationMode === 'FixedAmount'" type="number" placeholder="قيمة ثابتة" formControlName="fixedAmount"><span *ngIf="selectedStage()?.compensationMode === 'FullRatePerWorker'">سعر كامل لكل عامل</span><button pButton type="button" icon="pi pi-times" class="p-button-danger p-button-text" aria-label="إزالة العامل من التوزيع" title="إزالة العامل من التوزيع" (click)="removeWorker(i)" [disabled]="isRecordReadOnly"></button>
           </div>
         </section>
@@ -281,26 +281,26 @@
         <p class="production-page__context-note">إجمالي الاعتماد الحالي: <strong>{{ record.totalWorkerEarnings }}</strong></p>
       </ng-container>
       <label>سبب إلغاء اعتماد الإنتاج <input pInputText formControlName="reason" maxlength="500" placeholder="سبب واضح للمراجعة المالية والتشغيلية"></label>
-      <p class="production-page__context-note">لن يتم حذف السجل أو تعديل تعيينات العمال أو أي مصدر حضور.</p>
+      <p class="production-page__context-note">لن يتم حذف السجل أو تعديل تسكينات العمال أو أي مصدر حضور.</p>
     </form>
   </plp-dialog>
 
-  <plp-dialog [(visible)]="unassignDialogVisible" title="إلغاء تعيين العامل" subtitle="سينتهي التعيين التشغيلي الآن، ولن تتغير أي دفعة إنتاج محفوظة." size="compact" [saving]="assignmentSaving" [saveDisabled]="!assignmentForm.controls.reason.value?.trim()" saveLabel="تأكيد إلغاء التعيين" (save)="confirmUnassign()" (cancel)="closeUnassignDialog()">
+  <plp-dialog [(visible)]="unassignDialogVisible" title="إلغاء تسكين العامل" subtitle="سينتهي التسكين التشغيلي الآن، ولن تتغير أي دفعة إنتاج محفوظة." size="compact" [saving]="assignmentSaving" [saveDisabled]="!assignmentForm.controls.reason.value?.trim()" saveLabel="تأكيد إلغاء التسكين" (save)="confirmUnassign()" (cancel)="closeUnassignDialog()">
     <form [formGroup]="assignmentForm" class="production-page__form">
 <p class="production-page__worker-identity" *ngIf="pendingUnassignWorker"><plp-worker-avatar [fullName]="pendingUnassignWorker.fullName" [code]="pendingUnassignWorker.employeeCode" [photoReference]="pendingUnassignWorker.photoReference" size="md"></plp-worker-avatar><strong>{{ pendingUnassignWorker.employeeCode }} — {{ pendingUnassignWorker.fullName }}</strong></p>
       <label>سبب الإلغاء <input pInputText formControlName="reason" maxlength="500" placeholder="مثال: انتهاء الوردية أو تغيير خطة التشغيل"></label>
       <ng-container *ngIf="assignmentDraftWarning">
         <p class="production-page__context-note">{{ assignmentDraftWarning }}</p>
-        <label><input type="radio" [(ngModel)]="assignmentDraftUpdateMode" [ngModelOptions]="{standalone: true}" value="draft-too"> تحديث التعيين والدفعة الحالية</label>
-        <label><input type="radio" [(ngModel)]="assignmentDraftUpdateMode" [ngModelOptions]="{standalone: true}" value="assignment-only"> تحديث التعيين فقط</label>
+        <label><input type="radio" [(ngModel)]="assignmentDraftUpdateMode" [ngModelOptions]="{standalone: true}" value="draft-too"> تحديث التسكين والدفعة الحالية</label>
+        <label><input type="radio" [(ngModel)]="assignmentDraftUpdateMode" [ngModelOptions]="{standalone: true}" value="assignment-only"> تحديث التسكين فقط</label>
       </ng-container>
       <ul class="production-page__validation-summary" *ngIf="assignmentMissingRequirements.length" role="status"><li *ngFor="let message of assignmentMissingRequirements">{{ message }}</li></ul>
     </form>
   </plp-dialog>
 
-  <plp-dialog [(visible)]="moveDialogVisible" title="نقل العامل" subtitle="اختر الوجهة بالترتيب. ينفذ الخادم النقل بصورة ذرية بعد التحقق من التعيين الحالي." size="wide" [saving]="assignmentSaving" [saveDisabled]="!moveSubStageId || !assignmentForm.controls.reason.value?.trim()" saveLabel="تأكيد نقل العامل" (save)="confirmMove()" (cancel)="closeMoveDialog()">
+  <plp-dialog [(visible)]="moveDialogVisible" title="نقل العامل" subtitle="اختر الوجهة بالترتيب. ينفذ الخادم النقل بصورة ذرية بعد التحقق من التسكين الحالي." size="wide" [saving]="assignmentSaving" [saveDisabled]="!moveSubStageId || !assignmentForm.controls.reason.value?.trim()" saveLabel="تأكيد نقل العامل" (save)="confirmMove()" (cancel)="closeMoveDialog()">
     <form [formGroup]="assignmentForm" class="production-page__form">
-<p class="production-page__worker-identity" *ngIf="movingWorker"><plp-worker-avatar [fullName]="movingWorker.fullName" [code]="movingWorker.employeeCode" [photoReference]="movingWorker.photoReference" size="md"></plp-worker-avatar><strong>{{ movingWorker.employeeCode }} — {{ movingWorker.fullName }}</strong> — {{ movingWorker.assignmentType === 'Default' ? 'تعيين حالي' : 'نقل مؤقت ساري' }}</p>
+<p class="production-page__worker-identity" *ngIf="movingWorker"><plp-worker-avatar [fullName]="movingWorker.fullName" [code]="movingWorker.employeeCode" [photoReference]="movingWorker.photoReference" size="md"></plp-worker-avatar><strong>{{ movingWorker.employeeCode }} — {{ movingWorker.fullName }}</strong> — {{ movingWorker.assignmentType === 'Default' ? 'تسكين حالي' : 'نقل مؤقت ساري' }}</p>
       <div class="production-page__move-hierarchy" aria-label="وجهة نقل العامل">
         <label>المصنع
           <select [ngModel]="moveFactoryId" (ngModelChange)="selectMoveFactory($event)" [ngModelOptions]="{standalone: true}"><option value="">اختر المصنع</option><option *ngFor="let factory of factories; trackBy: trackById" [value]="factory.id">{{ factory.code }} — {{ factory.name }}</option></select>
@@ -320,14 +320,14 @@
       <label>سبب النقل <input pInputText formControlName="reason" maxlength="500" placeholder="سبب النقل (إلزامي)"></label>
       <ng-container *ngIf="assignmentDraftWarning">
         <p class="production-page__context-note">{{ assignmentDraftWarning }}</p>
-        <label><input type="radio" [(ngModel)]="assignmentDraftUpdateMode" [ngModelOptions]="{standalone: true}" value="draft-too"> تحديث التعيين والدفعة الحالية</label>
-        <label><input type="radio" [(ngModel)]="assignmentDraftUpdateMode" [ngModelOptions]="{standalone: true}" value="assignment-only"> تحديث التعيين فقط</label>
+        <label><input type="radio" [(ngModel)]="assignmentDraftUpdateMode" [ngModelOptions]="{standalone: true}" value="draft-too"> تحديث التسكين والدفعة الحالية</label>
+        <label><input type="radio" [(ngModel)]="assignmentDraftUpdateMode" [ngModelOptions]="{standalone: true}" value="assignment-only"> تحديث التسكين فقط</label>
       </ng-container>
       <ul class="production-page__validation-summary" *ngIf="assignmentMissingRequirements.length" role="status"><li *ngFor="let message of assignmentMissingRequirements">{{ message }}</li></ul>
     </form>
   </plp-dialog>
 
-  <plp-dialog [(visible)]="replaceDialogVisible" title="استبدال عامل حاضر" subtitle="الاستبدال مؤقت، ويحتفظ الخادم بسجل التعيين والسبب دون تعديل الدفعات التاريخية." size="wide" [saving]="assignmentSaving" [saveDisabled]="!assignmentForm.controls.workerId.value || !assignmentForm.controls.reason.value?.trim()" saveLabel="تأكيد الاستبدال" (save)="confirmReplacement()" (cancel)="closeReplaceDialog()">
+  <plp-dialog [(visible)]="replaceDialogVisible" title="استبدال عامل حاضر" subtitle="الاستبدال مؤقت، ويحتفظ الخادم بسجل التسكين والسبب دون تعديل الدفعات التاريخية." size="wide" [saving]="assignmentSaving" [saveDisabled]="!assignmentForm.controls.workerId.value || !assignmentForm.controls.reason.value?.trim()" saveLabel="تأكيد الاستبدال" (save)="confirmReplacement()" (cancel)="closeReplaceDialog()">
     <form [formGroup]="assignmentForm" class="production-page__form">
 <p class="production-page__worker-identity" *ngIf="replacingWorker"><plp-worker-avatar [fullName]="replacingWorker.fullName" [code]="replacingWorker.employeeCode" [photoReference]="replacingWorker.photoReference" size="md"></plp-worker-avatar><strong>استبدال: {{ replacingWorker.employeeCode }} — {{ replacingWorker.fullName }}</strong></p>
       <div class="production-page__candidate-list production-page__wide">
@@ -341,8 +341,8 @@
       <label>سبب الاستبدال <input pInputText formControlName="reason" maxlength="500" placeholder="سبب الاستبدال (إلزامي)"></label>
       <ng-container *ngIf="assignmentDraftWarning">
         <p class="production-page__context-note">{{ assignmentDraftWarning }}</p>
-        <label><input type="radio" [(ngModel)]="assignmentDraftUpdateMode" [ngModelOptions]="{standalone: true}" value="draft-too"> تحديث التعيين والدفعة الحالية</label>
-        <label><input type="radio" [(ngModel)]="assignmentDraftUpdateMode" [ngModelOptions]="{standalone: true}" value="assignment-only"> تحديث التعيين فقط</label>
+        <label><input type="radio" [(ngModel)]="assignmentDraftUpdateMode" [ngModelOptions]="{standalone: true}" value="draft-too"> تحديث التسكين والدفعة الحالية</label>
+        <label><input type="radio" [(ngModel)]="assignmentDraftUpdateMode" [ngModelOptions]="{standalone: true}" value="assignment-only"> تحديث التسكين فقط</label>
       </ng-container>
       <ul class="production-page__validation-summary" *ngIf="assignmentMissingRequirements.length" role="status"><li *ngFor="let message of assignmentMissingRequirements">{{ message }}</li></ul>
     </form>

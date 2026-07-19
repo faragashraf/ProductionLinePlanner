@@ -25,7 +25,7 @@ describe('Production display language and entity hierarchy', () => {
     expect(productionDisplayLabel('EqualShare')).toBe('توزيع متساوٍ');
     expect(productionDisplayLabel('FullRatePerWorker')).toBe('القيمة كاملة لكل عامل');
     expect(productionDisplayLabel('Ready')).toBe('جاهزة');
-    expect(productionDisplayLabel('Default')).toBe('تعيين أساسي');
+    expect(productionDisplayLabel('Default')).toBe('تسكين أساسي');
     expect(productionDisplayLabel('UnknownTechnicalValue')).toBe('غير محدد');
   });
 
@@ -40,4 +40,3 @@ describe('Production display language and entity hierarchy', () => {
     expect(fixture.nativeElement.querySelector('.plp-responsive-entity-row__value')?.textContent).toContain('245.50');
   });
 });
-

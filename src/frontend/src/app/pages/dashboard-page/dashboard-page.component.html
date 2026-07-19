@@ -36,10 +36,25 @@
       <section class="journey-actions" aria-label="روابط سريعة للعرض التجريبي">
         <span>إجراءات العرض التجريبي</span>
         <div class="journey-actions__buttons">
+          <button
+            *ngIf="canSynchronizeAttendance"
+            pButton
+            pRipple
+            type="button"
+            class="p-button-sm p-button-outlined"
+            icon="pi pi-refresh"
+            [label]="attendanceSyncing ? 'جارٍ مزامنة الحضور…' : 'مزامنة حضور اليوم'"
+            [loading]="attendanceSyncing"
+            [disabled]="attendanceSyncing"
+            (click)="synchronizeAttendanceToday()"
+          ></button>
           <a pButton pRipple type="button" class="p-button-sm p-button-secondary" routerLink="/factory-map" icon="pi pi-sitemap" label="الدخول إلى خريطة المصنع"></a>
-          <a pButton pRipple type="button" class="p-button-sm p-button-help" routerLink="/assignments" icon="pi pi-users" label="الدخول إلى التعيينات"></a>
+          <a pButton pRipple type="button" class="p-button-sm p-button-help" routerLink="/manufacturing/line-staffing" icon="pi pi-users" label="الدخول إلى تسكين الخط"></a>
         </div>
       </section>
+      <p class="plp-inline-state" [class.plp-inline-state--warning]="attendanceSyncFailed" *ngIf="attendanceSyncMessage">
+        {{ attendanceSyncMessage }}
+      </p>
     </section>
 
     <section class="readiness-summary" *ngIf="hasReadinessData">

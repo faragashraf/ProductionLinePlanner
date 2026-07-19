@@ -1153,6 +1153,76 @@ public sealed class AssignmentEngine : IAssignmentEngine
         });
     }
 
+    public async Task<Result<IReadOnlyCollection<SubStageAssignmentCoverageDto>>> GetActiveSubStageAssignmentCoverageAsync(
+        DateTime? asOfUtc = null,
+        CancellationToken cancellationToken = default)
+    {
+        var stages = await _dbContext.SubStages
+            .AsNoTracking()
+            .Where(stage => stage.IsActive)
+            .OrderBy(stage => stage.MainStageId)
+            .ThenBy(stage => stage.DefaultOrder)
+            .Select(stage => new { stage.Id, stage.Capacity })
+            .ToArrayAsync(cancellationToken);
+
+        if (stages.Length == 0)
+        {
+            return Result<IReadOnlyCollection<SubStageAssignmentCoverageDto>>.Success([]);
+        }
+
+        var workerIds = await _dbContext.Workers
+            .AsNoTracking()
+            .Where(worker => worker.IsActive && worker.EmploymentStatus == EmploymentStatus.Active)
+            .Select(worker => worker.Id)
+            .ToArrayAsync(cancellationToken);
+
+        var assignmentsResult = await ResolveEffectiveAssignmentsAsync(
+            workerIds,
+            asOfUtc ?? DateTime.UtcNow,
+            cancellationToken);
+        if (assignmentsResult.IsFailure)
+        {
+            return Result<IReadOnlyCollection<SubStageAssignmentCoverageDto>>.Failure(assignmentsResult.Error!);
+        }
+
+        var assignedWorkersByStage = assignmentsResult.Value!
+            .SelectMany(pair => pair.Value
+                .Where(assignment => assignment.EffectiveSubStageId.HasValue)
+                .Select(assignment => new { SubStageId = assignment.EffectiveSubStageId!.Value, WorkerId = pair.Key }))
+            .Distinct()
+            .GroupBy(item => item.SubStageId)
+            .ToDictionary(group => group.Key, group => group.Count());
+
+        IReadOnlyCollection<SubStageAssignmentCoverageDto> summaries = stages
+            .Select(stage =>
+            {
+                var assignedWorkersCount = assignedWorkersByStage.GetValueOrDefault(stage.Id);
+                var hasAuthoritativeRequiredWorkerCount = stage.Capacity > 0;
+                int? requiredWorkersCount = hasAuthoritativeRequiredWorkerCount ? stage.Capacity : null;
+                int? assignmentCoveragePercent = requiredWorkersCount.HasValue
+                    ? Math.Min(100, (int)Math.Round((decimal)assignedWorkersCount * 100m / requiredWorkersCount.Value, MidpointRounding.AwayFromZero))
+                    : null;
+                var staffingStatus = !hasAuthoritativeRequiredWorkerCount
+                    ? "RequirementNotDefined"
+                    : assignedWorkersCount == 0
+                        ? "Unstaffed"
+                        : assignedWorkersCount < requiredWorkersCount
+                            ? "Understaffed"
+                            : "Staffed";
+
+                return new SubStageAssignmentCoverageDto(
+                    stage.Id,
+                    assignedWorkersCount,
+                    requiredWorkersCount,
+                    hasAuthoritativeRequiredWorkerCount,
+                    assignmentCoveragePercent,
+                    staffingStatus);
+            })
+            .ToArray();
+
+        return Result<IReadOnlyCollection<SubStageAssignmentCoverageDto>>.Success(summaries);
+    }
+
     private static Result ValidateActor(Guid actorUserId)
     {
         if (actorUserId == Guid.Empty)

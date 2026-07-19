@@ -229,11 +229,11 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
   get assignmentDialogTitle(): string {
     return {
       default: 'تسكين دائم للمرحلة',
-      temporary: 'تعيين مؤقت',
+      temporary: 'تسكين مؤقت',
       replacement: 'استبدال عامل مؤقتًا',
       move: 'نقل العامل',
-      'remove-default': 'إلغاء التعيين الدائم',
-      'cancel-temporary': 'إلغاء التعيين المؤقت'
+      'remove-default': 'إلغاء التسكين الدائم',
+      'cancel-temporary': 'إلغاء التسكين المؤقت'
     }[this.assignmentDialogMode];
   }
 
@@ -245,7 +245,7 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
 
   get assignmentDialogSaveLabel(): string {
     if (this.assignmentDialogMode === 'default') return 'إضافة العمال المحددين';
-    return this.assignmentDialogMode.startsWith('remove') || this.assignmentDialogMode === 'cancel-temporary' ? 'تأكيد الإلغاء' : 'حفظ التعيين';
+    return this.assignmentDialogMode.startsWith('remove') || this.assignmentDialogMode === 'cancel-temporary' ? 'تأكيد الإلغاء' : 'حفظ التسكين';
   }
 
   get dialogNeedsWorkerPicker(): boolean {
@@ -461,7 +461,7 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
   openReplacement(worker: LineStaffingWorker): void {
     const participation = this.participationForStage(worker);
     if (!participation || participation.assignmentType !== 'Default') {
-      this.successMessage = 'الاستبدال المؤقت يتطلب أن يكون للعامل المستبدَل تعيين دائم في المرحلة المحددة.';
+      this.successMessage = 'الاستبدال المؤقت يتطلب أن يكون للعامل المستبدَل تسكين دائم في المرحلة المحددة.';
       return;
     }
     this.openAssignmentDialog('replacement', worker, participation);
@@ -624,7 +624,7 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
       .pipe(finalize(() => this.assignmentSaving = false), takeUntil(this.destroy$))
       .subscribe({
         next: () => {
-          this.successMessage = 'تم حفظ تغيير التسكين مع الاحتفاظ بسجل التعيينات.';
+          this.successMessage = 'تم حفظ تغيير التسكين مع الاحتفاظ بسجل التسكينات.';
           this.closeAssignmentDialog(true);
           this.refreshSelectedStageAfterAssignment();
         },
@@ -704,9 +704,9 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
     if (participation) {
       if (participation.assignmentType === 'Temporary') return `مشاركة مؤقتة ${this.temporaryParticipationPeriod(participation)}`;
       if (participation.assignmentType === 'Replacement') return `بديل مؤقت ${this.temporaryParticipationPeriod(participation)}`;
-      return 'تعيين دائم فعّال';
+      return 'تسكين دائم فعّال';
     }
-    return worker.participations.length ? `مشارك في ${worker.participations.length} مراحل` : 'دون تعيين فعّال';
+    return worker.participations.length ? `مشارك في ${worker.participations.length} مراحل` : 'دون تسكين فعّال';
   }
 
   workerElsewhereWarning(worker: LineStaffingWorker): string | null {
@@ -828,7 +828,7 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
       rules.push({ control: 'endTime', message: 'وقت النهاية مطلوب', isMissing: () => !this.assignmentForm.controls.endTime.value });
     }
     if (this.assignmentDialogMode === 'temporary') {
-      rules.push({ control: 'reason', message: 'سبب التعيين المؤقت مطلوب', isMissing: () => !(this.assignmentForm.controls.reason.value ?? '').trim() });
+      rules.push({ control: 'reason', message: 'سبب التسكين المؤقت مطلوب', isMissing: () => !(this.assignmentForm.controls.reason.value ?? '').trim() });
       if (this.temporaryParticipationMode === 'TemporaryMove') rules.push({ control: 'temporarySourceSubStageId', message: 'مرحلة المصدر للنقل المؤقت مطلوبة' });
     }
     if (this.assignmentDialogMode === 'replacement') {

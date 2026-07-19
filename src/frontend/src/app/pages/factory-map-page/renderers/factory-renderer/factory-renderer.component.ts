@@ -19,6 +19,12 @@ export class FactoryRendererComponent {
     return `مصمّم عبر ${lines} خط`;
   }
 
+  getWorkersSummary(): string {
+    return this.layout.workerRequirementDefined === false
+      ? `${this.layout.workersCurrent ?? 0} مسكن - الاحتياج غير محدد`
+      : `${this.layout.workersCurrent ?? 0} / ${this.layout.workersRequired ?? 0}`;
+  }
+
   onLineSelected(lineId: string): void {
     this.lineSelected.emit(lineId);
   }

@@ -164,7 +164,7 @@ export class FactoryMapPageComponent implements OnInit, OnDestroy {
               code: worker.code,
               status: 'info',
               assignmentType: worker.assignmentType || 'غير محدد',
-              lastActivity: 'التعيين الحالي'
+              lastActivity: 'التسكين الحالي'
             }))
           );
         },
@@ -182,7 +182,7 @@ export class FactoryMapPageComponent implements OnInit, OnDestroy {
         stages: line.stages.map((stage) => ({
           ...stage,
           subStages: stage.subStages.map((subStage) => subStage.id === subStageId
-            ? { ...subStage, workers, workersCurrent: workers.length }
+            ? { ...subStage, workers }
             : subStage)
         }))
       }))

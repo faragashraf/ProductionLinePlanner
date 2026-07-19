@@ -246,7 +246,7 @@ describe('LineStaffingWorkspacePageComponent', () => {
     component.selectDialogWorker(component.availableWorkers[1]);
 
     expect(component.assignmentDialogVisible).toBeTrue();
-    expect(component.assignmentMissingRequirements).toContain('سبب التعيين المؤقت مطلوب');
+    expect(component.assignmentMissingRequirements).toContain('سبب التسكين المؤقت مطلوب');
     expect(component.assignmentMissingRequirements).toContain('وقت النهاية مطلوب');
 
     component.assignmentForm.controls.startTime.setValue(null);
@@ -641,7 +641,7 @@ describe('LineStaffingWorkspacePageComponent', () => {
     expect(component.selectedStageWorkers).toEqual([]);
     expect(component.selectedStage?.effectiveAssignedWorkersCount).toBe(0);
     expect(component.selectedStage?.staffingStatus).toBe('NeedsStaffing');
-    expect(component.selectedStage?.workerStatusText).toBe('لا يوجد عمال معينون');
+    expect(component.selectedStage?.workerStatusText).toBe('لا يوجد عمال مسكنون');
   });
 
   it('keeps the previous worker details when cancellation fails', () => {
@@ -800,7 +800,7 @@ function cancelledStageRefresh() {
     effectiveAssignedWorkersCount: 0,
     temporaryAssignedWorkersCount: 0,
     staffingStatus: 'NeedsStaffing',
-    workerStatusText: 'لا يوجد عمال معينون',
+    workerStatusText: 'لا يوجد عمال مسكنون',
     effectiveWorkerIds: []
   };
   return {
@@ -882,7 +882,7 @@ function plan(): LineStaffingPlan {
     financialConfigurationPending: true,
     stages: [
       { productModelStageId: 'stage-one', subStageId: defaultStageId, mainStageName: 'تجميع', stageCode: 'S1', stageName: 'تجميع', stageOrder: 1, piecePrice: .38, compensationMode: 'SharedPercentage', compensationConfigurationStatus: 'FinancialReviewPending', isFinancialReviewPending: true, defaultAssignedWorkersCount: 1, effectiveAssignedWorkersCount: 1, temporaryAssignedWorkersCount: 0, requiredWorkers: null, hasAuthoritativeRequiredWorkerCount: false, staffingStatus: 'Staffed', workerStatusText: 'يوجد عامل واحد', effectiveWorkerIds: ['worker-one'] },
-      { productModelStageId: 'stage-two', subStageId: temporaryStageId, mainStageName: 'تشطيب', stageCode: 'S2', stageName: 'تشطيب', stageOrder: 2, piecePrice: .38, compensationMode: 'SharedPercentage', compensationConfigurationStatus: 'FinancialReviewPending', isFinancialReviewPending: true, defaultAssignedWorkersCount: 0, effectiveAssignedWorkersCount: 0, temporaryAssignedWorkersCount: 0, requiredWorkers: null, hasAuthoritativeRequiredWorkerCount: false, staffingStatus: 'NeedsStaffing', workerStatusText: 'لا يوجد عمال معينون', effectiveWorkerIds: [] }
+      { productModelStageId: 'stage-two', subStageId: temporaryStageId, mainStageName: 'تشطيب', stageCode: 'S2', stageName: 'تشطيب', stageOrder: 2, piecePrice: .38, compensationMode: 'SharedPercentage', compensationConfigurationStatus: 'FinancialReviewPending', isFinancialReviewPending: true, defaultAssignedWorkersCount: 0, effectiveAssignedWorkersCount: 0, temporaryAssignedWorkersCount: 0, requiredWorkers: null, hasAuthoritativeRequiredWorkerCount: false, staffingStatus: 'NeedsStaffing', workerStatusText: 'لا يوجد عمال مسكنون', effectiveWorkerIds: [] }
     ],
     workers: [
       { workerId: 'worker-one', employeeCode: '100', fullName: 'عامل أول', departmentName: 'التجميع', isOnActiveService: true, hasPhoto: false, photoReference: null, photoVersion: null, defaultSubStageId: defaultStageId, defaultSubStageName: 'تجميع', effectiveAssignmentId: 'default-a', effectiveAssignmentType: 'Default', effectiveSubStageId: defaultStageId, effectiveSubStageName: 'تجميع', fromSubStageId: null, fromSubStageName: null, temporaryStartsAtUtc: null, temporaryEndsAtUtc: null, replacementForWorkerId: null, participations: [{ assignmentId: 'default-a', assignmentType: 'Default', subStageId: defaultStageId, subStageName: 'تجميع', fromSubStageId: null, fromSubStageName: null, startsAtUtc: null, endsAtUtc: null, replacementForWorkerId: null, temporaryParticipationMode: null }] },

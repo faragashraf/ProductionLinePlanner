@@ -76,7 +76,7 @@ public sealed class AttendanceEngine : IAttendanceEngine
             .AsNoTracking()
             .Where(x => workerIdArray.Contains(x.WorkerId)
                         && x.AttendanceTimeUtc >= dateStartUtc
-                        && x.AttendanceTimeUtc <= asOf)
+                        && x.AttendanceTimeUtc < dateEndUtc)
             .GroupBy(x => x.WorkerId)
             .Select(g => new
             {

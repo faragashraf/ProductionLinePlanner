@@ -243,9 +243,9 @@ public sealed class LineStaffingEngine(
                 ? "NeedsStaffingReview"
                 : "Staffed";
         var workerStatusText = effectiveWorkers.Length == 0
-            ? "لا يوجد عمال معينون"
+            ? "لا يوجد عمال مسكنون"
             : temporaryCount > 0
-                ? effectiveWorkers.Length == 1 ? "يوجد تعيين مؤقت" : $"يوجد {effectiveWorkers.Length} عمال، منهم تعيين مؤقت"
+                ? effectiveWorkers.Length == 1 ? "يوجد تسكين مؤقت" : $"يوجد {effectiveWorkers.Length} عمال، منهم تسكين مؤقت"
                 : effectiveWorkers.Length == 1 ? "يوجد عامل واحد" : $"يوجد {effectiveWorkers.Length} عمال";
 
         return new LineStaffingStageDto(

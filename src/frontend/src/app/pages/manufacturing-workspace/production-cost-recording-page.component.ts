@@ -426,7 +426,7 @@ export class ProductionCostRecordingPageComponent implements OnInit, OnDestroy {
     if (!this.importedDayReview || !this.canApprove || this.importedDayReviewLoading) return;
     const key = this.participantOverrideKey(stageProductionRecordId, workerId);
     const reason = this.importedAllocationOverrideReasons[key]?.trim();
-    if (!reason) { this.error = 'سبب تفويض الحضور أو التعيين إلزامي.'; return; }
+    if (!reason) { this.error = 'سبب تفويض الحضور أو التسكين إلزامي.'; return; }
     if (!window.confirm('سيتم حفظ سبب التفويض في لقطة اليوم المستورد. متابعة؟')) return;
     this.importedDayReviewLoading = true;
     this.api.setParticipantOverride(this.importedDayReview.productionOrderId, stageProductionRecordId, workerId, reason).pipe(finalize(() => this.importedDayReviewLoading = false)).subscribe({
@@ -660,7 +660,7 @@ export class ProductionCostRecordingPageComponent implements OnInit, OnDestroy {
     if (this.isRecordReadOnly || !this.ensureProductionContext()) return;
     const workerId = worker?.workerId ?? '';
     if (workerId && !this.recordingWorkers.some(option => option.workerId === workerId)) {
-      this.error = 'لا يمكن إرفاق عامل إلا بعد أن يصبح ضمن التعيين الحالي للمرحلة.';
+      this.error = 'لا يمكن إرفاق عامل إلا بعد أن يصبح ضمن التسكين الحالي للمرحلة.';
       return;
     }
     if (workerId && !this.canSelectWorker(workerId, -1)) {
@@ -692,8 +692,8 @@ export class ProductionCostRecordingPageComponent implements OnInit, OnDestroy {
     );
     if (!this.canManageAssignments || !this.selectedSubStageId || !worker || !validation.valid) {
       this.error = validation.summary || (!this.canManageAssignments
-        ? 'لا تملك صلاحية حفظ تعيين العامل.'
-        : 'اختر عاملًا حاضرًا مؤهلًا قبل حفظ التعيين.');
+        ? 'لا تملك صلاحية حفظ تسكين العامل.'
+        : 'اختر عاملًا حاضرًا مؤهلًا قبل حفظ التسكين.');
       return;
     }
     const result = mode === 'temporary'
@@ -703,12 +703,12 @@ export class ProductionCostRecordingPageComponent implements OnInit, OnDestroy {
     this.assignmentSuccess = '';
     result.pipe(finalize(() => this.assignmentSaving = false)).subscribe({
       next: () => {
-        this.assignmentSuccess = mode === 'temporary' ? 'تم حفظ النقل المؤقت للمرحلة المحددة.' : 'تم حفظ التعيين الحالي للمرحلة المحددة.';
+        this.assignmentSuccess = mode === 'temporary' ? 'تم حفظ النقل المؤقت للمرحلة المحددة.' : 'تم حفظ التسكين الحالي للمرحلة المحددة.';
         this.assignmentForm.reset({ workerId: '', mode: 'default', reason: '', startAtLocal: '', endAtLocal: '' });
         this.loadWorkerContext(this.selectedSubStageId);
         this.refreshProductReadiness();
       },
-      error: error => this.handleError(error, 'تعذر حفظ تعيين العامل.')
+      error: error => this.handleError(error, 'تعذر حفظ تسكين العامل.')
     });
   }
 
@@ -796,7 +796,7 @@ export class ProductionCostRecordingPageComponent implements OnInit, OnDestroy {
     const reason = this.assignmentForm.controls.reason.value?.trim() ?? '';
     const validation = this.formSubmissionValidation.validate(this.assignmentForm, this.assignmentRequiredFields(false, true));
     if (!worker || !this.selectedSubStageId || !worker.assignmentId || !validation.valid) {
-      this.error = validation.summary || 'سبب إلغاء التعيين مطلوب.';
+      this.error = validation.summary || 'سبب إلغاء التسكين مطلوب.';
       return;
     }
 
@@ -808,7 +808,7 @@ export class ProductionCostRecordingPageComponent implements OnInit, OnDestroy {
     request.pipe(finalize(() => this.assignmentSaving = false)).subscribe({
       next: () => {
         this.applyDraftParticipantImpact(worker.workerId);
-        this.assignmentSuccess = 'تم إلغاء التعيين الحالي وحُفظ السبب. لم تتغير أي دفعة إنتاج سابقة.';
+        this.assignmentSuccess = 'تم إلغاء التسكين الحالي وحُفظ السبب. لم تتغير أي دفعة إنتاج سابقة.';
         this.unassignDialogVisible = false;
         this.pendingUnassignWorker = null;
         this.clearDraftParticipantImpact();
@@ -816,7 +816,7 @@ export class ProductionCostRecordingPageComponent implements OnInit, OnDestroy {
         this.loadWorkerContext(this.selectedSubStageId);
         this.refreshProductReadiness();
       },
-      error: error => this.handleError(error, 'تعذر إلغاء تعيين العامل. حدّث البيانات وحاول مرة أخرى.')
+      error: error => this.handleError(error, 'تعذر إلغاء تسكين العامل. حدّث البيانات وحاول مرة أخرى.')
     });
   }
 
@@ -906,7 +906,7 @@ export class ProductionCostRecordingPageComponent implements OnInit, OnDestroy {
       return;
     }
     if (worker.effectiveSubStageId === this.moveSubStageId) {
-      this.error = 'اختر مرحلة وجهة مختلفة عن التعيين الحالي.';
+      this.error = 'اختر مرحلة وجهة مختلفة عن التسكين الحالي.';
       return;
     }
 
@@ -935,7 +935,7 @@ export class ProductionCostRecordingPageComponent implements OnInit, OnDestroy {
         this.refreshProductReadiness();
         if (destinationSubStageId !== sourceSubStageId) this.refreshWorkerContext(destinationSubStageId);
       },
-      error: error => this.handleError(error, 'تعذر نقل العامل بسبب تعارض في التعيين. حدّث البيانات وحاول مرة أخرى.')
+      error: error => this.handleError(error, 'تعذر نقل العامل بسبب تعارض في التسكين. حدّث البيانات وحاول مرة أخرى.')
     });
   }
 
@@ -1074,7 +1074,7 @@ export class ProductionCostRecordingPageComponent implements OnInit, OnDestroy {
     const start = this.toUtc(this.assignmentForm.controls.startAtLocal.value);
     const end = this.toUtc(this.assignmentForm.controls.endAtLocal.value);
     const messages: string[] = [];
-    if (!worker?.effectiveSubStageId) messages.push('العامل يجب أن يكون معينًا حاليًا قبل النقل المؤقت');
+    if (!worker?.effectiveSubStageId) messages.push('العامل يجب أن يكون مسكنًا حاليًا قبل النقل المؤقت');
     if (start && end && end <= start) messages.push('أدخل فترة نقل مؤقت صالحة');
     return messages;
   }
@@ -1084,7 +1084,7 @@ export class ProductionCostRecordingPageComponent implements OnInit, OnDestroy {
     if (!this.hasProductionContext()) extra.push('اختر مسار الإنتاج وأمرًا نشطًا ومرحلة مطابقة');
     if (!this.hasValidQuantities()) extra.push('يجب ألا تتجاوز الكمية المقبولة والمرفوضة الكمية المنتجة');
     if (this.workers.length === 0) extra.push('يجب إضافة عامل فعلي واحد على الأقل');
-    if (!this.hasUniqueCurrentWorkersWithoutMessage()) extra.push('حدّث قائمة العمال من التعيين الحالي للمرحلة');
+    if (!this.hasUniqueCurrentWorkersWithoutMessage()) extra.push('حدّث قائمة العمال من التسكين الحالي للمرحلة');
     if (requireFreshPreview && !this.previewIsFresh) extra.push(this.previewStaleMessage || (this.previewIsStale ? 'تم تغيير بيانات الدفعة. أعد حساب المعاينة.' : 'احسب المعاينة قبل حفظ المسودة'));
     return this.formSubmissionValidation.missingMessages(this.recordForm, this.recordRequiredFields, extra);
   }
@@ -1169,7 +1169,7 @@ export class ProductionCostRecordingPageComponent implements OnInit, OnDestroy {
     this.assignmentDraftUpdateMode = 'draft-too';
     this.assignmentDraftWarning = action === 'replace'
       ? 'هذا العامل مضاف إلى الدفعة الحالية. اختر ما إذا كان الاستبدال سيحدّث الدفعة أيضًا.'
-      : 'هذا العامل مضاف إلى الدفعة الحالية. اختر ما إذا كان تغيير التعيين سيزيله من الدفعة أيضًا.';
+      : 'هذا العامل مضاف إلى الدفعة الحالية. اختر ما إذا كان تغيير التسكين سيزيله من الدفعة أيضًا.';
   }
 
   private clearDraftParticipantImpact(): void {
@@ -1213,7 +1213,7 @@ export class ProductionCostRecordingPageComponent implements OnInit, OnDestroy {
   }
   workerAvailabilityLabel(worker: AssignmentWorkflowWorker): string {
     if (!this.isRecordableWorker(worker)) return 'غير مؤهل للإنتاج بسبب الحضور';
-    return worker.isAvailable ? 'متاح لهذه المرحلة' : 'حاضر لكن معين بمرحلة أخرى';
+    return worker.isAvailable ? 'متاح لهذه المرحلة' : 'حاضر لكنه مسكن بمرحلة أخرى';
   }
 
   private loadWorkerContext(subStageId: string): void {
@@ -1591,7 +1591,7 @@ export class ProductionCostRecordingPageComponent implements OnInit, OnDestroy {
   private hasUniqueCurrentWorkers(): boolean {
     const selected = this.workers.controls.map(control => control.get('workerId')?.value).filter((workerId): workerId is string => !!workerId);
     const allCurrent = selected.every(workerId => this.recordingWorkers.some(worker => worker.workerId === workerId));
-    if (!allCurrent) this.error = 'تم تغيير التعيين الحالي. حدّث قائمة العمال قبل الحفظ.';
+    if (!allCurrent) this.error = 'تم تغيير التسكين الحالي. حدّث قائمة العمال قبل الحفظ.';
     return new Set(selected).size === selected.length && allCurrent;
   }
 
@@ -1638,11 +1638,11 @@ export class ProductionCostRecordingPageComponent implements OnInit, OnDestroy {
     const hasUnsavedRecord = !this.isRecordReadOnly && (this.recordForm.dirty || this.workers.length > 0 || !!this.editingRecordId);
     const hasUnsavedAssignment = this.assignmentForm.dirty;
     const hasUnsavedOrder = this.orderForm.dirty;
-    return !(hasUnsavedRecord || hasUnsavedAssignment || hasUnsavedOrder) || window.confirm('سيؤدي تغيير المسار إلى مسح مسودة التعيين أو الإنتاج أو الأمر غير المحفوظة. هل تريد المتابعة؟');
+    return !(hasUnsavedRecord || hasUnsavedAssignment || hasUnsavedOrder) || window.confirm('سيؤدي تغيير المسار إلى مسح مسودة التسكين أو الإنتاج أو الأمر غير المحفوظة. هل تريد المتابعة؟');
   }
 
   private confirmAssignmentActionReset(): boolean {
-    return !this.assignmentForm.dirty || window.confirm('سيتم استبدال مسودة التعيين غير المحفوظة بإجراء العامل المحدد. هل تريد المتابعة؟');
+    return !this.assignmentForm.dirty || window.confirm('سيتم استبدال مسودة التسكين غير المحفوظة بإجراء العامل المحدد. هل تريد المتابعة؟');
   }
 
   private workerGroup(workerId = '', percentage: number | null = null, fixedAmount: number | null = null, notes = '') {

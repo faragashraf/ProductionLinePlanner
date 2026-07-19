@@ -1,8 +1,10 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using ProductionLinePlanner.Application.Engines;
 using ProductionLinePlanner.Domain.Entities;
 using ProductionLinePlanner.Domain.Enums;
+using ProductionLinePlanner.Infrastructure.BusinessEngines;
 using ProductionLinePlanner.Infrastructure.Attendance;
 using ProductionLinePlanner.Infrastructure.Attendance.Services;
 using ProductionLinePlanner.Infrastructure.Data;
@@ -63,5 +65,32 @@ public sealed class ActiveWorkerAttendanceSafetyTests
         Assert.Equal("sync-no-source", stored.SourceRawId);
         await appDb.DisposeAsync();
         await attendanceDb.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Latest_daily_attendance_includes_the_synced_end_of_day_absence_before_that_timestamp()
+    {
+        var appDb = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString("N")).Options);
+        var worker = new Worker(Guid.NewGuid(), "003", "Absent worker");
+        var asOfUtc = new DateTime(2026, 7, 19, 3, 0, 0, DateTimeKind.Utc);
+        var dayEndUtc = new DateTime(2026, 7, 19, 21, 0, 0, DateTimeKind.Utc);
+        appDb.Workers.Add(worker);
+        appDb.AttendanceRecords.Add(new AttendanceRecord(
+            Guid.NewGuid(),
+            worker.Id,
+            dayEndUtc.AddTicks(-1),
+            AttendanceStatus.Absent,
+            source: "AttendanceSync",
+            sourceRawId: "sync-no-source"));
+        await appDb.SaveChangesAsync();
+
+        var engine = new AttendanceEngine(null!, null!, appDb, TestCairoTimeZoneProvider.Instance);
+
+        var result = await engine.GetLatestAttendanceStatusByWorkerAsync([worker.Id], asOfUtc);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(AttendanceStatus.Absent, result.Value![worker.Id].Status);
+        await appDb.DisposeAsync();
     }
 }

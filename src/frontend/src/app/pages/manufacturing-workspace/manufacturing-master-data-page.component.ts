@@ -7,6 +7,7 @@ import { MainStageOption, ManufacturingMasterDataApiService, ModelStageItem, Pro
 @Component({ selector: 'app-manufacturing-master-data-page', templateUrl: './manufacturing-master-data-page.component.html', styleUrls: ['./manufacturing-master-data-page.component.scss'] })
 export class ManufacturingMasterDataPageComponent implements OnInit {
   readonly mode: 'stages' | 'models'; loading = true; saving = false; error = ''; editMainId = ''; editSubId = ''; editModelId = ''; editModelStageId = '';
+  stageStatusFilter: 'all' | 'active' | 'inactive' = 'all';
   mainFormVisible = false; subFormVisible = false; modelFormVisible = false; modelStageFormVisible = false;
   lines: ProductionLineOption[] = []; mains: MainStageOption[] = []; subs: SubStageOption[] = []; models: ProductModelItem[] = []; stages: ModelStageItem[] = []; selected: ProductModelItem | null = null;
   readonly mainForm = this.fb.group({ productionLineId: ['', Validators.required], name: ['', Validators.required], sequenceOrder: [1, Validators.required], isCritical: [false] });
@@ -19,7 +20,7 @@ export class ManufacturingMasterDataPageComponent implements OnInit {
     this.loading = true;
     this.error = '';
     if (this.mode === 'stages') {
-      forkJoin({ lines: this.api.productionLines(), mains: this.api.mainStages(), subs: this.api.subStages() })
+      forkJoin({ lines: this.api.productionLines(), mains: this.api.allMainStages(), subs: this.api.allSubStages() })
         .pipe(finalize(() => this.loading = false))
         .subscribe({
           next: data => {
@@ -48,6 +49,8 @@ export class ManufacturingMasterDataPageComponent implements OnInit {
   editSub(item: SubStageOption): void { this.editSubId = item.id; this.subFormVisible = true; this.subForm.reset(item); }
   disableMain(id: string): void { if (confirm('سيتم تعطيل المرحلة دون حذفها.')) this.save(this.api.deactivateMain(id), () => this.mains = this.markInactive(this.mains, id)); }
   disableSub(id: string): void { if (confirm('سيتم تعطيل المرحلة دون حذفها.')) this.save(this.api.deactivateSub(id), () => this.subs = this.markInactive(this.subs, id)); }
+  setMainActive(item: MainStageOption): void { if (item.isActive) { this.disableMain(item.id); return; } if (confirm('سيتم إعادة تفعيل المرحلة.')) this.save(this.api.setMainActivation(item.id, true), result => this.mains = this.upsert(this.mains, result)); }
+  setSubActive(item: SubStageOption): void { if (item.isActive) { this.disableSub(item.id); return; } if (confirm('سيتم إعادة تفعيل المرحلة الفرعية.')) this.save(this.api.setSubActivation(item.id, true), result => this.subs = this.upsert(this.subs, result)); }
   saveModel(): void { if (this.modelForm.valid) this.save(this.editModelId ? this.api.updateModel(this.editModelId, this.modelForm.getRawValue()) : this.api.createModel(this.modelForm.getRawValue()), item => { this.models = this.upsert(this.models, item); this.editModelId = ''; this.modelFormVisible = false; this.modelForm.reset(); }); }
   editModel(item: ProductModelItem): void { this.editModelId = item.id; this.modelFormVisible = true; this.modelForm.reset(item); }
   select(item: ProductModelItem): void { this.selected = item; this.api.modelStages(item.id).subscribe({ next: x => this.stages = x, error: e => this.error = e.message }); }
@@ -60,7 +63,14 @@ export class ManufacturingMasterDataPageComponent implements OnInit {
   disableModelStage(id: string): void { if (this.selected && confirm('سيتم تعطيل إعداد المرحلة.')) this.save(this.api.deactivateModelStage(this.selected.id, id), () => this.stages = this.markInactive(this.stages, id)); }
   setModelActive(item: ProductModelItem): void { if (confirm(item.isActive ? 'تعطيل الموديل؟' : 'تفعيل الموديل؟')) this.save(this.api.setModelActivation(item.id, !item.isActive), () => this.models = this.models.map(model => model.id === item.id ? { ...model, isActive: !item.isActive } : model)); }
   mainName(id: string): string { return this.mains.find(x => x.id === id)?.name ?? '-'; } subName(id: string): string { return this.subs.find(x => x.id === id)?.name ?? '-'; } totalPrice(): number { return this.stages.filter(x => x.isActive).reduce((sum, x) => sum + x.piecePrice, 0); } totalSeconds(): number { return this.stages.filter(x => x.isActive).reduce((sum, x) => sum + (x.standardSeconds ?? 0), 0); }
+  get visibleMains(): MainStageOption[] { return this.filterByStatus(this.mains); }
+  get visibleSubs(): SubStageOption[] { return this.filterByStatus(this.subs); }
+  get stageResultCount(): number { return this.visibleMains.length + this.visibleSubs.length; }
+  setStageStatusFilter(value: string): void { this.stageStatusFilter = value === 'active' || value === 'inactive' ? value : 'all'; }
+  stageStatusLabel(isActive: boolean): string { return isActive ? 'فعالة' : 'معطلة'; }
+  formatOrder(value: number | null | undefined, minimum = 0): string { return value === null || value === undefined || value < minimum ? 'غير محدد' : String(value); }
   private save<T>(request: Observable<T>, success?: (result: T) => void): void { this.saving = true; this.error = ''; request.pipe(finalize(() => this.saving = false)).subscribe({ next: result => { this.error = ''; success?.(result); }, error: e => this.error = e.message || 'تعذر حفظ التغيير.' }); }
+  private filterByStatus<T extends { isActive: boolean }>(items: readonly T[]): T[] { return this.stageStatusFilter === 'all' ? [...items] : items.filter(item => item.isActive === (this.stageStatusFilter === 'active')); }
   private upsert<T extends { id: string }>(items: readonly T[], item: T, sortKey?: keyof T): T[] { const next = items.some(candidate => candidate.id === item.id) ? items.map(candidate => candidate.id === item.id ? item : candidate) : [...items, item]; return sortKey ? [...next].sort((left, right) => Number(left[sortKey]) - Number(right[sortKey])) : next; }
   private markInactive<T extends { id: string; isActive: boolean }>(items: readonly T[], id: string): T[] { return items.map(item => item.id === id ? { ...item, isActive: false } : item); }
 }

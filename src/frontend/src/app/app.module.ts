@@ -7,9 +7,6 @@ import { AppRoutingModule } from './app-routing.module';
 import { AppComponent } from './app.component';
 import { DashboardPageComponent } from './pages/dashboard-page/dashboard-page.component';
 import { FactoryMapPageComponent } from './pages/factory-map-page/factory-map-page.component';
-import { ProductionLinesPageComponent } from './pages/production-lines-page/production-lines-page.component';
-import { StagesPageComponent } from './pages/stages-page/stages-page.component';
-import { AssignmentsPageComponent } from './pages/assignments-page/assignments-page.component';
 import { NotificationsPageComponent } from './pages/notifications-page/notifications-page.component';
 import { LoginPageComponent } from './pages/login-page/login-page.component';
 import { AccessDeniedPageComponent } from './pages/access-denied-page/access-denied-page.component';
@@ -36,9 +33,6 @@ import { ProductExperienceModule } from './shared/product/product-experience.mod
     DashboardPageComponent,
     AccessDeniedPageComponent,
     FactoryMapPageComponent,
-    ProductionLinesPageComponent,
-    StagesPageComponent,
-    AssignmentsPageComponent,
     NotificationsPageComponent,
     LoginPageComponent,
     AppShellComponent,

@@ -11,8 +11,8 @@ const PRODUCTION_DISPLAY_LABELS: Readonly<Record<string, string>> = Object.freez
   AttendanceUnavailable: 'بيانات الحضور غير متاحة',
   Present: 'حاضر',
   Absent: 'غائب',
-  Default: 'تعيين أساسي',
-  Permanent: 'تعيين أساسي',
+  Default: 'تسكين أساسي',
+  Permanent: 'تسكين أساسي',
   Temporary: 'نقل مؤقت',
   Replacement: 'عامل بديل',
   FinancialReviewPending: 'تحتاج مراجعة تكلفة'
@@ -26,4 +26,3 @@ export function productionDisplayLabel(value: string | null | undefined, fallbac
   if (!value) return fallback;
   return PRODUCTION_DISPLAY_LABELS[value] ?? fallback;
 }
-

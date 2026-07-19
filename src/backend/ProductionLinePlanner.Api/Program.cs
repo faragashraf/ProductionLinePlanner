@@ -3213,6 +3213,47 @@ factoryStructureApi.MapGet("/sub-stages/{subStageId:guid}/workers", async (
     .WithTags("FactoryStructure")
     .WithName("GetFactoryStructureSubStageWorkers");
 
+factoryStructureApi.MapGet("/sub-stages/staffing-coverage", async (
+    IAssignmentEngine assignmentEngine,
+    CancellationToken cancellationToken) =>
+{
+    var result = await assignmentEngine.GetActiveSubStageAssignmentCoverageAsync(cancellationToken: cancellationToken);
+    if (result.IsFailure)
+    {
+        return ApiResponse.Failure(
+            result.Error?.Code ?? "FactoryStructureCoverageReadFailed",
+            result.Error?.Message ?? "Unable to load sub-stage staffing coverage.",
+            MapFailureStatusCode(result.Error?.Code));
+    }
+
+    return Results.Ok(ApiResponse.Success(result.Value!));
+})
+    .RequirePermission(FactoryStructurePermissions.View)
+    .RequirePermission("stages.view")
+    .WithTags("FactoryStructure")
+    .WithName("GetFactoryStructureSubStageStaffingCoverage");
+
+factoryStructureApi.MapGet("/sub-stages/attendance-summary", async (
+    IReadinessEngine readinessEngine,
+    CancellationToken cancellationToken) =>
+{
+    var result = await readinessEngine.GetActiveSubStageAttendanceSummariesAsync(cancellationToken: cancellationToken);
+    if (result.IsFailure)
+    {
+        return ApiResponse.Failure(
+            result.Error?.Code ?? "FactoryStructureAttendanceReadFailed",
+            result.Error?.Message ?? "Unable to load sub-stage attendance summaries.",
+            MapFailureStatusCode(result.Error?.Code));
+    }
+
+    return Results.Ok(ApiResponse.Success(result.Value!));
+})
+    .RequirePermission(FactoryStructurePermissions.View)
+    .RequirePermission("stages.view")
+    .RequirePermission("attendance.view")
+    .WithTags("FactoryStructure")
+    .WithName("GetFactoryStructureSubStageAttendanceSummary");
+
 factoryStructureApi.MapGet("/sub-stages/{subStageId:guid}/eligible-workers", async (
     Guid subStageId,
     AppDbContext dbContext,

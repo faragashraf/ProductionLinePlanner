@@ -85,8 +85,8 @@ export const MANUFACTURING_WORKSPACE_ITEMS: readonly ManufacturingWorkspaceItem[
   },
   {
     id: 'models',
-    label: 'النماذج',
-    description: 'كتالوج نماذج المنتجات سيظهر هنا.',
+    label: 'الموديلات',
+    description: 'كتالوج موديلات المنتجات سيظهر هنا.',
     route: '/manufacturing/models',
     icon: 'pi-box',
     permission: PERMISSIONS.models.view
@@ -102,7 +102,7 @@ export const MANUFACTURING_WORKSPACE_ITEMS: readonly ManufacturingWorkspaceItem[
   {
     id: 'line-staffing',
     label: 'تسكين الخط',
-    description: 'تخطيط التعيين الدائم والمؤقت لعمال الخط دون ربطه بحضور اليوم.',
+    description: 'تخطيط التسكين الدائم والمؤقت لعمال الخط دون ربطه بحضور اليوم.',
     route: '/manufacturing/line-staffing',
     icon: 'pi-users',
     ...LINE_STAFFING_ACCESS

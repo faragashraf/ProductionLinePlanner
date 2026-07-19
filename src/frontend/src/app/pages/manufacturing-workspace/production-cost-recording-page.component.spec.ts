@@ -81,9 +81,9 @@ describe('ProductionCostRecordingPageComponent', () => {
     }).overrideComponent(ProductionCostRecordingPageComponent, { set: { template: `
       <ng-container *ngIf="showWorkerPanel; else assignmentBlocked">
         <section id="workerPanel">
-          <p id="workerLoading" *ngIf="loadingWorkers">جارٍ تحميل التعيين الحالي وحالة الحضور…</p>
+          <p id="workerLoading" *ngIf="loadingWorkers">جارٍ تحميل التسكين الحالي وحالة الحضور…</p>
           <p id="workerError" *ngIf="workerContextError">{{ workerContextError }}</p>
-          <p id="noCurrentWorkers" *ngIf="!loadingWorkers && !workerContextError && !currentWorkers.length">لا يوجد عمال معينون حاليًا لهذه المرحلة.</p>
+          <p id="noCurrentWorkers" *ngIf="!loadingWorkers && !workerContextError && !currentWorkers.length">لا يوجد عمال مسكنون حاليًا لهذه المرحلة.</p>
           <p id="attendanceEmptyState" *ngIf="showAttendanceEmptyState">لا توجد بيانات حضور متاحة لهذا التاريخ.</p>
           <p id="attendanceProductionDateNote">المزامنة اليدوية تقرأ حضور تاريخ الإنتاج المحدد.</p>
           <button id="attendanceSyncAction" *ngIf="canSyncAttendance" (click)="syncAttendanceToday()">تحديث حضور تاريخ الإنتاج</button>

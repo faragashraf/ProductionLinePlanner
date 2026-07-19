@@ -17,6 +17,7 @@
 .factory-visualization-page {
   gap: var(--plp-spacing-2);
   width: 100%;
+  max-width: none;
 }
 
 .factory-visualization-page__path,
@@ -62,7 +63,7 @@
 
 .factory-map-overview {
   gap: var(--plp-spacing-2);
-  width: min(100%, 1060px);
+  width: 100%;
 }
 
 .factory-map-summary,
@@ -157,7 +158,7 @@
 }
 
 .factory-map-lines {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));
   gap: var(--plp-spacing-2);
 }
 

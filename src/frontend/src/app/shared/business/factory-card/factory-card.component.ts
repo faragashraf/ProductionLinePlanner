@@ -16,6 +16,7 @@ export class FactoryCardComponent {
   @Input() workersRequired = 0;
   @Input() metadataLabel = 'العاملون';
   @Input() metadataValue: string | number | null = null;
+  @Input() progressLabel = 'جاهزية';
   @Input() status: FactoryStatus | string = 'info';
 
   get clampedReadiness(): number {

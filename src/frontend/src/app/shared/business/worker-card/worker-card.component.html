@@ -4,7 +4,7 @@
     <h3>{{ safeFullName || 'عامل غير محدد' }}</h3>
     <plp-product-metadata-row [label]="'بيانات العامل ' + (safeFullName || 'غير محدد')">
       <plp-product-metadata-item label="الكود" [value]="safeCode || 'غير محدد'"></plp-product-metadata-item>
-      <plp-product-metadata-item label="التعيين" [value]="safeAssignmentType || 'غير محدد'"></plp-product-metadata-item>
+      <plp-product-metadata-item label="التسكين" [value]="safeAssignmentType || 'غير محدد'"></plp-product-metadata-item>
       <plp-product-metadata-item *ngIf="safeLastActivity" label="آخر نشاط" [value]="safeLastActivity"></plp-product-metadata-item>
     </plp-product-metadata-row>
   </div>

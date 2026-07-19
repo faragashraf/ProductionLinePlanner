@@ -26,24 +26,37 @@
             <label>الكود<input pInputText formControlName="code"></label>
             <label>الاسم<input pInputText formControlName="name"></label>
             <label>الترتيب<input type="number" formControlName="sequenceOrder"></label>
-            <label>السعة<input type="number" formControlName="capacity"></label>
+            <label>عدد تسكين المرحلة<input type="number" formControlName="capacity"></label>
             <button pButton type="submit" [label]="editSubId ? 'تحديث' : 'إضافة'" [disabled]="saving"></button>
           </form>
           </plp-expandable-form>
         </p-card>
       </div>
 
+      <div class="master-page__stage-filter" role="group" aria-label="فلترة حالة المراحل">
+        <label>حالة المراحل
+          <select [value]="stageStatusFilter" (change)="setStageStatusFilter($any($event.target).value)">
+            <option value="all">الكل</option>
+            <option value="active">الفعالة</option>
+            <option value="inactive">المعطلة</option>
+          </select>
+        </label>
+        <span>{{ stageResultCount }} نتيجة</span>
+      </div>
+
       <p-card header="المراحل الرئيسية">
-        <p-table plpResponsiveTable="scroll" plpTablePagination [plpPaginationPageSize]="10" [plpPaginationResetKey]="mains.length" [plpStickyActions]="true" [value]="mains" dataKey="id" responsiveLayout="scroll">
+        <p-table plpResponsiveTable="scroll" plpTablePagination [plpPaginationPageSize]="10" [plpPaginationResetKey]="'mains-' + stageStatusFilter + mains.length" [plpStickyActions]="true" [value]="visibleMains" dataKey="id" responsiveLayout="scroll">
           <ng-template pTemplate="header"><tr><th>الاسم</th><th>الترتيب</th><th>الحالة</th><th>الإجراءات</th></tr></ng-template>
-          <ng-template pTemplate="body" let-item><tr><td>{{ item.name }}</td><td>{{ item.sequenceOrder }}</td><td>{{ item.isActive ? 'نشطة' : 'معطلة' }}</td><td><button pButton type="button" icon="pi pi-pencil" class="p-button-text" aria-label="تعديل المرحلة" title="تعديل المرحلة" (click)="editMain(item)"></button><button pButton type="button" icon="pi pi-ban" class="p-button-text p-button-danger" aria-label="تعطيل المرحلة" title="تعطيل المرحلة" [disabled]="saving || !item.isActive" (click)="disableMain(item.id)"></button></td></tr></ng-template>
+          <ng-template pTemplate="body" let-item><tr [class.master-page__inactive-row]="!item.isActive"><td>{{ item.name }}</td><td>{{ formatOrder(item.sequenceOrder) }}</td><td><span class="master-page__stage-status" [class.master-page__stage-status--inactive]="!item.isActive" [title]="item.isActive ? 'تظهر في مسارات التشغيل اليومية.' : 'لا تظهر في مسارات التشغيل اليومية.'">{{ stageStatusLabel(item.isActive) }}</span></td><td><button pButton type="button" icon="pi pi-pencil" class="p-button-text" aria-label="تعديل المرحلة" title="تعديل المرحلة" (click)="editMain(item)"></button><button pButton type="button" [icon]="item.isActive ? 'pi pi-ban' : 'pi pi-check'" [class]="item.isActive ? 'p-button-text p-button-danger' : 'p-button-text p-button-success'" [attr.aria-label]="item.isActive ? 'تعطيل المرحلة' : 'إعادة تفعيل المرحلة'" [title]="item.isActive ? 'تعطيل المرحلة' : 'إعادة تفعيل المرحلة'" [disabled]="saving" (click)="setMainActive(item)"></button></td></tr></ng-template>
+          <ng-template pTemplate="emptymessage"><tr><td colspan="4" class="master-page__empty">لا توجد مراحل رئيسية مطابقة للفلتر المحدد.</td></tr></ng-template>
         </p-table>
       </p-card>
 
       <p-card header="المراحل الفرعية">
-        <p-table plpResponsiveTable="scroll" plpTablePagination [plpPaginationPageSize]="10" [plpPaginationResetKey]="subs.length" [plpStickyActions]="true" [value]="subs" dataKey="id" responsiveLayout="scroll">
+        <p-table plpResponsiveTable="scroll" plpTablePagination [plpPaginationPageSize]="10" [plpPaginationResetKey]="'subs-' + stageStatusFilter + subs.length" [plpStickyActions]="true" [value]="visibleSubs" dataKey="id" responsiveLayout="scroll">
           <ng-template pTemplate="header"><tr><th>الكود</th><th>الاسم</th><th>الرئيسية</th><th>الترتيب</th><th>الحالة</th><th>الإجراءات</th></tr></ng-template>
-          <ng-template pTemplate="body" let-item><tr><td>{{ item.code }}</td><td>{{ item.name }}</td><td>{{ mainName(item.mainStageId) }}</td><td>{{ item.sequenceOrder }}</td><td>{{ item.isActive ? 'نشطة' : 'معطلة' }}</td><td><button pButton type="button" icon="pi pi-pencil" class="p-button-text" aria-label="تعديل المرحلة الفرعية" title="تعديل المرحلة الفرعية" (click)="editSub(item)"></button><button pButton type="button" icon="pi pi-ban" class="p-button-text p-button-danger" aria-label="تعطيل المرحلة الفرعية" title="تعطيل المرحلة الفرعية" (click)="disableSub(item.id)"></button></td></tr></ng-template>
+          <ng-template pTemplate="body" let-item><tr [class.master-page__inactive-row]="!item.isActive"><td>{{ item.code }}</td><td>{{ item.name }}</td><td>{{ mainName(item.mainStageId) }}</td><td>{{ formatOrder(item.sequenceOrder, 1) }}</td><td><span class="master-page__stage-status" [class.master-page__stage-status--inactive]="!item.isActive" [title]="item.isActive ? 'تظهر في مسارات التشغيل اليومية.' : 'لا تظهر في مسارات التشغيل اليومية.'">{{ stageStatusLabel(item.isActive) }}</span></td><td><button pButton type="button" icon="pi pi-pencil" class="p-button-text" aria-label="تعديل المرحلة الفرعية" title="تعديل المرحلة الفرعية" (click)="editSub(item)"></button><button pButton type="button" [icon]="item.isActive ? 'pi pi-ban' : 'pi pi-check'" [class]="item.isActive ? 'p-button-text p-button-danger' : 'p-button-text p-button-success'" [attr.aria-label]="item.isActive ? 'تعطيل المرحلة الفرعية' : 'إعادة تفعيل المرحلة الفرعية'" [title]="item.isActive ? 'تعطيل المرحلة الفرعية' : 'إعادة تفعيل المرحلة الفرعية'" [disabled]="saving" (click)="setSubActive(item)"></button></td></tr></ng-template>
+          <ng-template pTemplate="emptymessage"><tr><td colspan="6" class="master-page__empty">لا توجد مراحل فرعية مطابقة للفلتر المحدد.</td></tr></ng-template>
         </p-table>
       </p-card>
     </ng-container>

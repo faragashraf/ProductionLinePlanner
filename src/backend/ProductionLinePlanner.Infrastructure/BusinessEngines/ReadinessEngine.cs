@@ -266,6 +266,68 @@ public sealed class ReadinessEngine : IReadinessEngine
         });
     }
 
+    public async Task<Result<IReadOnlyCollection<SubStageAttendanceSummaryDto>>> GetActiveSubStageAttendanceSummariesAsync(
+        DateTime? asOfUtc = null,
+        CancellationToken cancellationToken = default)
+    {
+        var asOf = asOfUtc ?? DateTime.UtcNow;
+        var activeSubStageIds = await _dbContext.SubStages
+            .AsNoTracking()
+            .Where(stage => stage.IsActive)
+            .OrderBy(stage => stage.MainStageId)
+            .ThenBy(stage => stage.DefaultOrder)
+            .Select(stage => stage.Id)
+            .ToArrayAsync(cancellationToken);
+
+        if (activeSubStageIds.Length == 0)
+        {
+            return Result<IReadOnlyCollection<SubStageAttendanceSummaryDto>>.Success([]);
+        }
+
+        var activeWorkerIds = await _dbContext.Workers
+            .AsNoTracking()
+            .Where(worker => worker.IsActive && worker.EmploymentStatus == EmploymentStatus.Active)
+            .Select(worker => worker.Id)
+            .ToArrayAsync(cancellationToken);
+
+        var effectiveAssignmentsResult = await _assignmentEngine.ResolveEffectiveAssignmentsAsync(
+            activeWorkerIds,
+            asOf,
+            cancellationToken);
+        if (effectiveAssignmentsResult.IsFailure)
+        {
+            return Result<IReadOnlyCollection<SubStageAttendanceSummaryDto>>.Failure(effectiveAssignmentsResult.Error!);
+        }
+
+        var assignedWorkerIdsByStage = effectiveAssignmentsResult.Value!
+            .SelectMany(pair => pair.Value
+                .Where(assignment => assignment.EffectiveSubStageId.HasValue && activeSubStageIds.Contains(assignment.EffectiveSubStageId.Value))
+                .Select(assignment => new { SubStageId = assignment.EffectiveSubStageId!.Value, WorkerId = pair.Key }))
+            .Distinct()
+            .GroupBy(item => item.SubStageId)
+            .ToDictionary(group => group.Key, group => group.Select(item => item.WorkerId).ToArray());
+
+        var assignedWorkerIds = assignedWorkerIdsByStage.Values.SelectMany(workerIds => workerIds).Distinct().ToArray();
+        var attendanceResult = await _attendanceEngine.GetLatestAttendanceStatusByWorkerAsync(
+            assignedWorkerIds,
+            asOf,
+            cancellationToken);
+        if (attendanceResult.IsFailure)
+        {
+            return Result<IReadOnlyCollection<SubStageAttendanceSummaryDto>>.Failure(attendanceResult.Error!);
+        }
+
+        var attendanceByWorker = attendanceResult.Value!;
+        var summaries = activeSubStageIds
+            .Select(subStageId => CreateSubStageAttendanceSummary(
+                subStageId,
+                assignedWorkerIdsByStage.GetValueOrDefault(subStageId, []),
+                attendanceByWorker))
+            .ToArray();
+
+        return Result<IReadOnlyCollection<SubStageAttendanceSummaryDto>>.Success(summaries);
+    }
+
     private static ReadinessCountResult ComputeReadinessCounts(
         int requiredWorkers,
         int assignedWorkers,
@@ -362,6 +424,69 @@ public sealed class ReadinessEngine : IReadinessEngine
         if (values.All(x => x == "Unavailable"))
             return "Unavailable";
         return "Incomplete";
+    }
+
+    private static SubStageAttendanceSummaryDto CreateSubStageAttendanceSummary(
+        Guid subStageId,
+        IReadOnlyCollection<Guid> assignedWorkerIds,
+        IReadOnlyDictionary<Guid, AttendanceStatusRecord> attendanceByWorker)
+    {
+        var assignedWorkersCount = assignedWorkerIds.Count;
+        var presentWorkersCount = 0;
+        var lateWorkersCount = 0;
+        var absentWorkersCount = 0;
+        var unresolvedWorkersCount = 0;
+
+        foreach (var workerId in assignedWorkerIds)
+        {
+            if (!attendanceByWorker.TryGetValue(workerId, out var attendance))
+            {
+                unresolvedWorkersCount++;
+                continue;
+            }
+
+            if (attendance.Status == AttendanceStatus.Present)
+            {
+                presentWorkersCount++;
+            }
+            else if (attendance.Status == AttendanceStatus.Late)
+            {
+                lateWorkersCount++;
+            }
+            else if (attendance.Status == AttendanceStatus.Absent)
+            {
+                absentWorkersCount++;
+            }
+            else
+            {
+                unresolvedWorkersCount++;
+            }
+        }
+
+        var attendanceDataStatus = DetermineAttendanceDataStatus(
+            assignedWorkersCount,
+            assignedWorkersCount,
+            assignedWorkerIds,
+            attendanceByWorker);
+        var attendanceStatus = assignedWorkersCount == 0
+            ? "NoAssignments"
+            : attendanceDataStatus != "Complete" || unresolvedWorkersCount > 0
+                ? "NeedsSync"
+                : presentWorkersCount + lateWorkersCount == assignedWorkersCount
+                    ? "FullyPresent"
+                    : absentWorkersCount == assignedWorkersCount
+                        ? "AllAbsent"
+                        : "PartiallyPresent";
+
+        return new SubStageAttendanceSummaryDto(
+            subStageId,
+            assignedWorkersCount,
+            presentWorkersCount + lateWorkersCount,
+            lateWorkersCount,
+            absentWorkersCount,
+            unresolvedWorkersCount,
+            attendanceDataStatus,
+            attendanceStatus);
     }
 
     private sealed record ReadinessCountResult(

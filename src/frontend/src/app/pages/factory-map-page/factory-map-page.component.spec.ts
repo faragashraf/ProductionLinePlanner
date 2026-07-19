@@ -29,4 +29,35 @@ describe('FactoryMapPageComponent', () => {
     expect(component.layout.lines).toEqual([]);
     expect(component.showFallbackWarning).toBeTrue();
   });
+
+  it('keeps the batch staffing summary unchanged when lazy worker details load', () => {
+    const mapApi = jasmine.createSpyObj<FactoryMapApiService>('FactoryMapApiService', ['loadFactoryMapData']);
+    const assignments = jasmine.createSpyObj<AssignmentsApiService>('AssignmentsApiService', ['getFactoryStructureSubStageWorkers']);
+    mapApi.loadFactoryMapData.and.returnValue(of({
+      hasBackendData: true,
+      hasUsableBackendData: true,
+      layout: {
+        id: 'factory-1', type: 'factory', name: 'مصنع 1', status: 'ready', readinessPercent: 100, workersCurrent: 2, workersRequired: 2,
+        lines: [{
+          id: 'line-1', type: 'line', name: 'خط 1', status: 'ready', readinessPercent: 100, statusText: 'مغطى', activeStageId: 'main-1', activeStageName: 'مرحلة 1', workersCurrent: 2, workersRequired: 2,
+          stages: [{
+            id: 'main-1', type: 'main-stage', name: 'مرحلة 1', status: 'ready', readinessPercent: 100, workersCurrent: 2, workersRequired: 2,
+            subStages: [{ id: 'sub-1', type: 'sub-stage', name: 'مرحلة فرعية', status: 'ready', readinessPercent: 100, workersCurrent: 2, workersRequired: 2, workers: [] }]
+          }]
+        }]
+      }
+    }));
+    assignments.getFactoryStructureSubStageWorkers.and.returnValue(of({
+      subStageId: 'sub-1', workers: [{ id: 'worker-1', fullName: 'عامل 1', code: 'W1', assignmentType: 'Default' }]
+    } as any));
+    const component = new FactoryMapPageComponent(mapApi, assignments, changeDetector);
+
+    component.ngOnInit();
+    component.onLineSelected('line-1');
+    component.onMainStageSelected('main-1');
+    component.onSubStageSelected('sub-1');
+
+    expect(component.selectedSubStage?.workers).toHaveSize(1);
+    expect(component.selectedSubStage?.workersCurrent).toBe(2);
+  });
 });

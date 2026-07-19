@@ -130,7 +130,7 @@
 
           <div class="daily-production-operations__stage-warnings plp-workspace-alert-stack">
             <p class="daily-production-operations__warning plp-inline-feedback plp-inline-feedback--warning" *ngIf="stage.staffingStatus === 'NoStaffing'">لا يوجد عامل فعّال لهذه المرحلة في تاريخ الإنتاج. أضف بديلًا/تجاوزًا مع سبب معتمد قبل الاحتساب.</p>
-            <p class="daily-production-operations__warning plp-inline-feedback plp-inline-feedback--warning" *ngIf="stage.hasAbsentWorkers">يوجد عامل غائب في هذا التاريخ؛ الحضور لا يغيّر حالة العمل أو التعيين، والتجاوز يتطلب سببًا وصلاحية.</p>
+            <p class="daily-production-operations__warning plp-inline-feedback plp-inline-feedback--warning" *ngIf="stage.hasAbsentWorkers">يوجد عامل غائب في هذا التاريخ؛ الحضور لا يغيّر حالة العمل أو التسكين، والتجاوز يتطلب سببًا وصلاحية.</p>
             <p class="daily-production-operations__warning plp-inline-feedback plp-inline-feedback--warning" *ngIf="stage.hasNoSourceCheckInWorkers">لا يوجد تسجيل بصمة مصدر لبعض العمال؛ هذه ليست حالة غياب تلقائية.</p>
           </div>
 
@@ -138,7 +138,7 @@
             <article *ngFor="let worker of stage.workers; trackBy: trackById" class="daily-production-operations__worker plp-structured-card">
               <plp-responsive-entity-row [title]="worker.workerName" [code]="worker.workerCode" icon="pi pi-user">
                 <plp-product-metadata-row plp-entity-metadata label="حالة العامل">
-                  <plp-product-metadata-item label="التعيين" [value]="assignmentTypeLabel(worker.effectiveAssignmentType)" icon="pi pi-link"></plp-product-metadata-item>
+                  <plp-product-metadata-item label="التسكين" [value]="assignmentTypeLabel(worker.effectiveAssignmentType)" icon="pi pi-link"></plp-product-metadata-item>
                   <plp-product-metadata-item label="الحضور" [value]="attendanceLabel(worker)" icon="pi pi-check-square"></plp-product-metadata-item>
                   <plp-product-metadata-item label="من" [value]="contributionTime(worker.contributionStartsAtUtc)" icon="pi pi-clock"></plp-product-metadata-item>
                   <plp-product-metadata-item label="إلى" [value]="contributionTime(worker.contributionEndsAtUtc)" icon="pi pi-clock"></plp-product-metadata-item>
@@ -196,7 +196,7 @@
             </select>
             <button pButton type="button" class="p-button-outlined" label="إضافة بديل / تجاوز" icon="pi pi-user-plus" [disabled]="!replacementWorkerId || !canOverrideParticipants" (click)="addReplacementWorker()"></button>
           </div>
-          <p class="daily-production-operations__permission-note plp-inline-feedback plp-inline-feedback--warning" *ngIf="!canOverrideParticipants">تغيير المشاركين أو تسجيل تجاوز يتطلب صلاحية إدارة التعيينات؛ لا يغيّر هذا الإجراء سجلات تشغيل تاريخية.</p>
+          <p class="daily-production-operations__permission-note plp-inline-feedback plp-inline-feedback--warning" *ngIf="!canOverrideParticipants">تغيير المشاركين أو تسجيل تجاوز يتطلب صلاحية إدارة التسكين؛ لا يغيّر هذا الإجراء سجلات تشغيل تاريخية.</p>
           </footer>
           </div>
         </p-card>

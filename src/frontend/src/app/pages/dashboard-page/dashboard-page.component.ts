@@ -1,8 +1,9 @@
 import { Component, OnDestroy, OnInit } from '@angular/core';
-import { catchError, finalize, of, Subject, switchMap, takeUntil } from 'rxjs';
+import { catchError, finalize, map, of, Subject, switchMap, takeUntil } from 'rxjs';
 import { DashboardApiData, DashboardApiService, StageReadinessAlert } from '../../core/services/dashboard-api.service';
 import { PERMISSIONS } from '../../core/config/permission-identifiers';
 import { PermissionService } from '../../core/services/permission.service';
+import { AttendanceApiService, AttendanceSyncResult } from '../../core/services/attendance-api.service';
 import {
   AttendanceIndicator,
   DashboardCard,
@@ -38,12 +39,16 @@ export class DashboardPageComponent implements OnInit, OnDestroy {
   attendanceState: DashboardApiData['attendanceState'] = 'not-authorized';
   assignmentCoveragePercent = 0;
   attendanceDataStatus = 'Unknown';
+  attendanceSyncing = false;
+  attendanceSyncMessage = '';
+  attendanceSyncFailed = false;
 
   private readonly destroy$ = new Subject<void>();
 
   constructor(
     private readonly dashboardApiService: DashboardApiService,
-    private readonly permissionService: PermissionService
+    private readonly permissionService: PermissionService,
+    private readonly attendanceApiService: AttendanceApiService
   ) {}
 
   ngOnInit(): void {
@@ -74,6 +79,46 @@ export class DashboardPageComponent implements OnInit, OnDestroy {
 
   retry(): void {
     this.loadDashboardData();
+  }
+
+  synchronizeAttendanceToday(): void {
+    if (!this.canSynchronizeAttendance || this.attendanceSyncing) {
+      return;
+    }
+
+    this.attendanceSyncing = true;
+    this.attendanceSyncMessage = '';
+    this.attendanceSyncFailed = false;
+
+    this.attendanceApiService
+      .syncToday()
+      .pipe(
+        switchMap((result) => this.dashboardApiService
+          .loadDashboardData({ includeAttendance: this.canViewAttendance })
+          .pipe(
+            map((data) => ({ result, data })),
+            catchError(() => of({ result, data: null }))
+          )),
+        takeUntil(this.destroy$),
+        finalize(() => {
+          this.attendanceSyncing = false;
+        })
+      )
+      .subscribe({
+        next: ({ result, data }) => {
+          if (data) {
+            this.setDashboardData(data);
+            this.attendanceSyncMessage = this.formatSyncSuccessMessage(result);
+            return;
+          }
+
+          this.attendanceSyncMessage = 'تمت مزامنة حضور اليوم، لكن تعذر تحديث مؤشرات لوحة التحكم. ستبقى البيانات السابقة معروضة.';
+        },
+        error: () => {
+          this.attendanceSyncFailed = true;
+          this.attendanceSyncMessage = 'تعذر مزامنة حضور اليوم. لم يتم تغيير المؤشرات المعروضة.';
+        }
+      });
   }
 
   private loadDashboardData(): void {
@@ -209,6 +254,14 @@ export class DashboardPageComponent implements OnInit, OnDestroy {
     return this.attendanceState === 'not-authorized';
   }
 
+  get canSynchronizeAttendance(): boolean {
+    return this.permissionService.hasPermission(PERMISSIONS.attendance.sync);
+  }
+
+  private get canViewAttendance(): boolean {
+    return this.permissionService.hasPermission(PERMISSIONS.attendance.view);
+  }
+
   get readinessUnavailableMessage(): string {
     if (this.attendanceUnavailableByPermission) {
       return 'الجاهزية التشغيلية غير متاحة بصلاحياتك الحالية.';
@@ -288,5 +341,10 @@ export class DashboardPageComponent implements OnInit, OnDestroy {
 
   getIndicatorClass(tone: AttendanceIndicator['tone']): string {
     return `attendance-pill ${tone}`;
+  }
+
+  private formatSyncSuccessMessage(result: AttendanceSyncResult): string {
+    const changedRecords = result.insertedRecords + result.updatedRecords;
+    return `تمت مزامنة حضور اليوم: ${changedRecords} سجل تم تحديثه، و${result.matchedWorkersCount} عامل تم ربطه.`;
   }
 }

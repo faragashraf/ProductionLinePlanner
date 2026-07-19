@@ -5,6 +5,9 @@
     [readinessPercent]="layout.readinessPercent ?? 0"
     [workersCurrent]="layout.workersCurrent ?? 0"
     [workersRequired]="layout.workersRequired ?? 0"
+    metadataLabel="المسكنون"
+    [metadataValue]="getWorkersSummary()"
+    progressLabel="تغطية التسكين"
     [status]="layout.status ?? 'info'"
   ></plp-factory-card>
 
@@ -29,6 +32,7 @@
           [totalStages]="line.stages.length"
           [activeStage]="line.activeStageName"
           [status]="line.status ?? 'info'"
+          progressLabel="تغطية التسكين"
         ></plp-production-line-card>
       </button>
     </plp-responsive-grid>

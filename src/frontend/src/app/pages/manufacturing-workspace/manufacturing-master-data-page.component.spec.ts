@@ -10,8 +10,8 @@ describe('ManufacturingMasterDataPageComponent', () => {
   let api: jasmine.SpyObj<ManufacturingMasterDataApiService>;
 
   beforeEach(async () => {
-    api = jasmine.createSpyObj('ManufacturingMasterDataApiService', ['subStages', 'productionLines', 'mainStages', 'models', 'createSub', 'updateSub']);
-    api.subStages.and.returnValue(of([])); api.productionLines.and.returnValue(of([])); api.mainStages.and.returnValue(of([])); api.models.and.returnValue(of([])); api.createSub.and.returnValue(of({ id: 'sub-1', mainStageId: 'main-1', name: 'Cutting', code: 'CUT', capacity: 10, sequenceOrder: 3, isActive: true })); api.updateSub.and.returnValue(of({ id: 'sub-1', mainStageId: 'main-1', name: 'Cutting', code: 'CUT', capacity: 10, sequenceOrder: 3, isActive: true }));
+    api = jasmine.createSpyObj('ManufacturingMasterDataApiService', ['subStages', 'productionLines', 'mainStages', 'allMainStages', 'allSubStages', 'models', 'createSub', 'updateSub', 'setMainActivation']);
+    api.subStages.and.returnValue(of([])); api.productionLines.and.returnValue(of([])); api.mainStages.and.returnValue(of([])); api.allMainStages.and.returnValue(of([])); api.allSubStages.and.returnValue(of([])); api.models.and.returnValue(of([])); api.createSub.and.returnValue(of({ id: 'sub-1', mainStageId: 'main-1', name: 'Cutting', code: 'CUT', capacity: 10, sequenceOrder: 3, isActive: true })); api.updateSub.and.returnValue(of({ id: 'sub-1', mainStageId: 'main-1', name: 'Cutting', code: 'CUT', capacity: 10, sequenceOrder: 3, isActive: true })); api.setMainActivation.and.returnValue(of({ id: 'main-1', productionLineId: 'line-1', name: 'Main', sequenceOrder: 1, isCritical: false, isActive: true }));
     await TestBed.configureTestingModule({ declarations: [ManufacturingMasterDataPageComponent], imports: [FormsModule, ReactiveFormsModule], providers: [{ provide: ManufacturingMasterDataApiService, useValue: api }, { provide: ActivatedRoute, useValue: { snapshot: { routeConfig: { path: 'stages' } } } }] }).overrideComponent(ManufacturingMasterDataPageComponent, { set: { template: '' } }).compileComponents();
     const fixture: ComponentFixture<ManufacturingMasterDataPageComponent> = TestBed.createComponent(ManufacturingMasterDataPageComponent);
     component = fixture.componentInstance;
@@ -23,12 +23,34 @@ describe('ManufacturingMasterDataPageComponent', () => {
     expect(api.createSub).toHaveBeenCalledWith({ mainStageId: 'main-1', code: 'CUT', name: 'Cutting', capacity: 10, defaultOrder: 3 });
   });
 
-  it('loads each stages-mode reference collection once', () => {
+  it('loads active and inactive catalog records once for stage administration only', () => {
     component.ngOnInit();
 
     expect(api.productionLines).toHaveBeenCalledTimes(1);
-    expect(api.mainStages).toHaveBeenCalledTimes(1);
-    expect(api.subStages).toHaveBeenCalledTimes(1);
+    expect(api.allMainStages).toHaveBeenCalledTimes(1);
+    expect(api.allSubStages).toHaveBeenCalledTimes(1);
+    expect(api.mainStages).not.toHaveBeenCalled();
+    expect(api.subStages).not.toHaveBeenCalled();
+  });
+
+  it('filters already-loaded stages locally and exposes explicit status and missing-order labels', () => {
+    component.mains = [{ id: 'active', productionLineId: 'line-1', name: 'نشطة', sequenceOrder: 1, isCritical: false, isActive: true }, { id: 'inactive', productionLineId: 'line-1', name: 'معطلة', sequenceOrder: 2, isCritical: false, isActive: false }];
+    component.setStageStatusFilter('inactive');
+    expect(component.visibleMains.map(item => item.id)).toEqual(['inactive']);
+    expect(component.stageStatusLabel(false)).toBe('معطلة');
+    expect(component.formatOrder(null)).toBe('غير محدد');
+    expect(component.formatOrder(0)).toBe('0');
+    expect(component.formatOrder(0, 1)).toBe('غير محدد');
+  });
+
+  it('reactivates an inactive main stage through the existing PATCH contract', () => {
+    spyOn(window, 'confirm').and.returnValue(true);
+    component.mains = [{ id: 'main-1', productionLineId: 'line-1', name: 'Main', sequenceOrder: 1, isCritical: false, isActive: false }];
+
+    component.setMainActive(component.mains[0]);
+
+    expect(api.setMainActivation).toHaveBeenCalledWith('main-1', true);
+    expect(component.mains[0].isActive).toBeTrue();
   });
 
   it('clears a failed save error after a successful retry while retaining the locally upserted record', () => {

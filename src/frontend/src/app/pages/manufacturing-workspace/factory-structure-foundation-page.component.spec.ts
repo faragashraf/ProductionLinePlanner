@@ -132,7 +132,7 @@ describe('FactoryStructureFoundationPageComponent', () => {
 
   function openAssignmentForm(fixture: ComponentFixture<FactoryStructureFoundationPageComponent>): void {
     const trigger = fixture.debugElement.queryAll(By.css('plp-expandable-form button'))
-      .find(button => button.nativeElement.textContent.trim() === 'تعيين عامل');
+      .find(button => button.nativeElement.textContent.trim() === 'تسكين عامل');
 
     expect(trigger).toBeDefined();
     trigger!.nativeElement.click();
