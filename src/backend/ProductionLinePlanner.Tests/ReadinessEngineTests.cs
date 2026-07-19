@@ -7,6 +7,7 @@ using ProductionLinePlanner.Domain.Entities;
 using ProductionLinePlanner.Domain.Enums;
 using ProductionLinePlanner.Infrastructure.BusinessEngines;
 using ProductionLinePlanner.Infrastructure.Data;
+using ProductionLinePlanner.Tests.TestInfrastructure;
 
 namespace ProductionLinePlanner.Tests;
 
@@ -121,6 +122,43 @@ public sealed class ReadinessEngineTests
         var stage = Assert.Single(result.Value!);
         Assert.Equal("Unavailable", stage.AttendanceDataStatus);
         Assert.Equal("NeedsSync", stage.AttendanceStatus);
+    }
+
+    [Fact]
+    public async Task Batch_attendance_hierarchy_counts_worker_assigned_to_multiple_stages_once()
+    {
+        await using var db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
+            .Options);
+        var factory = new Factory(Guid.NewGuid(), "Factory", "FAC");
+        var line = new ProductionLine(Guid.NewGuid(), factory.Id, "Line", 1);
+        var mainStage = new MainStage(Guid.NewGuid(), line.Id, "Main", 1);
+        var stageA = new SubStage(Guid.NewGuid(), mainStage.Id, "Stage A", "A", 1, 1);
+        var stageB = new SubStage(Guid.NewGuid(), mainStage.Id, "Stage B", "B", 1, 2);
+        var worker = new Worker(Guid.NewGuid(), "W1", "Worker One");
+        var actorId = Guid.NewGuid();
+        var asOfUtc = new DateTime(2026, 7, 19, 10, 0, 0, DateTimeKind.Utc);
+        db.AddRange(factory, line, mainStage, stageA, stageB, worker);
+        db.AddRange(
+            new WorkerDefaultAssignment(Guid.NewGuid(), worker.Id, stageA.Id, actorId, asOfUtc.AddDays(-1)),
+            new WorkerDefaultAssignment(Guid.NewGuid(), worker.Id, stageB.Id, actorId, asOfUtc.AddDays(-1)));
+        await db.SaveChangesAsync();
+        var attendance = new Dictionary<Guid, AttendanceStatusRecord>
+        {
+            [worker.Id] = new(worker.Id, AttendanceStatus.Present, asOfUtc, "test")
+        };
+        var engine = new ReadinessEngine(
+            db,
+            new AssignmentEngine(db, new RecordingAuditEngine()),
+            new AttendanceEngineStub(attendance));
+
+        var summaries = (await engine.GetActiveSubStageAttendanceSummariesAsync(asOfUtc)).Value!;
+
+        Assert.Equal([1, 1], summaries.Select(summary => summary.AssignedWorkersCount).ToArray());
+        Assert.All(summaries, summary => Assert.Equal(1, summary.MainStageDistinctAssignedWorkersCount));
+        Assert.All(summaries, summary => Assert.Equal(1, summary.MainStageDistinctPresentWorkersCount));
+        Assert.All(summaries, summary => Assert.Equal(1, summary.ProductionLineDistinctAssignedWorkersCount));
+        Assert.All(summaries, summary => Assert.Equal(1, summary.FactoryDistinctAssignedWorkersCount));
     }
 
     private sealed class ReadinessFixture : IAsyncDisposable

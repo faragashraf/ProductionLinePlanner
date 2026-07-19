@@ -10,4 +10,9 @@ public sealed record SubStageAssignmentCoverageDto(
     int? RequiredWorkersCount,
     bool HasAuthoritativeRequiredWorkerCount,
     int? AssignmentCoveragePercent,
-    string StaffingStatus);
+    string StaffingStatus)
+{
+    public int MainStageDistinctWorkersCount { get; init; }
+    public int ProductionLineDistinctWorkersCount { get; init; }
+    public int FactoryDistinctWorkersCount { get; init; }
+}

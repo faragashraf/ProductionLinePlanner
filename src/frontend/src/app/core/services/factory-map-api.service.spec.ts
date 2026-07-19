@@ -41,6 +41,8 @@ describe('FactoryMapApiService', () => {
     expect(result.layout.lines[0].stages[0].subStages[0].attendanceStatus).toBe('PartiallyPresent');
     expect(result.layout.lines[0].stages[0].subStages[0].presentAssignedWorkers).toBe(1);
     expect(result.layout.lines[0].readinessPercent).toBe(100);
+    expect(result.layout.presentAssignedWorkers).toBe(1);
+    expect(result.layout.attendanceSummaryText).toBe('1 من 2');
     http.expectNone((request) => /\/api\/factory-structure\/sub-stages\/[^/]+\/workers$/.test(request.url));
   });
 
@@ -75,6 +77,8 @@ describe('FactoryMapApiService', () => {
     expect(stage.workersCurrent).toBe(1);
     expect(stage.workerRequirementDefined).toBeFalse();
     expect(stage.status).toBe('info');
+    expect(result.layout.workerRequirementDefined).toBeFalse();
+    expect(result.layout.attendanceSummaryText).toBe('0 من 1');
   });
 
   it('keeps the batch coverage request active beyond the former short timeout', fakeAsync(() => {
@@ -109,5 +113,30 @@ describe('FactoryMapApiService', () => {
 
     expect(result.layout.lines[0].stages[0].subStages[0].attendanceStatus).toBe('NotAuthorized');
     http.expectNone(buildApiUrl('/api/factory-structure/sub-stages/attendance-summary'));
+  });
+
+  it('uses authoritative distinct hierarchy counts when the same worker participates in multiple stages', () => {
+    let result: any;
+    service.loadFactoryMapData().subscribe(value => result = value);
+
+    http.expectOne(buildApiUrl('/api/factories?pageSize=200')).flush({ success: true, data: { items: [{ id: 'factory-1', name: 'مصنع 1' }] } });
+    http.expectOne(buildApiUrl('/api/production-lines?pageSize=200')).flush({ success: true, data: { items: [{ id: 'line-1', factoryId: 'factory-1', name: 'خط 1' }] } });
+    http.expectOne(buildApiUrl('/api/main-stages?isActive=true&pageSize=200')).flush({ success: true, data: { items: [{ id: 'main-1', productionLineId: 'line-1', name: 'تجهيز' }] } });
+    http.expectOne(buildApiUrl('/api/sub-stages?isActive=true&pageSize=200')).flush({ success: true, data: { items: [{ id: 'sub-1', mainStageId: 'main-1', name: 'فحص' }, { id: 'sub-2', mainStageId: 'main-1', name: 'تجميع' }] } });
+    http.expectOne(buildApiUrl('/api/factory-structure/sub-stages/staffing-coverage')).flush({ success: true, data: [
+      { subStageId: 'sub-1', assignedWorkersCount: 1, requiredWorkersCount: 1, hasAuthoritativeRequiredWorkerCount: true, assignmentCoveragePercent: 100, staffingStatus: 'Staffed', mainStageDistinctWorkersCount: 1, productionLineDistinctWorkersCount: 1, factoryDistinctWorkersCount: 1 },
+      { subStageId: 'sub-2', assignedWorkersCount: 1, requiredWorkersCount: 1, hasAuthoritativeRequiredWorkerCount: true, assignmentCoveragePercent: 100, staffingStatus: 'Staffed', mainStageDistinctWorkersCount: 1, productionLineDistinctWorkersCount: 1, factoryDistinctWorkersCount: 1 }
+    ] });
+    http.expectOne(buildApiUrl('/api/factory-structure/sub-stages/attendance-summary')).flush({ success: true, data: [
+      { subStageId: 'sub-1', assignedWorkersCount: 1, presentAssignedWorkersCount: 1, absentAssignedWorkersCount: 0, attendanceDataStatus: 'Complete', attendanceStatus: 'FullyPresent', mainStageDistinctPresentWorkersCount: 1, mainStageDistinctAbsentWorkersCount: 0, productionLineDistinctPresentWorkersCount: 1, productionLineDistinctAbsentWorkersCount: 0, factoryDistinctPresentWorkersCount: 1, factoryDistinctAbsentWorkersCount: 0 },
+      { subStageId: 'sub-2', assignedWorkersCount: 1, presentAssignedWorkersCount: 1, absentAssignedWorkersCount: 0, attendanceDataStatus: 'Complete', attendanceStatus: 'FullyPresent', mainStageDistinctPresentWorkersCount: 1, mainStageDistinctAbsentWorkersCount: 0, productionLineDistinctPresentWorkersCount: 1, productionLineDistinctAbsentWorkersCount: 0, factoryDistinctPresentWorkersCount: 1, factoryDistinctAbsentWorkersCount: 0 }
+    ] });
+
+    expect(result.layout.workersCurrent).toBe(1);
+    expect(result.layout.presentAssignedWorkers).toBe(1);
+    expect(result.layout.lines[0].workersCurrent).toBe(1);
+    expect(result.layout.lines[0].stages[0].workersCurrent).toBe(1);
+    expect(result.layout.readinessPercent).toBe(100);
+    expect(result.layout.lines[0].stages[0].subStages.map((stage: any) => stage.workersCurrent)).toEqual([1, 1]);
   });
 });

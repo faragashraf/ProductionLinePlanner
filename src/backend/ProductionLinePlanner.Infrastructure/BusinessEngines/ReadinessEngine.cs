@@ -271,13 +271,20 @@ public sealed class ReadinessEngine : IReadinessEngine
         CancellationToken cancellationToken = default)
     {
         var asOf = asOfUtc ?? DateTime.UtcNow;
-        var activeSubStageIds = await _dbContext.SubStages
+        var activeSubStages = await _dbContext.SubStages
             .AsNoTracking()
             .Where(stage => stage.IsActive)
             .OrderBy(stage => stage.MainStageId)
             .ThenBy(stage => stage.DefaultOrder)
-            .Select(stage => stage.Id)
+            .Select(stage => new
+            {
+                stage.Id,
+                stage.MainStageId,
+                ProductionLineId = stage.MainStage!.ProductionLineId,
+                FactoryId = stage.MainStage.ProductionLine!.FactoryId
+            })
             .ToArrayAsync(cancellationToken);
+        var activeSubStageIds = activeSubStages.Select(stage => stage.Id).ToArray();
 
         if (activeSubStageIds.Length == 0)
         {
@@ -299,12 +306,29 @@ public sealed class ReadinessEngine : IReadinessEngine
             return Result<IReadOnlyCollection<SubStageAttendanceSummaryDto>>.Failure(effectiveAssignmentsResult.Error!);
         }
 
-        var assignedWorkerIdsByStage = effectiveAssignmentsResult.Value!
+        var effectiveParticipations = effectiveAssignmentsResult.Value!
             .SelectMany(pair => pair.Value
                 .Where(assignment => assignment.EffectiveSubStageId.HasValue && activeSubStageIds.Contains(assignment.EffectiveSubStageId.Value))
                 .Select(assignment => new { SubStageId = assignment.EffectiveSubStageId!.Value, WorkerId = pair.Key }))
             .Distinct()
+            .ToArray();
+        var assignedWorkerIdsByStage = effectiveParticipations
             .GroupBy(item => item.SubStageId)
+            .ToDictionary(group => group.Key, group => group.Select(item => item.WorkerId).ToArray());
+        var assignedWorkerIdsByMainStage = effectiveParticipations
+            .Join(activeSubStages, item => item.SubStageId, stage => stage.Id, (item, stage) => new { ScopeId = stage.MainStageId, item.WorkerId })
+            .Distinct()
+            .GroupBy(item => item.ScopeId)
+            .ToDictionary(group => group.Key, group => group.Select(item => item.WorkerId).ToArray());
+        var assignedWorkerIdsByProductionLine = effectiveParticipations
+            .Join(activeSubStages, item => item.SubStageId, stage => stage.Id, (item, stage) => new { ScopeId = stage.ProductionLineId, item.WorkerId })
+            .Distinct()
+            .GroupBy(item => item.ScopeId)
+            .ToDictionary(group => group.Key, group => group.Select(item => item.WorkerId).ToArray());
+        var assignedWorkerIdsByFactory = effectiveParticipations
+            .Join(activeSubStages, item => item.SubStageId, stage => stage.Id, (item, stage) => new { ScopeId = stage.FactoryId, item.WorkerId })
+            .Distinct()
+            .GroupBy(item => item.ScopeId)
             .ToDictionary(group => group.Key, group => group.Select(item => item.WorkerId).ToArray());
 
         var assignedWorkerIds = assignedWorkerIdsByStage.Values.SelectMany(workerIds => workerIds).Distinct().ToArray();
@@ -318,11 +342,37 @@ public sealed class ReadinessEngine : IReadinessEngine
         }
 
         var attendanceByWorker = attendanceResult.Value!;
-        var summaries = activeSubStageIds
-            .Select(subStageId => CreateSubStageAttendanceSummary(
-                subStageId,
-                assignedWorkerIdsByStage.GetValueOrDefault(subStageId, []),
-                attendanceByWorker))
+        var mainStageCounts = assignedWorkerIdsByMainStage.ToDictionary(
+            pair => pair.Key,
+            pair => CountDistinctAttendance(pair.Value, attendanceByWorker));
+        var productionLineCounts = assignedWorkerIdsByProductionLine.ToDictionary(
+            pair => pair.Key,
+            pair => CountDistinctAttendance(pair.Value, attendanceByWorker));
+        var factoryCounts = assignedWorkerIdsByFactory.ToDictionary(
+            pair => pair.Key,
+            pair => CountDistinctAttendance(pair.Value, attendanceByWorker));
+        var summaries = activeSubStages
+            .Select(stage =>
+            {
+                var mainStage = mainStageCounts.GetValueOrDefault(stage.MainStageId, DistinctAttendanceCounts.Empty);
+                var productionLine = productionLineCounts.GetValueOrDefault(stage.ProductionLineId, DistinctAttendanceCounts.Empty);
+                var factory = factoryCounts.GetValueOrDefault(stage.FactoryId, DistinctAttendanceCounts.Empty);
+                return CreateSubStageAttendanceSummary(
+                    stage.Id,
+                    assignedWorkerIdsByStage.GetValueOrDefault(stage.Id, []),
+                    attendanceByWorker) with
+                {
+                    MainStageDistinctAssignedWorkersCount = mainStage.Assigned,
+                    MainStageDistinctPresentWorkersCount = mainStage.Present,
+                    MainStageDistinctAbsentWorkersCount = mainStage.Absent,
+                    ProductionLineDistinctAssignedWorkersCount = productionLine.Assigned,
+                    ProductionLineDistinctPresentWorkersCount = productionLine.Present,
+                    ProductionLineDistinctAbsentWorkersCount = productionLine.Absent,
+                    FactoryDistinctAssignedWorkersCount = factory.Assigned,
+                    FactoryDistinctPresentWorkersCount = factory.Present,
+                    FactoryDistinctAbsentWorkersCount = factory.Absent
+                };
+            })
             .ToArray();
 
         return Result<IReadOnlyCollection<SubStageAttendanceSummaryDto>>.Success(summaries);
@@ -487,6 +537,38 @@ public sealed class ReadinessEngine : IReadinessEngine
             unresolvedWorkersCount,
             attendanceDataStatus,
             attendanceStatus);
+    }
+
+    private static DistinctAttendanceCounts CountDistinctAttendance(
+        IReadOnlyCollection<Guid> workerIds,
+        IReadOnlyDictionary<Guid, AttendanceStatusRecord> attendanceByWorker)
+    {
+        var distinctWorkerIds = workerIds.Distinct().ToArray();
+        var present = 0;
+        var absent = 0;
+        foreach (var workerId in distinctWorkerIds)
+        {
+            if (!attendanceByWorker.TryGetValue(workerId, out var attendance))
+            {
+                continue;
+            }
+
+            if (attendance.Status is AttendanceStatus.Present or AttendanceStatus.Late)
+            {
+                present++;
+            }
+            else if (attendance.Status == AttendanceStatus.Absent)
+            {
+                absent++;
+            }
+        }
+
+        return new DistinctAttendanceCounts(distinctWorkerIds.Length, present, absent);
+    }
+
+    private sealed record DistinctAttendanceCounts(int Assigned, int Present, int Absent)
+    {
+        public static readonly DistinctAttendanceCounts Empty = new(0, 0, 0);
     }
 
     private sealed record ReadinessCountResult(

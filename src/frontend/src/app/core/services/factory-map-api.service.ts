@@ -20,6 +20,11 @@ type FactoryMapFallbackReason = 'incomplete' | 'connection';
 type StaffingStatus = 'RequirementNotDefined' | 'Unstaffed' | 'Understaffed' | 'Staffed';
 type SubStageAttendanceStatus = 'FullyPresent' | 'PartiallyPresent' | 'AllAbsent' | 'NeedsSync' | 'NoAssignments' | 'NotAuthorized' | 'Unavailable';
 type AttendanceSummaryAvailability = 'available' | 'not-authorized' | 'unavailable';
+interface HierarchySummaryOverride {
+  workersCurrent?: number;
+  presentAssignedWorkers?: number;
+  absentAssignedWorkers?: number;
+}
 
 export function createEmptyFactoryLayout(): FactoryLayout {
   return {
@@ -114,7 +119,13 @@ export class FactoryMapApiService {
       attendanceSummaryBySubStageId,
       attendanceSummaryAvailability
     ));
-    const summary = this.summarizeNodes(lines);
+    const subStageIds = lines.flatMap(line => line.stages.flatMap(stage => stage.subStages.map(subStage => subStage.id)));
+    const summary = this.summarizeNodes(lines, this.hierarchySummaryOverride(
+      subStageIds,
+      staffingCoverageBySubStageId,
+      attendanceSummaryBySubStageId,
+      'factory'
+    ));
 
     return {
       id: this.resolveString(selectedFactory, ['id', 'factoryId', '_id']) || 'factory-01',
@@ -126,6 +137,12 @@ export class FactoryMapApiService {
       workersRequired: summary.workersRequired,
       workerRequirementDefined: summary.workerRequirementDefined,
       staffingSummaryAvailable: summary.staffingSummaryAvailable,
+      attendanceSummaryAvailable: summary.attendanceSummaryAvailable,
+      presentAssignedWorkers: summary.presentAssignedWorkers,
+      absentAssignedWorkers: summary.absentAssignedWorkers,
+      attendanceStatus: summary.attendanceStatus,
+      attendanceSummaryText: this.attendanceSummaryText(summary),
+      assignmentParticipationsCount: summary.assignmentParticipationsCount,
       description: 'خريطة مرئية لتغطية التسكين الفعّال.',
       lines
     };
@@ -152,7 +169,13 @@ export class FactoryMapApiService {
       attendanceSummaryBySubStageId,
       attendanceSummaryAvailability
     ));
-    const summary = this.summarizeNodes(stages);
+    const subStageIds = stages.flatMap(stage => stage.subStages.map(subStage => subStage.id));
+    const summary = this.summarizeNodes(stages, this.hierarchySummaryOverride(
+      subStageIds,
+      staffingCoverageBySubStageId,
+      attendanceSummaryBySubStageId,
+      'productionLine'
+    ));
     const activeStage = stages[0];
 
     return {
@@ -168,6 +191,12 @@ export class FactoryMapApiService {
       workersRequired: summary.workersRequired,
       workerRequirementDefined: summary.workerRequirementDefined,
       staffingSummaryAvailable: summary.staffingSummaryAvailable,
+      attendanceSummaryAvailable: summary.attendanceSummaryAvailable,
+      presentAssignedWorkers: summary.presentAssignedWorkers,
+      absentAssignedWorkers: summary.absentAssignedWorkers,
+      attendanceStatus: summary.attendanceStatus,
+      attendanceSummaryText: this.attendanceSummaryText(summary),
+      assignmentParticipationsCount: summary.assignmentParticipationsCount,
       position: this.parsePosition(lineRecord),
       stages,
       description: this.resolveString(lineRecord, ['description', 'summary'])
@@ -194,7 +223,12 @@ export class FactoryMapApiService {
         attendanceSummaryAvailability
       )
     );
-    const summary = this.summarizeNodes(subStages);
+    const summary = this.summarizeNodes(subStages, this.hierarchySummaryOverride(
+      subStages.map(subStage => subStage.id),
+      staffingCoverageBySubStageId,
+      attendanceSummaryBySubStageId,
+      'mainStage'
+    ));
 
     return {
       id,
@@ -206,6 +240,12 @@ export class FactoryMapApiService {
       workersRequired: summary.workersRequired,
       workerRequirementDefined: summary.workerRequirementDefined,
       staffingSummaryAvailable: summary.staffingSummaryAvailable,
+      attendanceSummaryAvailable: summary.attendanceSummaryAvailable,
+      presentAssignedWorkers: summary.presentAssignedWorkers,
+      absentAssignedWorkers: summary.absentAssignedWorkers,
+      attendanceStatus: summary.attendanceStatus,
+      attendanceSummaryText: this.attendanceSummaryText(summary),
+      assignmentParticipationsCount: summary.assignmentParticipationsCount,
       note: this.resolveString(stageRecord, ['note', 'description']),
       position: this.parsePosition(stageRecord),
       subStages
@@ -264,33 +304,92 @@ export class FactoryMapApiService {
         ? this.toNumber(this.pickFirst(attendance!, ['absentAssignedWorkersCount']), 0)
         : 0,
       attendanceStatus,
+      assignmentParticipationsCount: workersCurrent,
       workers: [],
       position: this.parsePosition(subStageRecord)
     };
   }
 
-  private summarizeNodes(nodes: LayoutNode[]): {
+  private summarizeNodes(nodes: LayoutNode[], authoritative: HierarchySummaryOverride = {}): {
     workersCurrent: number;
+    assignmentParticipationsCount: number;
     workersRequired: number;
     workerRequirementDefined: boolean;
     staffingSummaryAvailable: boolean;
     readinessPercent: number;
     staffingStatus: StaffingStatus;
+    attendanceSummaryAvailable: boolean;
+    presentAssignedWorkers: number;
+    absentAssignedWorkers: number;
+    attendanceStatus: SubStageAttendanceStatus;
   } {
-    const workersCurrent = nodes.reduce((sum, node) => sum + (node.workersCurrent ?? 0), 0);
+    const assignmentParticipationsCount = nodes.reduce(
+      (sum, node) => sum + (node.assignmentParticipationsCount ?? node.workersCurrent ?? 0),
+      0
+    );
+    const workersCurrent = authoritative.workersCurrent ?? assignmentParticipationsCount;
     const workersRequired = nodes.reduce((sum, node) => sum + (node.workersRequired ?? 0), 0);
     const staffingSummaryAvailable = nodes.length > 0 && nodes.every((node) => node.staffingSummaryAvailable === true);
     const workerRequirementDefined = staffingSummaryAvailable && nodes.every((node) => node.workerRequirementDefined === true);
-    const readinessPercent = workerRequirementDefined ? this.toPercent(undefined, workersCurrent, workersRequired) : 0;
+    const readinessPercent = workerRequirementDefined ? this.toPercent(undefined, assignmentParticipationsCount, workersRequired) : 0;
     const staffingStatus: StaffingStatus = !workerRequirementDefined
       ? 'RequirementNotDefined'
       : workersCurrent === 0
         ? 'Unstaffed'
-        : workersCurrent < workersRequired
+        : assignmentParticipationsCount < workersRequired
           ? 'Understaffed'
           : 'Staffed';
 
-    return { workersCurrent, workersRequired, workerRequirementDefined, staffingSummaryAvailable, readinessPercent, staffingStatus };
+    const presentAssignedWorkers = authoritative.presentAssignedWorkers
+      ?? nodes.reduce((sum, node) => sum + (node.presentAssignedWorkers ?? 0), 0);
+    const absentAssignedWorkers = authoritative.absentAssignedWorkers
+      ?? nodes.reduce((sum, node) => sum + (node.absentAssignedWorkers ?? 0), 0);
+    const attendanceSummaryAvailable = nodes.length > 0 && nodes.every(node => node.attendanceSummaryAvailable === true);
+    const statuses = nodes.map(node => node.attendanceStatus);
+    const attendanceStatus: SubStageAttendanceStatus = workersCurrent === 0
+      ? 'NoAssignments'
+      : statuses.some(status => status === 'NotAuthorized')
+        ? 'NotAuthorized'
+        : !attendanceSummaryAvailable || statuses.some(status => status === 'NeedsSync' || status === 'Unavailable')
+          ? 'NeedsSync'
+          : presentAssignedWorkers === workersCurrent
+            ? 'FullyPresent'
+            : presentAssignedWorkers === 0
+              ? 'AllAbsent'
+              : 'PartiallyPresent';
+    return { workersCurrent, assignmentParticipationsCount, workersRequired, workerRequirementDefined, staffingSummaryAvailable, readinessPercent, staffingStatus, attendanceSummaryAvailable, presentAssignedWorkers, absentAssignedWorkers, attendanceStatus };
+  }
+
+  private hierarchySummaryOverride(
+    subStageIds: string[],
+    staffingCoverageBySubStageId: Map<string, RawRecord>,
+    attendanceSummaryBySubStageId: Map<string, RawRecord>,
+    scope: 'mainStage' | 'productionLine' | 'factory'
+  ): HierarchySummaryOverride {
+    const staffingKey = `${scope}DistinctWorkersCount`;
+    const attendancePrefix = `${scope}Distinct`;
+    return {
+      workersCurrent: this.firstAggregateNumber(subStageIds, staffingCoverageBySubStageId, staffingKey),
+      presentAssignedWorkers: this.firstAggregateNumber(subStageIds, attendanceSummaryBySubStageId, `${attendancePrefix}PresentWorkersCount`),
+      absentAssignedWorkers: this.firstAggregateNumber(subStageIds, attendanceSummaryBySubStageId, `${attendancePrefix}AbsentWorkersCount`)
+    };
+  }
+
+  private firstAggregateNumber(ids: string[], records: Map<string, RawRecord>, key: string): number | undefined {
+    for (const id of ids) {
+      const record = records.get(id);
+      if (!record) continue;
+      const value = this.pickFirst(record, [key]);
+      if (typeof value === 'number' && Number.isFinite(value)) return value;
+    }
+    return undefined;
+  }
+
+  private attendanceSummaryText(summary: { workersCurrent: number; presentAssignedWorkers: number; attendanceStatus: SubStageAttendanceStatus }): string {
+    if (summary.attendanceStatus === 'NotAuthorized') return 'غير متاح بالصلاحية';
+    if (summary.attendanceStatus === 'NeedsSync' || summary.attendanceStatus === 'Unavailable') return 'تحتاج مزامنة حضور اليوم';
+    if (summary.attendanceStatus === 'NoAssignments') return 'لا يوجد عمال مسكنون';
+    return `${summary.presentAssignedWorkers} من ${summary.workersCurrent}`;
   }
 
   private hasUsableBackendData(layout: FactoryLayout, hasBackendData: boolean): boolean {

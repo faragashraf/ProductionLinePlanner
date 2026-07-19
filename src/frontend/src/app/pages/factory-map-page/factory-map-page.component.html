@@ -99,18 +99,20 @@
           </div>
           <p class="factory-map-summary__description">{{ layout.description }}</p>
           <plp-product-metadata-row class="factory-map-summary__meta" [label]="'بيانات مصنع ' + layout.name">
-            <plp-product-metadata-item label="العاملون" [value]="(layout.workersCurrent ?? 0) + ' / ' + (layout.workersRequired ?? 0)"></plp-product-metadata-item>
+            <plp-product-metadata-item label="المسكنون" [value]="layout.workersCurrent ?? 0"></plp-product-metadata-item>
+            <plp-product-metadata-item label="الاحتياج" [value]="layout.workerRequirementDefined === false ? 'غير محدد' : (layout.workersRequired ?? 0)"></plp-product-metadata-item>
+            <plp-product-metadata-item label="الحضور اليوم" [value]="layout.attendanceSummaryText || 'بيانات الحضور غير متاحة'"></plp-product-metadata-item>
             <plp-product-metadata-item label="خطوط التشغيل" [value]="layout.lines.length"></plp-product-metadata-item>
           </plp-product-metadata-row>
         </div>
 
-        <div class="factory-map-summary__readiness" aria-label="الجاهزية التشغيلية للمصنع">
-          <strong>{{ layout.readinessPercent ?? 0 }}%</strong>
-          <span>الجاهزية التشغيلية للمصنع</span>
+        <div class="factory-map-summary__readiness" aria-label="تغطية تسكين المصنع">
+          <strong>{{ layout.workerRequirementDefined === false ? '—' : (layout.readinessPercent ?? 0) + '%' }}</strong>
+          <span>تغطية التسكين للمصنع</span>
           <plp-completion-bar
             [value]="layout.readinessPercent ?? 0"
             [status]="layout.status ?? 'info'"
-            label="التقدم"
+              label="تغطية التسكين"
           ></plp-completion-bar>
         </div>
       </article>
@@ -133,12 +135,14 @@
             <plp-completion-bar
               [value]="line.readinessPercent ?? 0"
               [status]="line.status ?? 'info'"
-              label="جاهزية تشغيلية"
+              label="تغطية التسكين"
             ></plp-completion-bar>
           </div>
 
           <plp-product-metadata-row class="factory-map-line-card__details" [label]="'بيانات خط ' + line.name">
-            <plp-product-metadata-item label="العاملون" [value]="(line.workersCurrent ?? 0) + ' / ' + (line.workersRequired ?? 0)"></plp-product-metadata-item>
+            <plp-product-metadata-item label="المسكنون" [value]="line.workersCurrent ?? 0"></plp-product-metadata-item>
+            <plp-product-metadata-item label="الاحتياج" [value]="line.workerRequirementDefined === false ? 'غير محدد' : (line.workersRequired ?? 0)"></plp-product-metadata-item>
+            <plp-product-metadata-item label="الحضور اليوم" [value]="line.attendanceSummaryText || 'بيانات الحضور غير متاحة'"></plp-product-metadata-item>
             <plp-product-metadata-item label="المرحلة النشطة" [value]="line.activeStageName || 'غير محدد'"></plp-product-metadata-item>
           </plp-product-metadata-row>
 

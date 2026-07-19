@@ -1162,7 +1162,14 @@ public sealed class AssignmentEngine : IAssignmentEngine
             .Where(stage => stage.IsActive)
             .OrderBy(stage => stage.MainStageId)
             .ThenBy(stage => stage.DefaultOrder)
-            .Select(stage => new { stage.Id, stage.Capacity })
+            .Select(stage => new
+            {
+                stage.Id,
+                stage.Capacity,
+                stage.MainStageId,
+                ProductionLineId = stage.MainStage!.ProductionLineId,
+                FactoryId = stage.MainStage.ProductionLine!.FactoryId
+            })
             .ToArrayAsync(cancellationToken);
 
         if (stages.Length == 0)
@@ -1185,12 +1192,29 @@ public sealed class AssignmentEngine : IAssignmentEngine
             return Result<IReadOnlyCollection<SubStageAssignmentCoverageDto>>.Failure(assignmentsResult.Error!);
         }
 
-        var assignedWorkersByStage = assignmentsResult.Value!
+        var effectiveParticipations = assignmentsResult.Value!
             .SelectMany(pair => pair.Value
                 .Where(assignment => assignment.EffectiveSubStageId.HasValue)
                 .Select(assignment => new { SubStageId = assignment.EffectiveSubStageId!.Value, WorkerId = pair.Key }))
             .Distinct()
+            .ToArray();
+        var assignedWorkersByStage = effectiveParticipations
             .GroupBy(item => item.SubStageId)
+            .ToDictionary(group => group.Key, group => group.Count());
+        var distinctWorkersByMainStage = effectiveParticipations
+            .Join(stages, item => item.SubStageId, stage => stage.Id, (item, stage) => new { ScopeId = stage.MainStageId, item.WorkerId })
+            .Distinct()
+            .GroupBy(item => item.ScopeId)
+            .ToDictionary(group => group.Key, group => group.Count());
+        var distinctWorkersByProductionLine = effectiveParticipations
+            .Join(stages, item => item.SubStageId, stage => stage.Id, (item, stage) => new { ScopeId = stage.ProductionLineId, item.WorkerId })
+            .Distinct()
+            .GroupBy(item => item.ScopeId)
+            .ToDictionary(group => group.Key, group => group.Count());
+        var distinctWorkersByFactory = effectiveParticipations
+            .Join(stages, item => item.SubStageId, stage => stage.Id, (item, stage) => new { ScopeId = stage.FactoryId, item.WorkerId })
+            .Distinct()
+            .GroupBy(item => item.ScopeId)
             .ToDictionary(group => group.Key, group => group.Count());
 
         IReadOnlyCollection<SubStageAssignmentCoverageDto> summaries = stages
@@ -1216,7 +1240,12 @@ public sealed class AssignmentEngine : IAssignmentEngine
                     requiredWorkersCount,
                     hasAuthoritativeRequiredWorkerCount,
                     assignmentCoveragePercent,
-                    staffingStatus);
+                    staffingStatus)
+                {
+                    MainStageDistinctWorkersCount = distinctWorkersByMainStage.GetValueOrDefault(stage.MainStageId),
+                    ProductionLineDistinctWorkersCount = distinctWorkersByProductionLine.GetValueOrDefault(stage.ProductionLineId),
+                    FactoryDistinctWorkersCount = distinctWorkersByFactory.GetValueOrDefault(stage.FactoryId)
+                };
             })
             .ToArray();
 

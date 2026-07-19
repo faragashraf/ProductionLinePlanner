@@ -12,4 +12,15 @@ public sealed record SubStageAttendanceSummaryDto(
     int AbsentAssignedWorkersCount,
     int UnresolvedAssignedWorkersCount,
     string AttendanceDataStatus,
-    string AttendanceStatus);
+    string AttendanceStatus)
+{
+    public int MainStageDistinctAssignedWorkersCount { get; init; }
+    public int MainStageDistinctPresentWorkersCount { get; init; }
+    public int MainStageDistinctAbsentWorkersCount { get; init; }
+    public int ProductionLineDistinctAssignedWorkersCount { get; init; }
+    public int ProductionLineDistinctPresentWorkersCount { get; init; }
+    public int ProductionLineDistinctAbsentWorkersCount { get; init; }
+    public int FactoryDistinctAssignedWorkersCount { get; init; }
+    public int FactoryDistinctPresentWorkersCount { get; init; }
+    public int FactoryDistinctAbsentWorkersCount { get; init; }
+}

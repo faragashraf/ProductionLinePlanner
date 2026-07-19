@@ -25,6 +25,8 @@ export interface LayoutNode {
   presentAssignedWorkers?: number;
   absentAssignedWorkers?: number;
   attendanceStatus?: string;
+  attendanceSummaryText?: string;
+  assignmentParticipationsCount?: number;
   position?: LayoutPosition;
   description?: string;
 }
