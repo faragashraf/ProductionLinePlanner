@@ -1,6 +1,5 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Migrations.Operations;
 using ProductionLinePlanner.Application.Abstractions;
@@ -201,135 +200,44 @@ public sealed class ManufacturingMasterDataReviewClosureTests
     }
 
     [Fact]
-    public async Task Employee_name_rollback_uses_the_original_external_name_and_reports_reconciliation_failure()
+    public async Task Employee_local_name_update_has_no_external_compensation_path()
     {
         var worker = new Worker(Guid.NewGuid(), "W-1", "Local Original", "111", attendanceDepartmentId: 1);
         await using var dbContext = ProductModelFixture.CreateContext();
         dbContext.Workers.Add(worker);
         await dbContext.SaveChangesAsync();
-        var employees = new Dictionary<string, AttendanceEmployeeRecord?>
-        {
-            ["111"] = new AttendanceEmployeeRecord("111", 1, "1001", "ZK Original", true)
-        };
-        var names = new List<string>();
-        var writer = new FakeAttendanceEmployeeWriter(
-            employees,
-            (_, name, _) => { names.Add(name); return Task.FromResult(Result.Success()); },
-            (_, _, _) => Task.FromResult(Result.Failure(new Error("ExternalFailure", "Department failed."))));
-        var service = new EmployeeMasterDataService(
-            dbContext, writer, new FakeAttendanceEmployeeReader(employees),
-            new FakeAttendanceDepartmentReader(new Dictionary<int, AttendanceDepartmentRecord> { [2] = new(2, "Quality") }),
-            new RecordingAuditEngine());
+        var service = new EmployeeMasterDataService(dbContext, new RecordingAuditEngine());
 
-        var result = await service.UpdateMasterIdentityAsync(worker.Id, new UpdateWorkerRequest { FullName = "New Name", AttendanceDepartmentId = 2 }, Guid.NewGuid());
+        var result = await service.UpdateMasterIdentityAsync(worker.Id, new UpdateWorkerRequest { FullName = "New Local Name" }, Guid.NewGuid());
 
-        Assert.True(result.IsFailure);
-        Assert.Equal(new[] { "New Name", "ZK Original" }, names);
-        Assert.Equal("Local Original", (await dbContext.Workers.AsNoTracking().SingleAsync()).FullName);
+        Assert.True(result.IsSuccess);
+        Assert.Equal("New Local Name", (await dbContext.Workers.AsNoTracking().SingleAsync()).FullName);
+        Assert.Equal(1, (await dbContext.Workers.AsNoTracking().SingleAsync()).AttendanceDepartmentId);
     }
 
     [Fact]
-    public async Task Employee_name_rollback_failure_requires_reconciliation_and_does_not_update_planner()
+    public async Task Source_observed_department_and_external_department_mutations_are_blocked()
     {
         var worker = new Worker(Guid.NewGuid(), "W-1", "Local Original", "111", attendanceDepartmentId: 1);
         await using var dbContext = ProductModelFixture.CreateContext();
         dbContext.Workers.Add(worker);
         await dbContext.SaveChangesAsync();
-        var employees = new Dictionary<string, AttendanceEmployeeRecord?> { ["111"] = new("111", 1, "1001", "ZK Original", true) };
-        var calls = 0;
-        var writer = new FakeAttendanceEmployeeWriter(
-            employees,
-            (_, _, _) => Task.FromResult(++calls == 1 ? Result.Success() : Result.Failure(new Error("ExternalFailure", "Rollback failed."))),
-            (_, _, _) => Task.FromResult(Result.Failure(new Error("ExternalFailure", "Department failed."))));
-        var audit = new RecordingAuditEngine();
-        var service = new EmployeeMasterDataService(
-            dbContext, writer, new FakeAttendanceEmployeeReader(employees),
-            new FakeAttendanceDepartmentReader(new Dictionary<int, AttendanceDepartmentRecord> { [2] = new(2, "Quality") }), audit);
+        var departments = new FakeAttendanceDepartmentReader(new Dictionary<int, AttendanceDepartmentRecord> { [2] = new(2, "Quality") });
+        var employeeService = new EmployeeMasterDataService(dbContext, new RecordingAuditEngine());
+        var departmentService = new DepartmentAdministrationService(dbContext, departments);
 
-        var result = await service.UpdateMasterIdentityAsync(worker.Id, new UpdateWorkerRequest { FullName = "New Name", AttendanceDepartmentId = 2 }, Guid.NewGuid());
+        var identityUpdate = await employeeService.UpdateMasterIdentityAsync(worker.Id, new UpdateWorkerRequest { AttendanceDepartmentId = 2 }, Guid.NewGuid());
+        var departmentMove = await departmentService.MoveWorkerToDepartmentAsync(worker.Id, 2, Guid.NewGuid());
 
-        Assert.True(result.IsFailure);
-        Assert.Equal("NeedsReconciliation", result.Error!.Code);
+        Assert.Equal("SourceObservedOnly", identityUpdate.Error!.Code);
+        Assert.Equal("ExternalSourceReadOnly", departmentMove.Error!.Code);
         Assert.Equal("Local Original", (await dbContext.Workers.AsNoTracking().SingleAsync()).FullName);
-        Assert.Empty(audit.Calls);
-    }
-
-    [Fact]
-    public async Task Department_persistence_failure_compensates_external_move_after_queuing_the_uncommitted_audit()
-    {
-        var interceptor = new ThrowingSaveChangesInterceptor();
-        await using var dbContext = ProductModelFixture.CreateContext(interceptor);
-        var worker = new Worker(Guid.NewGuid(), "W-1", "Worker", "111", attendanceDepartmentId: 1);
-        dbContext.Workers.Add(worker);
-        await dbContext.SaveChangesAsync();
-        interceptor.ThrowOnSave = true;
-        var employees = new Dictionary<string, AttendanceEmployeeRecord?> { ["111"] = new("111", 1, "1001", "Worker", true) };
-        var writer = new FakeAttendanceEmployeeWriter(employees);
-        var audit = new RecordingAuditEngine();
-        var service = new DepartmentAdministrationService(
-            dbContext,
-            new FakeAttendanceDepartmentReader(new Dictionary<int, AttendanceDepartmentRecord> { [2] = new(2, "Quality") }),
-            new FakeAttendanceDepartmentWriter(),
-            writer,
-            new FakeAttendanceEmployeeReader(employees),
-            audit);
-
-        var result = await service.MoveWorkerToDepartmentAsync(worker.Id, 2, Guid.NewGuid());
-
-        Assert.True(result.IsFailure);
-        Assert.Equal("PersistenceFailed", result.Error!.Code);
-        Assert.Equal(new[] { 2, 1 }, writer.DepartmentUpdates.Select(x => x.DepartmentId));
-        Assert.Single(audit.Calls);
-    }
-
-    [Fact]
-    public async Task Department_rollback_failure_requires_reconciliation_after_queuing_the_uncommitted_audit()
-    {
-        var interceptor = new ThrowingSaveChangesInterceptor();
-        await using var dbContext = ProductModelFixture.CreateContext(interceptor);
-        var worker = new Worker(Guid.NewGuid(), "W-1", "Worker", "111", attendanceDepartmentId: 1);
-        dbContext.Workers.Add(worker);
-        await dbContext.SaveChangesAsync();
-        interceptor.ThrowOnSave = true;
-        var employees = new Dictionary<string, AttendanceEmployeeRecord?> { ["111"] = new("111", 1, "1001", "Worker", true) };
-        var calls = 0;
-        var writer = new FakeAttendanceEmployeeWriter(
-            employees,
-            null,
-            (_, _, _) => Task.FromResult(++calls == 1 ? Result.Success() : Result.Failure(new Error("ExternalFailure", "Rollback failed."))));
-        var audit = new RecordingAuditEngine();
-        var service = new DepartmentAdministrationService(
-            dbContext,
-            new FakeAttendanceDepartmentReader(new Dictionary<int, AttendanceDepartmentRecord> { [2] = new(2, "Quality") }),
-            new FakeAttendanceDepartmentWriter(),
-            writer,
-            new FakeAttendanceEmployeeReader(employees),
-            audit);
-
-        var result = await service.MoveWorkerToDepartmentAsync(worker.Id, 2, Guid.NewGuid());
-
-        Assert.True(result.IsFailure);
-        Assert.Equal("NeedsReconciliation", result.Error!.Code);
-        Assert.Single(audit.Calls);
+        Assert.Equal(1, (await dbContext.Workers.AsNoTracking().SingleAsync()).AttendanceDepartmentId);
     }
 
     private sealed class TestableManufacturingMigration : AddManufacturingMasterDataFoundation
     {
         public void BuildUp(MigrationBuilder builder) => Up(builder);
-    }
-
-    private sealed class ThrowingSaveChangesInterceptor : SaveChangesInterceptor
-    {
-        public bool ThrowOnSave { get; set; }
-
-        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
-            DbContextEventData eventData,
-            InterceptionResult<int> result,
-            CancellationToken cancellationToken = default)
-        {
-            if (ThrowOnSave) throw new InvalidOperationException("Persistence failed.");
-            return base.SavingChangesAsync(eventData, result, cancellationToken);
-        }
     }
 
     private sealed class ProductModelFixture : IAsyncDisposable
@@ -348,12 +256,10 @@ public sealed class ManufacturingMasterDataReviewClosureTests
         public ProductModelService Service { get; }
         public Guid ActorUserId { get; } = Guid.NewGuid();
 
-        public static AppDbContext CreateContext(params IInterceptor[] interceptors)
-        {
-            var builder = new DbContextOptionsBuilder<AppDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString("N"));
-            if (interceptors.Length > 0) builder.AddInterceptors(interceptors);
-            return new AppDbContext(builder.Options);
-        }
+        public static AppDbContext CreateContext() =>
+            new(new DbContextOptionsBuilder<AppDbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
+                .Options);
 
         public static async Task<ProductModelFixture> CreateAsync()
         {

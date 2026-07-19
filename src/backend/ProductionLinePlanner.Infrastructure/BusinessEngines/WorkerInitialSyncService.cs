@@ -4,59 +4,41 @@ using ProductionLinePlanner.Application.Common;
 using ProductionLinePlanner.Application.DTOs;
 using ProductionLinePlanner.Application.Engines;
 using ProductionLinePlanner.Application.Services;
+using ProductionLinePlanner.Application.Workers;
 using ProductionLinePlanner.Domain.Entities;
 using ProductionLinePlanner.Domain.Enums;
 using ProductionLinePlanner.Infrastructure.Data;
-using ProductionLinePlanner.Application.Workers;
 
 namespace ProductionLinePlanner.Infrastructure.BusinessEngines;
 
+/// <summary>
+/// Separate worker-master capability. Existing planner workers are comparison-only; only a new,
+/// structurally valid source identity may be initialized, and no attendance transaction is read.
+/// </summary>
 public sealed class WorkerInitialSyncService(
     AppDbContext dbContext,
     IAttendanceEmployeeReader attendanceEmployeeReader,
-    IAttendanceWorkerPhotoReader attendanceWorkerPhotoReader,
-    IWorkerPhotoCache workerPhotoCache,
+    IWorkerSyncPolicy workerSyncPolicy,
+    IAuthoritativeWorkerSnapshotValidator snapshotValidator,
     IAuditEngine auditEngine) : IWorkerInitialSyncService
 {
     public async Task<Result<WorkerActiveServiceSyncPreviewDto>> PreviewActiveServiceSyncAsync(
         CancellationToken cancellationToken = default)
     {
-        Result<AttendanceEmployeeRecord[]> sourceResult;
-        try
-        {
-            sourceResult = await attendanceEmployeeReader.GetAllAsync(cancellationToken);
-        }
-        catch
-        {
-            return Result<WorkerActiveServiceSyncPreviewDto>.Failure(new Error(
-                "AttendanceSourceError",
-                "Unable to read worker data from attendance source."));
-        }
-
+        var sourceResult = await ReadSourceSnapshotAsync(cancellationToken);
         if (sourceResult.IsFailure)
         {
             return Result<WorkerActiveServiceSyncPreviewDto>.Failure(sourceResult.Error!);
         }
 
-        var activeSourceRows = (sourceResult.Value ?? []).Where(x => x.IsActive).ToArray();
-        var localWorkers = await dbContext.Workers.AsNoTracking().ToArrayAsync(cancellationToken);
-        var workersInCurrentSource = localWorkers.Where(worker => IsRepresentedByActiveSource(worker, activeSourceRows)).ToArray();
-        var inactiveOrExcluded = localWorkers.Except(workersInCurrentSource).ToArray();
-        var sourceRowsWithoutLocalWorker = activeSourceRows.Count(source =>
-            !localWorkers.Any(worker => IsSourceRowForWorker(source, worker)));
+        var localWorkers = await dbContext.Workers
+            .AsNoTracking()
+            .OrderBy(worker => worker.EmployeeCode)
+            .ThenBy(worker => worker.Id)
+            .ToArrayAsync(cancellationToken);
+        var plan = BuildPlan(sourceResult.Value!, localWorkers);
 
-        return Result<WorkerActiveServiceSyncPreviewDto>.Success(new WorkerActiveServiceSyncPreviewDto
-        {
-            CurrentLocalWorkers = localWorkers.Length,
-            ActiveOnServiceWorkersInZkTime = activeSourceRows.Length,
-            WorkersToRemainActive = workersInCurrentSource.Count(x => x.IsActive && x.EmploymentStatus == EmploymentStatus.Active),
-            WorkersToReactivate = workersInCurrentSource.Count(x => !x.IsActive || x.EmploymentStatus != EmploymentStatus.Active),
-            WorkersToCreate = sourceRowsWithoutLocalWorker,
-            WorkersToMarkInactiveOrExcluded = inactiveOrExcluded.Count(x => x.IsActive || x.EmploymentStatus != EmploymentStatus.LeftEmployment),
-            WorkersAlreadyInactiveOrExcluded = inactiveOrExcluded.Count(x => !x.IsActive && x.EmploymentStatus == EmploymentStatus.LeftEmployment),
-            WorkersSafelyRemovable = 0,
-            WarningCount = 0
-        });
+        return Result<WorkerActiveServiceSyncPreviewDto>.Success(MapPreview(plan, localWorkers));
     }
 
     public async Task<Result<WorkerInitialSyncResultDto>> SyncWorkersAsync(
@@ -70,493 +52,335 @@ public sealed class WorkerInitialSyncService(
         }
 
         var startedAtUtc = DateTime.UtcNow;
-        var completedAtUtc = startedAtUtc;
-
-        Result<AttendanceEmployeeRecord[]> sourceResult;
-        try
-        {
-            sourceResult = await attendanceEmployeeReader.GetAllAsync(cancellationToken);
-        }
-        catch
-        {
-            return Result<WorkerInitialSyncResultDto>.Failure(new Error(
-                "AttendanceSourceError",
-                "Unable to read worker data from attendance source."));
-        }
-
+        var sourceResult = await ReadSourceSnapshotAsync(cancellationToken);
         if (sourceResult.IsFailure)
         {
             return Result<WorkerInitialSyncResultDto>.Failure(sourceResult.Error!);
         }
 
-        Result<AttendanceWorkerPhotoRecord[]> sourcePhotosResult;
-        try
-        {
-            sourcePhotosResult = await attendanceWorkerPhotoReader.GetAllCurrentPhotosAsync(cancellationToken);
-        }
-        catch
-        {
-            return Result<WorkerInitialSyncResultDto>.Failure(new Error(
-                "AttendanceSourceError",
-                "Unable to read worker photos from attendance source."));
-        }
-
-        if (sourcePhotosResult.IsFailure)
-        {
-            return Result<WorkerInitialSyncResultDto>.Failure(sourcePhotosResult.Error!);
-        }
-
-        // AttendanceDirectoryService limits this set to CurrentEmployeesImport membership.
-        // Retaining the filter here makes the local projection safe with any future reader.
-        var sourceRows = (sourceResult.Value ?? []).Where(x => x.IsActive).ToArray();
-        var sourceCount = sourceRows.Length;
-        var photosFoundCount = 0;
-        var invalidOrUnsupportedPhotosCount = 0;
-        var validPhotosByAttendanceUserId = new Dictionary<string, AttendanceWorkerPhotoRecord>(StringComparer.OrdinalIgnoreCase);
-        foreach (var sourcePhoto in sourcePhotosResult.Value ?? [])
-        {
-            photosFoundCount++;
-            if (WorkerPhotoFormat.TryGetContentType(sourcePhoto.Photo, out _))
-            {
-                validPhotosByAttendanceUserId[sourcePhoto.AttendanceUserId] = sourcePhoto;
-            }
-            else
-            {
-                invalidOrUnsupportedPhotosCount++;
-            }
-        }
-        var photosSynchronizedCount = 0;
-        var photosCreatedCount = 0;
-        var photosUpdatedCount = 0;
-        var photosUnchangedCount = 0;
-        var workersWithoutPhotosCount = 0;
-
-        // Safe for v1: no department scope override detected in current product implementation.
-        var localWorkers = await dbContext.Workers.ToListAsync(cancellationToken);
-        var nonUniqueAttendanceUserIds = localWorkers
-            .Where(x => !string.IsNullOrWhiteSpace(x.AttendanceUserId))
-            .Select(x => x.AttendanceUserId!.Trim())
-            .GroupBy(x => x, StringComparer.OrdinalIgnoreCase)
-            .Where(group => group.Count() > 1)
-            .Select(group => group.Key)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-        var nonUniqueBadges = localWorkers
-            .Where(x => !string.IsNullOrWhiteSpace(x.BadgeNumber))
-            .Select(x => x.BadgeNumber!.Trim())
-            .GroupBy(x => x, StringComparer.OrdinalIgnoreCase)
-            .Where(group => group.Count() > 1)
-            .Select(group => group.Key)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-        var localByAttendanceUserId = localWorkers
-            .Where(x => !string.IsNullOrWhiteSpace(x.AttendanceUserId))
-            .GroupBy(x => x.AttendanceUserId!.Trim(), StringComparer.OrdinalIgnoreCase)
-            .Where(group => group.Count() == 1)
-            .ToDictionary(group => group.Key, group => group.Single(), StringComparer.OrdinalIgnoreCase);
-        var localByBadge = localWorkers
-            .Where(x => !string.IsNullOrWhiteSpace(x.BadgeNumber))
-            .GroupBy(x => x.BadgeNumber!.Trim(), StringComparer.OrdinalIgnoreCase)
-            .Where(group => group.Count() == 1)
-            .ToDictionary(group => group.Key, group => group.Single(), StringComparer.OrdinalIgnoreCase);
-        var localByEmployeeCode = localWorkers.ToDictionary(x => x.EmployeeCode, x => x, StringComparer.OrdinalIgnoreCase);
-
-        var matchedWorkerIds = new HashSet<Guid>();
-        var seenAttendanceIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var seenBadgeFallbacks = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
+        var localWorkers = await dbContext.Workers
+            .OrderBy(worker => worker.EmployeeCode)
+            .ThenBy(worker => worker.Id)
+            .ToArrayAsync(cancellationToken);
+        var plan = BuildPlan(sourceResult.Value!, localWorkers);
         var createdCount = 0;
-        var updatedCount = 0;
-        var unchangedCount = 0;
-        var warningCount = 0;
-        var reactivatedCount = 0;
 
-        var now = DateTime.UtcNow;
-
-        foreach (var sourceRow in sourceRows)
+        foreach (var candidate in plan.Rows.Where(row => row.Preview.Action == WorkerSyncActions.NewWorkerCandidate))
         {
-            var sourceAttendanceId = NormalizeString(sourceRow.AttendanceUserId);
-            var sourceBadge = NormalizeString(sourceRow.BadgeNumber);
-            var sourceName = NormalizeString(sourceRow.Name);
-            var sourceDepartmentId = sourceRow.DepartmentId;
-
-            var hasAttendanceId = !string.IsNullOrWhiteSpace(sourceAttendanceId);
-            var hasBadge = !string.IsNullOrWhiteSpace(sourceBadge);
-            var hasUsableName = IsUsableName(sourceName);
-
-            if (hasAttendanceId)
+            var workerResult = workerSyncPolicy.CreateNewWorker(candidate.Source!, DateTime.UtcNow);
+            if (workerResult.IsFailure)
             {
-                if (!seenAttendanceIds.Add(sourceAttendanceId))
-                {
-                    warningCount++;
-                    continue;
-                }
-                if (nonUniqueAttendanceUserIds.Contains(sourceAttendanceId))
-                {
-                    warningCount++;
-                    continue;
-                }
-
-                if (localByAttendanceUserId.TryGetValue(sourceAttendanceId, out var localWorker))
-                {
-                    ApplySourceToWorker(localWorker, now, sourceAttendanceId, hasUsableName ? sourceName : null, sourceBadge, sourceDepartmentId,
-                        out var changedInData, out var reactivated);
-                    var existingPhotoOutcome = await SynchronizePhotoReferenceAsync(localWorker, sourceAttendanceId, validPhotosByAttendanceUserId, now, cancellationToken);
-                    photosSynchronizedCount += existingPhotoOutcome.Synchronized;
-                    photosCreatedCount += existingPhotoOutcome.Created;
-                    photosUpdatedCount += existingPhotoOutcome.Updated;
-                    photosUnchangedCount += existingPhotoOutcome.Unchanged;
-                    workersWithoutPhotosCount += existingPhotoOutcome.Missing;
-                    matchedWorkerIds.Add(localWorker.Id);
-                    if (reactivated) reactivatedCount++;
-
-                    if (changedInData)
-                    {
-                        updatedCount++;
-                    }
-                    else
-                    {
-                        unchangedCount++;
-                    }
-
-                    if (!hasUsableName)
-                    {
-                        warningCount++;
-                    }
-
-                    continue;
-                }
-
-                var employeeCode = sourceBadge ?? sourceAttendanceId;
-                if (string.IsNullOrWhiteSpace(employeeCode))
-                {
-                    warningCount++;
-                    continue;
-                }
-
-                if (localByEmployeeCode.ContainsKey(employeeCode))
-                {
-                    warningCount++;
-                    continue;
-                }
-
-                if (!hasUsableName)
-                {
-                    warningCount++;
-                }
-
-                var newWorker = CreateWorker(
-                    employeeCode,
-                    hasUsableName ? sourceName : employeeCode,
-                    sourceAttendanceId,
-                    sourceBadge,
-                    sourceDepartmentId,
-                    now);
-                var createdPhotoOutcome = await SynchronizePhotoReferenceAsync(newWorker, sourceAttendanceId, validPhotosByAttendanceUserId, now, cancellationToken);
-                photosSynchronizedCount += createdPhotoOutcome.Synchronized;
-                photosCreatedCount += createdPhotoOutcome.Created;
-                photosUpdatedCount += createdPhotoOutcome.Updated;
-                photosUnchangedCount += createdPhotoOutcome.Unchanged;
-                workersWithoutPhotosCount += createdPhotoOutcome.Missing;
-
-                dbContext.Workers.Add(newWorker);
-                localByAttendanceUserId[sourceAttendanceId] = newWorker;
-                localByEmployeeCode[employeeCode] = newWorker;
-                if (hasBadge)
-                {
-                    localByBadge[sourceBadge!] = newWorker;
-                }
-
-                createdCount++;
-                matchedWorkerIds.Add(newWorker.Id);
                 continue;
             }
 
-            if (hasBadge)
-            {
-                if (!seenBadgeFallbacks.Add(sourceBadge))
-                {
-                    warningCount++;
-                    continue;
-                }
-                if (nonUniqueBadges.Contains(sourceBadge))
-                {
-                    warningCount++;
-                    continue;
-                }
-
-                if (localByBadge.TryGetValue(sourceBadge, out var localWorker))
-                {
-                    ApplySourceToWorker(localWorker, now, null, hasUsableName ? sourceName : null, sourceBadge, sourceDepartmentId,
-                        out var changedInData, out var reactivated);
-                    var badgePhotoOutcome = await SynchronizePhotoReferenceAsync(localWorker, localWorker.AttendanceUserId, validPhotosByAttendanceUserId, now, cancellationToken);
-                    photosSynchronizedCount += badgePhotoOutcome.Synchronized;
-                    photosCreatedCount += badgePhotoOutcome.Created;
-                    photosUpdatedCount += badgePhotoOutcome.Updated;
-                    photosUnchangedCount += badgePhotoOutcome.Unchanged;
-                    workersWithoutPhotosCount += badgePhotoOutcome.Missing;
-                    matchedWorkerIds.Add(localWorker.Id);
-                    if (reactivated) reactivatedCount++;
-
-                    if (changedInData)
-                    {
-                        updatedCount++;
-                    }
-                    else
-                    {
-                        unchangedCount++;
-                    }
-
-                    if (!hasUsableName)
-                    {
-                        warningCount++;
-                    }
-
-                    continue;
-                }
-
-                if (localByEmployeeCode.ContainsKey(sourceBadge))
-                {
-                    warningCount++;
-                    continue;
-                }
-
-                var employeeCode = sourceBadge;
-                if (!hasUsableName)
-                {
-                    warningCount++;
-                }
-
-                var newWorker = CreateWorker(
-                    employeeCode,
-                    hasUsableName ? sourceName : employeeCode,
-                    null,
-                    sourceBadge,
-                    sourceDepartmentId,
-                    now);
-                var badgeCreatedPhotoOutcome = await SynchronizePhotoReferenceAsync(newWorker, null, validPhotosByAttendanceUserId, now, cancellationToken);
-                photosSynchronizedCount += badgeCreatedPhotoOutcome.Synchronized;
-                photosCreatedCount += badgeCreatedPhotoOutcome.Created;
-                photosUpdatedCount += badgeCreatedPhotoOutcome.Updated;
-                photosUnchangedCount += badgeCreatedPhotoOutcome.Unchanged;
-                workersWithoutPhotosCount += badgeCreatedPhotoOutcome.Missing;
-
-                dbContext.Workers.Add(newWorker);
-                localByBadge[sourceBadge] = newWorker;
-                localByEmployeeCode[employeeCode] = newWorker;
-                createdCount++;
-                matchedWorkerIds.Add(newWorker.Id);
-                continue;
-            }
-
-            // No key to safely match.
-            warningCount++;
+            dbContext.Workers.Add(workerResult.Value!);
+            createdCount++;
         }
 
-        var localWorkersOutsideActiveSource = localWorkers
-            .Where(worker => !IsRepresentedByActiveSource(worker, sourceRows))
-            .ToArray();
-        var markedInactiveCount = 0;
-        foreach (var worker in localWorkersOutsideActiveSource)
+        var completedAtUtc = DateTime.UtcNow;
+        var identityConflictCount = plan.Rows.Count(row => row.Preview.Action == WorkerSyncActions.IdentityConflict);
+        var unsupportedCount = plan.Rows.Count(row => row.Preview.Action == WorkerSyncActions.UnsupportedSourceState);
+        var missingFromSourceCount = plan.Rows.Count(row => row.Source is null && row.Worker is not null);
+        var unchangedCount = plan.Rows.Count(row => row.Preview.Action == WorkerSyncActions.ExistingWorkerUnchanged);
+        var result = new WorkerInitialSyncResultDto
         {
-            if (!worker.IsActive && worker.EmploymentStatus == EmploymentStatus.LeftEmployment)
-            {
-                continue;
-            }
-
-            worker.SetEmploymentStatus(EmploymentStatus.LeftEmployment, now, now);
-            markedInactiveCount++;
-        }
-
-        var missingFromSourceCount = localWorkersOutsideActiveSource.Length;
-        completedAtUtc = DateTime.UtcNow;
+            SourceCount = sourceResult.Value!.Rows.Count,
+            CreatedCount = createdCount,
+            UpdatedCount = 0,
+            UnchangedCount = unchangedCount,
+            MissingFromSourceCount = missingFromSourceCount,
+            MarkedInactiveCount = 0,
+            ReactivatedCount = 0,
+            WarningCount = identityConflictCount + unsupportedCount,
+            StartedAtUtc = startedAtUtc,
+            CompletedAtUtc = completedAtUtc
+        };
 
         await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
         try
         {
-            await RecordAuditAsync(actorUserId, requestMeta, new WorkerInitialSyncResultDto
-            {
-                SourceCount = sourceCount,
-                CreatedCount = createdCount,
-                UpdatedCount = updatedCount,
-                UnchangedCount = unchangedCount,
-                MissingFromSourceCount = missingFromSourceCount,
-                MarkedInactiveCount = markedInactiveCount,
-                ReactivatedCount = reactivatedCount,
-                WarningCount = warningCount,
-                PhotosFoundCount = photosFoundCount,
-                PhotosSynchronizedCount = photosSynchronizedCount,
-                PhotosCreatedCount = photosCreatedCount,
-                PhotosUpdatedCount = photosUpdatedCount,
-                PhotosUnchangedCount = photosUnchangedCount,
-                InvalidOrUnsupportedPhotosCount = invalidOrUnsupportedPhotosCount,
-                WorkersWithoutPhotosCount = workersWithoutPhotosCount,
-                StartedAtUtc = startedAtUtc,
-                CompletedAtUtc = completedAtUtc
-            }, cancellationToken);
+            await auditEngine.RecordAsync(
+                actorUserId,
+                AuditActionType.WorkerInitialSync,
+                nameof(Worker),
+                nameof(Worker),
+                before: null,
+                after: result,
+                requestMeta: requestMeta,
+                cancellationToken: cancellationToken);
             await dbContext.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            await transaction.RollbackAsync(CancellationToken.None);
+            throw;
+        }
         catch
         {
-            await transaction.RollbackAsync(cancellationToken);
+            await transaction.RollbackAsync(CancellationToken.None);
             return Result<WorkerInitialSyncResultDto>.Failure(new Error(
                 "WorkerInitialSyncFailed",
-                "Unable to persist initial worker sync results."));
+                "Unable to persist worker import results."));
         }
 
-        return Result<WorkerInitialSyncResultDto>.Success(new WorkerInitialSyncResultDto
-        {
-            SourceCount = sourceCount,
-            CreatedCount = createdCount,
-            UpdatedCount = updatedCount,
-            UnchangedCount = unchangedCount,
-            MissingFromSourceCount = missingFromSourceCount,
-            MarkedInactiveCount = markedInactiveCount,
-            ReactivatedCount = reactivatedCount,
-            WarningCount = warningCount,
-            PhotosFoundCount = photosFoundCount,
-            PhotosSynchronizedCount = photosSynchronizedCount,
-            PhotosCreatedCount = photosCreatedCount,
-            PhotosUpdatedCount = photosUpdatedCount,
-            PhotosUnchangedCount = photosUnchangedCount,
-            InvalidOrUnsupportedPhotosCount = invalidOrUnsupportedPhotosCount,
-            WorkersWithoutPhotosCount = workersWithoutPhotosCount,
-            StartedAtUtc = startedAtUtc,
-            CompletedAtUtc = completedAtUtc
-        });
+        return Result<WorkerInitialSyncResultDto>.Success(result);
     }
 
-    private static bool IsUsableName(string? sourceName) =>
-        !string.IsNullOrWhiteSpace(sourceName) &&
-        sourceName.Trim().All(char.IsDigit) is false;
-
-    private static string? NormalizeString(string? value) =>
-        string.IsNullOrWhiteSpace(value)
-            ? null
-            : value.Trim();
-
-    private static Worker CreateWorker(
-        string employeeCode,
-        string fullName,
-        string? attendanceUserId,
-        string? badgeNumber,
-        int? attendanceDepartmentId,
-        DateTime now)
+    private async Task<Result<WorkerSourceSnapshot>> ReadSourceSnapshotAsync(CancellationToken cancellationToken)
     {
-        return new Worker(
-            id: Guid.NewGuid(),
-            employeeCode: employeeCode,
-            fullName: fullName,
-            attendanceUserId: attendanceUserId,
-            badgeNumber: badgeNumber,
-            isActive: true,
-            attendanceDepartmentId: attendanceDepartmentId,
-            lastExternalSyncAt: now,
-            createdAtUtc: now,
-            phone: null,
-            employmentStatus: EmploymentStatus.Active);
-    }
-
-    private static void ApplySourceToWorker(
-        Worker worker,
-        DateTime now,
-        string? sourceAttendanceUserId,
-        string? sourceName,
-        string? sourceBadge,
-        int? sourceDepartmentId,
-        out bool changedInData,
-        out bool reactivated)
-    {
-        var normalizedAttendanceUserId = NormalizeString(sourceAttendanceUserId);
-        var normalizedName = NormalizeString(sourceName);
-        var normalizedBadge = NormalizeString(sourceBadge);
-        var validName = !string.IsNullOrWhiteSpace(normalizedName) && !normalizedName.All(char.IsDigit);
-
-        reactivated = !worker.IsActive || worker.EmploymentStatus != EmploymentStatus.Active;
-        var hasDataChanges = reactivated ||
-            (worker.AttendanceDepartmentId != sourceDepartmentId)
-            || (!string.IsNullOrWhiteSpace(normalizedBadge) && !string.Equals(worker.BadgeNumber, normalizedBadge, StringComparison.Ordinal))
-            || (validName && !string.Equals(worker.FullName, normalizedName, StringComparison.Ordinal));
-
-        if (reactivated)
+        try
         {
-            worker.Activate(now);
-        }
-        worker.ApplyAttendanceSync(now, normalizedAttendanceUserId, validName ? normalizedName : null, normalizedBadge, sourceDepartmentId);
-        changedInData = hasDataChanges;
-    }
-
-    private async Task<PhotoSyncOutcome> SynchronizePhotoReferenceAsync(
-        Worker worker,
-        string? attendanceUserId,
-        IReadOnlyDictionary<string, AttendanceWorkerPhotoRecord> validPhotosByAttendanceUserId,
-        DateTime now,
-        CancellationToken cancellationToken)
-    {
-        var normalizedAttendanceUserId = NormalizeString(attendanceUserId);
-        if (normalizedAttendanceUserId is not null &&
-            validPhotosByAttendanceUserId.TryGetValue(normalizedAttendanceUserId, out var sourcePhoto))
-        {
-            var store = await workerPhotoCache.StoreAsync(worker.Id, sourcePhoto.Photo, cancellationToken);
-            var managedReference = GetManagedPhotoReference(worker.Id, store.Version);
-            if (!string.Equals(worker.PhotoReference, managedReference, StringComparison.Ordinal)) worker.SetPhotoReference(managedReference, now);
-            if (store.Unchanged)
+            var sourceResult = await attendanceEmployeeReader.GetAllAsync(cancellationToken);
+            if (sourceResult.IsFailure)
             {
-                return new PhotoSyncOutcome(Unchanged: 1);
+                return Result<WorkerSourceSnapshot>.Failure(sourceResult.Error!);
             }
-            return new PhotoSyncOutcome(Synchronized: 1, Created: store.Created ? 1 : 0, Updated: store.Updated ? 1 : 0);
-        }
 
-        // Only clear planner-managed references. Imported/manual references remain untouched.
-        if (IsManagedPhotoReference(worker.PhotoReference, worker.Id))
+            var orderedRows = (sourceResult.Value ?? [])
+                .OrderBy(row => WorkerSyncPolicy.Normalize(row.AttendanceUserId), StringComparer.OrdinalIgnoreCase)
+                .ThenBy(row => WorkerSyncPolicy.Normalize(row.BadgeNumber), StringComparer.OrdinalIgnoreCase)
+                .ThenBy(row => WorkerSyncPolicy.Normalize(row.EmployeeCode), StringComparer.OrdinalIgnoreCase)
+                .ThenBy(row => WorkerSyncPolicy.Normalize(row.Name), StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+
+            return Result<WorkerSourceSnapshot>.Success(new WorkerSourceSnapshot(
+                orderedRows,
+                IsComplete: false,
+                AbsenceIsAuthoritative: false,
+                EmploymentStatusIsAuthoritative: false,
+                DepartmentIsAuthoritative: false,
+                ShiftIsAuthoritative: false));
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            worker.SetPhotoReference(null, now);
-            await workerPhotoCache.RemoveAsync(worker.Id, cancellationToken);
+            throw;
         }
-        return new PhotoSyncOutcome(Missing: 1);
+        catch
+        {
+            return Result<WorkerSourceSnapshot>.Failure(new Error(
+                "AttendanceSourceError",
+                "Unable to read worker data from attendance source."));
+        }
     }
 
-    private static string GetManagedPhotoReference(Guid workerId, string version) => $"/api/workers/{workerId:D}/photo?v={version}";
-
-    private static bool IsManagedPhotoReference(string? photoReference, Guid workerId) =>
-        !string.IsNullOrWhiteSpace(photoReference) &&
-        photoReference.StartsWith($"/api/workers/{workerId:D}/photo", StringComparison.OrdinalIgnoreCase);
-
-    private readonly record struct PhotoSyncOutcome(int Synchronized = 0, int Created = 0, int Updated = 0, int Unchanged = 0, int Missing = 0);
-
-    private static bool IsRepresentedByActiveSource(Worker worker, IEnumerable<AttendanceEmployeeRecord> sourceRows) =>
-        sourceRows.Any(source => IsSourceRowForWorker(source, worker));
-
-    private static bool IsSourceRowForWorker(AttendanceEmployeeRecord source, Worker worker)
+    private WorkerSyncPlan BuildPlan(WorkerSourceSnapshot snapshot, IReadOnlyCollection<Worker> localWorkers)
     {
-        var sourceAttendanceUserId = NormalizeString(source.AttendanceUserId);
-        var sourceBadge = NormalizeString(source.BadgeNumber);
-        var workerAttendanceUserId = NormalizeString(worker.AttendanceUserId);
-        var workerBadge = NormalizeString(worker.BadgeNumber);
-        var workerEmployeeCode = NormalizeString(worker.EmployeeCode);
+        var validation = snapshotValidator.Inspect(snapshot);
+        var attendanceUsers = BuildLookup(localWorkers, worker => worker.AttendanceUserId);
+        var badges = BuildLookup(localWorkers, worker => worker.BadgeNumber);
+        var employeeCodes = BuildLookup(localWorkers, worker => worker.EmployeeCode);
+        var matchedWorkerIds = new HashSet<Guid>();
+        var rows = new List<WorkerSyncPlanRow>();
 
-        return (!string.IsNullOrWhiteSpace(sourceAttendanceUserId) &&
-                string.Equals(sourceAttendanceUserId, workerAttendanceUserId, StringComparison.OrdinalIgnoreCase)) ||
-            (!string.IsNullOrWhiteSpace(sourceBadge) &&
-             (string.Equals(sourceBadge, workerBadge, StringComparison.OrdinalIgnoreCase) ||
-              string.Equals(sourceBadge, workerEmployeeCode, StringComparison.OrdinalIgnoreCase)));
+        var sourceIndex = 0;
+        foreach (var source in snapshot.Rows)
+        {
+            var sourceAttendanceUserId = WorkerSyncPolicy.Normalize(source.AttendanceUserId);
+            var sourceBadge = WorkerSyncPolicy.Normalize(source.BadgeNumber);
+            var sourceEmployeeCode = WorkerSyncPolicy.Normalize(source.EmployeeCode);
+            var sourceConflicts = new List<string>();
+
+            if (validation.InvalidSourceRowIndexes.Contains(sourceIndex))
+            {
+                rows.Add(new WorkerSyncPlanRow(
+                    source,
+                    null,
+                    CreatePreviewRow(
+                        WorkerSyncActions.UnsupportedSourceState,
+                        null,
+                        source,
+                        [],
+                        ["InvalidSourceIdentity"],
+                        "Null or invalid attendance, badge, or employee-code identity.")));
+                sourceIndex++;
+                continue;
+            }
+
+            if (sourceAttendanceUserId is not null && validation.DuplicateAttendanceUserIds.Contains(sourceAttendanceUserId))
+                sourceConflicts.Add("DuplicateSourceAttendanceUserId");
+            if (sourceBadge is not null && validation.DuplicateBadgeNumbers.Contains(sourceBadge))
+                sourceConflicts.Add("DuplicateSourceBadgeNumber");
+            if (sourceEmployeeCode is not null && validation.DuplicateEmployeeCodes.Contains(sourceEmployeeCode))
+                sourceConflicts.Add("DuplicateSourceEmployeeCode");
+
+            if (sourceConflicts.Count > 0)
+            {
+                rows.Add(new WorkerSyncPlanRow(
+                    source,
+                    null,
+                    CreatePreviewRow(
+                        WorkerSyncActions.IdentityConflict,
+                        null,
+                        source,
+                        workerSyncPolicy.ProtectedLocalFields,
+                        sourceConflicts,
+                        "Duplicate identities make this source row unsafe to match.")));
+                sourceIndex++;
+                continue;
+            }
+
+            var candidateWorkers = new Dictionary<Guid, Worker>();
+            AddCandidates(candidateWorkers, attendanceUsers, sourceAttendanceUserId);
+            AddCandidates(candidateWorkers, badges, sourceBadge);
+            AddCandidates(candidateWorkers, employeeCodes, sourceEmployeeCode);
+
+            if (candidateWorkers.Count > 1)
+            {
+                rows.Add(new WorkerSyncPlanRow(
+                    source,
+                    null,
+                    CreatePreviewRow(
+                        WorkerSyncActions.IdentityConflict,
+                        null,
+                        source,
+                        workerSyncPolicy.ProtectedLocalFields,
+                        ["SourceIdentityMatchesMultipleWorkers"],
+                        "The source identities resolve to more than one local worker.")));
+                sourceIndex++;
+                continue;
+            }
+
+            if (candidateWorkers.Count == 1)
+            {
+                var worker = candidateWorkers.Values.Single();
+                matchedWorkerIds.Add(worker.Id);
+                var decision = workerSyncPolicy.EvaluateExistingWorker(worker, source);
+                rows.Add(new WorkerSyncPlanRow(
+                    source,
+                    worker,
+                    CreatePreviewRow(
+                        decision.Action,
+                        worker,
+                        source,
+                        decision.ProtectedLocalFields,
+                        decision.IdentityConflicts,
+                        decision.Action == WorkerSyncActions.IdentityConflict
+                            ? "Identity differences require explicit reconciliation and are never applied automatically."
+                            : "Existing planner-owned worker data remains unchanged.")));
+                sourceIndex++;
+                continue;
+            }
+
+            var createResult = workerSyncPolicy.CreateNewWorker(source, DateTime.UnixEpoch);
+            rows.Add(new WorkerSyncPlanRow(
+                source,
+                null,
+                CreatePreviewRow(
+                    createResult.IsSuccess ? WorkerSyncActions.NewWorkerCandidate : WorkerSyncActions.UnsupportedSourceState,
+                    null,
+                    source,
+                    workerSyncPolicy.ProtectedLocalFields,
+                    createResult.IsSuccess ? [] : [createResult.Error!.Code],
+                    createResult.IsSuccess
+                        ? "Only a new worker may initialize its local name from the source."
+                        : createResult.Error!.Message)));
+            sourceIndex++;
+        }
+
+        foreach (var worker in localWorkers.Where(worker => !matchedWorkerIds.Contains(worker.Id)))
+        {
+            rows.Add(new WorkerSyncPlanRow(
+                null,
+                worker,
+                CreatePreviewRow(
+                    WorkerSyncActions.ExistingWorkerUnchanged,
+                    worker,
+                    null,
+                    workerSyncPolicy.ProtectedLocalFields,
+                    [],
+                    "Missing from CurrentEmployeesImport does not imply LeftEmployment.")));
+        }
+
+        return new WorkerSyncPlan(snapshot, validation, rows);
     }
 
-    private async Task RecordAuditAsync(
-        Guid actorUserId,
-        string? requestMeta,
-        WorkerInitialSyncResultDto result,
-        CancellationToken cancellationToken)
+    private WorkerActiveServiceSyncPreviewDto MapPreview(WorkerSyncPlan plan, IReadOnlyCollection<Worker> localWorkers)
     {
-        await auditEngine.RecordAsync(
-            actorUserId,
-            AuditActionType.WorkerInitialSync,
-            nameof(Worker),
-            nameof(Worker),
-            before: null,
-            after: result,
-            requestMeta: requestMeta,
-            cancellationToken: cancellationToken);
+        var existingUnchanged = plan.Rows.Count(row => row.Preview.Action == WorkerSyncActions.ExistingWorkerUnchanged);
+        var newCandidates = plan.Rows.Count(row => row.Preview.Action == WorkerSyncActions.NewWorkerCandidate);
+        var identityConflicts = plan.Rows.Count(row => row.Preview.Action == WorkerSyncActions.IdentityConflict);
+        var unsupported = plan.Rows.Count(row => row.Preview.Action == WorkerSyncActions.UnsupportedSourceState);
+
+        return new WorkerActiveServiceSyncPreviewDto
+        {
+            IsReadOnly = true,
+            CanApply = false,
+            CurrentLocalWorkers = localWorkers.Count,
+            ActiveOnServiceWorkersInZkTime = plan.Snapshot.Rows.Count(row => row.IsActive),
+            WorkersToRemainActive = existingUnchanged,
+            WorkersToReactivate = 0,
+            WorkersToCreate = newCandidates,
+            WorkersToMarkInactiveOrExcluded = 0,
+            WorkersAlreadyInactiveOrExcluded = localWorkers.Count(worker => !worker.IsActive),
+            WorkersSafelyRemovable = 0,
+            WarningCount = identityConflicts + unsupported,
+            IdentityConflictCount = identityConflicts,
+            UnsupportedSourceStateCount = unsupported,
+            SnapshotIssues = plan.Validation.Issues,
+            Rows = plan.Rows.Select(row => row.Preview).ToArray()
+        };
     }
+
+    private WorkerMasterSyncPreviewRowDto CreatePreviewRow(
+        string action,
+        Worker? worker,
+        AttendanceEmployeeRecord? source,
+        IReadOnlyCollection<string> protectedFields,
+        IReadOnlyCollection<string> conflicts,
+        string reason) =>
+        new(
+            action,
+            worker?.Id,
+            worker?.EmployeeCode,
+            worker?.FullName,
+            source?.AttendanceUserId,
+            source?.BadgeNumber,
+            source?.EmployeeCode,
+            source?.Name,
+            source?.EmploymentStatus ?? (source is null ? null : source.IsActive ? "ObservedPresentInCurrentEmployeesImport" : "ObservedAbsentFromCurrentEmployeesImport"),
+            source?.DepartmentId,
+            source?.Department,
+            source?.Shift,
+            protectedFields,
+            conflicts,
+            reason);
+
+    private static Dictionary<string, List<Worker>> BuildLookup(
+        IEnumerable<Worker> workers,
+        Func<Worker, string?> selector)
+    {
+        var lookup = new Dictionary<string, List<Worker>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var worker in workers)
+        {
+            var identity = WorkerSyncPolicy.Normalize(selector(worker));
+            if (identity is null) continue;
+            if (!lookup.TryGetValue(identity, out var matches))
+            {
+                matches = [];
+                lookup[identity] = matches;
+            }
+            matches.Add(worker);
+        }
+        return lookup;
+    }
+
+    private static void AddCandidates(
+        IDictionary<Guid, Worker> candidates,
+        IReadOnlyDictionary<string, List<Worker>> lookup,
+        string? identity)
+    {
+        if (identity is null || !lookup.TryGetValue(identity, out var matches)) return;
+        foreach (var worker in matches) candidates[worker.Id] = worker;
+    }
+
+    private sealed record WorkerSyncPlan(
+        WorkerSourceSnapshot Snapshot,
+        WorkerSnapshotValidation Validation,
+        IReadOnlyCollection<WorkerSyncPlanRow> Rows);
+
+    private sealed record WorkerSyncPlanRow(
+        AttendanceEmployeeRecord? Source,
+        Worker? Worker,
+        WorkerMasterSyncPreviewRowDto Preview);
 }
