@@ -1,11 +1,15 @@
-import { Component, OnInit } from '@angular/core';
-import { catchError, finalize, of } from 'rxjs';
+import { Component, OnDestroy, OnInit } from '@angular/core';
+import { catchError, finalize, of, Subject, switchMap, takeUntil } from 'rxjs';
+import { DashboardApiData, DashboardApiService, StageReadinessAlert } from '../../core/services/dashboard-api.service';
+import { PERMISSIONS } from '../../core/config/permission-identifiers';
+import { PermissionService } from '../../core/services/permission.service';
 import {
   AttendanceIndicator,
-  MockDataService
-} from '../../core/services/mock-data.service';
-import { DashboardApiData, DashboardApiService, StageReadinessAlert } from '../../core/services/dashboard-api.service';
-import { DashboardCard, FactoryMapLine, FactoryReadinessSummary, KpiTrend } from '../../core/services/mock-data.service';
+  DashboardCard,
+  FactoryMapLine,
+  FactoryReadinessSummary,
+  KpiTrend
+} from '../../shared/models/dashboard.model';
 import { FactoryStatus } from '../../shared/models/factory-status.model';
 
 @Component({
@@ -13,9 +17,9 @@ import { FactoryStatus } from '../../shared/models/factory-status.model';
   templateUrl: './dashboard-page.component.html',
   styleUrls: ['./dashboard-page.component.scss']
 })
-export class DashboardPageComponent implements OnInit {
+export class DashboardPageComponent implements OnInit, OnDestroy {
   isLoading = true;
-  showFallbackWarning = false;
+  hasLoadError = false;
   cards: DashboardCard[] = [];
   lineReadinessSummary: FactoryReadinessSummary = {
     overallReadiness: 0,
@@ -30,24 +34,61 @@ export class DashboardPageComponent implements OnInit {
   attendanceIndicators: AttendanceIndicator[] = [];
   previewLines: FactoryMapLine[] = [];
   criticalReadinessAlerts: StageReadinessAlert[] = [];
+  readinessState: DashboardApiData['readinessState'] = 'error';
+  attendanceState: DashboardApiData['attendanceState'] = 'not-authorized';
+  assignmentCoveragePercent = 0;
+  attendanceDataStatus = 'Unknown';
+
+  private readonly destroy$ = new Subject<void>();
 
   constructor(
-    private readonly dataService: MockDataService,
-    private readonly dashboardApiService: DashboardApiService
+    private readonly dashboardApiService: DashboardApiService,
+    private readonly permissionService: PermissionService
   ) {}
 
   ngOnInit(): void {
+    this.isLoading = true;
+    this.permissionService
+      .ensureHydrated()
+      .pipe(
+        catchError(() => of([])),
+        switchMap(() => this.dashboardApiService.loadDashboardData({
+          includeAttendance: this.permissionService.hasPermission(PERMISSIONS.attendance.view)
+        })),
+        catchError(() => {
+          this.hasLoadError = true;
+          return of(this.getEmptyDashboardData());
+        }),
+        takeUntil(this.destroy$),
+        finalize(() => {
+          this.isLoading = false;
+        })
+      )
+      .subscribe((data) => this.setDashboardData(data));
+  }
+
+  ngOnDestroy(): void {
+    this.destroy$.next();
+    this.destroy$.complete();
+  }
+
+  retry(): void {
     this.loadDashboardData();
   }
 
   private loadDashboardData(): void {
+    this.isLoading = true;
+    this.hasLoadError = false;
     this.dashboardApiService
-      .loadDashboardData()
+      .loadDashboardData({
+        includeAttendance: this.permissionService.hasPermission(PERMISSIONS.attendance.view)
+      })
       .pipe(
         catchError(() => {
-          this.showFallbackWarning = true;
-          return of(this.getMockDashboardData());
+          this.hasLoadError = true;
+          return of(this.getEmptyDashboardData());
         }),
+        takeUntil(this.destroy$),
         finalize(() => {
           this.isLoading = false;
         })
@@ -63,16 +104,36 @@ export class DashboardPageComponent implements OnInit {
     this.lineReadinessSummary = data.lineReadinessSummary;
     this.attendanceIndicators = data.attendanceIndicators;
     this.criticalReadinessAlerts = data.criticalReadinessAlerts;
+    this.readinessState = data.readinessState;
+    this.attendanceState = data.attendanceState;
+    this.assignmentCoveragePercent = data.assignmentCoveragePercent;
+    this.attendanceDataStatus = data.attendanceDataStatus;
+    this.hasLoadError = data.hasLoadError;
   }
 
-  private getMockDashboardData(): DashboardApiData {
-    const previewLines = this.dataService.getFactoryMapData();
+  private getEmptyDashboardData(): DashboardApiData {
+    const previewLines: FactoryMapLine[] = [];
     return {
-      cards: this.dataService.getDashboardCards(),
-      lineReadinessSummary: this.dataService.getFactoryReadinessSummary(previewLines),
-      attendanceIndicators: this.dataService.getAttendanceIndicators(),
+      cards: [],
+      lineReadinessSummary: {
+        overallReadiness: 0,
+        totalLines: 0,
+        healthyLines: 0,
+        warningLines: 0,
+        criticalLines: 0,
+        activeWorkers: 0,
+        totalWorkers: 0,
+        attendanceRate: 0
+      },
+      attendanceIndicators: [],
       previewLines,
-      criticalReadinessAlerts: this.dashboardApiService.extractCriticalReadinessAlerts(previewLines)
+      criticalReadinessAlerts: [],
+      assignmentCoveragePercent: 0,
+      attendanceDataStatus: 'Unknown',
+      readinessState: 'error',
+      attendanceState: 'not-authorized',
+      notificationsState: 'error',
+      hasLoadError: true
     };
   }
 
@@ -126,8 +187,46 @@ export class DashboardPageComponent implements OnInit {
     return 'red';
   }
 
-  get totalAttendanceDeficit(): number {
+  get totalOperationalDeficit(): number {
     return this.lineReadinessSummary.totalWorkers - this.lineReadinessSummary.activeWorkers;
+  }
+
+  get hasReadinessData(): boolean {
+    return this.readinessState === 'available'
+      && this.attendanceState === 'available'
+      && this.attendanceDataStatus === 'Complete';
+  }
+
+  get hasReadinessEndpointData(): boolean {
+    return this.readinessState === 'available';
+  }
+
+  get hasAttendanceData(): boolean {
+    return this.attendanceState === 'available';
+  }
+
+  get attendanceUnavailableByPermission(): boolean {
+    return this.attendanceState === 'not-authorized';
+  }
+
+  get readinessUnavailableMessage(): string {
+    if (this.attendanceUnavailableByPermission) {
+      return 'الجاهزية التشغيلية غير متاحة بصلاحياتك الحالية.';
+    }
+
+    if (this.attendanceDataStatus === 'Unavailable') {
+      return 'تحتاج مزامنة حضور اليوم قبل تأكيد الجاهزية التشغيلية.';
+    }
+
+    if (this.attendanceDataStatus === 'Incomplete') {
+      return 'بيانات الحضور لليوم غير مكتملة، لذلك لا يمكن تأكيد الجاهزية التشغيلية.';
+    }
+
+    if (this.attendanceDataStatus === 'NoAssignments') {
+      return 'لا يوجد تسكين كافٍ لتأكيد الجاهزية التشغيلية.';
+    }
+
+    return 'الجاهزية التشغيلية غير متاحة حالياً.';
   }
 
   get readinessToneStatus(): FactoryStatus {
@@ -151,10 +250,10 @@ export class DashboardPageComponent implements OnInit {
   }
 
   get shortageToneStatus(): FactoryStatus {
-    if (this.totalAttendanceDeficit <= 2) {
+    if (this.totalOperationalDeficit <= 2) {
       return 'ready';
     }
-    if (this.totalAttendanceDeficit <= 6) {
+    if (this.totalOperationalDeficit <= 6) {
       return 'warning';
     }
     return 'critical';

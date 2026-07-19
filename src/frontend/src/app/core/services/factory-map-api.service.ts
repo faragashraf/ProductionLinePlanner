@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { catchError, map, Observable, of, timeout } from 'rxjs';
+import { catchError, forkJoin, map, Observable, of, timeout } from 'rxjs';
 import { ApiResponse } from '../models/api-response.model';
 import { buildApiUrl } from '../config/api.config';
 import { deriveStatusFromReadiness } from '../../shared/models/factory-status.model';
@@ -17,6 +17,20 @@ type RawRecord = Record<string, unknown>;
 type FactoryMapFallbackReason = 'incomplete' | 'connection';
 
 const FACTORY_MAP_REQUEST_TIMEOUT_MS = 1500;
+
+export function createEmptyFactoryLayout(): FactoryLayout {
+  return {
+    id: 'factory-empty',
+    type: 'factory',
+    name: 'خريطة المصنع',
+    status: 'info',
+    readinessPercent: 0,
+    workersCurrent: 0,
+    workersRequired: 0,
+    description: 'لا توجد بيانات تشغيل متاحة من الخادم.',
+    lines: []
+  };
+}
 
 export interface FactoryMapApiData {
   layout: FactoryLayout;
@@ -39,17 +53,26 @@ export class FactoryMapApiService {
   constructor(private readonly http: HttpClient) {}
 
   loadFactoryMapData(): Observable<FactoryMapApiData> {
-    return this.getFactories().pipe(
+    return forkJoin({
+      factories: this.getEntityList('/api/factories?pageSize=200'),
+      productionLines: this.getEntityList('/api/production-lines?pageSize=200'),
+      mainStages: this.getEntityList('/api/main-stages?isActive=true&pageSize=200'),
+      subStages: this.getEntityList('/api/sub-stages?isActive=true&pageSize=200'),
+      factoryReadiness: this.getEntity('/api/readiness/factory'),
+      lineReadiness: this.getEntity('/api/readiness/production-lines')
+    }).pipe(
       timeout(FACTORY_MAP_REQUEST_TIMEOUT_MS),
-      map((factories) => {
+      map(({ factories, productionLines, mainStages, subStages, factoryReadiness, lineReadiness }) => {
         const selectedFactory = factories[0] ?? {};
         const mapped = this.mapFactoryLayout(
           factories,
-          this.getNestedProductionLines(selectedFactory),
-          [],
-          [],
-          this.getEmptyFactoryReadiness(),
-          []
+          productionLines.filter((line) =>
+            this.resolveString(line, ['factoryId', 'parentFactoryId']) === this.resolveString(selectedFactory, ['id', 'factoryId', '_id'])
+          ),
+          mainStages,
+          subStages,
+          this.parseFactoryReadiness(factoryReadiness),
+          this.parseEntityList(lineReadiness).map((item) => this.normalizeObject(item))
         );
         const hasBackendData = this.hasBackendData(factories);
         const hasUsableBackendData = this.hasUsableBackendData(mapped, hasBackendData);
@@ -68,22 +91,23 @@ export class FactoryMapApiService {
     );
   }
 
-  private getFactories(): Observable<RawRecord[]> {
+  private getEntityList(path: string): Observable<RawRecord[]> {
     return this.http
-      .get<ApiResponse<unknown>>(buildApiUrl('/api/factories'))
+      .get<ApiResponse<unknown>>(buildApiUrl(path))
       .pipe(
         map((response) => this.parseEntityList(this.extractPayload(response))),
         map((factories) => factories.map((item) => this.normalizeObject(item)))
       );
   }
 
-  private hasBackendData(factories: RawRecord[]): boolean {
-    return factories.length > 0;
+  private getEntity(path: string): Observable<RawRecord> {
+    return this.http
+      .get<ApiResponse<unknown>>(buildApiUrl(path))
+      .pipe(map((response) => this.normalizeObject(this.extractPayload(response))));
   }
 
-  private getNestedProductionLines(factory: RawRecord): RawRecord[] {
-    return this.toArray(this.pickFirst(factory, ['productionLines', 'lines', 'items']))
-      .map((line) => this.normalizeObject(line));
+  private hasBackendData(factories: RawRecord[]): boolean {
+    return factories.length > 0;
   }
 
   private createFallbackData(
@@ -131,7 +155,7 @@ export class FactoryMapApiService {
     const selectedFactory = factories.length > 0 ? factories[0] : {};
     const mainStageMap = this.groupByParentId(mainStages, ['lineId', 'productionLineId', 'parentLineId']);
     const subStageByMainMap = this.groupByParentId(subStages, ['mainStageId', 'parentMainStageId', 'parentId']);
-    const lineReadinessById = this.indexByKey(lineReadiness, ['lineId', 'productionLineId', 'id', '_id']);
+    const lineReadinessById = this.indexByKey(lineReadiness, ['scopeEntityId', 'lineId', 'productionLineId', 'id', '_id']);
 
     const mappedLines = this.buildProductionLines(
       productionLines,
@@ -157,11 +181,11 @@ export class FactoryMapApiService {
       status: deriveStatusFromReadiness(factoryReadinessPercent),
       readinessPercent: factoryReadinessPercent,
       workersCurrent: this.toNumber(
-        this.pickFirst(selectedFactory, ['workersCurrent', 'currentWorkers', 'activeWorkers', 'activeWorkersCount']),
+        this.pickFirst(selectedFactory, ['workersCurrent', 'currentWorkers', 'activeWorkers', 'activeWorkersCount', 'presentWorkers']),
         totalWorkersCurrent
       ),
       workersRequired: this.toNumber(
-        this.pickFirst(selectedFactory, ['workersRequired', 'requiredWorkers', 'expectedWorkers']),
+        this.pickFirst(selectedFactory, ['workersRequired', 'requiredWorkers', 'expectedWorkers', 'capacity']),
         totalWorkersRequired
       ),
       description: this.resolveString(
@@ -192,11 +216,11 @@ export class FactoryMapApiService {
       const stageWorkersCurrent = stages.reduce((sum, stage) => sum + (stage.workersCurrent ?? 0), 0);
       const stageWorkersRequired = stages.reduce((sum, stage) => sum + (stage.workersRequired ?? 0), 0);
       const workersCurrent = this.toNumber(
-        this.pickFirst(readinessRecord, ['workersCurrent', 'currentWorkers', 'activeWorkers']),
+        this.pickFirst(readinessRecord, ['workersCurrent', 'currentWorkers', 'activeWorkers', 'presentWorkers']),
         stageWorkersCurrent
       );
       const workersRequired = this.toNumber(
-        this.pickFirst(readinessRecord, ['workersRequired', 'requiredWorkers', 'expectedWorkers']),
+        this.pickFirst(readinessRecord, ['workersRequired', 'requiredWorkers', 'expectedWorkers', 'capacity']),
         stageWorkersRequired
       );
       const readinessPercent = this.toPercent(
@@ -243,17 +267,18 @@ export class FactoryMapApiService {
       const stageWorkersCurrent = stages.reduce((sum, stage) => sum + (stage.workersCurrent ?? 0), 0);
       const stageWorkersRequired = stages.reduce((sum, stage) => sum + (stage.workersRequired ?? 0), 0);
       const workersCurrent = this.toNumber(
-        this.pickFirst(lineRecord, ['workersCurrent', 'currentWorkers', 'activeWorkers']),
-        this.toNumber(this.pickFirst(readinessRecord, ['workersCurrent', 'currentWorkers', 'activeWorkers']), stageWorkersCurrent)
+        this.pickFirst(lineRecord, ['workersCurrent', 'currentWorkers', 'activeWorkers', 'presentWorkers']),
+        this.toNumber(this.pickFirst(readinessRecord, ['workersCurrent', 'currentWorkers', 'activeWorkers', 'presentWorkers']), stageWorkersCurrent)
       );
       const workersRequired = this.toNumber(
-        this.pickFirst(lineRecord, ['workersRequired', 'requiredWorkers', 'expectedWorkers']),
-        this.toNumber(this.pickFirst(readinessRecord, ['workersRequired', 'requiredWorkers', 'expectedWorkers']), stageWorkersRequired)
+        this.pickFirst(lineRecord, ['workersRequired', 'requiredWorkers', 'expectedWorkers', 'capacity']),
+        this.toNumber(this.pickFirst(readinessRecord, ['workersRequired', 'requiredWorkers', 'expectedWorkers', 'capacity']), stageWorkersRequired)
       );
       const readinessPercent = this.toPercent(
         this.pickFirst(lineRecord, ['readinessPercent', 'readiness', 'lineReadinessPercent']),
         workersCurrent,
-        workersRequired
+        workersRequired,
+        this.toNumber(this.pickFirst(readinessRecord, ['readinessPercent', 'readiness', 'lineReadinessPercent']))
       );
       const statusText = this.resolveString(
         lineRecord,
@@ -307,14 +332,14 @@ export class FactoryMapApiService {
         { current: 0, required: 0 }
       );
       const workersCurrent = this.toNumber(
-        this.pickFirst(stageRecord, ['workersCurrent', 'currentWorkers', 'activeWorkers']),
+        this.pickFirst(stageRecord, ['workersCurrent', 'currentWorkers', 'activeWorkers', 'presentWorkers']),
         workersFromSubStages.current
       );
       const workersRequired = this.toNumber(
-        this.pickFirst(stageRecord, ['workersRequired', 'requiredWorkers', 'expectedWorkers']),
+        this.pickFirst(stageRecord, ['workersRequired', 'requiredWorkers', 'expectedWorkers', 'capacity']),
         workersFromSubStages.required
       );
-      const lineFallbackCurrent = this.toNumber(this.pickFirst(lineReadinessRecord, ['workersCurrent', 'currentWorkers']));
+      const lineFallbackCurrent = this.toNumber(this.pickFirst(lineReadinessRecord, ['workersCurrent', 'currentWorkers', 'presentWorkers']));
       const lineFallbackRequired = this.toNumber(this.pickFirst(lineReadinessRecord, ['workersRequired', 'requiredWorkers']));
       const readinessPercent = this.toPercent(
         this.pickFirst(stageRecord, ['readinessPercent', 'readiness']),
@@ -345,11 +370,11 @@ export class FactoryMapApiService {
     const subStageName = this.resolveString(subStageRecord, ['name', 'stageName', 'title'], 'مرحلة فرعية');
     const workers = this.parseWorkers(subStageRecord).workers;
     const workersCurrent = this.toNumber(
-      this.pickFirst(subStageRecord, ['workersCurrent', 'currentWorkers']),
+      this.pickFirst(subStageRecord, ['workersCurrent', 'currentWorkers', 'presentWorkers']),
       workers.length
     );
     const workersRequired = this.toNumber(
-      this.pickFirst(subStageRecord, ['workersRequired', 'requiredWorkers', 'expectedWorkers']),
+      this.pickFirst(subStageRecord, ['workersRequired', 'requiredWorkers', 'expectedWorkers', 'capacity']),
       workersCurrent
     );
     const readinessPercent = this.toPercent(
@@ -401,9 +426,9 @@ export class FactoryMapApiService {
   private parseFactoryReadiness(raw: unknown): FactoryReadinessSummary {
     const source = this.normalizeObject(raw);
     return {
-      overallReadiness: this.toNumber(this.pickFirst(source, ['overallReadiness', 'readiness', 'overallReadyPercent'])),
-      workersCurrent: this.toNumber(this.pickFirst(source, ['workersCurrent', 'currentWorkers', 'activeWorkers'])),
-      workersRequired: this.toNumber(this.pickFirst(source, ['workersRequired', 'requiredWorkers', 'expectedWorkers'])),
+      overallReadiness: this.toNumber(this.pickFirst(source, ['readinessPercent', 'overallReadiness', 'readiness', 'overallReadyPercent'])),
+      workersCurrent: this.toNumber(this.pickFirst(source, ['workersCurrent', 'currentWorkers', 'activeWorkers', 'presentWorkers'])),
+      workersRequired: this.toNumber(this.pickFirst(source, ['workersRequired', 'requiredWorkers', 'expectedWorkers', 'capacity'])),
       totalLines: this.toNumber(this.pickFirst(source, ['totalLines', 'linesCount', 'lineCount']))
     };
   }
@@ -503,10 +528,14 @@ export class FactoryMapApiService {
     if (percent > 0) {
       return this.clampPercent(percent);
     }
+    const fallback = this.toNumber(fallbackPercent);
+    if (fallback > 0) {
+      return this.clampPercent(fallback);
+    }
     if (requiredWorkers > 0) {
       return this.toPercentFromWorkers(currentWorkers, requiredWorkers);
     }
-    return this.clampPercent(this.toNumber(fallbackPercent));
+    return 0;
   }
 
   private toPercentFromWorkers(currentWorkers: number, requiredWorkers: number): number {
@@ -519,17 +548,7 @@ export class FactoryMapApiService {
   }
 
   private getEmptyFactoryLayout(): FactoryLayout {
-    return {
-      id: 'factory-empty',
-      type: 'factory',
-      name: 'مصنع الطموح',
-      status: 'critical',
-      readinessPercent: 0,
-      workersCurrent: 0,
-      workersRequired: 0,
-      description: 'لا توجد بيانات تشغيل متاحة من الخادم.',
-      lines: []
-    };
+    return createEmptyFactoryLayout();
   }
 
   private toNumber(value: unknown, fallback = 0): number {

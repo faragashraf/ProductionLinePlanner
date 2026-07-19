@@ -41,7 +41,11 @@ export const APP_ROUTES: Routes = [
         path: 'factory-map',
         component: FactoryMapPageComponent,
         canActivate: [PermissionCanActivateGuard],
-        data: { title: 'خريطة المصنع', breadcrumb: 'خريطة المصنع', permission: PERMISSIONS.factoryStructure.view }
+        data: {
+          title: 'خريطة المصنع',
+          breadcrumb: 'خريطة المصنع',
+          requireAll: [PERMISSIONS.factoryStructure.view, PERMISSIONS.stages.view]
+        }
       },
       {
         path: 'production-lines',

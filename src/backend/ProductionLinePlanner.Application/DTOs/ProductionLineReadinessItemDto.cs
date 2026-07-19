@@ -14,6 +14,7 @@ public sealed class ProductionLineReadinessItemDto
     public int AbsentWorkers { get; init; }
     public int UnassignedWorkers { get; init; }
     public decimal ReadinessPercent { get; init; }
+    public decimal AssignmentCoveragePercent { get; init; }
+    public string AttendanceDataStatus { get; init; } = "Unknown";
     public ReadinessStatus Status { get; init; }
 }
-

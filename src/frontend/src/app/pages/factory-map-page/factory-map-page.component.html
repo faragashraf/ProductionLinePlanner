@@ -36,6 +36,9 @@
     *ngIf="showFallbackWarning && !isLoading"
   >
     {{ fallbackWarningMessage }}
+    <button type="button" class="p-button p-button-sm p-button-text" (click)="retry()" *ngIf="!isBackendDataIncomplete">
+      إعادة المحاولة
+    </button>
   </p>
 
   <div *ngIf="!isLoading">
@@ -101,9 +104,9 @@
           </plp-product-metadata-row>
         </div>
 
-        <div class="factory-map-summary__readiness" aria-label="جاهزية المصنع">
+        <div class="factory-map-summary__readiness" aria-label="الجاهزية التشغيلية للمصنع">
           <strong>{{ layout.readinessPercent ?? 0 }}%</strong>
-          <span>جاهزية المصنع</span>
+          <span>الجاهزية التشغيلية للمصنع</span>
           <plp-completion-bar
             [value]="layout.readinessPercent ?? 0"
             [status]="layout.status ?? 'info'"
@@ -130,7 +133,7 @@
             <plp-completion-bar
               [value]="line.readinessPercent ?? 0"
               [status]="line.status ?? 'info'"
-              label="جاهزية"
+              label="جاهزية تشغيلية"
             ></plp-completion-bar>
           </div>
 
@@ -179,5 +182,14 @@
       (back)="onStageBack($event)"
       (subStageSelected)="onSubStageSelected($event)"
     ></plp-stage-renderer>
+
+    <p class="plp-inline-state plp-inline-state--loading" *ngIf="currentZoom === 'worker' && isWorkerLoading">
+      <i class="pi pi-spin pi-spinner" aria-hidden="true"></i>
+      جارٍ تحميل العاملين…
+    </p>
+
+    <p class="plp-inline-state plp-inline-state--warning" *ngIf="currentZoom === 'worker' && workerLoadError && !isWorkerLoading">
+      تعذر تحميل العاملين لهذه المرحلة. افتح المرحلة مرة أخرى لإعادة المحاولة.
+    </p>
   </div>
 </section>

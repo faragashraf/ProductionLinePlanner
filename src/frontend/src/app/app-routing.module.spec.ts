@@ -70,4 +70,15 @@ describe('IAM routing', () => {
     expect(workers?.loadChildren).toBeDefined();
     expect(workers?.component).toBeUndefined();
   });
+
+  it('requires both factory-structure.view and stages.view for Factory Map', () => {
+    const shell = APP_ROUTES.find((route) => route.path === '');
+    const factoryMap = shell?.children?.find((route) => route.path === 'factory-map');
+
+    expect(factoryMap?.canActivate).toContain(PermissionCanActivateGuard);
+    expect(factoryMap?.data?.['requireAll']).toEqual([
+      PERMISSIONS.factoryStructure.view,
+      PERMISSIONS.stages.view
+    ]);
+  });
 });

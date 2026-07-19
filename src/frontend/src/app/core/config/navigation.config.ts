@@ -23,7 +23,15 @@ export const APP_NAVIGATION_ITEMS: AppNavigationItem[] = [
     group: 'workspace',
     requireAny: [...MANUFACTURING_WORKSPACE_VIEW_PERMISSIONS]
   },
-  { id: 'factory-map', label: 'خريطة المصنع', route: '/factory-map', icon: 'pi-map', order: 20, group: 'workspace', permission: PERMISSIONS.factoryStructure.view },
+  {
+    id: 'factory-map',
+    label: 'خريطة المصنع',
+    route: '/factory-map',
+    icon: 'pi-map',
+    order: 20,
+    group: 'workspace',
+    requireAll: [PERMISSIONS.factoryStructure.view, PERMISSIONS.stages.view]
+  },
   { id: 'production-lines', label: 'خطوط الإنتاج', route: '/production-lines', icon: 'pi-sitemap', order: 30, group: 'workspace', permission: PERMISSIONS.factoryStructure.view },
   { id: 'stages', label: 'المراحل', route: '/stages', icon: 'pi-list', order: 40, group: 'workspace', permission: PERMISSIONS.stages.view },
   { id: 'workers', label: 'العاملون', route: '/workers', icon: 'pi-users', order: 50, group: 'workspace', permission: PERMISSIONS.workers.view },

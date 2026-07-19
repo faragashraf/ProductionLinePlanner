@@ -13,11 +13,11 @@
       <plp-status-badge [status]="line.status ?? 'info'" [label]="line.statusText" [compact]="true"></plp-status-badge>
     </header>
     <plp-product-metadata-row class="plp-line-renderer__summary-meta" [label]="'بيانات خط ' + line.name">
-      <plp-product-metadata-item label="الجاهزية" [value]="(line.readinessPercent ?? 0) + '%'"></plp-product-metadata-item>
+      <plp-product-metadata-item label="الجاهزية التشغيلية" [value]="(line.readinessPercent ?? 0) + '%'"></plp-product-metadata-item>
       <plp-product-metadata-item label="المراحل" [value]="line.stages.length"></plp-product-metadata-item>
       <plp-product-metadata-item label="المرحلة النشطة" [value]="line.activeStageName || 'غير محدد'"></plp-product-metadata-item>
     </plp-product-metadata-row>
-    <plp-completion-bar [value]="line.readinessPercent ?? 0" [status]="line.status ?? 'info'" label="جاهزية الخط"></plp-completion-bar>
+    <plp-completion-bar [value]="line.readinessPercent ?? 0" [status]="line.status ?? 'info'" label="الجاهزية التشغيلية للخط"></plp-completion-bar>
   </article>
 
   <plp-responsive-grid class="plp-line-renderer__stages-grid" [minItemWidth]="240" [gap]="'var(--plp-spacing-2)'">

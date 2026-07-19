@@ -83,6 +83,8 @@ public sealed class ReadinessEngine : IReadinessEngine
             AbsentWorkers = counts.AbsentWorkers,
             UnassignedWorkers = counts.UnassignedWorkers,
             ReadinessPercent = counts.ReadinessPercent,
+            AssignmentCoveragePercent = counts.AssignmentCoveragePercent,
+            AttendanceDataStatus = counts.AttendanceDataStatus,
             Status = StageReadinessSnapshot.ReadinessFromPercent(counts.ReadinessPercent),
             CalculatedAtUtc = asOf
         });
@@ -159,6 +161,8 @@ public sealed class ReadinessEngine : IReadinessEngine
                     AbsentWorkers = counts.AbsentWorkers,
                     UnassignedWorkers = counts.UnassignedWorkers,
                     ReadinessPercent = counts.ReadinessPercent,
+                    AssignmentCoveragePercent = counts.AssignmentCoveragePercent,
+                    AttendanceDataStatus = counts.AttendanceDataStatus,
                     Status = StageReadinessSnapshot.ReadinessFromPercent(counts.ReadinessPercent)
                 };
             })
@@ -171,6 +175,8 @@ public sealed class ReadinessEngine : IReadinessEngine
         var absentWorkers = lineReadiness.Sum(x => x.AbsentWorkers);
         var unassignedWorkers = lineReadiness.Sum(x => x.UnassignedWorkers);
         var readinessPercent = StageReadinessSnapshot.CalculateReadinessPercent(requiredWorkers, presentWorkers, lateWorkers, absentWorkers, unassignedWorkers);
+        var assignmentCoveragePercent = CalculateAssignmentCoveragePercent(requiredWorkers, assignedWorkers);
+        var attendanceDataStatus = AggregateAttendanceDataStatus(lineReadiness.Select(x => x.AttendanceDataStatus));
 
         return Result<ProductionLinesReadinessDto>.Success(new ProductionLinesReadinessDto
         {
@@ -182,6 +188,8 @@ public sealed class ReadinessEngine : IReadinessEngine
             AbsentWorkers = absentWorkers,
             UnassignedWorkers = unassignedWorkers,
             ReadinessPercent = readinessPercent,
+            AssignmentCoveragePercent = assignmentCoveragePercent,
+            AttendanceDataStatus = attendanceDataStatus,
             Status = StageReadinessSnapshot.ReadinessFromPercent(readinessPercent),
             CalculatedAtUtc = asOf,
             Items = lineReadiness.ToArray()
@@ -251,6 +259,8 @@ public sealed class ReadinessEngine : IReadinessEngine
             AbsentWorkers = counts.AbsentWorkers,
             UnassignedWorkers = counts.UnassignedWorkers,
             ReadinessPercent = counts.ReadinessPercent,
+            AssignmentCoveragePercent = counts.AssignmentCoveragePercent,
+            AttendanceDataStatus = counts.AttendanceDataStatus,
             Status = StageReadinessSnapshot.ReadinessFromPercent(counts.ReadinessPercent),
             CalculatedAtUtc = asOf
         });
@@ -267,7 +277,9 @@ public sealed class ReadinessEngine : IReadinessEngine
         var absent = 0;
         var unassignedFromAttendance = 0;
 
-        var relevantWorkers = workerIds ?? attendanceByWorker.Keys.ToArray();
+        var relevantWorkers = (workerIds ?? attendanceByWorker.Keys.ToArray())
+            .Distinct()
+            .ToArray();
 
         foreach (var workerId in relevantWorkers)
         {
@@ -296,8 +308,8 @@ public sealed class ReadinessEngine : IReadinessEngine
         }
 
         var unassignedWorkers = Math.Max(0, requiredWorkers - assignedWorkers) + unassignedFromAttendance;
-        var readyCount = attendanceByWorker.Count == 0 ? assignedWorkers : present;
-        var readinessPercent = StageReadinessSnapshot.CalculateReadinessPercent(requiredWorkers, readyCount, late, absent, unassignedWorkers);
+        var readinessPercent = StageReadinessSnapshot.CalculateReadinessPercent(requiredWorkers, present, late, absent, unassignedWorkers);
+        var attendanceDataStatus = DetermineAttendanceDataStatus(requiredWorkers, assignedWorkers, relevantWorkers, attendanceByWorker);
 
         return new ReadinessCountResult(
             requiredWorkers,
@@ -306,7 +318,50 @@ public sealed class ReadinessEngine : IReadinessEngine
             late,
             absent,
             unassignedWorkers,
-            readinessPercent);
+            readinessPercent,
+            CalculateAssignmentCoveragePercent(requiredWorkers, assignedWorkers),
+            attendanceDataStatus);
+    }
+
+    private static decimal CalculateAssignmentCoveragePercent(int requiredWorkers, int assignedWorkers)
+    {
+        if (requiredWorkers <= 0)
+            return 100m;
+
+        return Math.Clamp((decimal)assignedWorkers / requiredWorkers * 100m, 0m, 100m);
+    }
+
+    private static string DetermineAttendanceDataStatus(
+        int requiredWorkers,
+        int assignedWorkers,
+        IReadOnlyCollection<Guid> relevantWorkers,
+        IReadOnlyDictionary<Guid, AttendanceStatusRecord> attendanceByWorker)
+    {
+        if (requiredWorkers <= 0)
+            return "NotRequired";
+
+        if (assignedWorkers <= 0 || relevantWorkers.Count == 0)
+            return "NoAssignments";
+
+        var attendanceRecordCount = relevantWorkers.Count(attendanceByWorker.ContainsKey);
+        if (attendanceRecordCount == 0)
+            return "Unavailable";
+
+        return attendanceRecordCount == relevantWorkers.Count ? "Complete" : "Incomplete";
+    }
+
+    private static string AggregateAttendanceDataStatus(IEnumerable<string> statuses)
+    {
+        var values = statuses.Distinct(StringComparer.Ordinal).ToArray();
+        if (values.Length == 0 || values.All(x => x == "NotRequired"))
+            return "NotRequired";
+        if (values.All(x => x == "NoAssignments"))
+            return "NoAssignments";
+        if (values.All(x => x == "Complete"))
+            return "Complete";
+        if (values.All(x => x == "Unavailable"))
+            return "Unavailable";
+        return "Incomplete";
     }
 
     private sealed record ReadinessCountResult(
@@ -316,5 +371,7 @@ public sealed class ReadinessEngine : IReadinessEngine
         int LateWorkers,
         int AbsentWorkers,
         int UnassignedWorkers,
-        decimal ReadinessPercent);
+        decimal ReadinessPercent,
+        decimal AssignmentCoveragePercent,
+        string AttendanceDataStatus);
 }

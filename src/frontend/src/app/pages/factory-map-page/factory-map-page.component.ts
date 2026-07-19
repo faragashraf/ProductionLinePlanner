@@ -1,13 +1,13 @@
-import { ChangeDetectionStrategy, ChangeDetectorRef, Component, OnInit } from '@angular/core';
+import { ChangeDetectionStrategy, ChangeDetectorRef, Component, OnDestroy, OnInit } from '@angular/core';
 import {
   FactoryLayout,
   MainStageLayout,
   ProductionLineLayout,
   SubStageLayout
 } from '../../shared/models/factory-visualization.model';
-import { FactoryMapApiData, FactoryMapApiService } from '../../core/services/factory-map-api.service';
-import { MockDataService } from '../../core/services/mock-data.service';
-import { catchError, finalize, of } from 'rxjs';
+import { createEmptyFactoryLayout, FactoryMapApiService } from '../../core/services/factory-map-api.service';
+import { AssignmentsApiService } from '../../core/services/assignments-api.service';
+import { catchError, finalize, of, Subject, takeUntil } from 'rxjs';
 
 type FactoryZoomLevel = 'factory' | 'line' | 'stage' | 'worker';
 
@@ -17,29 +17,40 @@ type FactoryZoomLevel = 'factory' | 'line' | 'stage' | 'worker';
   styleUrls: ['./factory-map-page.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush
 })
-export class FactoryMapPageComponent implements OnInit {
+export class FactoryMapPageComponent implements OnInit, OnDestroy {
   isLoading = true;
   showFallbackWarning = false;
   isBackendDataIncomplete = false;
   fallbackWarningMessage: string | null = null;
-  layout: FactoryLayout;
+  layout: FactoryLayout = createEmptyFactoryLayout();
   currentZoom: FactoryZoomLevel = 'factory';
+  isWorkerLoading = false;
+  workerLoadError = false;
   private selectedLineId: string | null = null;
   private selectedMainStageId: string | null = null;
   private selectedSubStageId: string | null = null;
 
-  private readonly backendFailureWarning = 'لا يمكن الاتصال بالخادم حالياً، لذلك يتم عرض البيانات التجريبية.';
-  private readonly backendIncompleteWarning = 'لا توجد بيانات مكتملة لخريطة المصنع حالياً، لذلك يتم عرض بيانات تجريبية.';
+  private readonly destroy$ = new Subject<void>();
+  private readonly backendFailureWarning = 'لا يمكن الاتصال بالخادم حالياً. حاول إعادة تحميل خريطة المصنع.';
+  private readonly backendIncompleteWarning = 'لا توجد بنية مصنع مكتملة متاحة من الخادم حالياً.';
 
   constructor(
-    private readonly dataService: MockDataService,
     private readonly factoryMapApiService: FactoryMapApiService,
+    private readonly assignmentsApiService: AssignmentsApiService,
     private readonly changeDetectorRef: ChangeDetectorRef
-  ) {
-    this.layout = this.dataService.getFactoryLayout();
-  }
+  ) {}
 
   ngOnInit(): void {
+    this.loadFactoryMapData();
+  }
+
+  ngOnDestroy(): void {
+    this.destroy$.next();
+    this.destroy$.complete();
+  }
+
+  retry(): void {
+    this.showFactory();
     this.loadFactoryMapData();
   }
 
@@ -48,7 +59,13 @@ export class FactoryMapPageComponent implements OnInit {
     this.factoryMapApiService
       .loadFactoryMapData()
       .pipe(
-        catchError(() => of(this.getConnectionFallbackData())),
+        catchError(() => of({
+          layout: createEmptyFactoryLayout(),
+          hasBackendData: false,
+          hasUsableBackendData: false,
+          fallbackReason: 'connection' as const
+        })),
+        takeUntil(this.destroy$),
         finalize(() => {
           this.isLoading = false;
           this.changeDetectorRef.markForCheck();
@@ -56,7 +73,7 @@ export class FactoryMapPageComponent implements OnInit {
       )
       .subscribe((data) => {
         if (!data.hasBackendData || !data.hasUsableBackendData) {
-          this.layout = this.dataService.getFactoryLayout();
+          this.layout = data.layout;
           this.showFallbackWarning = true;
           this.isBackendDataIncomplete = data.fallbackReason !== 'connection';
           this.fallbackWarningMessage = data.fallbackReason === 'connection'
@@ -70,15 +87,6 @@ export class FactoryMapPageComponent implements OnInit {
         this.isBackendDataIncomplete = false;
         this.fallbackWarningMessage = null;
       });
-  }
-
-  private getConnectionFallbackData(): FactoryMapApiData {
-    return {
-      layout: this.dataService.getFactoryLayout(),
-      hasBackendData: false,
-      hasUsableBackendData: false,
-      fallbackReason: 'connection'
-    };
   }
 
   get selectedLine(): ProductionLineLayout | undefined {
@@ -128,9 +136,57 @@ export class FactoryMapPageComponent implements OnInit {
 
     if (this.selectedSubStage) {
       this.currentZoom = 'worker';
+      this.loadSubStageWorkers(this.selectedSubStage);
     } else {
       this.currentZoom = 'stage';
     }
+  }
+
+  private loadSubStageWorkers(subStage: SubStageLayout): void {
+    this.isWorkerLoading = true;
+    this.workerLoadError = false;
+    this.assignmentsApiService
+      .getFactoryStructureSubStageWorkers(subStage.id)
+      .pipe(
+        takeUntil(this.destroy$),
+        finalize(() => {
+          this.isWorkerLoading = false;
+          this.changeDetectorRef.markForCheck();
+        })
+      )
+      .subscribe({
+        next: (data) => {
+          this.replaceSubStageWorkers(
+            subStage.id,
+            data.workers.map((worker) => ({
+              id: worker.id,
+              fullName: worker.fullName,
+              code: worker.code,
+              status: 'info',
+              assignmentType: worker.assignmentType || 'غير محدد',
+              lastActivity: 'التعيين الحالي'
+            }))
+          );
+        },
+        error: () => {
+          this.workerLoadError = true;
+        }
+      });
+  }
+
+  private replaceSubStageWorkers(subStageId: string, workers: SubStageLayout['workers']): void {
+    this.layout = {
+      ...this.layout,
+      lines: this.layout.lines.map((line) => ({
+        ...line,
+        stages: line.stages.map((stage) => ({
+          ...stage,
+          subStages: stage.subStages.map((subStage) => subStage.id === subStageId
+            ? { ...subStage, workers, workersCurrent: workers.length }
+            : subStage)
+        }))
+      }))
+    };
   }
 
   showFactory(): void {

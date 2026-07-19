@@ -71,4 +71,16 @@ describe('navigation filtering', () => {
     expect(items).toContain('assignments');
     expect(items).not.toContain('models');
   });
+
+  it('hides Factory Map unless both its hierarchy permissions are granted', () => {
+    const onlyFactoryStructure = service([PERMISSIONS.factoryStructure.view])
+      .filterNavigation(APP_NAVIGATION_ITEMS)
+      .map((item) => item.id);
+    const completeAccess = service([PERMISSIONS.factoryStructure.view, PERMISSIONS.stages.view])
+      .filterNavigation(APP_NAVIGATION_ITEMS)
+      .map((item) => item.id);
+
+    expect(onlyFactoryStructure).not.toContain('factory-map');
+    expect(completeAccess).toContain('factory-map');
+  });
 });

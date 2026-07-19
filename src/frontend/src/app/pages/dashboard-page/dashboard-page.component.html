@@ -9,23 +9,28 @@
     جارٍ تحميل مؤشرات لوحة التحكم…
   </p>
 
-  <p class="plp-inline-state plp-inline-state--warning" *ngIf="showFallbackWarning && !isLoading">
-    لا يمكن الاتصال بالخادم حالياً، لذلك يتم عرض البيانات التجريبية.
+  <p class="plp-inline-state plp-inline-state--warning" *ngIf="hasLoadError && !isLoading">
+    تعذر تحميل بعض مؤشرات لوحة التحكم من الخادم.
+    <button type="button" class="p-button p-button-sm p-button-text" (click)="retry()">إعادة المحاولة</button>
   </p>
 
   <div *ngIf="!isLoading">
     <section class="dashboard-page__hero" aria-label="ملخص تشغيل المصنع">
       <div class="hero-copy">
         <span class="hero-eyebrow">ملخص الوردية الآن</span>
-        <strong>جاهزية المصنع {{ lineReadinessSummary.overallReadiness }}%</strong>
-        <span>الحضور الفعلي {{ lineReadinessSummary.attendanceRate }}% مع عجز {{ totalAttendanceDeficit }} عامل يحتاج متابعة.</span>
+        <strong *ngIf="hasReadinessData; else readinessUnavailable">الجاهزية التشغيلية للمصنع {{ lineReadinessSummary.overallReadiness }}%</strong>
+        <ng-template #readinessUnavailable><strong>{{ readinessUnavailableMessage }}</strong></ng-template>
+        <span *ngIf="hasReadinessEndpointData">اكتمال التسكين {{ assignmentCoveragePercent }}%.</span>
+        <span *ngIf="hasAttendanceData">الحضور الفعلي {{ lineReadinessSummary.attendanceRate }}% مع عجز تشغيلي {{ totalOperationalDeficit }} عامل يحتاج متابعة.</span>
+        <span *ngIf="attendanceUnavailableByPermission">بيانات الحضور غير متاحة بصلاحياتك الحالية.</span>
+        <span *ngIf="attendanceState === 'error'">تعذر تحميل بيانات الحضور حالياً.</span>
       </div>
 
       <section class="demo-callout-strip" aria-label="شريط حالة التشغيل">
-        <plp-status-badge [status]="attendanceToneStatus" [label]="'حضور فعلي: ' + lineReadinessSummary.attendanceRate + '%'"></plp-status-badge>
-        <plp-status-badge [status]="shortageToneStatus" [label]="'عجز عمالة: ' + totalAttendanceDeficit + ' عامل'"></plp-status-badge>
+        <plp-status-badge *ngIf="hasAttendanceData" [status]="attendanceToneStatus" [label]="'حضور فعلي: ' + lineReadinessSummary.attendanceRate + '%'"></plp-status-badge>
+        <plp-status-badge *ngIf="hasReadinessData" [status]="shortageToneStatus" [label]="'عجز تشغيلي: ' + totalOperationalDeficit + ' عامل'"></plp-status-badge>
         <plp-status-badge [status]="recommendationAvailabilityTone" [label]="'توصية متاحة'"></plp-status-badge>
-        <plp-status-badge [status]="readinessShortageToneStatus" [label]="'جاهزية الخط: ' + lineReadinessSummary.overallReadiness + '%'"></plp-status-badge>
+        <plp-status-badge *ngIf="hasReadinessData" [status]="readinessShortageToneStatus" [label]="'جاهزية الخط التشغيلية: ' + lineReadinessSummary.overallReadiness + '%'"></plp-status-badge>
       </section>
 
       <section class="journey-actions" aria-label="روابط سريعة للعرض التجريبي">
@@ -37,13 +42,14 @@
       </section>
     </section>
 
-    <section class="readiness-summary">
+    <section class="readiness-summary" *ngIf="hasReadinessData">
       <p-card styleClass="summary-card">
-        <div class="summary-label">جاهزية المصنع</div>
+        <div class="summary-label">الجاهزية التشغيلية للمصنع</div>
         <div class="summary-value" [ngClass]="getReadinessTone()">{{ lineReadinessSummary.overallReadiness }}%</div>
         <div class="summary-rows">
           <span>إجمالي الخطوط: {{ lineReadinessSummary.totalLines }}</span>
-          <span>العاملون الحاضرون: {{ lineReadinessSummary.activeWorkers }} / {{ lineReadinessSummary.totalWorkers }}</span>
+          <span>العاملون الجاهزون: {{ lineReadinessSummary.activeWorkers }} / {{ lineReadinessSummary.totalWorkers }}</span>
+          <span>اكتمال التسكين: {{ assignmentCoveragePercent }}%</span>
         </div>
       </p-card>
 
@@ -56,7 +62,7 @@
         </div>
       </p-card>
 
-      <p-card styleClass="summary-card">
+      <p-card *ngIf="hasAttendanceData" styleClass="summary-card">
         <div class="summary-label">مؤشر الحضور</div>
         <div class="summary-value" [ngClass]="getAttendanceTone()">{{ lineReadinessSummary.attendanceRate }}%</div>
         <div class="summary-note">نسبة الحضور العامة على كل المراحل.</div>
@@ -78,7 +84,7 @@
             </span>
             <plp-status-badge
               [status]="lineReadinessSummary.overallReadiness > 70 ? 'warning' : 'critical'"
-              [label]="'عجز ' + alert.shortageWorkers"
+              [label]="'عجز تشغيلي ' + alert.shortageWorkers"
               [compact]="true"
             ></plp-status-badge>
           </li>
@@ -106,7 +112,7 @@
       </p-card>
     </div>
 
-    <section class="attendance-row">
+    <section class="attendance-row" *ngIf="hasAttendanceData">
       <p-card class="attendance-card">
         <div class="attendance-title">
           <span>مؤشرات حضور مختصرة</span>
