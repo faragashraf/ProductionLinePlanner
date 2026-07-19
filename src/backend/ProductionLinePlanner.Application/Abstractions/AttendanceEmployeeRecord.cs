@@ -5,4 +5,8 @@ public sealed record AttendanceEmployeeRecord(
     int? DepartmentId,
     string? BadgeNumber,
     string? Name,
-    bool IsActive);
+    bool IsActive,
+    string? EmployeeCode = null,
+    string? EmploymentStatus = null,
+    string? Department = null,
+    string? Shift = null);

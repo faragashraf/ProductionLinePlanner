@@ -65,20 +65,6 @@ public class Worker
     public List<WorkerDefaultAssignment> DefaultAssignmentHistory { get; } = [];
     public List<WorkerTemporaryAssignment> TemporaryAssignments { get; } = [];
 
-    public void UpdateContactInfo(string? zkEmployeeCode, string? phone, DateTime? atUtc = null)
-    {
-        AttendanceUserId = string.IsNullOrWhiteSpace(zkEmployeeCode) ? null : zkEmployeeCode.Trim();
-        Phone = string.IsNullOrWhiteSpace(phone) ? null : phone.Trim();
-        UpdatedAtUtc = atUtc ?? DateTime.UtcNow;
-    }
-
-    public void SetAttendanceDepartmentId(int? attendanceDepartmentId, DateTime? atUtc = null)
-    {
-        AttendanceDepartmentId = attendanceDepartmentId;
-        UpdatedAtUtc = atUtc ?? DateTime.UtcNow;
-        LastExternalSyncAt = UpdatedAtUtc;
-    }
-
     public void SetPhone(string? phone, DateTime? atUtc = null)
     {
         Phone = string.IsNullOrWhiteSpace(phone) ? null : phone.Trim();
@@ -143,68 +129,4 @@ public class Worker
         UpdatedAtUtc = atUtc ?? DateTime.UtcNow;
     }
 
-    public void MarkExternalSync(DateTime syncedAt, int? attendanceDepartmentId = null)
-    {
-        LastExternalSyncAt = syncedAt;
-        if (attendanceDepartmentId.HasValue)
-        {
-            AttendanceDepartmentId = attendanceDepartmentId;
-        }
-        UpdatedAtUtc = syncedAt;
-    }
-
-    public bool ApplyAttendanceSync(
-        DateTime syncedAtUtc,
-        string? attendanceUserId = null,
-        string? fullName = null,
-        string? badgeNumber = null,
-        int? attendanceDepartmentId = null)
-    {
-        var isUpdated = false;
-
-        var normalizedAttendanceUserId = NormalizeOptionalString(attendanceUserId);
-        var normalizedFullName = NormalizeOptionalString(fullName);
-        var normalizedBadgeNumber = NormalizeOptionalString(badgeNumber);
-
-        if (!string.IsNullOrWhiteSpace(normalizedAttendanceUserId) &&
-            !string.Equals(AttendanceUserId, normalizedAttendanceUserId, StringComparison.Ordinal))
-        {
-            AttendanceUserId = normalizedAttendanceUserId;
-            isUpdated = true;
-        }
-
-        if (!string.IsNullOrWhiteSpace(normalizedFullName) &&
-            !string.Equals(FullName, normalizedFullName, StringComparison.Ordinal))
-        {
-            FullName = normalizedFullName;
-            isUpdated = true;
-        }
-
-        if (!string.IsNullOrWhiteSpace(normalizedBadgeNumber) &&
-            !string.Equals(BadgeNumber, normalizedBadgeNumber, StringComparison.Ordinal))
-        {
-            BadgeNumber = normalizedBadgeNumber;
-            isUpdated = true;
-        }
-
-        if (attendanceDepartmentId.HasValue && AttendanceDepartmentId != attendanceDepartmentId.Value)
-        {
-            AttendanceDepartmentId = attendanceDepartmentId;
-            isUpdated = true;
-        }
-
-        UpdatedAtUtc = syncedAtUtc;
-        LastExternalSyncAt = syncedAtUtc;
-        return isUpdated;
-    }
-
-    private static string? NormalizeOptionalString(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return null;
-        }
-
-        return value.Trim();
-    }
 }

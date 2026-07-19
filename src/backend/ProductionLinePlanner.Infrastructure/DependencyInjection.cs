@@ -75,20 +75,19 @@ public static class DependencyInjection
         services.AddScoped<IReadinessEngine, ReadinessEngine>();
         services.AddScoped<INotificationEngine, NotificationEngine>();
         services.AddScoped<IAuditEngine, AuditEngine>();
-        services.AddScoped<IWorkerInitialSyncService, WorkerInitialSyncService>();
         services.AddScoped<IPermissionService, PermissionService>();
         services.AddScoped<IIamDelegationPolicy, IamDelegationPolicy>();
         services.AddScoped<IIamAuthorizationService, IamAuthorizationService>();
         services.AddScoped<IUserManagementService, UserManagementService>();
         services.AddScoped<IRolePermissionSeedService, PermissionSeedService>();
 
-        services.AddScoped<IAttendanceEmployeeReader, AttendanceDirectoryService>();
-        services.AddScoped<IAttendanceWorkerPhotoReader, AttendanceDirectoryService>();
+        services.AddScoped<AttendanceDirectoryService>();
+        services.AddScoped<IAttendanceEmployeeReader>(provider => provider.GetRequiredService<AttendanceDirectoryService>());
+        services.AddScoped<IAttendanceWorkerPhotoReader>(provider => provider.GetRequiredService<AttendanceDirectoryService>());
         services.AddSingleton<IWorkerPhotoCache, LocalWorkerPhotoCache>();
-        services.AddScoped<IAttendanceEmployeeWriter, AttendanceDirectoryService>();
-        services.AddScoped<IAttendanceDepartmentReader, AttendanceDirectoryService>();
-        services.AddScoped<IAttendanceDepartmentWriter, AttendanceDirectoryService>();
+        services.AddScoped<IAttendanceDepartmentReader>(provider => provider.GetRequiredService<AttendanceDirectoryService>());
 
+        services.AddWorkerSyncFoundation();
         services.AddScoped<IEmployeeMasterDataService, EmployeeMasterDataService>();
         services.AddScoped<IDepartmentAdministrationService, DepartmentAdministrationService>();
         services.AddScoped<IProductionStageCatalogService, ProductionStageCatalogService>();
@@ -104,6 +103,14 @@ public static class DependencyInjection
         services.AddScoped<IPilotMasterDataResetService, PilotMasterDataResetService>();
         services.AddScoped<IRealDataIntakeService, RealDataIntakeService>();
 
+        return services;
+    }
+
+    private static IServiceCollection AddWorkerSyncFoundation(this IServiceCollection services)
+    {
+        services.AddScoped<IWorkerSyncPolicy, WorkerSyncPolicy>();
+        services.AddScoped<IAuthoritativeWorkerSnapshotValidator, AuthoritativeWorkerSnapshotValidator>();
+        services.AddScoped<IWorkerInitialSyncService, WorkerInitialSyncService>();
         return services;
     }
 

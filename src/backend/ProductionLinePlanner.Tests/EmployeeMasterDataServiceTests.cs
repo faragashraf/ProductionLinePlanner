@@ -1,6 +1,4 @@
 using Microsoft.EntityFrameworkCore;
-using ProductionLinePlanner.Application.Abstractions;
-using ProductionLinePlanner.Application.Common;
 using ProductionLinePlanner.Application.Engines;
 using ProductionLinePlanner.Application.Requests;
 using ProductionLinePlanner.Application.Services;
@@ -56,8 +54,8 @@ public sealed class EmployeeMasterDataServiceTests
         Assert.Equal(2, allWorkers.Value!.Length);
         Assert.Single(activeWorkers.Value!);
         Assert.Single(formerWorkers.Value!);
-        Assert.Equal("Former Worker", formerWorkers.Value.Single().FullName);
-        Assert.Equal(EmploymentStatus.LeftEmployment.ToString(), formerWorkers.Value.Single().EmploymentStatus);
+        Assert.Equal("Former Worker", formerWorkers.Value!.Single().FullName);
+        Assert.Equal(EmploymentStatus.LeftEmployment.ToString(), formerWorkers.Value!.Single().EmploymentStatus);
     }
 
     [Fact]
@@ -72,7 +70,7 @@ public sealed class EmployeeMasterDataServiceTests
 
         Assert.True(result.IsSuccess);
         var managed = result.Value!.Single(worker => worker.Id == managedWorker.Id);
-        var legacy = result.Value.Single(worker => worker.Id == legacyWorker.Id);
+        var legacy = result.Value!.Single(worker => worker.Id == legacyWorker.Id);
         Assert.True(managed.HasPhoto);
         Assert.Equal("photo-version", managed.PhotoVersion);
         Assert.Equal($"/api/workers/{managedWorker.Id:D}/photo?v=photo-version", managed.PhotoReference);
@@ -115,14 +113,13 @@ public sealed class EmployeeMasterDataServiceTests
     }
 
     [Fact]
-    public async Task UpdateMasterIdentityAsync_updates_name_and_department_when_attendance_sync_succeeds()
+    public async Task UpdateMasterIdentityAsync_updates_planner_owned_name_and_phone_locally()
     {
         await using var fixture = await EmployeeMasterDataFixture.CreateAsync();
 
         var request = new UpdateWorkerRequest
         {
             FullName = "Ahmed Nasser",
-            AttendanceDepartmentId = 20,
             Phone = "0110001111"
         };
 
@@ -131,11 +128,8 @@ public sealed class EmployeeMasterDataServiceTests
         Assert.True(result.IsSuccess);
         var updated = await fixture.DbContext.Workers.AsNoTracking().SingleAsync(x => x.Id == fixture.Workers[0].Id);
         Assert.Equal("Ahmed Nasser", updated.FullName);
-        Assert.Equal(20, updated.AttendanceDepartmentId);
+        Assert.Equal(1, updated.AttendanceDepartmentId);
         Assert.Equal("0110001111", updated.Phone);
-        Assert.Equal(fixture.Workers[0].AttendanceUserId, fixture.AttendanceEmployeeWriter.FullNameUpdates.Single().AttendanceUserId);
-        Assert.Equal("Ahmed Nasser", fixture.AttendanceEmployeeWriter.FullNameUpdates.Single().FullName);
-        Assert.Equal(20, fixture.AttendanceEmployeeWriter.DepartmentUpdates.Single().DepartmentId);
         Assert.Single(fixture.AuditEngine.Calls);
     }
 
@@ -177,24 +171,21 @@ public sealed class EmployeeMasterDataServiceTests
     }
 
     [Fact]
-    public async Task UpdateMasterIdentityAsync_returns_failure_when_attendance_sync_fails_and_projection_is_not_saved()
+    public async Task UpdateMasterIdentityAsync_rejects_source_observed_department_without_local_write()
     {
-        await using var fixture = await EmployeeMasterDataFixture.CreateAsync(
-            updateWorkerFullNameAsync: (_, _, _) => Task.FromResult(Result.Failure(new Error("ValidationError", "ATT sync failed."))));
+        await using var fixture = await EmployeeMasterDataFixture.CreateAsync();
 
         var before = await fixture.DbContext.Workers.AsNoTracking().SingleAsync(x => x.Id == fixture.Workers[0].Id);
 
         var result = await fixture.Service.UpdateMasterIdentityAsync(fixture.Workers[0].Id, new UpdateWorkerRequest
         {
-            FullName = "Should Not Persist",
             AttendanceDepartmentId = 20
         }, fixture.ActorUserId);
 
         Assert.True(result.IsFailure);
-        Assert.Equal("ValidationError", result.Error!.Code);
+        Assert.Equal("SourceObservedOnly", result.Error!.Code);
 
         var after = await fixture.DbContext.Workers.AsNoTracking().SingleAsync(x => x.Id == fixture.Workers[0].Id);
-        Assert.Equal(before.FullName, after.FullName);
         Assert.Equal(before.AttendanceDepartmentId, after.AttendanceDepartmentId);
         Assert.Empty(fixture.AuditEngine.Calls);
     }
@@ -255,63 +246,30 @@ public sealed class EmployeeMasterDataServiceTests
     {
         private EmployeeMasterDataFixture(
             AppDbContext dbContext,
-            FakeAttendanceEmployeeWriter attendanceEmployeeWriter,
-            FakeAttendanceDepartmentReader attendanceDepartmentReader,
-            FakeAttendanceEmployeeReader attendanceEmployeeReader,
             RecordingAuditEngine auditEngine,
             IReadOnlyList<Worker> workers,
             Guid actorUserId)
         {
             DbContext = dbContext;
-            AttendanceEmployeeWriter = attendanceEmployeeWriter;
-            AttendanceDepartmentReader = attendanceDepartmentReader;
-            AttendanceEmployeeReader = attendanceEmployeeReader;
             AuditEngine = auditEngine;
             Workers = workers;
             ActorUserId = actorUserId;
-            Service = new EmployeeMasterDataService(dbContext, attendanceEmployeeWriter, attendanceEmployeeReader, attendanceDepartmentReader, auditEngine);
+            Service = new EmployeeMasterDataService(dbContext, auditEngine);
         }
 
         public AppDbContext DbContext { get; }
-        public FakeAttendanceEmployeeWriter AttendanceEmployeeWriter { get; }
-        public FakeAttendanceEmployeeReader AttendanceEmployeeReader { get; }
-        public FakeAttendanceDepartmentReader AttendanceDepartmentReader { get; }
         public RecordingAuditEngine AuditEngine { get; }
         public IReadOnlyList<Worker> Workers { get; }
         public Guid ActorUserId { get; }
         public IEmployeeMasterDataService Service { get; }
 
-        public static async Task<EmployeeMasterDataFixture> CreateAsync(
-            IEnumerable<Worker>? workers = null,
-            Func<string, string, CancellationToken, Task<Result>>? updateWorkerFullNameAsync = null,
-            Func<string, int, CancellationToken, Task<Result>>? updateWorkerDepartmentAsync = null)
+        public static async Task<EmployeeMasterDataFixture> CreateAsync(IEnumerable<Worker>? workers = null)
         {
             var options = new DbContextOptionsBuilder<AppDbContext>()
                 .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
                 .Options;
 
             var dbContext = new AppDbContext(options);
-
-            var attendanceEmployeeData = new Dictionary<string, AttendanceEmployeeRecord?>
-            {
-                ["111"] = new AttendanceEmployeeRecord("111", 1, "1001", "Omar", true)
-            };
-
-            var attendanceDepartments = new Dictionary<int, AttendanceDepartmentRecord>
-            {
-                [1] = new AttendanceDepartmentRecord(1, "Operations"),
-                [2] = new AttendanceDepartmentRecord(2, "Quality"),
-                [10] = new AttendanceDepartmentRecord(10, "Packing"),
-                [11] = new AttendanceDepartmentRecord(11, "QA"),
-                [20] = new AttendanceDepartmentRecord(20, "Finished Goods")
-            };
-
-            var attendanceEmployeeWriter = new FakeAttendanceEmployeeWriter(
-                attendanceEmployeeData,
-                updateWorkerFullNameAsync,
-                updateWorkerDepartmentAsync);
-            var attendanceEmployeeReader = new FakeAttendanceEmployeeReader(attendanceEmployeeData);
-            var attendanceDepartmentReader = new FakeAttendanceDepartmentReader(attendanceDepartments);
 
             var workerList = workers?.ToList() ?? [
                 new Worker(
@@ -332,9 +290,6 @@ public sealed class EmployeeMasterDataServiceTests
 
             return new EmployeeMasterDataFixture(
                 dbContext,
-                attendanceEmployeeWriter,
-                attendanceDepartmentReader,
-                attendanceEmployeeReader,
                 auditEngine,
                 workerList,
                 actorUserId);

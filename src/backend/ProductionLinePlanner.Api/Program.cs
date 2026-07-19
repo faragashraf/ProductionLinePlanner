@@ -1898,33 +1898,7 @@ app.MapGet("/api/workers/{workerId:guid}/photo", async (
     .WithTags("Workers")
     .WithName("GetWorkerPhoto");
 
-workersApi.MapPost("/sync", async (
-    IWorkerInitialSyncService syncService,
-    ICurrentUserService currentUserService,
-    HttpContext httpContext,
-    CancellationToken cancellationToken) =>
-{
-    var actorUserId = currentUserService.UserId;
-    if (actorUserId is null)
-    {
-        return ApiResponse.Failure("Unauthorized", "User context is required.");
-    }
-
-    var requestMeta = $"{httpContext.Request.Method} {httpContext.Request.Path}";
-    var result = await syncService.SyncWorkersAsync(actorUserId.Value, requestMeta, cancellationToken);
-    if (result.IsFailure)
-    {
-        return ApiResponse.Failure(
-            result.Error?.Code ?? "WorkerInitialSyncFailed",
-            result.Error?.Message ?? "Unable to run worker initial sync.",
-            MapFailureStatusCode(result.Error?.Code));
-    }
-
-    return Results.Ok(ApiResponse.Success(result.Value!));
-})
-    .RequirePermission("workers.manage")
-    .WithTags("Workers")
-    .WithName("SyncWorkersInitial");
+workersApi.MapWorkerSyncEndpoints();
 
 workersApi.MapGet("/{workerId:guid}", async (
     Guid workerId,
@@ -3633,7 +3607,7 @@ static int MapFailureStatusCode(string? code)
         "ValidationError" => StatusCodes.Status400BadRequest,
         "NotFound" => StatusCodes.Status404NotFound,
         "Unauthorized" or "InvalidToken" or "InvalidCredentials" => StatusCodes.Status401Unauthorized,
-        "Conflict" => StatusCodes.Status409Conflict,
+        "Conflict" or "IdentityConflict" or "SourceObservedOnly" or "ExternalSourceReadOnly" => StatusCodes.Status409Conflict,
         "AttendanceSyncInProgress" => StatusCodes.Status409Conflict,
         "BootstrapNotAllowed" => StatusCodes.Status409Conflict,
         "Forbidden" => StatusCodes.Status403Forbidden,

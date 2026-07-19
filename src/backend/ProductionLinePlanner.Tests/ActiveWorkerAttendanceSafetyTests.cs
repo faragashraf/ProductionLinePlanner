@@ -23,7 +23,15 @@ public sealed class ActiveWorkerAttendanceSafetyTests
         var attendanceDb = new AttendanceDbContext(
             new DbContextOptionsBuilder<AttendanceDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString("N")).Options,
             sourceOptions);
-        var activeWorker = new Worker(Guid.NewGuid(), "001", "Active", attendanceUserId: "1001");
+        var activeWorker = new Worker(
+            Guid.NewGuid(),
+            "001",
+            "Planner-owned Arabic Name",
+            attendanceUserId: "1001",
+            badgeNumber: "001",
+            phone: "0100000000",
+            attendanceDepartmentId: 7,
+            photoReference: "local-photo.png");
         var formerWorker = new Worker(Guid.NewGuid(), "002", "Former", attendanceUserId: "1002", isActive: false, employmentStatus: EmploymentStatus.LeftEmployment);
         appDb.Workers.AddRange(activeWorker, formerWorker);
         await appDb.SaveChangesAsync();
@@ -36,6 +44,12 @@ public sealed class ActiveWorkerAttendanceSafetyTests
         var records = await appDb.AttendanceRecords.AsNoTracking().ToArrayAsync();
         Assert.Single(records);
         Assert.Equal(activeWorker.Id, records[0].WorkerId);
+        var persistedWorker = await appDb.Workers.AsNoTracking().SingleAsync(worker => worker.Id == activeWorker.Id);
+        Assert.Equal("Planner-owned Arabic Name", persistedWorker.FullName);
+        Assert.Equal("001", persistedWorker.BadgeNumber);
+        Assert.Equal("0100000000", persistedWorker.Phone);
+        Assert.Equal(7, persistedWorker.AttendanceDepartmentId);
+        Assert.Equal("local-photo.png", persistedWorker.PhotoReference);
         await appDb.DisposeAsync();
         await attendanceDb.DisposeAsync();
     }
