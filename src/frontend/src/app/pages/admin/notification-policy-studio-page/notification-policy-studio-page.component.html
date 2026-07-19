@@ -1,0 +1,94 @@
+<section class="policy-studio" dir="rtl">
+  <plp-product-page-header title="استوديو سياسات الإشعارات" subtitle="تحكم في الأحداث الثابتة وقنوات العرض والمستلمين دون إنشاء أحداث جديدة."></plp-product-page-header>
+
+  <plp-product-loading-state *ngIf="isLoading" [lines]="8" label="جارٍ تحميل سياسات الإشعارات"></plp-product-loading-state>
+
+  <plp-product-error-state *ngIf="isLoadError && !isLoading" title="تعذر إكمال العملية" [description]="errorMessage || 'حدث خطأ غير متوقع.'" (retry)="loadStudio()"></plp-product-error-state>
+
+  <plp-product-empty-state *ngIf="!isLoading && !isLoadError && policies.length === 0" title="لا توجد أحداث متاحة" description="يجب أن تأتي الأحداث من كتالوج المنتج الثابت."></plp-product-empty-state>
+
+  <div *ngIf="!isLoading && !isLoadError && policies.length > 0" class="policy-studio__layout">
+    <aside class="policy-studio__catalog" aria-label="كتالوج الأحداث">
+      <div class="policy-studio__filters">
+        <label>بحث
+          <input pInputText [(ngModel)]="searchTerm" placeholder="اسم الحدث أو المفتاح" aria-label="بحث في الأحداث">
+        </label>
+        <label>الحالة
+          <select [(ngModel)]="enabledFilter" aria-label="تصفية الحالة">
+            <option value="all">الكل</option>
+            <option value="enabled">مفعّل</option>
+            <option value="disabled">معطّل</option>
+          </select>
+        </label>
+        <label>الشدة
+          <select [(ngModel)]="severityFilter" aria-label="تصفية الشدة">
+            <option value="all">كل الشدات</option>
+            <option *ngFor="let severity of severities" [value]="severity">{{ severityLabel(severity) }}</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="policy-studio__table-wrap">
+        <table>
+          <thead><tr><th>الحدث</th><th>الحالة</th><th>الشدة</th></tr></thead>
+          <tbody>
+            <tr *ngFor="let policy of filteredPolicies; trackBy: trackPolicy" [class.is-selected]="policy.eventKey === selectedEventKey" (click)="selectPolicy(policy)">
+              <td data-label="الحدث"><strong>{{ policy.displayName }}</strong><small dir="ltr">{{ policy.eventKey }}</small></td>
+              <td data-label="الحالة"><p-tag [value]="policy.isEnabled ? 'مفعّل' : 'معطّل'" [severity]="policy.isEnabled ? 'success' : 'secondary'"></p-tag></td>
+              <td data-label="الشدة"><span class="severity" [attr.data-severity]="policy.severity">{{ severityLabel(policy.severity) }}</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </aside>
+
+    <article *ngIf="draft" class="policy-studio__editor" aria-live="polite">
+      <header><div><h2>{{ draft.displayName }}</h2><code dir="ltr">{{ draft.eventKey }}</code></div><p-tag [value]="draft.isEnabled ? 'مفعّل' : 'معطّل'" [severity]="draft.isEnabled ? 'success' : 'secondary'"></p-tag></header>
+
+      <div class="policy-studio__switches">
+        <label><input type="checkbox" [(ngModel)]="draft.isEnabled" (ngModelChange)="markDirty()"> تفعيل الحدث</label>
+        <label><input type="checkbox" [(ngModel)]="draft.isToastEnabled" (ngModelChange)="markDirty()"> تنبيه فوري</label>
+        <label><input type="checkbox" [(ngModel)]="draft.isInboxEnabled" (ngModelChange)="markDirty()"> صندوق الوارد</label>
+        <label><input type="checkbox" [(ngModel)]="draft.isSoundEnabled" (ngModelChange)="markDirty()"> صوت</label>
+        <label>الشدة
+          <select [(ngModel)]="draft.severity" (ngModelChange)="markDirty()">
+            <option *ngFor="let severity of severities" [value]="severity">{{ severityLabel(severity) }}</option>
+          </select>
+        </label>
+        <label *ngIf="draft.isSoundEnabled">الصوت
+          <input pInputText [value]="'default'" readonly aria-label="الصوت الافتراضي">
+        </label>
+      </div>
+
+      <section class="policy-studio__templates">
+        <div class="policy-studio__tokens"><strong>Tokens المسموحة</strong><button *ngFor="let token of draft.allowedTokens" pButton type="button" class="p-button-text p-button-sm" [label]="'{' + token + '}'" (click)="insertToken(token, 'message')"></button></div>
+        <label>العنوان العربي
+          <input pInputText [(ngModel)]="draft.titleTemplateAr" (ngModelChange)="markDirty()" maxlength="200">
+        </label>
+        <label>الرسالة العربية
+          <textarea pInputTextarea rows="4" [(ngModel)]="draft.messageTemplateAr" (ngModelChange)="markDirty()" maxlength="2000"></textarea>
+        </label>
+        <div class="policy-studio__preview"><strong>معاينة مباشرة</strong><h3>{{ preview(draft.titleTemplateAr) }}</h3><p>{{ preview(draft.messageTemplateAr) }}</p></div>
+      </section>
+
+      <section class="policy-studio__rules">
+        <div class="policy-studio__section-heading"><div><h3>قواعد المستلمين</h3><p>تُقيَّم القواعد الفعالة فقط، مع دعم استبعاد منفذ الحدث.</p></div><button pButton type="button" label="إضافة قاعدة" icon="pi pi-plus" class="p-button-outlined" (click)="addRule()"></button></div>
+        <div *ngFor="let rule of draft.recipientRules; let index = index; trackBy: trackRule" class="policy-studio__rule">
+          <select [(ngModel)]="rule.recipientKind" (ngModelChange)="onRecipientKindChanged(rule)" [attr.aria-label]="'نوع قاعدة المستلم ' + (index + 1)">
+            <option *ngFor="let kind of recipientKinds" [value]="kind">{{ recipientKindLabel(kind) }}</option>
+          </select>
+          <select *ngIf="rule.recipientKind === 'User'" [(ngModel)]="rule.userId" (ngModelChange)="markDirty()"><option [ngValue]="null">{{ userLabel(null) }}</option><option *ngFor="let user of recipientOptions.users" [value]="user.id">{{ user.fullName }} — {{ user.email }}</option></select>
+          <select *ngIf="rule.recipientKind === 'Role'" [(ngModel)]="rule.roleId" (ngModelChange)="markDirty()"><option [ngValue]="null">اختر دورًا</option><option *ngFor="let role of recipientOptions.roles" [value]="role.id">{{ role.name }}</option></select>
+          <select *ngIf="rule.recipientKind === 'Permission'" [(ngModel)]="rule.permissionKey" (ngModelChange)="markDirty()"><option [ngValue]="null">اختر صلاحية</option><option *ngFor="let permission of recipientOptions.permissions" [value]="permission.name">{{ permission.descriptionAr || permission.name }} ({{ permission.name }})</option></select>
+          <select *ngIf="rule.recipientKind === 'CapabilityGroup'" [(ngModel)]="rule.capabilityKey" (ngModelChange)="markDirty()"><option [ngValue]="null">اختر مجموعة</option><option *ngFor="let capability of recipientOptions.capabilityGroups" [value]="capability">{{ capability }}</option></select>
+          <span *ngIf="rule.recipientKind === 'Creator'">منشئ الحدث الحالي</span><span *ngIf="rule.recipientKind === 'ExcludeActor'">استبعاد المستخدم الذي نفذ الحدث</span>
+          <label class="rule-active"><input type="checkbox" [(ngModel)]="rule.isActive" (ngModelChange)="markDirty()"> فعالة</label>
+          <button pButton type="button" icon="pi pi-trash" class="p-button-text p-button-danger" [attr.aria-label]="'حذف القاعدة ' + (index + 1)" (click)="removeRule(index)"></button>
+        </div>
+      </section>
+
+      <footer><span *ngIf="isDirty" class="policy-studio__dirty">لديك تعديلات غير محفوظة</span><button pButton type="button" label="حفظ السياسة" icon="pi pi-save" [loading]="isSaving" (click)="save()"></button></footer>
+      <p *ngIf="hasError" class="policy-studio__operation-error" role="alert">{{ errorMessage }}</p>
+    </article>
+  </div>
+</section>

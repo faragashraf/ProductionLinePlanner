@@ -1,4 +1,5 @@
 using ProductionLinePlanner.Domain.Enums;
+using ProductionLinePlanner.Domain.Notifications;
 
 namespace ProductionLinePlanner.Application.DTOs;
 
@@ -14,6 +15,8 @@ public sealed class NotificationDto
     public Guid? RelatedWorkerId { get; init; }
     public string? RelatedEntityType { get; init; }
     public Guid? RelatedEntityId { get; init; }
+    public string? EventKey { get; init; }
+    public NotificationSeverity Severity { get; init; } = NotificationSeverity.Information;
     public DateTime CreatedAtUtc { get; init; }
     public DateTime? ReadAtUtc { get; init; }
 }

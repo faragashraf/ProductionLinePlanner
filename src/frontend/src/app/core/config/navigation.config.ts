@@ -37,5 +37,6 @@ export const APP_NAVIGATION_ITEMS: AppNavigationItem[] = [
   { id: 'notifications', label: 'الإشعارات', route: '/notifications', icon: 'pi-bell', order: 90, group: 'workspace' },
   { id: 'admin-users', label: 'إدارة المستخدمين', route: '/admin/users', icon: 'pi-id-card', order: 100, group: 'administration', permission: PERMISSIONS.users.view },
   { id: 'admin-roles', label: 'إدارة الأدوار', route: '/admin/roles', icon: 'pi-lock', order: 110, group: 'administration', permission: PERMISSIONS.roles.view },
-  { id: 'admin-permissions', label: 'كتالوج الصلاحيات', route: '/admin/permissions', icon: 'pi-key', order: 120, group: 'administration', permission: PERMISSIONS.permissions.assign }
+  { id: 'admin-permissions', label: 'كتالوج الصلاحيات', route: '/admin/permissions', icon: 'pi-key', order: 120, group: 'administration', permission: PERMISSIONS.permissions.assign },
+  { id: 'admin-notification-policies', label: 'سياسات الإشعارات', route: '/admin/notification-policies', icon: 'pi-bell', order: 130, group: 'administration', permission: PERMISSIONS.notifications.policiesManage }
 ];

@@ -5,6 +5,7 @@ using ProductionLinePlanner.Application.Realtime;
 using ProductionLinePlanner.Domain.Authorization;
 using ProductionLinePlanner.Domain.Entities;
 using ProductionLinePlanner.Domain.Enums;
+using ProductionLinePlanner.Domain.Notifications;
 using ProductionLinePlanner.Infrastructure.Data;
 
 namespace ProductionLinePlanner.Infrastructure.Realtime;
@@ -186,5 +187,7 @@ public sealed class NotificationPublisher(
         notification.RelatedEntityType,
         notification.RelatedEntityId,
         notification.CreatedAtUtc,
-        notification.ReadAtUtc);
+        notification.ReadAtUtc,
+        notification.EventKey,
+        notification.Severity ?? NotificationSeverity.Information);
 }

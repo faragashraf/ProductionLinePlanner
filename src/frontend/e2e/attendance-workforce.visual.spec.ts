@@ -20,7 +20,9 @@ async function prepareWorkforce(page: Page, requests: { workforce: number; detai
   }, { userPermissions: permissions });
   await page.routeWebSocket('**/hubs/notifications**', socket => {
     socket.onMessage(message => {
-      if (typeof message === 'string' && message.includes('"protocol"')) socket.send('{}\u001e');
+      if (typeof message === 'string' && message.includes('"protocol"')) {
+        socket.send('{}\u001e');
+      }
     });
   });
   await page.route('**/hubs/notifications/negotiate**', route => route.fulfill({

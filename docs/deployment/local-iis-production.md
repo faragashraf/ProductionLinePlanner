@@ -89,9 +89,11 @@ Before the first deployment, configure these values outside Git as machine or II
 - `Authentication__Jwt__SigningKey` (minimum 64 bytes)
 - `Bootstrap__Secret` when the bootstrap endpoint is used
 
+`Database__ApplyMigrationsOnStartup` is not a secret and defaults to `false` in committed configuration. Leave it false for normal deployments. A reviewed schema migration may use a temporary `true` value only on one backend instance, following [the notification policy migration runbook](../notification-policy-platform-deployment-runbook.md); reset it to false before starting other instances. `Database__MigrationCommandTimeoutSeconds` defaults to `120` and must be between 1 and 3600 when overridden.
+
 Never put these values in `appsettings.Production.json`, package scripts, or the deployment script. ASP.NET Core defaults to the `Production` environment when no development environment variable is configured. Ensure IIS does not set `ASPNETCORE_ENVIRONMENT=Development`.
 
-The application does not execute database migrations at startup. Database changes remain an explicit, separately approved operation. Do not run the migration scripts as part of deployment.
+The application does not execute database migrations at startup unless the explicit `Database:ApplyMigrationsOnStartup` configuration is temporarily enabled. Database changes remain separately approved operations; automatic execution is not a substitute for backup, restore verification, staging validation, SQL review, or the single-instance deployment rule.
 
 Swagger is Development-only. The API uses its generic exception handler in Production and does not expose developer exception pages.
 

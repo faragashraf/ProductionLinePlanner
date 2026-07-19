@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
 using System.Diagnostics;
@@ -22,10 +23,12 @@ using ProductionLinePlanner.Application.Engines;
 using ProductionLinePlanner.Application.Services;
 using ProductionLinePlanner.Application.Requests;
 using ProductionLinePlanner.Application.Realtime;
+using ProductionLinePlanner.Application.Notifications;
 using ProductionLinePlanner.Application.Workers;
 using ProductionLinePlanner.Api.Security;
 using ProductionLinePlanner.Api.Authorization;
 using ProductionLinePlanner.Api.Bootstrap;
+using ProductionLinePlanner.Api.Database;
 using ProductionLinePlanner.Api.Diagnostics;
 using ProductionLinePlanner.Api.Endpoints;
 using ProductionLinePlanner.Api.Realtime;
@@ -90,6 +93,10 @@ var jwtKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSigningKey));
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.AddProblemDetails();
+builder.Services.AddOptions<DatabaseMigrationOptions>()
+    .Bind(builder.Configuration.GetSection(DatabaseMigrationOptions.SectionName))
+    .ValidateOnStart();
+builder.Services.AddSingleton<IValidateOptions<DatabaseMigrationOptions>, DatabaseMigrationOptionsValidator>();
 
 builder.Services.AddCors(options =>
 {
@@ -178,6 +185,8 @@ builder.Services.AddSingleton<IUserPasswordHasher, UserPasswordHasher>();
 builder.Services.AddSignalR(options => options.EnableDetailedErrors = false);
 builder.Services.AddSingleton<IUserIdProvider, AuthenticatedUserIdProvider>();
 builder.Services.AddScoped<INotificationLiveDispatcher, SignalRNotificationLiveDispatcher>();
+builder.Services.AddScoped<IStartupDatabaseMigrationExecutor, EfCoreStartupDatabaseMigrationExecutor>();
+builder.Services.AddScoped<StartupDatabaseMigrationRunner>();
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
@@ -277,9 +286,18 @@ if (PilotMasterDataBootstrapCommand.IsRequested(args))
 
 if (!isEfDesignTime)
 {
-    await using var seedScope = app.Services.CreateAsyncScope();
-    var permissionSeedService = seedScope.ServiceProvider.GetRequiredService<IRolePermissionSeedService>();
+    await using var startupScope = app.Services.CreateAsyncScope();
+    var migrationRunner = startupScope.ServiceProvider.GetRequiredService<StartupDatabaseMigrationRunner>();
+    await migrationRunner.ApplyIfEnabledAsync(app.Lifetime.ApplicationStopping);
+
+    var permissionSeedService = startupScope.ServiceProvider.GetRequiredService<IRolePermissionSeedService>();
     await permissionSeedService.EnsureSeedAsync();
+    var notificationPolicyReconciler = startupScope.ServiceProvider.GetRequiredService<INotificationPolicyCatalogReconciler>();
+    var notificationPolicyReconciliation = await notificationPolicyReconciler.EnsureDefaultsAsync();
+    if (notificationPolicyReconciliation.IsFailure)
+    {
+        throw new InvalidOperationException(notificationPolicyReconciliation.Error?.Message ?? "Notification policy catalog reconciliation failed.");
+    }
 }
 
 if (app.Environment.IsDevelopment())
@@ -940,6 +958,7 @@ authApi.MapPost("/logout", async (
     .WithName("AuthLogout");
 
 app.MapIamAdminEndpoints();
+app.MapNotificationPolicyAdminEndpoints();
 factoriesApi.MapGet("", async (
     AppDbContext dbContext,
     CancellationToken cancellationToken,

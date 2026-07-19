@@ -64,7 +64,7 @@ export const APP_ROUTES: Routes = [
         canMatch: [PermissionCanMatchGuard],
         canActivate: [PermissionCanActivateGuard],
         data: {
-          requireAny: [PERMISSIONS.users.view, PERMISSIONS.roles.view, PERMISSIONS.permissions.assign]
+          requireAny: [PERMISSIONS.users.view, PERMISSIONS.roles.view, PERMISSIONS.permissions.assign, PERMISSIONS.notifications.policiesManage]
         }
       },
       { path: 'notifications', component: NotificationsPageComponent, data: { title: 'الإشعارات', breadcrumb: 'الإشعارات' } },

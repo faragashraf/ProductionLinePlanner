@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using ProductionLinePlanner.Domain.Entities;
+using ProductionLinePlanner.Domain.Notifications;
 
 namespace ProductionLinePlanner.Infrastructure.Data.Configurations;
 
@@ -16,6 +17,8 @@ public sealed class NotificationConfiguration : IEntityTypeConfiguration<Notific
         builder.Property(x => x.SenderUserId);
         builder.Property(x => x.Title).IsRequired().HasMaxLength(200);
         builder.Property(x => x.Message).IsRequired().HasMaxLength(2000);
+        builder.Property(x => x.EventKey).HasMaxLength(NotificationPolicy.MaxEventKeyLength);
+        builder.Property(x => x.Severity).HasDefaultValue(NotificationSeverity.Information);
         builder.Property(x => x.IsRead).HasDefaultValue(false);
         builder.Property(x => x.ReadAtUtc);
         builder.Property(x => x.CreatedAtUtc).IsRequired();
@@ -23,6 +26,7 @@ public sealed class NotificationConfiguration : IEntityTypeConfiguration<Notific
 
         builder.HasIndex(x => x.RecipientUserId);
         builder.HasIndex(x => x.RelatedEntityId);
+        builder.HasIndex(x => x.EventKey);
 
         builder.HasOne(x => x.RecipientUser)
             .WithMany()

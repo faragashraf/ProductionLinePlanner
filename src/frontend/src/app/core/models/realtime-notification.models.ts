@@ -8,6 +8,8 @@ export interface NotificationSummary {
   isRead: boolean;
   relatedEntityType: string | null;
   relatedEntityId: string | null;
+  eventKey?: string | null;
+  severity?: 'Information' | 'Success' | 'Warning' | 'Critical' | number;
   createdAtUtc: string;
   readAtUtc: string | null;
 }

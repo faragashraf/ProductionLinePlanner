@@ -1,4 +1,5 @@
 using ProductionLinePlanner.Domain.Enums;
+using ProductionLinePlanner.Domain.Notifications;
 
 namespace ProductionLinePlanner.Application.Realtime;
 
@@ -11,7 +12,9 @@ public sealed record NotificationSummaryDto(
     string? RelatedEntityType,
     Guid? RelatedEntityId,
     DateTime CreatedAtUtc,
-    DateTime? ReadAtUtc);
+    DateTime? ReadAtUtc,
+    string? EventKey = null,
+    NotificationSeverity Severity = NotificationSeverity.Information);
 
 public sealed record PublishUserNotificationCommand(
     Guid NotificationId,
