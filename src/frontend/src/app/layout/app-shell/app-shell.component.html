@@ -1,18 +1,18 @@
-<div class="plp-app-shell" [attr.data-navigation-mode]="navigationMode" plpMotion>
+<div class="plp-app-shell" [attr.data-navigation-mode]="navigationMode" [attr.data-sidebar-collapsed]="sidebarCollapsed" plpMotion>
   <a class="plp-app-shell__skip-link" href="#app-shell-main-content">الانتقال إلى المحتوى</a>
 
   <header class="plp-app-shell__topbar">
     <button
-      *ngIf="isOverlayNavigation"
+      *ngIf="isOverlayNavigation || hasPersistentNavigation"
       #menuTrigger
       pButton
       type="button"
       [icon]="menuIcon"
       class="p-button-text plp-app-shell__menu-trigger"
-      aria-label="فتح القائمة"
-      title="فتح القائمة"
-      [attr.aria-expanded]="sidebarOpen"
-      aria-controls="app-shell-overlay-navigation"
+      [attr.aria-label]="isOverlayNavigation ? (sidebarOpen ? 'إغلاق القائمة' : 'فتح القائمة') : (sidebarCollapsed ? 'فتح القائمة' : 'إغلاق القائمة')"
+      [attr.title]="isOverlayNavigation ? (sidebarOpen ? 'إغلاق القائمة' : 'فتح القائمة') : (sidebarCollapsed ? 'فتح القائمة' : 'إغلاق القائمة')"
+      [attr.aria-expanded]="isOverlayNavigation ? sidebarOpen : !sidebarCollapsed"
+      [attr.aria-controls]="isOverlayNavigation ? 'app-shell-overlay-navigation' : 'app-shell-navigation'"
       (click)="toggleSidebar()"
     ></button>
 
@@ -85,7 +85,12 @@
     </div>
   </p-sidebar>
 
-  <aside id="app-shell-navigation" class="plp-app-shell__desktop-nav">
+  <aside
+    *ngIf="hasPersistentNavigation"
+    id="app-shell-navigation"
+    class="plp-app-shell__desktop-nav"
+    [class.plp-app-shell__desktop-nav--collapsed]="sidebarCollapsed"
+  >
     <div class="plp-app-shell__sidebar-header">
       <div class="plp-app-shell__sidebar-identity">
         <plp-brand-logo class="plp-app-shell__brand-mark" variant="mark" size="30px" [inverse]="true"></plp-brand-logo>

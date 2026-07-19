@@ -319,6 +319,11 @@
   grid-template-columns: var(--plp-app-shell-sidebar-width) minmax(0, 1fr);
 }
 
+.plp-app-shell[data-sidebar-collapsed='true'][data-navigation-mode='tablet-landscape'],
+.plp-app-shell[data-sidebar-collapsed='true'][data-navigation-mode='desktop'] {
+  --plp-app-shell-sidebar-width: 0px;
+}
+
 .plp-app-shell:is([data-navigation-mode='tablet-landscape'], [data-navigation-mode='desktop']) .plp-app-shell__desktop-nav {
   block-size: 100%;
   background: var(--plp-color-shell-navigation);
@@ -339,6 +344,11 @@
   border-block-end: var(--plp-border-width) solid var(--plp-color-shell-navigation-soft);
   display: flex;
   padding: var(--plp-space-16);
+}
+
+.plp-app-shell[data-sidebar-collapsed='true'][data-navigation-mode='tablet-landscape'] .plp-app-shell__desktop-nav,
+.plp-app-shell[data-sidebar-collapsed='true'][data-navigation-mode='desktop'] .plp-app-shell__desktop-nav {
+  display: none;
 }
 
 .plp-app-shell:is([data-navigation-mode='tablet-landscape'], [data-navigation-mode='desktop']) .plp-app-shell__desktop-nav .plp-app-shell__nav-group h2 {

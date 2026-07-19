@@ -22,6 +22,7 @@ export class AppShellComponent implements OnInit, OnDestroy {
   @ViewChild('overlayCloseButton') private overlayCloseButton?: ElementRef<HTMLButtonElement>;
 
   sidebarOpen = false;
+  sidebarCollapsed = false;
   navigationMode: ShellNavigationMode = 'phone';
   breadcrumbItems: MenuItem[] = [];
   readonly overlaySidebarBaseZIndex = PRODUCTION_RUNTIME_Z_INDEX.modal;
@@ -91,9 +92,14 @@ export class AppShellComponent implements OnInit, OnDestroy {
   @HostListener('window:resize')
   onResize(): void {
     this.checkViewport();
-    if (!this.isOverlayNavigation) {
-      this.closeSidebar();
+
+    if (this.isOverlayNavigation) {
+      this.sidebarOpen = false;
+      this.sidebarCollapsed = false;
+      return;
     }
+
+    this.sidebarOpen = false;
   }
 
   @HostListener('document:keydown.escape', ['$event'])
@@ -107,11 +113,19 @@ export class AppShellComponent implements OnInit, OnDestroy {
   toggleSidebar(): void {
     if (this.isOverlayNavigation) {
       this.sidebarOpen = !this.sidebarOpen;
+      return;
     }
+
+    this.sidebarCollapsed = !this.sidebarCollapsed;
   }
 
   closeSidebar(): void {
-    this.sidebarOpen = false;
+    if (this.isOverlayNavigation) {
+      this.sidebarOpen = false;
+      return;
+    }
+
+    this.sidebarCollapsed = true;
   }
 
   onSidebarVisibleChange(visible: boolean): void {
@@ -136,7 +150,18 @@ export class AppShellComponent implements OnInit, OnDestroy {
   }
 
   isActive(path: string): boolean {
-    return this.router.url.startsWith(path);
+    const currentPath = this.router.url.split(/[?#]/, 1)[0];
+    if (currentPath === path || currentPath.startsWith(`${path}/`)) {
+      return true;
+    }
+
+    const dashboardSuffix = '/dashboard';
+    const workspacePath = path.endsWith(dashboardSuffix)
+      ? path.slice(0, -dashboardSuffix.length)
+      : '';
+
+    return Boolean(workspacePath)
+      && (currentPath === workspacePath || currentPath.startsWith(`${workspacePath}/`));
   }
 
   logout(): void {
@@ -157,7 +182,7 @@ export class AppShellComponent implements OnInit, OnDestroy {
   }
 
   get hasPersistentNavigation(): boolean {
-    return this.navigationMode === 'tablet-landscape' || this.navigationMode === 'desktop';
+    return !this.isOverlayNavigation;
   }
 
   get currentUserName(): string {
