@@ -21,8 +21,8 @@ const LOCAL_PROFILE_STATUS: Readonly<Record<WorkerLocalProfileStatus, WorkerMana
 };
 
 const SOURCE_LINK_STATUS: Readonly<Record<WorkerSourceLinkStatus, WorkerManagementStatusPresentation>> = {
-  linked: { label: 'مرتبط بالمصدر', tone: 'success', icon: 'pi pi-link' },
-  unlinked: { label: 'غير مرتبط', tone: 'neutral', icon: 'pi pi-minus-circle' },
+  linked: { label: 'مرجع خارجي محفوظ', tone: 'success', icon: 'pi pi-link' },
+  unlinked: { label: 'لا يوجد مرجع خارجي', tone: 'neutral', icon: 'pi pi-minus-circle' },
   conflict: { label: 'تعارض هوية', tone: 'danger', icon: 'pi pi-exclamation-circle' },
   'new-source': { label: 'جديد من المصدر', tone: 'info', icon: 'pi pi-plus-circle' },
   'missing-source': { label: 'غير ظاهر في آخر قراءة', tone: 'warning', icon: 'pi pi-eye-slash' }
@@ -36,8 +36,8 @@ const ASSIGNMENT_STATUS: Readonly<Record<WorkerAssignmentStatus, WorkerManagemen
 
 const LOCAL_EMPLOYMENT_STATUS: Readonly<Record<WorkerLocalEmploymentStatus, WorkerManagementStatusPresentation>> = {
   active: { label: 'نشط محليًا', tone: 'success', icon: 'pi pi-check-circle' },
-  inactive: { label: 'غير نشط محليًا', tone: 'neutral', icon: 'pi pi-ban' },
-  'not-set': { label: 'غير محددة محليًا', tone: 'warning', icon: 'pi pi-question-circle' }
+  inactive: { label: 'معلّق محليًا', tone: 'neutral', icon: 'pi pi-ban' },
+  'left-employment': { label: 'منتهية خدمته محليًا', tone: 'warning', icon: 'pi pi-user-minus' }
 };
 
 const SOURCE_PREVIEW: Readonly<Record<WorkerSourcePreviewKind, WorkerManagementStatusPresentation>> = {

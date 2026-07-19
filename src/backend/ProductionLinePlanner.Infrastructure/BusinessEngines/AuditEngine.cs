@@ -87,6 +87,11 @@ public sealed class AuditEngine : IAuditEngine
         ,"CompensationMode"
         ,"Allocations"
         ,"Result"
+        ,"PhotoReference"
+        ,"Version"
+        ,"ContentType"
+        ,"Length"
+        ,"Source"
     };
 
     private static readonly JsonSerializerOptions AuditJsonOptions = new()

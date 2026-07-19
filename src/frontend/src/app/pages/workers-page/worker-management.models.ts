@@ -1,7 +1,7 @@
 export type WorkerLocalProfileStatus = 'complete' | 'needs-review' | 'source-pending';
 export type WorkerSourceLinkStatus = 'linked' | 'unlinked' | 'conflict' | 'new-source' | 'missing-source';
 export type WorkerAssignmentStatus = 'assigned' | 'unassigned' | 'mixed';
-export type WorkerLocalEmploymentStatus = 'active' | 'inactive' | 'not-set';
+export type WorkerLocalEmploymentStatus = 'active' | 'inactive' | 'left-employment';
 export type WorkerAssignmentKind = 'permanent' | 'temporary';
 export type WorkerHistoryKind = 'name' | 'photo' | 'status' | 'assignment';
 export type WorkerSourcePreviewKind = 'new' | 'unchanged' | 'protected-local' | 'identity-conflict' | 'observed';
@@ -65,6 +65,8 @@ export interface WorkerManagementProfile {
   assignments: WorkerAssignmentSummary[];
   history: WorkerHistoryEntry[];
   sourcePreview: WorkerSourcePreviewItem[];
+  assignmentStatus: WorkerAssignmentStatus;
+  defaultSubStageId: string | null;
 }
 
 export interface WorkerManagementListItem {
@@ -85,25 +87,10 @@ export interface WorkerManagementListItem {
   hasIdentityConflict: boolean;
 }
 
-export interface WorkerManagementFilterOption {
-  value: string;
-  label: string;
-}
-
-export interface WorkerManagementFilterOptions {
-  factories: WorkerManagementFilterOption[];
-  productionLines: WorkerManagementFilterOption[];
-}
-
 export interface WorkerManagementQuery {
   page: number;
   pageSize: number;
   search: string;
-  localProfileStatus: WorkerLocalProfileStatus | '';
-  sourceLinkStatus: WorkerSourceLinkStatus | '';
-  factoryId: string;
-  productionLineId: string;
-  assignmentStatus: WorkerAssignmentStatus | '';
   localEmploymentStatus: WorkerLocalEmploymentStatus | '';
 }
 
@@ -113,7 +100,4 @@ export interface WorkerManagementPage {
   page: number;
   pageSize: number;
   totalPages: number;
-  filterOptions: WorkerManagementFilterOptions;
 }
-
-export type WorkerManagementMockScenario = 'default' | 'empty' | 'error' | 'loading';

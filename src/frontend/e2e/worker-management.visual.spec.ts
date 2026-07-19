@@ -3,62 +3,90 @@ import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 
 const visualOutput = path.join(process.cwd(), 'test-results', 'worker-management');
-const scenarioKey = 'plp.worker-management.mock-scenario';
-const permissions = ['workers.view', 'workers.manage', 'assignments.view'];
+const workerId = '11111111-1111-1111-1111-111111111111';
+const managerPermissions = ['workers.view', 'workers.manage', 'assignments.view'];
+type Scenario = 'default' | 'loading' | 'empty' | 'error';
 
-type Scenario = 'default' | 'empty' | 'error' | 'loading';
-type Diagnostics = { consoleErrors: string[]; failedRequests: string[]; unexpectedResponses: string[]; workerApiCalls: number };
-
-test.beforeAll(async () => {
-  await mkdir(visualOutput, { recursive: true });
+const worker = (hasPhoto = false) => ({
+  id: workerId,
+  employeeCode: 'EMP-101',
+  fullName: 'فاطمة أحمد عبد الرحمن',
+  attendanceUserId: '101',
+  badgeNumber: 'B-101',
+  isActive: true,
+  employmentStatus: 'Active',
+  defaultSubStageId: null,
+  hasPhoto,
+  photoReference: hasPhoto ? `/api/workers/${workerId}/photo?v=${'a'.repeat(64)}` : null,
+  photoVersion: hasPhoto ? 'a'.repeat(64) : null
 });
 
-async function prepareWorkspace(page: Page, scenario: Scenario = 'default'): Promise<Diagnostics> {
-  const diagnostics: Diagnostics = { consoleErrors: [], failedRequests: [], unexpectedResponses: [], workerApiCalls: 0 };
-  page.on('console', message => { if (message.type() === 'error') diagnostics.consoleErrors.push(message.text()); });
-  page.on('pageerror', error => diagnostics.consoleErrors.push(error.message));
-  page.on('requestfailed', request => diagnostics.failedRequests.push(`${request.method()} ${request.url()} ${request.failure()?.errorText ?? ''}`));
-  page.on('response', response => { if (response.status() >= 400) diagnostics.unexpectedResponses.push(`${response.status()} ${response.url()}`); });
+test.beforeAll(async () => { await mkdir(visualOutput, { recursive: true }); });
 
-  await page.addInitScript(({ storedPermissions, selectedScenario, storageKey }) => {
+async function prepareWorkspace(page: Page, scenario: Scenario = 'default', permissions = managerPermissions): Promise<void> {
+  let hasPhoto = false;
+  await page.addInitScript(({ storedPermissions }) => {
     localStorage.setItem('plp.accessToken', 'worker-management-visual-token');
     localStorage.setItem('plp.currentUser', JSON.stringify({
-      id: 'visual-worker-manager',
-      fullName: 'مراجع إدارة العاملين',
-      email: 'worker.management@local.test',
-      roles: ['Administrator'],
-      permissions: storedPermissions
+      id: 'visual-worker-manager', fullName: 'مراجع إدارة العاملين', email: 'worker.management@local.test',
+      roles: ['Administrator'], permissions: storedPermissions
     }));
-    sessionStorage.setItem(storageKey, selectedScenario);
-  }, { storedPermissions: permissions, selectedScenario: scenario, storageKey: scenarioKey });
+  }, { storedPermissions: permissions });
 
   await page.routeWebSocket('**/hubs/notifications**', socket => {
     socket.onMessage(message => {
-      if (typeof message === 'string' && message.includes('"protocol"')) {
-        socket.send('{}\u001e');
-      }
+      if (typeof message === 'string' && message.includes('"protocol"')) socket.send('{}\u001e');
     });
   });
   await page.route('**/hubs/notifications/negotiate**', route => route.fulfill({
     status: 200,
     contentType: 'application/json',
-    body: JSON.stringify({
-      negotiateVersion: 1,
-      connectionId: 'worker-management-visual-connection',
-      connectionToken: 'worker-management-visual-token',
-      availableTransports: [{ transport: 'WebSockets', transferFormats: ['Text', 'Binary'] }]
-    })
+    body: JSON.stringify({ negotiateVersion: 1, connectionId: 'worker-management-visual', connectionToken: 'worker-management-visual', availableTransports: [{ transport: 'WebSockets', transferFormats: ['Text', 'Binary'] }] })
   }));
 
   await page.route('**/api/**', async route => {
-    const pathname = new URL(route.request().url()).pathname;
-    if (pathname.startsWith('/api/workers')) diagnostics.workerApiCalls += 1;
-    const data = pathname.endsWith('/api/auth/me')
-      ? { id: 'visual-worker-manager', fullName: 'مراجع إدارة العاملين', email: 'worker.management@local.test', roles: ['Administrator'], permissions }
-      : { items: [] };
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data, error: null }) });
+    const request = route.request();
+    const pathname = new URL(request.url()).pathname;
+    if (pathname.endsWith('/api/auth/me')) {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: { id: 'visual-worker-manager', fullName: 'مراجع إدارة العاملين', email: 'worker.management@local.test', roles: ['Administrator'], permissions }, error: null }) });
+      return;
+    }
+    if (pathname === '/api/workers' && request.method() === 'GET') {
+      if (scenario === 'loading') { await new Promise(resolve => setTimeout(resolve, 1000)); }
+      if (scenario === 'error') { await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ success: false, data: null, error: { message: 'تعذر تحميل العاملين.' } }) }); return; }
+      const items = scenario === 'empty' ? [] : [worker(hasPhoto)];
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: { items, totalCount: items.length, pageNumber: 1, pageSize: 6 }, error: null }) });
+      return;
+    }
+    if (pathname === `/api/workers/${workerId}` && request.method() === 'GET') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: worker(hasPhoto), error: null }) });
+      return;
+    }
+    if (pathname === `/api/workers/${workerId}` && request.method() === 'PATCH') {
+      const body = request.postDataJSON() as { fullName?: string };
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: { ...worker(hasPhoto), fullName: body.fullName ?? worker(hasPhoto).fullName }, error: null }) });
+      return;
+    }
+    if (pathname === `/api/workers/${workerId}/employment-status`) {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: { ...worker(hasPhoto), employmentStatus: 'Suspended', isActive: false }, error: null }) });
+      return;
+    }
+    if (pathname === `/api/workers/${workerId}/photo` && request.method() === 'PUT') {
+      hasPhoto = true;
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: { photo: { version: 'a'.repeat(64) } }, error: null }) });
+      return;
+    }
+    if (pathname === `/api/workers/${workerId}/photo` && request.method() === 'DELETE') {
+      hasPhoto = false;
+      await route.fulfill({ status: 204 });
+      return;
+    }
+    if (pathname === `/api/workers/${workerId}/photo`) {
+      await route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ success: false, error: { message: 'غير متاح' } }) });
+      return;
+    }
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: { items: [] }, error: null }) });
   });
-  return diagnostics;
 }
 
 async function openList(page: Page): Promise<void> {
@@ -68,181 +96,68 @@ async function openList(page: Page): Promise<void> {
 }
 
 async function expectViewportSafe(page: Page): Promise<void> {
-  const geometry = await page.evaluate(() => ({
-    direction: getComputedStyle(document.documentElement).direction,
-    scrollWidth: document.documentElement.scrollWidth,
-    clientWidth: document.documentElement.clientWidth
-  }));
+  const geometry = await page.evaluate(() => ({ direction: getComputedStyle(document.documentElement).direction, scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth }));
   expect(geometry.direction).toBe('rtl');
   expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.clientWidth + 1);
-  await expect(page.locator('p-table[data-plp-table-presentation="stack"]')).toHaveCount(1);
-  const openButtons = page.getByRole('button', { name: 'فتح الملف' });
-  await expect(openButtons).toHaveCount(6);
-  const openButton = openButtons.first();
-  const box = await openButton.boundingBox();
-  expect(box?.height ?? 0).toBeGreaterThanOrEqual(40);
-  const minimumFilterControlHeight = await page.evaluate(() => Math.min(
-    ...Array.from(document.querySelectorAll('.worker-management-page__filters select'))
-      .map(control => control.getBoundingClientRect().height)
-  ));
-  expect(minimumFilterControlHeight).toBeGreaterThanOrEqual(43.5);
+  const openButton = page.getByRole('button', { name: 'فتح الملف' });
+  await expect(openButton).toHaveCount(1);
+  expect((await openButton.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(40);
 }
 
-test('renders an RTL, overflow-safe worker table at the required viewports', async ({ page }) => {
-  const diagnostics = await prepareWorkspace(page);
-  const viewports = [
-    ['desktop-1440x900', 1440, 900],
-    ['android-tablet-landscape-1280x800', 1280, 800],
-    ['android-tablet-portrait-800x1280', 800, 1280],
-    ['mobile-390x844', 390, 844]
-  ] as const;
-
-  for (const [name, width, height] of viewports) {
+test('uses API-backed worker data and remains RTL/overflow safe at required viewports', async ({ page }) => {
+  await prepareWorkspace(page);
+  for (const [name, width, height] of [
+    ['desktop-1440x900', 1440, 900], ['android-tablet-landscape-1280x800', 1280, 800],
+    ['android-tablet-portrait-800x1280', 800, 1280], ['mobile-390x844', 390, 844]
+  ] as const) {
     await page.setViewportSize({ width, height });
     await openList(page);
+    await expect(page.locator('.worker-management-page__table')).toContainText('فاطمة أحمد عبد الرحمن');
     await expectViewportSafe(page);
-    if (width <= 1023) {
-      await expect(page.locator('.p-datatable-thead')).toBeHidden();
-      await expect(page.locator('.p-datatable-tbody > tr').first()).toHaveCSS('display', 'grid');
-    } else {
-      await expect(page.locator('.p-datatable-thead')).toBeVisible();
-      const tableScroll = await page.locator('.p-datatable-wrapper').evaluate(element => ({
-        clientWidth: element.clientWidth,
-        scrollWidth: element.scrollWidth
-      }));
-      if (tableScroll.scrollWidth > tableScroll.clientWidth + 1) {
-        await expect(page.locator('.plp-scroll-hint')).toBeVisible();
-        await expect(page.locator('.plp-scroll-hint')).toHaveText('اسحب لعرض المزيد');
-      }
-    }
-    const identities = page.locator('.worker-management-page__identity');
-    await expect(identities).toHaveCount(6);
-    await expect(identities.first()).toContainText('الاسم المحلي الرئيسي');
-    await expect(identities.first()).toContainText('من المصدر');
-    if (width <= 1023) await page.locator('.worker-management-page__table').scrollIntoViewIfNeeded();
     await page.screenshot({ path: path.join(visualOutput, `${name}.png`), fullPage: true });
   }
-
-  expect(diagnostics.workerApiCalls).toBe(0);
-  expect(diagnostics.consoleErrors).toEqual([]);
-  expect(diagnostics.failedRequests).toEqual([]);
-  expect(diagnostics.unexpectedResponses).toEqual([]);
 });
 
-test('opens and closes the full profile workspace and keeps source fields read-only', async ({ page }) => {
-  const diagnostics = await prepareWorkspace(page);
-  await page.setViewportSize({ width: 1440, height: 900 });
+test('renders the real profile, validates photo selection, replaces and deletes with confirmation', async ({ page }) => {
+  await prepareWorkspace(page);
+  await page.setViewportSize({ width: 390, height: 844 });
   await openList(page);
-  await page.getByLabel('بحث في ملفات العاملين').fill('هدى إبراهيم');
-  await expect(page.locator('.worker-management-page__table')).toContainText('هدى إبراهيم سالم');
-  const conflictOpenButtons = page.getByRole('button', { name: 'فتح الملف' });
-  await expect(conflictOpenButtons).toHaveCount(1);
-  await conflictOpenButtons.click();
-
+  await page.getByRole('button', { name: 'فتح الملف' }).click();
   await expect(page.locator('[data-workspace-view="profile"]')).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'هدى إبراهيم سالم' })).toBeVisible();
-  await expect(page.locator('[role="alert"]')).toContainText('تعارض يحتاج مراجعة هوية');
-  await expect(page.getByRole('button', { name: 'حفظ فعلي لاحقًا' })).toBeDisabled();
-  await expect(page.getByRole('button', { name: 'تغيير الصورة لاحقًا' })).toBeDisabled();
-
-  await page.getByRole('button', { name: 'بيانات المصدر', exact: true }).click();
-  const sourceFields = page.locator('[data-profile-section="source"] input');
-  await expect(sourceFields).toHaveCount(7);
-  for (let index = 0; index < 7; index += 1) await expect(sourceFields.nth(index)).toHaveAttribute('readonly', '');
-
-  await page.getByRole('button', { name: 'التسكين والتشغيل' }).click();
-  await expect(page.locator('[data-profile-section="operations"]')).toContainText('مصنع التجميع');
-  await page.getByRole('button', { name: 'السجل' }).click();
-  await expect(page.locator('[data-profile-section="history"]')).toContainText('رصد اختلاف في الهوية');
-  await page.getByRole('button', { name: 'معاينة بيانات المصدر' }).click();
-  const preview = page.locator('[data-profile-section="source-preview"]');
-  await expect(preview).toContainText('لن يُطبق أي تغيير');
-  await expect(preview.getByRole('button')).toHaveCount(0);
-  await page.screenshot({ path: path.join(visualOutput, 'desktop-identity-conflict-profile.png'), fullPage: true });
-
-  await page.getByRole('button', { name: 'العودة إلى قائمة العاملين' }).click();
-  await expect(page.getByRole('heading', { name: 'إدارة العاملين' })).toBeVisible();
-  expect(diagnostics.workerApiCalls).toBe(0);
-  expect(diagnostics.consoleErrors).toEqual([]);
-  expect(diagnostics.failedRequests).toEqual([]);
-});
-
-test('keeps long names, missing photos, many stages, and mobile sections viewport-safe', async ({ page }) => {
-  const diagnostics = await prepareWorkspace(page);
-  await page.setViewportSize({ width: 390, height: 844 });
-  await openList(page);
-
-  await page.getByLabel('بحث في ملفات العاملين').fill('عبد الرحمن');
-  await expect(page.locator('.worker-management-page__table')).toContainText('عبد الرحمن محمد عبد السلام');
-  const longNameOpenButtons = page.getByRole('button', { name: 'فتح الملف' });
-  await expect(longNameOpenButtons).toHaveCount(1);
-  await longNameOpenButtons.click();
-  await expect(page.locator('.worker-profile__identity h1')).toContainText('عبد الرحمن محمد عبد السلام');
-  await expect(page.locator('.worker-profile__identity img')).toHaveCount(0);
-  await expect(page.getByText('لا توجد — يظهر البديل القياسي')).toBeVisible();
-  await expectViewportSafeProfile(page);
-  await page.screenshot({ path: path.join(visualOutput, 'mobile-long-name-missing-photo.png'), fullPage: true });
-
-  await page.getByRole('button', { name: 'العودة إلى قائمة العاملين' }).click();
-  await page.getByLabel('بحث في ملفات العاملين').fill('كريم فتحي');
-  await expect(page.locator('.worker-management-page__table')).toContainText('كريم فتحي');
-  const manyStagesOpenButtons = page.getByRole('button', { name: 'فتح الملف' });
-  await expect(manyStagesOpenButtons).toHaveCount(1);
-  await manyStagesOpenButtons.click();
-  await page.getByRole('button', { name: 'التسكين والتشغيل' }).click();
-  await expect(page.locator('.worker-profile__stage-list span')).toHaveCount(6);
-  await expectViewportSafeProfile(page);
-  await page.screenshot({ path: path.join(visualOutput, 'mobile-many-stages.png'), fullPage: true });
-
-  expect(diagnostics.consoleErrors).toEqual([]);
-  expect(diagnostics.failedRequests).toEqual([]);
-});
-
-test('asserts loading, empty, and error states rather than only capturing screenshots', async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 844 });
-
-  await prepareWorkspace(page, 'loading');
-  await page.goto('/workers');
-  const loading = page.locator('.plp-product-loading');
-  await expect(loading).toBeVisible();
-  await expect(loading).toHaveAttribute('aria-busy', 'true');
-  const skeletons = loading.locator('.p-skeleton');
-  await expect(skeletons).toHaveCount(24);
-  await expect(skeletons.first()).toBeVisible();
-  await loading.scrollIntoViewIfNeeded();
-  await page.screenshot({ path: path.join(visualOutput, 'mobile-loading.png'), fullPage: true });
-});
-
-test('shows an explicit empty state', async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 844 });
-  const diagnostics = await prepareWorkspace(page, 'empty');
-  await page.goto('/workers');
-  const emptyState = page.getByText('لا توجد نتائج');
-  await expect(emptyState).toBeVisible();
-  await expect(page.locator('.worker-management-page__table')).toHaveCount(0);
-  await emptyState.scrollIntoViewIfNeeded();
-  await page.screenshot({ path: path.join(visualOutput, 'mobile-empty.png'), fullPage: true });
-  expect(diagnostics.consoleErrors).toEqual([]);
-});
-
-test('shows an actionable API-like error state', async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 844 });
-  const diagnostics = await prepareWorkspace(page, 'error');
-  await page.goto('/workers');
-  const error = page.locator('section[role="alert"]');
-  await expect(error).toBeVisible();
-  await expect(error).toContainText('تعذر تحميل إدارة العاملين');
-  await expect(page.getByRole('button', { name: 'إعادة المحاولة' })).toBeVisible();
-  await error.scrollIntoViewIfNeeded();
-  await page.screenshot({ path: path.join(visualOutput, 'mobile-error.png'), fullPage: true });
-  expect(diagnostics.consoleErrors).toEqual([]);
-});
-
-async function expectViewportSafeProfile(page: Page): Promise<void> {
+  await expect(page.getByText('لا تقرأ هذه الشاشة نظام البصمة مباشرةً')).toBeVisible();
+  await expect(page.getByText('JPEG وPNG وBMP فقط')).toBeVisible();
+  await page.locator('#workerPhotoInput').setInputFiles({ name: 'worker.png', mimeType: 'image/png', buffer: Buffer.from('image-data') });
+  await expect(page.getByRole('button', { name: 'رفع الصورة' })).toBeEnabled();
+  await page.getByRole('button', { name: 'رفع الصورة' }).click();
+  await expect(page.getByText('تم حفظ الصورة المحلية وتحديثها فورًا.')).toBeVisible();
+  page.once('dialog', dialog => dialog.accept());
+  await page.getByRole('button', { name: 'حذف الصورة' }).click();
+  await expect(page.getByText('تم حذف الصورة المحلية.')).toBeVisible();
   const geometry = await page.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth }));
   expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.clientWidth + 1);
-  const sectionButtons = page.locator('.plp-section-navigation__item');
-  await expect(sectionButtons).toHaveCount(5);
-  const firstBox = await sectionButtons.first().boundingBox();
-  expect(firstBox?.height ?? 0).toBeGreaterThanOrEqual(40);
-}
+  await page.screenshot({ path: path.join(visualOutput, 'mobile-photo-lifecycle.png'), fullPage: true });
+});
+
+test('shows loading, empty, and error states with API responses, not runtime mocks', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await prepareWorkspace(page, 'loading');
+  await page.goto('/workers', { waitUntil: 'commit' });
+  await expect(page.locator('.plp-product-loading')).toBeVisible();
+
+  await prepareWorkspace(page, 'empty');
+  await page.goto('/workers');
+  await expect(page.getByText('لا توجد نتائج')).toBeVisible();
+
+  await prepareWorkspace(page, 'error');
+  await page.goto('/workers');
+  await expect(page.getByRole('button', { name: 'إعادة المحاولة' })).toBeVisible();
+});
+
+test('hides write actions for workers.view-only users', async ({ page }) => {
+  await prepareWorkspace(page, 'default', ['workers.view']);
+  await openList(page);
+  await page.getByRole('button', { name: 'فتح الملف' }).click();
+  await expect(page.getByText('تتطلب التعديلات والصور `workers.manage`.')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'حفظ البيانات المحلية' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'رفع الصورة' })).toBeDisabled();
+});

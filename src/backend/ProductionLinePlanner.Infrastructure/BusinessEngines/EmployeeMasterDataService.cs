@@ -4,6 +4,7 @@ using ProductionLinePlanner.Application.DTOs;
 using ProductionLinePlanner.Application.Engines;
 using ProductionLinePlanner.Application.Requests;
 using ProductionLinePlanner.Application.Services;
+using ProductionLinePlanner.Application.Workers;
 using ProductionLinePlanner.Domain.Entities;
 using ProductionLinePlanner.Domain.Enums;
 using ProductionLinePlanner.Infrastructure.Data;
@@ -225,8 +226,7 @@ public sealed class EmployeeMasterDataService(
 
     private static WorkerDto MapWorker(Worker worker, Guid? defaultSubStageId = null)
     {
-        var photoVersion = GetPhotoVersion(worker.PhotoReference);
-        var hasManagedPhoto = photoVersion is not null && IsManagedPhotoReference(worker.PhotoReference, worker.Id);
+        var hasManagedPhoto = WorkerPhotoReference.TryParse(worker.PhotoReference, worker.Id, out var photoVersion);
         return new WorkerDto
         {
             Id = worker.Id,
@@ -239,7 +239,7 @@ public sealed class EmployeeMasterDataService(
             LocalDepartmentName = worker.LocalDepartmentName,
             EmploymentStatus = worker.EmploymentStatus.ToString(),
             EmploymentEndDate = worker.EmploymentEndDate,
-            // Only synchronization-produced cache references are browser-visible.
+            // Only Planner-owned, hash-versioned references are browser-visible.
             // Legacy/manual strings cannot cause a live or arbitrary image request.
             PhotoReference = hasManagedPhoto ? worker.PhotoReference : null,
             HasPhoto = hasManagedPhoto,
@@ -248,20 +248,6 @@ public sealed class EmployeeMasterDataService(
             DefaultSubStageId = defaultSubStageId
         };
     }
-
-    private static string? GetPhotoVersion(string? photoReference)
-    {
-        if (string.IsNullOrWhiteSpace(photoReference)) return null;
-        var marker = "?v=";
-        var index = photoReference.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
-        return index >= 0 && index + marker.Length < photoReference.Length
-            ? photoReference[(index + marker.Length)..]
-            : null;
-    }
-
-    private static bool IsManagedPhotoReference(string? photoReference, Guid workerId) =>
-        !string.IsNullOrWhiteSpace(photoReference) &&
-        photoReference.StartsWith($"/api/workers/{workerId:D}/photo?v=", StringComparison.OrdinalIgnoreCase);
 
     private async Task<WorkerDto[]> MapWorkersWithAssignmentsAsync(IEnumerable<Worker> workers, CancellationToken cancellationToken)
     {
