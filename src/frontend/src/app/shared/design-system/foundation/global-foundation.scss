@@ -705,6 +705,10 @@ plp-expandable-form {
   z-index: calc(var(--plp-z-sticky) + 2);
 }
 
+.plp-scroll-hint[hidden] {
+  display: none;
+}
+
 .plp-scroll-hint::before {
   content: '←';
   font-size: 1em;
@@ -748,6 +752,18 @@ plp-expandable-form {
   min-inline-size: 100%;
 }
 
+// Keeps detail workspaces shrinkable inside page-level CSS grids. Without this,
+// an intrinsic-width hero, tab rail, or long RTL label can be clipped on mobile.
+.plp-workspace-detail,
+.plp-workspace-detail > * {
+  max-inline-size: 100%;
+  min-inline-size: 0;
+}
+
+.plp-workspace-detail {
+  inline-size: 100%;
+}
+
 .plp-operational-table .p-datatable-thead > tr > th,
 .plp-operational-table .p-datatable-tbody > tr > td {
   overflow-wrap: anywhere;
@@ -767,7 +783,7 @@ plp-expandable-form {
   white-space: nowrap;
 }
 
-@media (max-width: 767px) {
+@media (max-width: 1023px) {
   .plp-operational-table--scroll .p-datatable-table {
     min-inline-size: 42rem;
   }

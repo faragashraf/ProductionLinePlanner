@@ -69,6 +69,9 @@ describe('IAM routing', () => {
 
     expect(workers?.loadChildren).toBeDefined();
     expect(workers?.component).toBeUndefined();
+    expect(workers?.canMatch).toContain(PermissionCanMatchGuard);
+    expect(workers?.canActivate).toContain(PermissionCanActivateGuard);
+    expect(workers?.data?.['permission']).toBe(PERMISSIONS.workers.view);
   });
 
   it('requires both factory-structure.view and stages.view for Factory Map', () => {
