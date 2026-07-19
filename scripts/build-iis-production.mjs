@@ -1,4 +1,4 @@
-import { cpSync, existsSync, mkdirSync, rmSync, copyFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, rmSync, copyFileSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
@@ -35,7 +35,7 @@ function buildFrontend() {
   const angularCli = join(frontendRoot, 'node_modules', '.bin', process.platform === 'win32' ? 'ng.cmd' : 'ng');
   requirePath(angularCli, 'Angular CLI; run npm ci in src/frontend first');
   run(angularCli, [
-    'build', '--configuration', 'production', '--base-href', '/', '--output-path', frontendBuildArtifact
+    'build', '--configuration', 'production', '--output-path', frontendBuildArtifact
   ], frontendRoot);
 
   const browserOutput = join(frontendBuildArtifact, 'browser');
@@ -44,6 +44,16 @@ function buildFrontend() {
   copyFileSync(frontendWebConfig, join(frontendArtifact, 'web.config'));
   rmSync(frontendBuildArtifact, { recursive: true, force: true });
   requirePath(join(frontendArtifact, 'index.html'), 'frontend index.html');
+  const indexHtml = readFileSync(join(frontendArtifact, 'index.html'), 'utf8');
+  if (!/<base href="\/app\/">/i.test(indexHtml)) {
+    throw new Error('IIS frontend build must emit <base href="/app/">.');
+  }
+  for (const pattern of [/^main-.+\.js$/, /^polyfills-.+\.js$/, /^styles-.+\.css$/]) {
+    if (!readdirSync(frontendArtifact).some(file => pattern.test(file))) {
+      throw new Error(`IIS frontend build is missing required asset matching ${pattern}.`);
+    }
+  }
+  requirePath(join(frontendArtifact, 'assets', 'brand', 'manifest.webmanifest'), 'frontend brand manifest');
   console.log(`Frontend artifact: ${frontendArtifact}`);
 }
 

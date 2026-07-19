@@ -27,8 +27,12 @@ function filesRecursively(root) {
 
 const indexHtml = requireFile(join(frontendRoot, 'index.html'), 'frontend index.html');
 const frontendWebConfig = requireFile(join(frontendRoot, 'web.config'), 'frontend IIS web.config');
-assert(/<base href="\/">/i.test(indexHtml), 'Frontend index.html must use <base href="/">.');
-assert(/<rewrite>/i.test(frontendWebConfig) && /index\.html/i.test(frontendWebConfig), 'Frontend web.config must rewrite client routes to index.html.');
+assert(/<base href="\/app\/">/i.test(indexHtml), 'Frontend index.html must use <base href="/app/">.');
+assert(/(?:src|href)="(?:\.\/)?main-[^"]+\.js"/i.test(indexHtml), 'Frontend index.html must reference a hashed main JavaScript bundle.');
+assert(/(?:src|href)="(?:\.\/)?polyfills-[^"]+\.js"/i.test(indexHtml), 'Frontend index.html must reference a hashed polyfills JavaScript bundle.');
+assert(/(?:src|href)="(?:\.\/)?styles-[^"]+\.css"/i.test(indexHtml), 'Frontend index.html must reference a hashed stylesheet.');
+assert(existsSync(join(frontendRoot, 'assets', 'brand', 'manifest.webmanifest')), 'Frontend artifact must contain assets/brand/manifest.webmanifest.');
+assert(/<rewrite>/i.test(frontendWebConfig) && /url="index\.html"/i.test(frontendWebConfig), 'Frontend web.config must rewrite client routes to its application-local index.html.');
 assert(/\^\/_?\(api\|hubs\)/i.test(frontendWebConfig), 'Frontend web.config must not rewrite API or hub paths.');
 assert(!existsSync(join(frontendRoot, 'browser')), 'Deploy the browser contents, not an extra browser directory.');
 
@@ -58,7 +62,7 @@ assert(!filesRecursively(backendRoot).some(path => ['.cs', '.csproj', '.sln'].in
 
 try {
   const config = JSON.parse(productionSettings);
-  assert(config?.Cors?.AllowedOrigins?.length === 1 && config.Cors.AllowedOrigins[0] === 'http://192.168.1.99:8000', 'Production CORS must allow only the Dayoub frontend origin.');
+  assert(config?.Cors?.AllowedOrigins?.length === 1 && config.Cors.AllowedOrigins[0] === 'http://dayoub.local', 'Production CORS must allow only the Dayoub frontend origin.');
   assert(config?.Cors?.AllowInsecureHttpOrigins === true, 'Production config must explicitly opt in to its local HTTP CORS origin.');
   assert(config?.Cors?.AllowCredentials === true, 'Production CORS must permit credentialed SignalR-compatible requests for the exact origin.');
   assert(config?.Hosting?.EnableHttpsRedirection === false && config?.Hosting?.EnableHsts === false, 'Local HTTP IIS deployment must disable HTTPS redirection and HSTS.');
