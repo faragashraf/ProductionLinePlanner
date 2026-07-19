@@ -297,7 +297,7 @@ test('reports workspace selects the authorized financial projection without chan
   await financialRequest;
 
   await expect(page.locator('[data-reports-workspace="quantities-and-financials"]')).toBeVisible();
-  await expect(page.getByText('وضع القيم المالية مفعّل ضمن نفس نطاق الفلاتر، مع الحفاظ على بنية النتائج الحالية.')).toBeVisible();
+  await expect(page.getByText('وضع القيم المالية مفعّل ضمن نفس نطاق الفلاتر، ويعرض قيم المراحل وأرباح العمال من اللقطات المحفوظة.')).toBeVisible();
   await expect(page.locator('.reports-workspace__table [data-report-source]')).toHaveCount(3);
   await page.screenshot({ path: path.join(visualOutput, 'financial-desktop-1440x900.png'), fullPage: true });
 });
