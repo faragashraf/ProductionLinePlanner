@@ -7,6 +7,7 @@ import { ApiResponse } from '../models/api-response.model';
 
 export interface MainStageOption { id: string; productionLineId: string; name: string; sequenceOrder: number; isCritical: boolean; isActive: boolean; }
 export interface SubStageOption { id: string; mainStageId: string; name: string; code: string; capacity: number; sequenceOrder: number; isActive: boolean; }
+export interface SubStagePage { items: SubStageOption[]; totalCount: number; pageNumber: number; pageSize: number; }
 interface SubStageApiDto extends Omit<SubStageOption, 'sequenceOrder'> { defaultOrder?: number | null; }
 export interface FactoryItem { id: string; name: string; code: string; location?: string; isActive: boolean; }
 export interface ProductionLineOption { id: string; factoryId: string; name: string; lineCode?: string; sequenceOrder: number; isActive: boolean; }
@@ -20,6 +21,7 @@ export interface DepartmentItem { departmentId: number; name: string; isActive?:
 export class ManufacturingMasterDataApiService {
   constructor(private readonly http: HttpClient) {}
   mainStages(): Observable<MainStageOption[]> { return this.getItems('/api/main-stages'); } subStages(): Observable<SubStageOption[]> { return this.getSubStageItems('/api/sub-stages'); } productionLines(): Observable<ProductionLineOption[]> { return this.getItems('/api/production-lines'); }
+  searchSubStages(search = '', page = 1, pageSize = 50, isActive = true): Observable<SubStagePage> { return this.get<{ items: SubStageApiDto[]; totalCount: number; pageNumber: number; pageSize: number }>(`/api/sub-stages?isActive=${isActive}&page=${page}&pageSize=${pageSize}&search=${encodeURIComponent(search)}`).pipe(map(result => ({ ...result, items: (result.items ?? []).map(item => this.toSubStageOption(item)) }))); }
   factories(): Observable<FactoryItem[]> { return this.getItems('/api/factories?pageSize=200'); }
   allProductionLines(): Observable<ProductionLineOption[]> { return this.getItems('/api/production-lines?includeInactive=true&pageSize=200'); }
   mainStagesForLine(productionLineId: string): Observable<MainStageOption[]> { return this.getItems(`/api/production-lines/${productionLineId}/main-stages?includeInactive=true&pageSize=200`); }

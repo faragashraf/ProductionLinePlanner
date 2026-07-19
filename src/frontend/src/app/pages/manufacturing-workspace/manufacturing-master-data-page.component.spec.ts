@@ -1,4 +1,4 @@
-import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { ComponentFixture, fakeAsync, TestBed, tick } from '@angular/core/testing';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { of, throwError } from 'rxjs';
 import { ActivatedRoute } from '@angular/router';
@@ -10,8 +10,8 @@ describe('ManufacturingMasterDataPageComponent', () => {
   let api: jasmine.SpyObj<ManufacturingMasterDataApiService>;
 
   beforeEach(async () => {
-    api = jasmine.createSpyObj('ManufacturingMasterDataApiService', ['subStages', 'productionLines', 'mainStages', 'allMainStages', 'allSubStages', 'models', 'createSub', 'updateSub', 'setMainActivation']);
-    api.subStages.and.returnValue(of([])); api.productionLines.and.returnValue(of([])); api.mainStages.and.returnValue(of([])); api.allMainStages.and.returnValue(of([])); api.allSubStages.and.returnValue(of([])); api.models.and.returnValue(of([])); api.createSub.and.returnValue(of({ id: 'sub-1', mainStageId: 'main-1', name: 'Cutting', code: 'CUT', capacity: 10, sequenceOrder: 3, isActive: true })); api.updateSub.and.returnValue(of({ id: 'sub-1', mainStageId: 'main-1', name: 'Cutting', code: 'CUT', capacity: 10, sequenceOrder: 3, isActive: true })); api.setMainActivation.and.returnValue(of({ id: 'main-1', productionLineId: 'line-1', name: 'Main', sequenceOrder: 1, isCritical: false, isActive: true }));
+    api = jasmine.createSpyObj('ManufacturingMasterDataApiService', ['subStages', 'searchSubStages', 'productionLines', 'mainStages', 'allMainStages', 'allSubStages', 'models', 'createSub', 'updateSub', 'setMainActivation']);
+    api.subStages.and.returnValue(of([])); api.searchSubStages.and.returnValue(of({ items: [], totalCount: 0, pageNumber: 1, pageSize: 50 })); api.productionLines.and.returnValue(of([])); api.mainStages.and.returnValue(of([])); api.allMainStages.and.returnValue(of([])); api.allSubStages.and.returnValue(of([])); api.models.and.returnValue(of([])); api.createSub.and.returnValue(of({ id: 'sub-1', mainStageId: 'main-1', name: 'Cutting', code: 'CUT', capacity: 10, sequenceOrder: 3, isActive: true })); api.updateSub.and.returnValue(of({ id: 'sub-1', mainStageId: 'main-1', name: 'Cutting', code: 'CUT', capacity: 10, sequenceOrder: 3, isActive: true })); api.setMainActivation.and.returnValue(of({ id: 'main-1', productionLineId: 'line-1', name: 'Main', sequenceOrder: 1, isCritical: false, isActive: true }));
     await TestBed.configureTestingModule({ declarations: [ManufacturingMasterDataPageComponent], imports: [FormsModule, ReactiveFormsModule], providers: [{ provide: ManufacturingMasterDataApiService, useValue: api }, { provide: ActivatedRoute, useValue: { snapshot: { routeConfig: { path: 'stages' } } } }] }).overrideComponent(ManufacturingMasterDataPageComponent, { set: { template: '' } }).compileComponents();
     const fixture: ComponentFixture<ManufacturingMasterDataPageComponent> = TestBed.createComponent(ManufacturingMasterDataPageComponent);
     component = fixture.componentInstance;
@@ -70,4 +70,28 @@ describe('ManufacturingMasterDataPageComponent', () => {
     expect(component.error).toBe('');
     expect(component.subs.map(item => item.id)).toEqual(['sub-1']);
   });
+
+  it('keeps the debounced stage search alive after one request fails', fakeAsync(() => {
+    component.ngOnInit();
+    api.searchSubStages.and.returnValue(throwError(() => new Error('تعذر البحث.')));
+    component.onModelStageSearch('فشل');
+    tick(250);
+    expect(component.error).toBe('تعذر البحث.');
+
+    api.searchSubStages.and.returnValue(of({ items: [{ id: 'sub-2', mainStageId: 'main-1', name: 'مرحلة', code: 'S2', capacity: 1, sequenceOrder: 1, isActive: true }], totalCount: 1, pageNumber: 1, pageSize: 50 }));
+    component.onModelStageSearch('مرحلة');
+    tick(250);
+
+    expect(component.modelStageOptions.map(item => item.id)).toEqual(['sub-2']);
+    expect(component.error).toBe('');
+  }));
+
+  it('stops pending stage searches when the component is destroyed', fakeAsync(() => {
+    component.ngOnInit();
+    api.searchSubStages.calls.reset();
+    component.onModelStageSearch('لن ينفذ');
+    component.ngOnDestroy();
+    tick(250);
+    expect(api.searchSubStages).not.toHaveBeenCalled();
+  }));
 });
