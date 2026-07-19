@@ -1,54 +1,69 @@
 # Notification Policy Platform — staged production deployment runbook
 
-This runbook is for migration `20260719213301_AddNotificationPolicyPlatform`. It is deliberately schema-first: do **not** enable the new backend feature until the additive schema has been applied and verified. This task did not connect to, inspect, or modify a production database.
+This runbook covers migration `20260719213301_AddNotificationPolicyPlatform` and the platform-wide, opt-in EF Core startup migration runner. This repository task did not connect to, inspect, or modify a production database.
 
-## 1. Pre-deployment backup and restore check
+The notification migration is additive: it creates `NotificationPolicies` and `NotificationPolicyRecipientRules`, adds nullable `Notifications.EventKey`, and adds nullable/defaulted `Notifications.Severity`. It does not send notifications, and catalog reconciliation creates only disabled policies.
+
+## Startup migration configuration
+
+| Configuration key | Default in committed configuration | Purpose |
+| --- | --- | --- |
+| `Database:ApplyMigrationsOnStartup` | `false` | Enables the explicitly controlled startup path. |
+| `Database:MigrationCommandTimeoutSeconds` | `120` | SQL command timeout for the migration operations; valid range is 1–3600. |
+
+Equivalent environment variables are `Database__ApplyMigrationsOnStartup` and `Database__MigrationCommandTimeoutSeconds`. Production configuration commits set `ApplyMigrationsOnStartup` to `false`. Do not put connection strings or other secrets in this document, source control, or deployment logs.
+
+The startup runner checks pending migrations before calling `Database.MigrateAsync`. When disabled it logs that automatic execution is disabled and continues normally. When enabled with no pending migration it logs that result and continues. If inspecting or applying migrations fails, it logs a non-sensitive failure message and rethrows so the backend does not start against a partially migrated schema.
+
+Auto-apply is only for migrations that have been reviewed and approved before deployment. Do not publish a future destructive migration with `Database:ApplyMigrationsOnStartup=true`; this is a deployment policy, not a general SQL safety parser.
+
+## Path A — recommended controlled deployment
 
 1. Have the database owner create a named, time-stamped production backup according to the production backup policy.
-2. Restore that backup to an isolated non-production instance and verify application tables and `__EFMigrationsHistory` can be read. Do not test a restore against the production database.
-3. Record the backup identifier, restore test time, SQL Server version, database compatibility level, free space, and change approver in the deployment ticket.
+2. Restore that backup to an isolated non-production instance and verify application tables and `__EFMigrationsHistory` can be read. Record the backup ID, restore verification time, SQL Server version, compatibility level, free space, and change approver in the deployment ticket.
+3. Use an anonymized clone or staging database with the same migration history. Generate the reviewed SQL without a production connection string:
 
-## 2. Clone/staging dry run
+   ```bash
+   cd /Users/ashraffarag/Repo/ProductionLinePlanner-notification-policy
+   ASPNETCORE_ENVIRONMENT=Production \
+   ConnectionStrings__AppDatabase='Server=(localdb)\\MSSQLLocalDB;Database=NotificationPolicyDesignTime;Trusted_Connection=True;TrustServerCertificate=True' \
+   dotnet tool run dotnet-ef migrations script 20260716015121_AllowWorkerMultiStageParticipation 20260719213301_AddNotificationPolicyPlatform --idempotent \
+     --context AppDbContext \
+     --project src/backend/ProductionLinePlanner.Infrastructure/ProductionLinePlanner.Infrastructure.csproj \
+     --startup-project src/backend/ProductionLinePlanner.Api/ProductionLinePlanner.Api.csproj \
+     --output database/sql2016/018-add-notification-policy-platform.sql
+   ```
 
-1. Use an anonymized clone or staging database with the same migration history as production.
-2. Generate/review the SQL without any production connection string:
+4. Review the script and dry run it on staging. Stop for review if it contains `DROP`, `TRUNCATE`, unqualified `DELETE`, a destructive `ALTER`, a table rebuild, or an unexpected migration range. This reviewed script should contain only the additive notification changes, constraints, indexes, and migration-history insert.
+5. Have the DBA apply the approved script manually through the production change process. Do not use a developer workstation or an application instance for this recommended path. Creating indexes and constraints can take short schema-modification locks, so use a low-traffic window.
+6. Deploy the backend with `Database:ApplyMigrationsOnStartup=false` (the committed default). Verify the old application can still read/write its existing inbox, then smoke test the new policy APIs: known events appear disabled; unknown events and unknown tokens are rejected; stale row versions return HTTP 409.
+7. Deploy the matching frontend. Confirm the Arabic RTL Studio is visible only to `notifications.policies.manage` and users without that permission cannot reach the route.
+8. Keep every policy disabled. Enable a low-risk test policy only after a separately approved business-event delivery integration exists. That delivery integration is not part of this platform.
 
-```bash
-cd /Users/ashraffarag/Repo/ProductionLinePlanner-notification-policy
-ASPNETCORE_ENVIRONMENT=Production \
-ConnectionStrings__AppDatabase='Server=(localdb)\\MSSQLLocalDB;Database=NotificationPolicyDesignTime;Trusted_Connection=True;TrustServerCertificate=True' \
-dotnet tool run dotnet-ef migrations script 20260716015121_AllowWorkerMultiStageParticipation 20260719213301_AddNotificationPolicyPlatform --idempotent \
-  --context AppDbContext \
-  --project src/backend/ProductionLinePlanner.Infrastructure/ProductionLinePlanner.Infrastructure.csproj \
-  --startup-project src/backend/ProductionLinePlanner.Api/ProductionLinePlanner.Api.csproj \
-  --output database/sql2016/018-add-notification-policy-platform.sql
-```
+## Path B — controlled automatic startup migration
 
-3. Review `database/sql2016/018-add-notification-policy-platform.sql`: it must contain only the two new tables, nullable `Notifications.EventKey`, nullable/defaulted `Notifications.Severity`, indexes, constraints, foreign keys, and migration-history insert. Stop if a reviewed script contains `DROP`, `TRUNCATE`, unqualified `DELETE`, destructive `ALTER`, table rebuild, or an unexpected migration range.
-4. Apply the reviewed script to staging using the approved DBA mechanism, then run the existing deployed application against it. It must continue to read/write its current inbox because it ignores the new nullable fields and tables.
+Use this path only when the migration has received the same backup, restore, staging-clone, SQL-review, and change approval as Path A.
 
-## 3. Production schema application
+1. Create and verify the backup and restore as in Path A.
+2. Drain or stop all but one backend instance. **Never start multiple backend instances with automatic migration enabled at the same time.** `Database.MigrateAsync` alone is not a distributed deployment lock.
+3. On the one deployment instance only, set the temporary environment variables:
 
-1. Schedule a low-traffic window: creating indexes/constraints can take short schema-modification locks even though this migration is additive.
-2. The DBA must run the already reviewed, idempotent script through the approved production change process. Do not use `dotnet ef database update`, application startup, a developer workstation, or this repository task to apply it to production.
-3. Verify the new migration history row, `NotificationPolicies`, `NotificationPolicyRecipientRules`, the nullable `Notifications.EventKey`, and the nullable/defaulted `Notifications.Severity`. Verify existing inbox rows still load through the old application.
+   ```text
+   Database__ApplyMigrationsOnStartup=true
+   Database__MigrationCommandTimeoutSeconds=120
+   ```
 
-## 4. Backend and API smoke test
+4. Start that backend instance. It logs the count and reviewed IDs of pending migrations, then logs success after the migration completes. If it fails, startup fails; do not start additional instances until the cause is resolved through the approved change process.
+5. Confirm success from the backend logs and `__EFMigrationsHistory`, and verify the expected notification tables/columns. Do not treat an application log alone as the database verification.
+6. Set `Database__ApplyMigrationsOnStartup=false` again, or remove the temporary override so the committed `false` default applies. Restart the deployment instance with automatic migration disabled.
+7. Start the remaining backend instances, then run the API smoke checks from Path A.
+8. Deploy the frontend and keep notification policies disabled until explicit activation is approved.
 
-1. Deploy the backend that contains this feature only after the schema verification succeeds. Startup reconciliation creates any missing static catalog rows as disabled; it does not dispatch notifications.
-2. With an account granted only `notifications.policies.manage`, call `GET /api/admin/notification-policies` and verify the code-catalog events appear disabled.
-3. Call `GET /api/admin/notification-policies/{eventKey}` for one known event; verify templates, allowed tokens, and a nonempty row version.
-4. Verify an unknown event key is rejected, a bad token is rejected, and a stale row version returns HTTP 409. Do not activate any production policy during the initial API smoke test.
+## Monitoring and recovery
 
-## 5. Frontend deployment and gradual activation
+Monitor backend startup errors, database lock duration, API 4xx/409 rates, audit records, and inbox/SignalR error dashboards. Set rollback criteria before the window: failed schema verification, old-application incompatibility, excessive locking/error rates, or unexpected notification dispatch.
 
-1. Deploy the matching frontend after backend smoke tests pass.
-2. Verify the Arabic RTL Notification Policy Studio is visible only to `notifications.policies.manage`; confirm users without it do not see or reach the route.
-3. Keep every policy disabled. Enable one low-risk test policy only after a separate business-event delivery integration is approved and released; that integration is not part of this change.
-4. Monitor backend errors, database lock duration, API 4xx/409 rates, audit records, and inbox/SignalR error dashboards. Set rollback criteria before the window: unexpected old-app incompatibility, failed schema validation, elevated database lock/error rate, or unexpected notification dispatch.
-
-## Rollback principles
-
-- Before any new-policy data is used, a DBA may roll back migration `20260719213301_AddNotificationPolicyPlatform` only after confirming no policy/rule data exists and the Down script has been reviewed. Its `Down` drops the new tables and new inbox columns, so it is destructive by definition.
-- After policy/rule data exists, roll back the application first and leave the additive tables/columns in place. This is the normal safe recovery path.
-- Restore the verified database backup only when required by the approved incident process. Dropping the new tables is not the primary recovery plan.
+- There is no automatic backup and no automatic migration rollback.
+- Before new-policy data is used, a DBA may roll back migration `20260719213301_AddNotificationPolicyPlatform` only after confirming no policy/rule data exists and manually reviewing its destructive `Down` operations.
+- After policy/rule data exists, the normal safe recovery is to roll back the application while retaining the additive schema. Restore the verified database backup only when required by the approved incident process.
+- Do not use automatic table drops as the primary recovery plan.
