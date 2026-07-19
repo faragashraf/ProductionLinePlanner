@@ -4,14 +4,15 @@ import { Observable, Subject, catchError, finalize, forkJoin, of, takeUntil } fr
 import { FactoryItem, ManufacturingMasterDataApiService, ModelStageItem, ProductModelItem, ProductionLineOption } from '../../core/services/manufacturing-master-data-api.service';
 import { ProductionOrder, ProductionCostRecordingApiService, WorkerOption } from '../../core/services/production-cost-recording-api.service';
 import { ProductionFinancialReportApiService } from '../../core/services/production-financial-report-api.service';
-import { ProductionQuantitiesReportApiService, QuantitiesReportRow, QuantitiesReportSortBy, QuantitiesReportView } from '../../core/services/production-quantities-report-api.service';
+import { ProductionQuantitiesReportApiService, QuantitiesReportSortBy, QuantitiesReportView } from '../../core/services/production-quantities-report-api.service';
 import { PERMISSIONS } from '../../core/config/permission-identifiers';
 import { PermissionService } from '../../core/services/permission.service';
-import { ReportPresentationMode, ReportsWorkspaceFilters, ReportsWorkspaceResult, ReportsWorkspaceViewOption } from './reports-workspace.models';
+import { compensationModeLabel, financialStatusLabel, formatEgp, formatPercentage, isFinancialRow } from './reports-financial-presentation';
+import { ReportPresentationMode, ReportsWorkspaceFilters, ReportsWorkspaceResult, ReportsWorkspaceRow, ReportsWorkspaceViewOption } from './reports-workspace.models';
 import { ReportsWorkspaceStateService } from './reports-workspace-state.service';
 
 interface ReportsColumn {
-  key: 'stage' | 'worker' | 'date' | 'status' | 'produced' | 'accepted' | 'rejected' | 'allocated' | 'records' | 'stages' | 'workers';
+  key: 'stage' | 'worker' | 'date' | 'status' | 'produced' | 'accepted' | 'rejected' | 'allocated' | 'records' | 'stages' | 'workers' | 'stageCost' | 'earnings' | 'unitPrice' | 'percentage' | 'compensation' | 'financialStatus';
   label: string;
   sortBy?: QuantitiesReportSortBy;
   numeric?: boolean;
@@ -78,7 +79,7 @@ export class ReportsWorkspacePageComponent implements OnInit, OnDestroy {
     this.destroy$.complete();
   }
 
-  get rows(): QuantitiesReportRow[] {
+  get rows(): ReportsWorkspaceRow[] {
     return this.result?.rows ?? [];
   }
 
@@ -94,7 +95,7 @@ export class ReportsWorkspacePageComponent implements OnInit, OnDestroy {
     if (this.modeMessage) return this.modeMessage;
     if (!this.canUseFinancialMode) return 'تحتاج صلاحية عرض القيم المالية لتفعيل هذا الوضع.';
     return this.isFinancialMode
-      ? 'وضع القيم المالية مرتبط الآن بالعقد الآمن؛ ستُضاف امتدادات العرض في الجولة التالية.'
+      ? 'يعرض قيم المرحلة وأرباح العمال من اللقطات المالية المحفوظة ضمن الفلاتر الحالية.'
       : 'يعرض هذا الوضع الكميات التشغيلية فقط دون قيم مالية.';
   }
 
@@ -107,14 +108,16 @@ export class ReportsWorkspacePageComponent implements OnInit, OnDestroy {
           { key: 'workers', label: 'العمال', sortBy: 'WorkerCount', numeric: true },
           { key: 'produced', label: 'كمية المرحلة', sortBy: 'ProducedQuantity', numeric: true },
           { key: 'accepted', label: 'المقبول', sortBy: 'AcceptedQuantity', numeric: true },
-          { key: 'rejected', label: 'المرفوض', sortBy: 'RejectedQuantity', numeric: true }
+          { key: 'rejected', label: 'المرفوض', sortBy: 'RejectedQuantity', numeric: true },
+          ...this.financialColumns('ByStage')
         ];
       case 'ByWorker':
         return [
           { key: 'worker', label: 'العامل', sortBy: 'WorkerCode' },
           { key: 'stages', label: 'المراحل', sortBy: 'StageCount', numeric: true },
           { key: 'records', label: 'السجلات', sortBy: 'RecordCount', numeric: true },
-          { key: 'allocated', label: 'حصة العامل', sortBy: 'WorkerAllocatedQuantity', numeric: true }
+          { key: 'allocated', label: 'حصة العامل', sortBy: 'WorkerAllocatedQuantity', numeric: true },
+          ...this.financialColumns('ByWorker')
         ];
       case 'WorkerStages':
       case 'StageWorkers':
@@ -123,7 +126,8 @@ export class ReportsWorkspacePageComponent implements OnInit, OnDestroy {
           { key: 'worker', label: 'العامل', sortBy: 'WorkerCode' },
           { key: 'date', label: 'التاريخ', sortBy: 'ProductionDate' },
           { key: 'allocated', label: 'حصة العامل', sortBy: 'WorkerAllocatedQuantity', numeric: true },
-          { key: 'produced', label: 'كمية المرحلة', numeric: true }
+          { key: 'produced', label: 'كمية المرحلة', numeric: true },
+          ...this.financialColumns('Participation')
         ];
       default:
         return [
@@ -133,7 +137,8 @@ export class ReportsWorkspacePageComponent implements OnInit, OnDestroy {
           { key: 'produced', label: 'كمية المرحلة', sortBy: 'ProducedQuantity', numeric: true },
           { key: 'accepted', label: 'المقبول', sortBy: 'AcceptedQuantity', numeric: true },
           { key: 'rejected', label: 'المرفوض', sortBy: 'RejectedQuantity', numeric: true },
-          { key: 'workers', label: 'العمال', numeric: true }
+          { key: 'workers', label: 'العمال', numeric: true },
+          ...this.financialColumns('Details')
         ];
     }
   }
@@ -220,7 +225,7 @@ export class ReportsWorkspacePageComponent implements OnInit, OnDestroy {
     this.loadReport();
   }
 
-  rowValue(row: QuantitiesReportRow, column: ReportsColumn['key']): string {
+  rowValue(row: ReportsWorkspaceRow, column: ReportsColumn['key']): string {
     switch (column) {
       case 'stage': return [row.stageCode, row.stageName].filter(Boolean).join(' · ') || '—';
       case 'worker': return [row.workerCode, row.workerName].filter(Boolean).join(' · ') || '—';
@@ -233,10 +238,16 @@ export class ReportsWorkspacePageComponent implements OnInit, OnDestroy {
       case 'records': return this.quantity(row.recordCount);
       case 'stages': return this.quantity(row.stageCount);
       case 'workers': return this.quantity(row.workerCount);
+      case 'stageCost': return isFinancialRow(row) ? formatEgp(row.stageProductionCost) : '—';
+      case 'earnings': return isFinancialRow(row) ? formatEgp(row.productionEarning) : '—';
+      case 'unitPrice': return isFinancialRow(row) ? formatEgp(row.stageUnitPrice) : '—';
+      case 'percentage': return isFinancialRow(row) ? formatPercentage(row.workerPercentage) : '—';
+      case 'compensation': return isFinancialRow(row) ? compensationModeLabel(row.compensationMode) : '—';
+      case 'financialStatus': return isFinancialRow(row) ? financialStatusLabel(row.financialDataStatus) : '—';
     }
   }
 
-  rowKey(row: QuantitiesReportRow): string {
+  rowKey(row: ReportsWorkspaceRow): string {
     return row.source.stageProductionWorkerAllocationId || row.source.stageProductionRecordId || row.source.productModelStageId || row.source.workerId || `${row.stageCode}-${row.workerCode}`;
   }
 
@@ -246,6 +257,38 @@ export class ReportsWorkspacePageComponent implements OnInit, OnDestroy {
 
   statusLabel(status: string): string {
     return status === 'Approved' ? 'معتمد' : status === 'Draft' ? 'مسودة' : status === 'Cancelled' ? 'ملغى' : status;
+  }
+
+  private financialColumns(view: 'Details' | 'ByStage' | 'ByWorker' | 'Participation'): readonly ReportsColumn[] {
+    if (!this.isFinancialMode) return [];
+
+    switch (view) {
+      case 'Details':
+        return [
+          { key: 'stageCost', label: 'تكلفة المرحلة', numeric: true },
+          { key: 'unitPrice', label: 'سعر الوحدة', numeric: true },
+          { key: 'compensation', label: 'طريقة الاحتساب' },
+          { key: 'financialStatus', label: 'حالة البيانات المالية' }
+        ];
+      case 'ByStage':
+        return [
+          { key: 'stageCost', label: 'قيمة المرحلة', numeric: true },
+          { key: 'financialStatus', label: 'حالة البيانات المالية' }
+        ];
+      case 'ByWorker':
+        return [
+          { key: 'earnings', label: 'أرباح الإنتاج', numeric: true },
+          { key: 'financialStatus', label: 'حالة البيانات المالية' }
+        ];
+      case 'Participation':
+        return [
+          { key: 'earnings', label: 'أرباح الإنتاج', numeric: true },
+          { key: 'percentage', label: 'نسبة التوزيع', numeric: true },
+          { key: 'unitPrice', label: 'سعر الوحدة', numeric: true },
+          { key: 'compensation', label: 'طريقة الاحتساب' },
+          { key: 'financialStatus', label: 'حالة البيانات المالية' }
+        ];
+    }
   }
 
   private loadLookups(): void {

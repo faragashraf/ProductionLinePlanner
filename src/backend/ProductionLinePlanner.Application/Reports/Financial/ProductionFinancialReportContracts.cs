@@ -46,6 +46,8 @@ public sealed record FinancialReportRowDto(
     int WorkerCount,
     decimal? StageProductionCost,
     decimal? ProductionEarning,
+    decimal? StageUnitPrice,
+    decimal? WorkerPercentage,
     string? CompensationMode,
     string FinancialDataStatus);
 

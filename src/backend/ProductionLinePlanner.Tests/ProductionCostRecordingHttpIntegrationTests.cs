@@ -304,6 +304,8 @@ public sealed class ProductionCostRecordingHttpIntegrationTests
         {
             Assert.Equal("Complete", row.GetProperty("financialDataStatus").GetString());
             Assert.Equal(125m, row.GetProperty("productionEarning").GetDecimal());
+            Assert.Equal(50m, row.GetProperty("workerPercentage").GetDecimal());
+            Assert.True(row.GetProperty("stageUnitPrice").GetDecimal() > 0m);
         });
     }
 

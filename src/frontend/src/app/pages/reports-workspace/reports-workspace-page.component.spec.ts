@@ -68,6 +68,8 @@ describe('ReportsWorkspacePageComponent', () => {
       ...row,
       stageProductionCost: 250,
       productionEarning: null,
+      stageUnitPrice: 0.52,
+      workerPercentage: null,
       compensationMode: 'SharedPercentage',
       financialDataStatus: 'Complete'
     }))
@@ -169,6 +171,71 @@ describe('ReportsWorkspacePageComponent', () => {
     }));
     expect(localStorage.getItem('plp.reports-workspace.filters.v1')).toContain('QuantitiesAndFinancials');
     expect(component.result?.summary.totalPhysicalProducedQuantity).toBe(480);
+    expect(component.columns.map(column => column.label)).toContain('تكلفة المرحلة');
+    expect(component.rowValue(component.rows[0], 'stageCost')).toContain('EGP');
+    expect(component.rowValue(component.rows[0], 'compensation')).toBe('توزيع نسبي');
+  });
+
+  it('maps financial values by report grain without relabelling worker participation as physical production', () => {
+    component.ngOnInit();
+    component.applyFilters();
+    component.changePresentationMode('QuantitiesAndFinancials');
+    component.changeView('ByWorker');
+    component.result = {
+      ...financialResult,
+      view: 'ByWorker',
+      summary: { ...financialResult.summary, totalPhysicalProducedQuantity: 500, totalProductionEarnings: 175.0005 },
+      rows: [{
+        ...financialResult.rows[0],
+        source: { sourceType: 'Worker', workerId: 'worker-1' },
+        workerCode: 'W-01', workerName: 'عامل التشغيل', producedQuantity: null, acceptedQuantity: null, rejectedQuantity: null,
+        workerAllocatedQuantity: 166.667, recordCount: 1, stageCount: 1, workerCount: 1,
+        stageProductionCost: null, productionEarning: 58.3335, stageUnitPrice: null, workerPercentage: null,
+        compensationMode: 'SharedPercentage', financialDataStatus: 'Complete'
+      }]
+    };
+
+    expect(component.result.summary.totalPhysicalProducedQuantity).toBe(500);
+    expect(component.columns.map(column => column.label)).toContain('أرباح الإنتاج');
+    expect(component.columns.map(column => column.label)).not.toContain('إجمالي الإنتاج');
+    expect(component.rowValue(component.rows[0], 'allocated')).toContain('١٦٦٫٦٦٧');
+    expect(component.rowValue(component.rows[0], 'earnings')).toContain('EGP');
+
+    component.changeView('StageWorkers');
+    component.result = {
+      ...financialResult,
+      view: 'StageWorkers',
+      summary: { ...financialResult.summary, totalPhysicalProducedQuantity: 500, totalProductionEarnings: 175.0005 },
+      rows: [{
+        ...component.rows[0],
+        source: { sourceType: 'StageProductionWorkerAllocation', stageProductionRecordId: 'record-1', stageProductionWorkerAllocationId: 'allocation-1', workerId: 'worker-1' },
+        stageCode: 'ST-01', stageName: 'مرحلة التجميع', producedQuantity: 500, acceptedQuantity: 500,
+        workerAllocatedQuantity: 166.667, stageProductionCost: null, productionEarning: 58.3335, stageUnitPrice: 0.35, workerPercentage: 33.3333,
+        compensationMode: 'SharedPercentage', financialDataStatus: 'Complete'
+      }]
+    };
+
+    expect(component.result!.summary.totalPhysicalProducedQuantity).toBe(500);
+    expect(component.columns.map(column => column.label)).toContain('أرباح الإنتاج');
+    expect(component.columns.map(column => column.label)).toContain('نسبة التوزيع');
+    expect(component.rowValue(component.rows[0], 'produced')).toBe('٥٠٠');
+    expect(component.rowValue(component.rows[0], 'earnings')).toContain('EGP');
+    expect(component.rowValue(component.rows[0], 'percentage')).toBe('٣٣٫٣٣٪');
+    expect(component.rowValue(component.rows[0], 'unitPrice')).toContain('EGP');
+  });
+
+  it('keeps missing financial amounts explicit instead of rendering zero, NaN, or undefined', () => {
+    component.ngOnInit();
+    component.applyFilters();
+    component.changePresentationMode('QuantitiesAndFinancials');
+    component.result = {
+      ...financialResult,
+      summary: { ...financialResult.summary, totalProductionEarnings: null, totalStageProductionCost: null, financialDataStatus: 'Incomplete', incompleteFinancialRecordCount: 1 },
+      rows: [{ ...financialResult.rows[0], stageProductionCost: null, productionEarning: null, financialDataStatus: 'Incomplete' }]
+    };
+
+    expect(component.rowValue(component.rows[0], 'stageCost')).toBe('—');
+    expect(component.rowValue(component.rows[0], 'financialStatus')).toBe('بيانات مالية غير مكتملة');
   });
 
   it('keeps financial mode disabled and never requests the financial API without permission', () => {

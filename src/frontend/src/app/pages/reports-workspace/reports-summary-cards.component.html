@@ -1,6 +1,14 @@
-<section class="reports-summary-cards" aria-label="ملخص تقرير الكميات">
-  <plp-statistic-card title="إجمالي إنتاج التشغيل" [value]="summary ? quantity(summary.totalPhysicalProducedQuantity) : '—'" [helper]="summary ? 'يُحتسب مرة واحدة لكل تشغيل يومي ولا يتكرر بالمراحل أو العمال' : 'بانتظار تحميل النطاق'" icon="pi pi-box"></plp-statistic-card>
-  <plp-statistic-card title="عدد العمال" [value]="summary ? quantity(summary.workerCount) : '—'" [helper]="summary ? 'عمال مميزون في السجلات المطابقة' : '—'" icon="pi pi-users"></plp-statistic-card>
-  <plp-statistic-card title="عدد المراحل" [value]="summary ? quantity(summary.stageCount) : '—'" [helper]="summary ? 'مراحل موديل مميزة' : '—'" icon="pi pi-sitemap"></plp-statistic-card>
-  <plp-statistic-card title="عدد السجلات" [value]="summary ? quantity(summary.recordCount) : '—'" [helper]="summary ? 'سجلات إنتاج المرحلة' : '—'" icon="pi pi-list-check"></plp-statistic-card>
+<section class="reports-summary-cards" [attr.aria-label]="financialMode ? 'ملخص تقرير القيم المالية' : 'ملخص تقرير الكميات'">
+  <ng-container *ngIf="financialMode && financialSummary; else quantitiesSummary">
+    <plp-statistic-card title="إجمالي إنتاج التشغيل" [value]="quantity(financialSummary.totalPhysicalProducedQuantity)" helper="يُحتسب مرة واحدة لكل تشغيل يومي ولا يتكرر بالمراحل أو العمال" icon="pi pi-box"></plp-statistic-card>
+    <plp-statistic-card title="إجمالي قيمة المراحل" [value]="money(financialSummary.totalStageProductionCost)" [helper]="financialStatus(financialSummary.financialDataStatus)" icon="pi pi-wallet"></plp-statistic-card>
+    <plp-statistic-card title="إجمالي أرباح الإنتاج" [value]="money(financialSummary.totalProductionEarnings)" [helper]="financialSummary.incompleteFinancialRecordCount ? 'توجد سجلات مالية تحتاج استكمالًا أو مراجعة' : 'مجموع أرباح التوزيعات الفعلية'" icon="pi pi-money-bill"></plp-statistic-card>
+    <plp-statistic-card title="متوسط أرباح العامل" [value]="money(financialSummary.averageProductionEarningPerWorker)" [helper]="financialSummary.workerCount ? 'على العمال المميزين في النطاق' : 'لا توجد مشاركات عمال'" icon="pi pi-users"></plp-statistic-card>
+  </ng-container>
+  <ng-template #quantitiesSummary>
+    <plp-statistic-card title="إجمالي إنتاج التشغيل" [value]="summary ? quantity(summary.totalPhysicalProducedQuantity) : '—'" [helper]="summary ? 'يُحتسب مرة واحدة لكل تشغيل يومي ولا يتكرر بالمراحل أو العمال' : 'بانتظار تحميل النطاق'" icon="pi pi-box"></plp-statistic-card>
+    <plp-statistic-card title="عدد العمال" [value]="summary ? quantity(summary.workerCount) : '—'" [helper]="summary ? 'عمال مميزون في السجلات المطابقة' : '—'" icon="pi pi-users"></plp-statistic-card>
+    <plp-statistic-card title="عدد المراحل" [value]="summary ? quantity(summary.stageCount) : '—'" [helper]="summary ? 'مراحل موديل مميزة' : '—'" icon="pi pi-sitemap"></plp-statistic-card>
+    <plp-statistic-card title="عدد السجلات" [value]="summary ? quantity(summary.recordCount) : '—'" [helper]="summary ? 'سجلات إنتاج المرحلة' : '—'" icon="pi pi-list-check"></plp-statistic-card>
+  </ng-template>
 </section>

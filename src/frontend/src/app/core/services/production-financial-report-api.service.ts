@@ -28,6 +28,8 @@ export interface FinancialReportSummary extends Pick<QuantitiesReportSummary,
 export interface FinancialReportRow extends QuantitiesReportRow {
   stageProductionCost: number | null;
   productionEarning: number | null;
+  stageUnitPrice: number | null;
+  workerPercentage: number | null;
   compensationMode: string | null;
   financialDataStatus: 'Complete' | 'Incomplete' | 'ReviewRequired';
 }

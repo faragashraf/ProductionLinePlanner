@@ -3,7 +3,7 @@
     <div>
       <p class="reports-workspace__eyebrow">مركز التقارير التشغيلية</p>
       <h1>تقارير الإنتاج</h1>
-      <p>{{ isFinancialMode ? 'وضع القيم المالية مفعّل ضمن نفس نطاق الفلاتر، مع الحفاظ على بنية النتائج الحالية.' : 'راجع كميات سجلات المراحل ومشاركة العاملين من مصدر واحد، دون قيم مالية في هذا الوضع.' }}</p>
+      <p>{{ isFinancialMode ? 'وضع القيم المالية مفعّل ضمن نفس نطاق الفلاتر، ويعرض قيم المراحل وأرباح العمال من اللقطات المحفوظة.' : 'راجع كميات سجلات المراحل ومشاركة العاملين من مصدر واحد، دون قيم مالية في هذا الوضع.' }}</p>
     </div>
     <div class="reports-workspace__presentation" aria-label="وضع عرض التقرير">
       <div class="reports-workspace__mode-selector" role="group" aria-label="اختيار وضع عرض التقرير">
@@ -53,7 +53,7 @@
     (reset)="resetFilters()"
   ></app-reports-filter-bar>
 
-  <app-reports-summary-cards *ngIf="result && loadState !== 'error' && loadState !== 'unauthorized'" [summary]="result.summary" [loading]="loading"></app-reports-summary-cards>
+  <app-reports-summary-cards *ngIf="result && loadState !== 'error' && loadState !== 'unauthorized'" [summary]="result.summary" [financialMode]="isFinancialMode" [loading]="loading"></app-reports-summary-cards>
 
   <section class="reports-workspace__results" aria-labelledby="reports-results-title">
     <div class="reports-workspace__results-heading">

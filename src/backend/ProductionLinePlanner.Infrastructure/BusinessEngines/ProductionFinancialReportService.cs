@@ -38,7 +38,7 @@ public sealed class ProductionFinancialReportService(AppDbContext db) : IProduct
                 record.SnapshotFactoryCode, record.SnapshotFactoryName, record.SnapshotProductionLineCode, record.SnapshotProductionLineName,
                 record.SnapshotProductModelCode, record.SnapshotProductModelName, record.SnapshotMainStageName,
                 record.SnapshotStageCode, record.SnapshotStageName, record.ProductionOrder!.OrderNumber,
-                record.ProductionOrder.SourceReference, record.TotalWorkerEarnings, record.SnapshotCompensationMode))
+                record.ProductionOrder.SourceReference, record.TotalWorkerEarnings, record.SnapshotPiecePrice, record.SnapshotCompensationMode))
             .ToArrayAsync(cancellationToken);
 
         var recordIds = recordData.Select(record => record.RecordId).ToArray();
@@ -50,7 +50,7 @@ public sealed class ProductionFinancialReportService(AppDbContext db) : IProduct
                 .Select(allocation => new FinancialAllocationData(
                     allocation.Id, allocation.StageProductionRecordId, allocation.WorkerId,
                     allocation.SnapshotWorkerCode, allocation.SnapshotWorkerName,
-                    allocation.EquivalentQuantity, allocation.CalculatedEarning))
+                    allocation.Percentage, allocation.EquivalentQuantity, allocation.CalculatedEarning))
                 .ToArrayAsync(cancellationToken);
 
         var allocationsByRecord = allAllocations
@@ -148,7 +148,7 @@ public sealed class ProductionFinancialReportService(AppDbContext db) : IProduct
             new ReportSourceReferenceDto("StageProductionRecord", record.RecordId, null, record.ProductionOrderId, record.ProductModelStageId, null),
             record, null, null, record.ProducedQuantity, record.AcceptedQuantity, record.RejectedQuantity, null,
             1, 1, record.Allocations.Select(allocation => allocation.WorkerId).Distinct().Count(),
-            amount, amount, record.CompensationMode.ToString(), financialStatus);
+            amount, amount, record.SnapshotPiecePrice, null, record.CompensationMode.ToString(), financialStatus);
     }
 
     private static FinancialReportRowDto ToStageRow(IGrouping<Guid, FinancialRecordData> group)
@@ -161,7 +161,7 @@ public sealed class ProductionFinancialReportService(AppDbContext db) : IProduct
             new ReportSourceReferenceDto("ProductModelStage", null, null, null, first.ProductModelStageId, null),
             first, null, null, records.Sum(record => record.ProducedQuantity), records.Sum(record => record.AcceptedQuantity), records.Sum(record => record.RejectedQuantity), null,
             records.Length, 1, records.SelectMany(record => record.Allocations).Select(allocation => allocation.WorkerId).Distinct().Count(),
-            amount, amount, ResolveCompensationMode(records), financialStatus);
+            amount, amount, null, null, ResolveCompensationMode(records), financialStatus);
     }
 
     private static FinancialReportRowDto ToWorkerRow(IGrouping<Guid, Participation> group)
@@ -177,7 +177,7 @@ public sealed class ProductionFinancialReportService(AppDbContext db) : IProduct
             participations.Select(participation => participation.Record.ProductModelStageId).Distinct().Count(),
             1, null,
             financialStatus == Complete ? participations.Sum(participation => participation.Allocation.CalculatedEarning) : null,
-            ResolveCompensationMode(participations.Select(participation => participation.Record)), financialStatus);
+            null, null, ResolveCompensationMode(participations.Select(participation => participation.Record)), financialStatus);
     }
 
     private static FinancialReportRowDto ToParticipationRow(Participation participation)
@@ -195,6 +195,7 @@ public sealed class ProductionFinancialReportService(AppDbContext db) : IProduct
             participation.Record.ProducedQuantity, participation.Record.AcceptedQuantity, participation.Record.RejectedQuantity,
             participation.Allocation.EquivalentQuantity, 1, 1, 1, null,
             financialStatus == Complete ? participation.Allocation.CalculatedEarning : null,
+            participation.Record.SnapshotPiecePrice, participation.Allocation.Percentage,
             participation.Record.CompensationMode.ToString(), financialStatus);
     }
 
@@ -212,6 +213,8 @@ public sealed class ProductionFinancialReportService(AppDbContext db) : IProduct
         int workerCount,
         decimal? stageProductionCost,
         decimal? productionEarning,
+        decimal? stageUnitPrice,
+        decimal? workerPercentage,
         string? compensationMode,
         string financialDataStatus) =>
         new(
@@ -239,6 +242,8 @@ public sealed class ProductionFinancialReportService(AppDbContext db) : IProduct
             workerCount,
             stageProductionCost,
             productionEarning,
+            stageUnitPrice,
+            workerPercentage,
             compensationMode,
             financialDataStatus);
 
@@ -341,6 +346,7 @@ public sealed class ProductionFinancialReportService(AppDbContext db) : IProduct
         string ProductionOrderNumber,
         string? ProductionOrderSourceReference,
         decimal TotalWorkerEarnings,
+        decimal SnapshotPiecePrice,
         CompensationMode CompensationMode)
     {
         public IReadOnlyCollection<FinancialAllocationData> Allocations { get; init; } = [];
@@ -354,6 +360,7 @@ public sealed class ProductionFinancialReportService(AppDbContext db) : IProduct
         Guid WorkerId,
         string WorkerCode,
         string WorkerName,
+        decimal? Percentage,
         decimal EquivalentQuantity,
         decimal CalculatedEarning);
 
