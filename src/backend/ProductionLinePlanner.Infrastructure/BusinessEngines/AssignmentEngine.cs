@@ -24,6 +24,13 @@ public sealed class AssignmentEngine : IAssignmentEngine
     private const string BulkStageSelectionRemovalReason = "إزالة من تحديد عمال المرحلة الجماعي";
     private const int MaxReasonLength = 500;
 
+    // Historical temporary-assignment records remain readable, but no new
+    // non-permanent movement is available from the active application flow.
+    private static bool NonPermanentAssignmentsAreDisabled => true;
+    private static Error NonPermanentAssignmentsDisabledError => new(
+        "FeatureDisabled",
+        "التسكين غير الدائم متوقف حاليًا. استخدم التسكين الدائم فقط.");
+
     private readonly AppDbContext _dbContext;
     private readonly IAuditEngine _auditEngine;
     private readonly IAssignmentNotificationDispatcher? _assignmentNotificationDispatcher;
@@ -122,25 +129,6 @@ public sealed class AssignmentEngine : IAssignmentEngine
             .Select(x => new { x.WorkerId, x.AssignedAt, x.Id, x.SubStageId })
             .ToListAsync(cancellationToken);
 
-        var activeTemporaryAssignments = await _dbContext.WorkerTemporaryAssignments
-            .AsNoTracking()
-            .Where(x => uniqueWorkerIds.Contains(x.WorkerId)
-                        && x.StartAtUtc <= asOfUtc
-                        && x.EndAtUtc > asOfUtc
-                        && (x.Status == TempStatusActive || x.Status == TempStatusScheduled))
-            .Select(x => new
-            {
-                x.WorkerId,
-                x.Id,
-                x.StartAtUtc,
-                x.EndAtUtc,
-                x.FromSubStageId,
-                x.ToSubStageId,
-                x.ReplacementForWorkerId,
-                x.ParticipationMode
-            })
-            .ToListAsync(cancellationToken);
-
         var byWorker = uniqueWorkerIds.ToDictionary(
             workerId => workerId,
             _ => new List<WorkerAssignmentState>());
@@ -159,32 +147,6 @@ public sealed class AssignmentEngine : IAssignmentEngine
                 null,
                 null,
                 null));
-        }
-
-        foreach (var assignment in activeTemporaryAssignments
-                     .OrderBy(x => x.StartAtUtc)
-                     .ThenBy(x => x.Id))
-        {
-            var participations = byWorker[assignment.WorkerId];
-            if (assignment.ParticipationMode == TemporaryAssignmentMode.TemporaryMove && assignment.FromSubStageId.HasValue)
-            {
-                participations.RemoveAll(state =>
-                    state.AssignmentType == AssignmentType.Default &&
-                    state.EffectiveSubStageId == assignment.FromSubStageId);
-            }
-
-            participations.RemoveAll(state => state.EffectiveSubStageId == assignment.ToSubStageId && state.AssignmentType is AssignmentType.Temporary or AssignmentType.Replacement);
-            participations.Add(new WorkerAssignmentState(
-                assignment.Id,
-                assignment.WorkerId,
-                assignment.ReplacementForWorkerId is null ? AssignmentType.Temporary : AssignmentType.Replacement,
-                assignment.StartAtUtc,
-                assignment.EndAtUtc,
-                assignment.ToSubStageId,
-                assignment.FromSubStageId,
-                assignment.ToSubStageId,
-                assignment.ReplacementForWorkerId,
-                assignment.ParticipationMode));
         }
 
         return Result<Dictionary<Guid, IReadOnlyCollection<WorkerAssignmentState>>>.Success(
@@ -496,6 +458,9 @@ public sealed class AssignmentEngine : IAssignmentEngine
         string? requestMeta = null,
         CancellationToken cancellationToken = default)
     {
+        if (NonPermanentAssignmentsAreDisabled)
+            return Result<AssignmentActionResultDto>.Failure(NonPermanentAssignmentsDisabledError);
+
         var actorValidationResult = ValidateActor(actorUserId);
         if (actorValidationResult.IsFailure)
         {
@@ -652,6 +617,9 @@ public sealed class AssignmentEngine : IAssignmentEngine
         string? requestMeta = null,
         CancellationToken cancellationToken = default)
     {
+        if (NonPermanentAssignmentsAreDisabled)
+            return Result<AssignmentActionResultDto>.Failure(NonPermanentAssignmentsDisabledError);
+
         var actorValidationResult = ValidateActor(actorUserId);
         if (actorValidationResult.IsFailure)
         {
@@ -832,6 +800,9 @@ public sealed class AssignmentEngine : IAssignmentEngine
         string? requestMeta = null,
         CancellationToken cancellationToken = default)
     {
+        if (NonPermanentAssignmentsAreDisabled)
+            return Result<CancelTemporaryAssignmentResultDto>.Failure(NonPermanentAssignmentsDisabledError);
+
         var actorValidationResult = ValidateActor(actorUserId);
         if (actorValidationResult.IsFailure)
         {
@@ -933,6 +904,9 @@ public sealed class AssignmentEngine : IAssignmentEngine
         string? requestMeta = null,
         CancellationToken cancellationToken = default)
     {
+        if (NonPermanentAssignmentsAreDisabled)
+            return Result<AssignmentActionResultDto>.Failure(NonPermanentAssignmentsDisabledError);
+
         foreach (var validation in new[]
                  {
                      ValidateActor(actorUserId),

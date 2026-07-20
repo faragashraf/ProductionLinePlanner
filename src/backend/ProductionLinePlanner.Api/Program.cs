@@ -459,6 +459,7 @@ app.MapGet("/api/error", (HttpContext context) =>
     var traceId = Activity.Current?.Id ?? context.TraceIdentifier;
     var (statusCode, title, code) = exception switch
     {
+        BadHttpRequestException => (StatusCodes.Status400BadRequest, "Validation Failed", "InvalidRequestBody"),
         UnauthorizedAccessException => (StatusCodes.Status401Unauthorized, "Unauthorized", "UnauthorizedAccess"),
         System.ComponentModel.DataAnnotations.ValidationException => (StatusCodes.Status400BadRequest, "Validation Failed", "ValidationError"),
         KeyNotFoundException => (StatusCodes.Status404NotFound, "Not Found", "ResourceNotFound"),
@@ -2960,155 +2961,20 @@ assignmentsApi.MapDelete("/default/{workerId:guid}", async (
     .WithTags("Assignments")
     .WithName("RemoveDefaultAssignment");
 
-assignmentsApi.MapPost("/temporary", async (
-    CreateTemporaryAssignmentRequest request,
-    IAssignmentEngine assignmentEngine,
-    ICurrentUserService currentUserService,
-    HttpContext httpContext,
-    CancellationToken cancellationToken) =>
-{
-    var actorUserId = currentUserService.UserId;
-    if (actorUserId is null)
-    {
-        return ApiResponse.Failure("Unauthorized", "User context is required.");
-    }
-
-    var requestMeta = $"{httpContext.Request.Method} {httpContext.Request.Path}";
-    var clientIp = httpContext.Connection.RemoteIpAddress?.ToString();
-    if (!string.IsNullOrWhiteSpace(clientIp))
-    {
-        requestMeta = $"{requestMeta} from {clientIp}";
-    }
-
-    if (!string.IsNullOrWhiteSpace(currentUserService.UserName))
-    {
-        requestMeta = $"{requestMeta} by {currentUserService.UserName}";
-    }
-
-    var result = await assignmentEngine.CreateTemporaryAssignmentAsync(request, actorUserId.Value, requestMeta, cancellationToken);
-    if (result.IsFailure)
-    {
-        return ApiResponse.Failure(
-            result.Error?.Code ?? "ValidationError",
-            result.Error?.Message ?? "Validation failed.",
-            MapFailureStatusCode(result.Error?.Code));
-    }
-
-    var value = result.Value!;
-    var response = new
-    {
-        assignmentId = value.AssignmentId,
-        workerId = value.WorkerId,
-        fromSubStageId = value.FromSubStageId,
-        toSubStageId = value.ToSubStageId,
-        assignmentType = value.AssignmentType,
-        status = value.Status,
-        startAtUtc = value.StartsAtUtc,
-        endAtUtc = value.EndsAtUtc
-    };
-
-    return Results.Created($"/api/assignments/temporary/{value.AssignmentId}", ApiResponse.Success(response));
-})
+assignmentsApi.MapPost("/temporary", () =>
+    ApiResponse.Failure("FeatureDisabled", "التسكين غير الدائم متوقف حاليًا. استخدم التسكين الدائم فقط.", StatusCodes.Status409Conflict))
     .RequirePermission("assignments.manage")
     .WithTags("Assignments")
     .WithName("CreateTemporaryAssignment");
 
-assignmentsApi.MapPost("/replacement", async (
-    CreateReplacementAssignmentRequest request,
-    IAssignmentEngine assignmentEngine,
-    ICurrentUserService currentUserService,
-    HttpContext httpContext,
-    CancellationToken cancellationToken) =>
-{
-    var actorUserId = currentUserService.UserId;
-    if (actorUserId is null)
-    {
-        return ApiResponse.Failure("Unauthorized", "User context is required.");
-    }
-
-    var requestMeta = $"{httpContext.Request.Method} {httpContext.Request.Path}";
-    var clientIp = httpContext.Connection.RemoteIpAddress?.ToString();
-    if (!string.IsNullOrWhiteSpace(clientIp))
-    {
-        requestMeta = $"{requestMeta} from {clientIp}";
-    }
-
-    if (!string.IsNullOrWhiteSpace(currentUserService.UserName))
-    {
-        requestMeta = $"{requestMeta} by {currentUserService.UserName}";
-    }
-
-    var result = await assignmentEngine.CreateReplacementAssignmentAsync(request, actorUserId.Value, requestMeta, cancellationToken);
-    if (result.IsFailure)
-    {
-        return ApiResponse.Failure(
-            result.Error?.Code ?? "ValidationError",
-            result.Error?.Message ?? "Validation failed.",
-            MapFailureStatusCode(result.Error?.Code));
-    }
-
-    var value = result.Value!;
-    var response = new
-    {
-        assignmentId = value.AssignmentId,
-        workerId = value.WorkerId,
-        replacementForWorkerId = value.ReplacementForWorkerId,
-        fromSubStageId = value.FromSubStageId,
-        toSubStageId = value.ToSubStageId,
-        assignmentType = value.AssignmentType,
-        status = value.Status,
-        startAtUtc = value.StartsAtUtc,
-        endAtUtc = value.EndsAtUtc
-    };
-
-    return Results.Created($"/api/assignments/temporary/{value.AssignmentId}", ApiResponse.Success(response));
-})
+assignmentsApi.MapPost("/replacement", () =>
+    ApiResponse.Failure("FeatureDisabled", "التسكين غير الدائم متوقف حاليًا. استخدم التسكين الدائم فقط.", StatusCodes.Status409Conflict))
     .RequirePermission("assignments.manage")
     .WithTags("Assignments")
     .WithName("CreateReplacementAssignment");
 
-assignmentsApi.MapPost("/move", async (
-    MoveCurrentWorkerAssignmentRequest request,
-    IAssignmentEngine assignmentEngine,
-    ICurrentUserService currentUserService,
-    HttpContext httpContext,
-    CancellationToken cancellationToken) =>
-{
-    var actorUserId = currentUserService.UserId;
-    if (actorUserId is null)
-    {
-        return ApiResponse.Failure("Unauthorized", "User context is required.");
-    }
-
-    var requestMeta = $"{httpContext.Request.Method} {httpContext.Request.Path}";
-    if (!string.IsNullOrWhiteSpace(currentUserService.UserName))
-    {
-        requestMeta = $"{requestMeta} by {currentUserService.UserName}";
-    }
-
-    var result = await assignmentEngine.MoveCurrentAssignmentAsync(request, actorUserId.Value, requestMeta, cancellationToken);
-    if (result.IsFailure)
-    {
-        return ApiResponse.Failure(
-            result.Error?.Code ?? "ValidationError",
-            result.Error?.Message ?? "Validation failed.",
-            MapFailureStatusCode(result.Error?.Code));
-    }
-
-    var value = result.Value!;
-    return Results.Ok(ApiResponse.Success(new
-    {
-        assignmentId = value.AssignmentId,
-        workerId = value.WorkerId,
-        subStageId = value.SubStageId,
-        fromSubStageId = value.FromSubStageId,
-        toSubStageId = value.ToSubStageId,
-        assignmentType = value.AssignmentType,
-        status = value.Status,
-        startAtUtc = value.StartsAtUtc,
-        endAtUtc = value.EndsAtUtc
-    }));
-})
+assignmentsApi.MapPost("/move", () =>
+    ApiResponse.Failure("FeatureDisabled", "النقل عبر هذه الواجهة متوقف حاليًا. استخدم التسكين الدائم فقط.", StatusCodes.Status409Conflict))
     .RequirePermission("assignments.manage")
     .WithTags("Assignments")
     .WithName("MoveCurrentAssignment");
@@ -3160,50 +3026,8 @@ assignmentsApi.MapGet("/recommendations", async (
     .WithTags("Assignments")
     .WithName("GetAssignmentRecommendations");
 
-assignmentsApi.MapDelete("/temporary/{assignmentId:guid}", async (
-    Guid assignmentId,
-    string reason,
-    IAssignmentEngine assignmentEngine,
-    ICurrentUserService currentUserService,
-    HttpContext httpContext,
-    CancellationToken cancellationToken) =>
-{
-    var actorUserId = currentUserService.UserId;
-    if (actorUserId is null)
-    {
-        return ApiResponse.Failure("Unauthorized", "User context is required.");
-    }
-
-    var requestMeta = $"{httpContext.Request.Method} {httpContext.Request.Path}";
-    var clientIp = httpContext.Connection.RemoteIpAddress?.ToString();
-    if (!string.IsNullOrWhiteSpace(clientIp))
-    {
-        requestMeta = $"{requestMeta} from {clientIp}";
-    }
-
-    if (!string.IsNullOrWhiteSpace(currentUserService.UserName))
-    {
-        requestMeta = $"{requestMeta} by {currentUserService.UserName}";
-    }
-
-    var result = await assignmentEngine.CancelTemporaryAssignmentAsync(assignmentId, reason, actorUserId.Value, requestMeta, cancellationToken);
-
-    if (result.IsFailure)
-    {
-        return ApiResponse.Failure(
-            result.Error?.Code ?? "ValidationError",
-            result.Error?.Message ?? "Validation failed.",
-            MapFailureStatusCode(result.Error?.Code));
-    }
-
-    var value = result.Value!;
-    return Results.Ok(ApiResponse.Success(new
-    {
-        assignmentId = value.AssignmentId,
-        cancelledAt = value.CancelledAt,
-        status = value.Status
-    }));
-})
+assignmentsApi.MapDelete("/temporary/{assignmentId:guid}", () =>
+    ApiResponse.Failure("FeatureDisabled", "إدارة التسكين غير الدائم متوقفة حاليًا.", StatusCodes.Status409Conflict))
     .RequirePermission("assignments.manage")
     .WithTags("Assignments")
     .WithName("CancelTemporaryAssignment");

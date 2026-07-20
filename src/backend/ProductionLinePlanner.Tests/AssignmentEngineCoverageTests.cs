@@ -10,7 +10,7 @@ namespace ProductionLinePlanner.Tests;
 public sealed class AssignmentEngineCoverageTests
 {
     [Fact]
-    public async Task Active_sub_stage_coverage_uses_effective_default_and_temporary_assignments_without_attendance()
+    public async Task Active_sub_stage_coverage_uses_permanent_assignments_without_attendance()
     {
         var options = new DbContextOptionsBuilder<AppDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
@@ -49,15 +49,15 @@ public sealed class AssignmentEngineCoverageTests
         var emptySummary = summaries.Single(summary => summary.SubStageId == empty.Id);
         var undefinedSummary = summaries.Single(summary => summary.SubStageId == undefined.Id);
 
-        Assert.Equal(2, coveredSummary.AssignedWorkersCount);
+        Assert.Equal(1, coveredSummary.AssignedWorkersCount);
         Assert.Equal(2, coveredSummary.RequiredWorkersCount);
-        Assert.Equal(100, coveredSummary.AssignmentCoveragePercent);
-        Assert.Equal("Staffed", coveredSummary.StaffingStatus);
+        Assert.Equal(50, coveredSummary.AssignmentCoveragePercent);
+        Assert.Equal("Understaffed", coveredSummary.StaffingStatus);
 
-        Assert.Equal(1, partialSummary.AssignedWorkersCount);
+        Assert.Equal(2, partialSummary.AssignedWorkersCount);
         Assert.Equal(2, partialSummary.RequiredWorkersCount);
-        Assert.Equal(50, partialSummary.AssignmentCoveragePercent);
-        Assert.Equal("Understaffed", partialSummary.StaffingStatus);
+        Assert.Equal(100, partialSummary.AssignmentCoveragePercent);
+        Assert.Equal("Staffed", partialSummary.StaffingStatus);
 
         Assert.Equal(0, emptySummary.AssignedWorkersCount);
         Assert.Equal(1, emptySummary.RequiredWorkersCount);

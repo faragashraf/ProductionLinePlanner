@@ -41,7 +41,7 @@ public sealed class AssignmentNotificationDispatchTests
     }
 
     [Fact]
-    public async Task Temporary_assignment_uses_the_same_policy_and_keeps_actor_when_creator_rule_is_enabled()
+    public async Task Disabled_non_permanent_assignment_does_not_dispatch_a_notification()
     {
         await using var fixture = await Fixture.CreateAsync(enabled: true, includeActor: true, includeOtherRecipient: false);
         var start = DateTime.UtcNow.AddMinutes(1);
@@ -58,10 +58,10 @@ public sealed class AssignmentNotificationDispatchTests
             },
             fixture.Actor.Id);
 
-        Assert.True(result.IsSuccess);
-        var notification = Assert.Single(await fixture.Db.Notifications.ToArrayAsync());
-        Assert.Equal(fixture.Actor.Id, notification.RecipientUserId);
-        Assert.Equal(NotificationEventKeys.AssignmentChanged, notification.EventKey);
+        Assert.True(result.IsFailure);
+        Assert.Equal("FeatureDisabled", result.Error?.Code);
+        Assert.Empty(await fixture.Db.Notifications.ToArrayAsync());
+        Assert.Empty(fixture.LiveDispatcher.UserNotifications);
     }
 
     [Fact]
