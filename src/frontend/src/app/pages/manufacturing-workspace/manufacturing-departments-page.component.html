@@ -1,5 +1,5 @@
 <section class="page-frame departments-page" dir="rtl">
-  <plp-page-header title="الأقسام" description="عرض أقسام الحضور المتزامنة من مصدر ZKTime." [compact]="true">
+  <plp-page-header title="الأقسام التشغيلية" description="إدارة الأقسام المحلية المرتبطة بهيكل المصنع، بعيدًا عن مصدر الحضور." [compact]="true">
     <div header-actions>
       <button
         pButton
@@ -56,7 +56,7 @@
   </section>
 
   <section class="departments-table-shell" *ngIf="!isLoading && !hasError && filteredDepartments.length > 0">
-    <p-table plpResponsiveTable="scroll" plpTablePagination [plpPaginationPageSize]="10" [plpPaginationResetKey]="searchTerm" [value]="filteredDepartments" dataKey="departmentId" responsiveLayout="scroll" [scrollHeight]="'auto'">
+    <p-table plpResponsiveTable="scroll" plpTablePagination [plpPaginationPageSize]="10" [plpPaginationResetKey]="searchTerm" [value]="filteredDepartments" dataKey="id" responsiveLayout="scroll" [scrollHeight]="'auto'">
       <ng-template pTemplate="header">
         <tr>
           <th>كود القسم</th>
@@ -66,8 +66,8 @@
       </ng-template>
       <ng-template pTemplate="body" let-department>
         <tr>
-          <td>{{ department.departmentId }}</td>
-          <td>{{ department.name }}</td>
+          <td>{{ departmentCode(department) }}</td>
+          <td>{{ departmentName(department) }}</td>
           <td>
             <span class="departments-status">{{ displayStatus(department) }}</span>
           </td>

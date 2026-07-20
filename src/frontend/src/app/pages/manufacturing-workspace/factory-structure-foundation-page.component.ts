@@ -6,9 +6,11 @@ import { PRODUCTION_RECORDING_ACCESS } from '../../core/config/manufacturing-wor
 import { AssignmentsApiService, AssignmentWorker } from '../../core/services/assignments-api.service';
 import {
   FactoryItem,
+  DepartmentItem,
   MainStageOption,
   ManufacturingMasterDataApiService,
   ProductionLineOption,
+  StageDependencySummary,
   SubStageOption
 } from '../../core/services/manufacturing-master-data-api.service';
 import { WorkersApiService } from '../../core/services/workers-api.service';
@@ -25,8 +27,18 @@ interface FactoryDraft {
 interface LineDraft {
   id: string;
   factoryId: string;
+  departmentId: string;
   name: string;
   lineCode: string;
+  sequenceOrder: number;
+}
+
+interface DepartmentDraft {
+  id: string;
+  factoryId: string;
+  code: string;
+  nameAr: string;
+  nameEn: string;
   sequenceOrder: number;
 }
 
@@ -47,7 +59,7 @@ interface SubStageDraft {
   capacity: number;
 }
 
-type FactoryStructureFormId = 'factory' | 'line' | 'main-stage' | 'sub-stage' | 'assignment';
+type FactoryStructureFormId = 'factory' | 'department' | 'line' | 'main-stage' | 'sub-stage' | 'assignment';
 
 @Component({
   selector: 'app-factory-structure-foundation-page',
@@ -58,6 +70,7 @@ export class FactoryStructureFoundationPageComponent implements OnInit, OnDestro
   readonly permissions = PERMISSIONS;
 
   factories: FactoryItem[] = [];
+  departments: DepartmentItem[] = [];
   lines: ProductionLineOption[] = [];
   mainStages: MainStageOption[] = [];
   subStages: SubStageOption[] = [];
@@ -65,6 +78,7 @@ export class FactoryStructureFoundationPageComponent implements OnInit, OnDestro
   assignedWorkers: AssignmentWorker[] = [];
 
   selectedFactoryId = '';
+  selectedDepartmentId = '';
   selectedLineId = '';
   selectedMainStageId = '';
   selectedSubStageId = '';
@@ -77,8 +91,13 @@ export class FactoryStructureFoundationPageComponent implements OnInit, OnDestro
   errorMessage = 'تعذر تحميل بنية المصنع، يرجى المحاولة مرة أخرى.';
   successMessage = '';
   activeForm: FactoryStructureFormId | null = null;
+  stageDependencyDialogVisible = false;
+  stageDependencySummary: StageDependencySummary | null = null;
+  pendingStageDependencyAction: 'disable' | 'delete' | null = null;
+  pendingDependencyStage: SubStageOption | null = null;
 
   factoryDraft: FactoryDraft = this.emptyFactoryDraft();
+  departmentDraft: DepartmentDraft = this.emptyDepartmentDraft();
   lineDraft: LineDraft = this.emptyLineDraft();
   mainStageDraft: MainStageDraft = this.emptyMainStageDraft();
   subStageDraft: SubStageDraft = this.emptySubStageDraft();
@@ -119,9 +138,18 @@ export class FactoryStructureFoundationPageComponent implements OnInit, OnDestro
   }
 
   get visibleLines(): ProductionLineOption[] {
-    return this.selectedFactoryId
-      ? this.lines.filter(item => item.factoryId === this.selectedFactoryId)
-      : [];
+    const factoryLines = this.selectedFactoryId ? this.lines.filter(item => item.factoryId === this.selectedFactoryId) : [];
+    if (!this.selectedDepartmentId) return factoryLines;
+    if (this.selectedDepartmentId === 'unassigned') return factoryLines.filter(item => !item.departmentId);
+    return factoryLines.filter(item => item.departmentId === this.selectedDepartmentId);
+  }
+
+  get visibleDepartments(): DepartmentItem[] {
+    return this.selectedFactoryId ? this.departments.filter(item => item.factoryId === this.selectedFactoryId) : [];
+  }
+
+  get unassignedLines(): ProductionLineOption[] {
+    return this.selectedFactoryId ? this.lines.filter(item => item.factoryId === this.selectedFactoryId && !item.departmentId) : [];
   }
 
   get visibleMainStages(): MainStageOption[] {
@@ -146,6 +174,16 @@ export class FactoryStructureFoundationPageComponent implements OnInit, OnDestro
 
   get canManage(): boolean {
     return this.permissionService.hasPermission(this.permissions.factoryStructure.manage);
+  }
+
+  get canManageDepartments(): boolean {
+    return this.permissionService.hasPermission(this.permissions.departments.manage);
+  }
+
+  get canConfirmStageDependencyAction(): boolean {
+    return this.pendingStageDependencyAction === 'disable'
+      ? !!this.stageDependencySummary?.canDisable
+      : this.pendingStageDependencyAction === 'delete' && !!this.stageDependencySummary?.canDelete;
   }
 
   get productionRecordingContext(): { factoryId: string; productionLineId: string; mainStageId: string; subStageId: string } | null {
@@ -191,7 +229,10 @@ export class FactoryStructureFoundationPageComponent implements OnInit, OnDestro
 
     forkJoin({
       factories: this.masterDataApi.factories(),
-      lines: this.masterDataApi.allProductionLines()
+      lines: this.masterDataApi.allProductionLines(),
+      departments: typeof this.masterDataApi.departments === 'function'
+        ? this.masterDataApi.departments(undefined, true)
+        : new Observable<DepartmentItem[]>(subscriber => { subscriber.next([]); subscriber.complete(); })
     })
       .pipe(finalize(() => {
         this.isLoading = false;
@@ -201,6 +242,7 @@ export class FactoryStructureFoundationPageComponent implements OnInit, OnDestro
         next: data => {
           this.factories = data.factories;
           this.lines = data.lines;
+          this.departments = data.departments;
           this.resetSelectionsForReload();
         },
         error: error => {
@@ -212,8 +254,16 @@ export class FactoryStructureFoundationPageComponent implements OnInit, OnDestro
 
   selectFactory(id: string): void {
     this.selectedFactoryId = id;
+    this.selectedDepartmentId = '';
     this.clearLineAndDownstream();
     this.lineDraft.factoryId = id;
+  }
+
+  selectDepartment(id: string): void {
+    this.selectedDepartmentId = id;
+    this.clearLineAndDownstream();
+    this.lineDraft.factoryId = this.selectedFactoryId;
+    this.lineDraft.departmentId = id === 'unassigned' ? '' : id;
   }
 
   selectLine(id: string): void {
@@ -287,6 +337,7 @@ export class FactoryStructureFoundationPageComponent implements OnInit, OnDestro
     this.lineDraft = {
       id: item.id,
       factoryId: item.factoryId,
+      departmentId: item.departmentId ?? '',
       name: item.name,
       lineCode: item.lineCode ?? '',
       sequenceOrder: item.sequenceOrder
@@ -294,15 +345,76 @@ export class FactoryStructureFoundationPageComponent implements OnInit, OnDestro
     this.activeForm = 'line';
   }
 
+  editDepartment(item: DepartmentItem): void {
+    if (!item.id || !item.factoryId) return;
+    this.departmentDraft = {
+      id: item.id,
+      factoryId: item.factoryId,
+      code: item.code ?? '',
+      nameAr: item.nameAr ?? item.name ?? '',
+      nameEn: item.nameEn ?? '',
+      sequenceOrder: item.sequenceOrder ?? 0
+    };
+    this.activeForm = 'department';
+  }
+
+  saveDepartment(): void {
+    if (!this.departmentDraft.factoryId || !this.departmentDraft.code.trim() || !this.departmentDraft.nameAr.trim()) {
+      this.errorMessage = 'المصنع وكود القسم واسمه بالعربية مطلوبة.';
+      this.hasError = true;
+      return;
+    }
+
+    const payload = {
+      factoryId: this.departmentDraft.factoryId,
+      code: this.departmentDraft.code.trim(),
+      nameAr: this.departmentDraft.nameAr.trim(),
+      nameEn: this.departmentDraft.nameEn.trim() || null,
+      sequenceOrder: Number(this.departmentDraft.sequenceOrder) || 0,
+      isActive: true
+    };
+    const request = this.departmentDraft.id
+      ? this.masterDataApi.updateDepartment(this.departmentDraft.id, {
+        code: payload.code,
+        nameAr: payload.nameAr,
+        // An empty string is intentional on update: the domain normalizes it
+        // to null, so users can clear the optional English label.
+        nameEn: this.departmentDraft.nameEn.trim(),
+        sequenceOrder: payload.sequenceOrder,
+        isActive: true
+      })
+      : this.masterDataApi.createDepartment(payload);
+
+    this.save(request, () => {
+      this.departmentDraft = this.emptyDepartmentDraft();
+      this.departmentDraft.factoryId = this.selectedFactoryId;
+      this.activeForm = null;
+    });
+  }
+
+  setDepartmentActive(item: DepartmentItem, isActive: boolean): void {
+    if (!item.id) return;
+    this.save(this.masterDataApi.updateDepartment(item.id, { isActive }));
+  }
+
+  deleteDepartment(item: DepartmentItem): void {
+    if (!item.id) return;
+    if (!window.confirm(`حذف القسم ${item.nameAr ?? item.name ?? item.code ?? ''} نهائيًا؟`)) return;
+    this.save(this.masterDataApi.deleteDepartment(item.id), () => {
+      if (this.selectedDepartmentId === item.id) this.selectDepartment('');
+    });
+  }
+
   saveLine(): void {
-    if (!this.lineDraft.factoryId || !this.lineDraft.name.trim()) {
-      this.errorMessage = 'المصنع واسم الخط مطلوبان.';
+    if (!this.lineDraft.factoryId || !this.lineDraft.name.trim() || (!this.lineDraft.id && !this.lineDraft.departmentId)) {
+      this.errorMessage = 'المصنع والقسم واسم الخط مطلوبة عند إنشاء خط جديد.';
       this.hasError = true;
       return;
     }
 
     const payload = {
       factoryId: this.lineDraft.factoryId,
+      departmentId: this.lineDraft.departmentId || null,
       name: this.lineDraft.name.trim(),
       lineCode: this.lineDraft.lineCode.trim() || null,
       sequenceOrder: Number(this.lineDraft.sequenceOrder) || 0,
@@ -311,6 +423,7 @@ export class FactoryStructureFoundationPageComponent implements OnInit, OnDestro
     const request = this.lineDraft.id
       ? this.masterDataApi.updateProductionLine(this.lineDraft.id, {
         name: payload.name,
+        ...(payload.departmentId ? { departmentId: payload.departmentId } : {}),
         lineCode: payload.lineCode,
         sequenceOrder: payload.sequenceOrder,
         isActive: true
@@ -320,6 +433,7 @@ export class FactoryStructureFoundationPageComponent implements OnInit, OnDestro
     this.save(request, () => {
       this.lineDraft = this.emptyLineDraft();
       this.lineDraft.factoryId = this.selectedFactoryId;
+      this.lineDraft.departmentId = this.selectedDepartmentId === 'unassigned' ? '' : this.selectedDepartmentId;
       this.activeForm = null;
     });
   }
@@ -386,39 +500,83 @@ export class FactoryStructureFoundationPageComponent implements OnInit, OnDestro
   }
 
   saveSubStage(): void {
-    if (!this.subStageDraft.mainStageId || !this.subStageDraft.code.trim() || !this.subStageDraft.name.trim()) {
-      this.errorMessage = 'المرحلة الرئيسية وكود واسم المرحلة الفرعية مطلوبة.';
+    if (!this.selectedLineId || !this.subStageDraft.name.trim() || (this.visibleMainStages.length > 1 && !this.subStageDraft.mainStageId)) {
+      this.errorMessage = 'الخط واسم المرحلة مطلوبان؛ اختر مجموعة المراحل عند وجود أكثر من مجموعة.';
       this.hasError = true;
       return;
     }
 
     const payload = {
-      mainStageId: this.subStageDraft.mainStageId,
-      code: this.subStageDraft.code.trim(),
+      productionLineId: this.selectedLineId,
+      mainStageId: this.visibleMainStages.length > 1 ? this.subStageDraft.mainStageId : undefined,
       name: this.subStageDraft.name.trim(),
       defaultOrder: Number(this.subStageDraft.defaultOrder) || 1,
       capacity: Number(this.subStageDraft.capacity) || 0,
       isActive: true
     };
     const request = this.subStageDraft.id
-      ? this.masterDataApi.updateSub(this.subStageDraft.id, {
-        code: payload.code,
+      ? this.masterDataApi.updateOperationalStage(this.subStageDraft.id, {
         name: payload.name,
         defaultOrder: payload.defaultOrder,
         capacity: payload.capacity,
         isActive: true
       })
-      : this.masterDataApi.createSub(payload);
+      : this.masterDataApi.createOperationalStage(payload);
 
     this.save(request, () => {
       this.subStageDraft = this.emptySubStageDraft();
-      this.subStageDraft.mainStageId = this.selectedMainStageId;
+      this.subStageDraft.mainStageId = this.selectedMainStageId || (this.visibleMainStages.length === 1 ? this.visibleMainStages[0].id : '');
       this.activeForm = null;
     });
   }
 
   setSubStageActive(item: SubStageOption, isActive: boolean): void {
-    this.save(this.masterDataApi.updateSub(item.id, { isActive }));
+    if (!isActive) {
+      this.openStageDependencyDialog(item, 'disable');
+      return;
+    }
+    this.save(this.masterDataApi.updateOperationalStage(item.id, { isActive }));
+  }
+
+  openStageDependencyDialog(item: SubStageOption, action: 'disable' | 'delete'): void {
+    this.hasError = false;
+    this.stageDependencySummary = null;
+    this.pendingDependencyStage = item;
+    this.pendingStageDependencyAction = action;
+    this.masterDataApi.stageDependencies(item.id).subscribe({
+      next: summary => {
+        this.stageDependencySummary = summary;
+        this.stageDependencyDialogVisible = true;
+      },
+      error: error => {
+        this.hasError = true;
+        this.errorMessage = this.extractErrorMessage(error);
+      }
+    });
+  }
+
+  confirmStageDependencyAction(): void {
+    const stage = this.pendingDependencyStage;
+    if (!stage || !this.pendingStageDependencyAction || !this.canConfirmStageDependencyAction) return;
+    const request = this.pendingStageDependencyAction === 'delete'
+      ? this.masterDataApi.deleteOperationalStage(stage.id)
+      : this.masterDataApi.deactivateOperationalStage(stage.id);
+    this.save(request, () => this.closeStageDependencyDialog());
+  }
+
+  closeStageDependencyDialog(): void {
+    this.stageDependencyDialogVisible = false;
+    this.stageDependencySummary = null;
+    this.pendingStageDependencyAction = null;
+    this.pendingDependencyStage = null;
+  }
+
+  onStageDependencyDialogVisibility(visible: boolean): void {
+    if (visible) {
+      this.stageDependencyDialogVisible = true;
+      return;
+    }
+    this.closeStageDependencyDialog();
   }
 
   assignWorker(): void {
@@ -663,7 +821,11 @@ export class FactoryStructureFoundationPageComponent implements OnInit, OnDestro
   }
 
   private emptyLineDraft(): LineDraft {
-    return { id: '', factoryId: '', name: '', lineCode: '', sequenceOrder: 0 };
+    return { id: '', factoryId: '', departmentId: '', name: '', lineCode: '', sequenceOrder: 0 };
+  }
+
+  private emptyDepartmentDraft(): DepartmentDraft {
+    return { id: '', factoryId: '', code: '', nameAr: '', nameEn: '', sequenceOrder: 0 };
   }
 
   private emptyMainStageDraft(): MainStageDraft {

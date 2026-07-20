@@ -181,6 +181,8 @@ export class FactoryMapApiService {
     return {
       id,
       type: 'line',
+      departmentId: this.resolveString(lineRecord, ['departmentId']) || null,
+      departmentName: this.resolveString(lineRecord, ['departmentNameAr', 'departmentName', 'department']) || null,
       name,
       status: this.statusFor(summary.staffingStatus, summary.readinessPercent),
       readinessPercent: summary.readinessPercent,

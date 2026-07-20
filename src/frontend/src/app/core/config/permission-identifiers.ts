@@ -29,6 +29,7 @@ export const PERMISSIONS = {
   stages: {
     view: 'stages.view',
     manage: 'stages.manage',
+    delete: 'stages.delete',
     import: 'stages.import',
     export: 'stages.export'
   },

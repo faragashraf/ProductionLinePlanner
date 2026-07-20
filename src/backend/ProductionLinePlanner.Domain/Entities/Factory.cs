@@ -38,6 +38,7 @@ public class Factory
     public DateTime UpdatedAtUtc { get; private set; }
 
     public List<ProductionLine> ProductionLines { get; } = [];
+    public List<Department> Departments { get; } = [];
 
     public void Activate(DateTime? atUtc = null)
     {

@@ -19,36 +19,45 @@ describe('ManufacturingMasterDataApiService', () => {
     service.mainStages().subscribe(value => values.push(value)); service.subStages().subscribe(value => values.push(value)); service.productionLines().subscribe(value => values.push(value)); service.models().subscribe(value => values.push(value));
     const page = (items: unknown[]) => ({ success: true, data: { items, totalCount: items.length, pageNumber: 1, pageSize: 50 } });
     http.expectOne(request => request.url.endsWith('/api/main-stages')).flush(page([{ id: 'main-1' }]));
-    http.expectOne(request => request.url.endsWith('/api/sub-stages')).flush(page([{ id: 'sub-1', defaultOrder: 4 }]));
+    http.expectOne(request => request.url.endsWith('/api/stages')).flush(page([{ id: 'sub-1', defaultOrder: 4 }]));
     http.expectOne(request => request.url.endsWith('/api/production-lines')).flush(page([{ id: 'line-1' }]));
     http.expectOne(request => request.url.endsWith('/api/product-models?includeInactive=true')).flush(page([{ id: 'model-1', isActive: false }]));
     expect(values).toEqual([[{ id: 'main-1' }], [{ id: 'sub-1', defaultOrder: 4, sequenceOrder: 4 }], [{ id: 'line-1' }], [{ id: 'model-1', isActive: false }]]);
   });
 
-  it('loads active and inactive sub-stages for administration and maps DefaultOrder once at the API boundary', () => {
+  it('loads active and inactive operational stages and maps DefaultOrder once at the API boundary', () => {
     let stages: unknown[] = [];
     service.allSubStages().subscribe(value => stages = value);
     const page = (items: unknown[]) => ({ success: true, data: { items } });
-    http.expectOne(request => request.url.endsWith('/api/sub-stages?isActive=true&pageSize=200')).flush(page([{ id: 'active', defaultOrder: 1, isActive: true }]));
-    http.expectOne(request => request.url.endsWith('/api/sub-stages?isActive=false&pageSize=200')).flush(page([{ id: 'inactive', defaultOrder: 2, isActive: false }]));
+    http.expectOne(request => request.url.endsWith('/api/stages?includeInactive=true&pageSize=200')).flush(page([
+      { id: 'active', defaultOrder: 1, isActive: true },
+      { id: 'inactive', defaultOrder: 2, isActive: false }
+    ]));
     expect(stages).toEqual([{ id: 'active', defaultOrder: 1, sequenceOrder: 1, isActive: true }, { id: 'inactive', defaultOrder: 2, sequenceOrder: 2, isActive: false }]);
   });
 
-  it('unwraps department responses from the existing API envelope', () => {
+  it('keeps operational and attendance department endpoints separate', () => {
     let departments: unknown[] = [];
+    let attendanceDepartments: unknown[] = [];
 
     service.departments().subscribe(value => departments = value);
+    service.attendanceDepartments().subscribe(value => attendanceDepartments = value);
 
     http.expectOne(request => request.url.endsWith('/api/departments')).flush({
       success: true,
       data: {
         items: [
-          { departmentId: 4, name: 'Challenger' }
+          { id: 'department-1', factoryId: 'factory-1', code: 'CUT', nameAr: 'القص' }
         ]
       }
     });
+    http.expectOne(request => request.url.endsWith('/api/attendance/departments')).flush({
+      success: true,
+      data: { items: [{ departmentId: 4, name: 'Challenger' }] }
+    });
 
-    expect(departments).toEqual([{ departmentId: 4, name: 'Challenger' }]);
+    expect(departments).toEqual([{ id: 'department-1', factoryId: 'factory-1', code: 'CUT', nameAr: 'القص' }]);
+    expect(attendanceDepartments).toEqual([{ departmentId: 4, name: 'Challenger' }]);
   });
 
   it('maps active compensation model options from the endpoint envelope', () => {

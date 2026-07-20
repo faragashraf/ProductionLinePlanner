@@ -96,10 +96,10 @@
             <option value="review">تحتاج مراجعة</option>
           </select>
           <div class="line-staffing-page__stage-navigation" aria-label="التنقل بين المراحل">
-            <button pButton type="button" class="p-button-sm p-button-text" label="المرحلة السابقة" [disabled]="!canNavigateStages(-1)" (click)="previousStage()"></button>
-            <button pButton type="button" class="p-button-sm p-button-text" label="المرحلة التالية" [disabled]="!canNavigateStages(1)" (click)="nextStage()"></button>
-            <button pButton type="button" class="p-button-sm p-button-text" label="السابقة التي تحتاج متابعة" [disabled]="!canNavigateStages(-1, true)" (click)="previousProblemStage()"></button>
-            <button pButton type="button" class="p-button-sm p-button-text" label="التالية التي تحتاج متابعة" [disabled]="!canNavigateStages(1, true)" (click)="nextProblemStage()"></button>
+            <button pButton type="button" class="p-button-sm p-button-text p-button-icon-only" icon="pi pi-arrow-right" pTooltip="المرحلة السابقة" tooltipPosition="top" aria-label="المرحلة السابقة" [disabled]="!canNavigateStages(-1)" (click)="previousStage()"></button>
+            <button pButton type="button" class="p-button-sm p-button-text p-button-icon-only" icon="pi pi-arrow-left" pTooltip="المرحلة التالية" tooltipPosition="top" aria-label="المرحلة التالية" [disabled]="!canNavigateStages(1)" (click)="nextStage()"></button>
+            <button pButton type="button" class="p-button-sm p-button-text p-button-icon-only" icon="pi pi-angle-double-right" pTooltip="المرحلة السابقة التي تحتاج متابعة" tooltipPosition="top" aria-label="المرحلة السابقة التي تحتاج متابعة" [disabled]="!canNavigateStages(-1, true)" (click)="previousProblemStage()"></button>
+            <button pButton type="button" class="p-button-sm p-button-text p-button-icon-only" icon="pi pi-angle-double-left" pTooltip="المرحلة التالية التي تحتاج متابعة" tooltipPosition="top" aria-label="المرحلة التالية التي تحتاج متابعة" [disabled]="!canNavigateStages(1, true)" (click)="nextProblemStage()"></button>
           </div>
         </div>
 

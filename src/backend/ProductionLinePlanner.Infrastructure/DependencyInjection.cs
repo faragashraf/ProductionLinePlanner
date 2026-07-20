@@ -103,7 +103,9 @@ public static class DependencyInjection
         services.AddWorkerSyncFoundation();
         services.AddScoped<IEmployeeMasterDataService, EmployeeMasterDataService>();
         services.AddScoped<IDepartmentAdministrationService, DepartmentAdministrationService>();
+        services.AddScoped<IDepartmentCatalogService, DepartmentCatalogService>();
         services.AddScoped<IProductionStageCatalogService, ProductionStageCatalogService>();
+        services.AddScoped<IStageDependencyInspector, StageDependencyInspector>();
         services.AddScoped<IProductModelService, ProductModelService>();
         services.AddScoped<IWorkerCompensationService, WorkerCompensationService>();
         services.AddScoped<IProductionCostRecordingService, ProductionCostRecordingService>();

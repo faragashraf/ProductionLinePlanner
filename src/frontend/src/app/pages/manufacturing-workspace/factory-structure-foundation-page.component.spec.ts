@@ -14,6 +14,7 @@ import { SharedModule } from '../../shared/shared.module';
 import { PlpResponsiveTableDirective } from '../../shared/product/plp-responsive-table.directive';
 import { PlpTablePaginationDirective } from '../../shared/product/plp-table-pagination.directive';
 import { PlpExpandableFormComponent } from '../../shared/product/plp-expandable-form.component';
+import { PlpDialogComponent } from '../../shared/product/plp-dialog.component';
 import { NoopAnimationsModule } from '@angular/platform-browser/animations';
 import { FactoryStructureFoundationPageComponent } from './factory-structure-foundation-page.component';
 
@@ -21,6 +22,7 @@ describe('FactoryStructureFoundationPageComponent', () => {
   function configure(options: { manage?: boolean; record?: boolean; fail?: boolean; empty?: boolean } = {}): ComponentFixture<FactoryStructureFoundationPageComponent> {
     const masterData = jasmine.createSpyObj<ManufacturingMasterDataApiService>('ManufacturingMasterDataApiService', [
       'factories',
+      'departments',
       'allProductionLines',
       'mainStagesForLine',
       'subStagesForMainStage',
@@ -33,7 +35,10 @@ describe('FactoryStructureFoundationPageComponent', () => {
       'createMain',
       'updateMain',
       'createSub',
-      'updateSub'
+      'updateSub',
+      'stageDependencies',
+      'deactivateOperationalStage',
+      'deleteOperationalStage'
     ]);
     const assignments = jasmine.createSpyObj<AssignmentsApiService>('AssignmentsApiService', [
       'getFactoryStructureSubStageWorkers',
@@ -74,6 +79,13 @@ describe('FactoryStructureFoundationPageComponent', () => {
       { id: 'line-1', factoryId: 'fac-1', name: 'خط خياطة 3', lineCode: 'LINE-STITCH-0001', sequenceOrder: 1, isActive: true },
       { id: 'line-2', factoryId: 'fac-1', name: 'خط خياطة 4', lineCode: 'LINE-STITCH-0002', sequenceOrder: 2, isActive: true }
     ]));
+    masterData.departments.and.returnValue(of([]));
+    masterData.stageDependencies.and.returnValue(of({
+      stageId: 'sub-1', activeBlockers: [], historicalDependencies: [], canDisable: true, canDelete: true,
+      disableMessageAr: 'يمكن تعطيل المرحلة.', deleteMessageAr: 'يمكن حذف المرحلة.'
+    }));
+    masterData.deactivateOperationalStage.and.returnValue(of({}));
+    masterData.deleteOperationalStage.and.returnValue(of({}));
     masterData.mainStagesForLine.and.callFake((lineId: string) => of(lineId === 'line-1'
       ? [{ id: 'main-1', productionLineId: 'line-1', name: 'الخياطة', sequenceOrder: 1, isCritical: false, isActive: true }]
       : [{ id: 'main-2', productionLineId: 'line-2', name: 'التجهيز', sequenceOrder: 1, isCritical: false, isActive: true }]));
@@ -113,7 +125,7 @@ describe('FactoryStructureFoundationPageComponent', () => {
 
     TestBed.configureTestingModule({
       declarations: [FactoryStructureFoundationPageComponent],
-      imports: [FormsModule, SharedModule, ButtonModule, TableModule, PlpResponsiveTableDirective, PlpTablePaginationDirective, PlpExpandableFormComponent, NoopAnimationsModule],
+      imports: [FormsModule, SharedModule, ButtonModule, TableModule, PlpResponsiveTableDirective, PlpTablePaginationDirective, PlpExpandableFormComponent, PlpDialogComponent, NoopAnimationsModule],
       providers: [
         { provide: ManufacturingMasterDataApiService, useValue: masterData },
         { provide: AssignmentsApiService, useValue: assignments },
@@ -155,6 +167,21 @@ describe('FactoryStructureFoundationPageComponent', () => {
     expect(text).toContain('الخياطة');
     expect(text).toContain('STG001');
     expect(text).toContain('عامل تجريبي');
+  });
+
+  it('shows the dependency summary before disabling an operational stage', () => {
+    const fixture = configure({ manage: true });
+    const component = fixture.componentInstance;
+    const masterData = TestBed.inject(ManufacturingMasterDataApiService) as jasmine.SpyObj<ManufacturingMasterDataApiService>;
+    const stage: SubStageOption = { id: 'sub-1', mainStageId: 'main-1', code: 'STG001', name: 'مرحلة', capacity: 0, sequenceOrder: 1, isActive: true };
+
+    component.openStageDependencyDialog(stage, 'disable');
+    fixture.detectChanges();
+
+    expect(masterData.stageDependencies).toHaveBeenCalledWith('sub-1');
+    expect(component.stageDependencyDialogVisible).toBeTrue();
+    expect(component.canConfirmStageDependencyAction).toBeTrue();
+    expect(fixture.nativeElement.textContent).toContain('يمكن تعطيل المرحلة.');
   });
 
   it('clears downstream selections when selecting a factory with no lines', () => {

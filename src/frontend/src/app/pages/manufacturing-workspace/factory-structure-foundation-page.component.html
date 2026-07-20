@@ -79,8 +79,57 @@
 
       <article class="factory-structure-panel">
         <plp-expandable-form
+          title="الأقسام المحلية"
+          [summary]="selectedFactoryId ? visibleDepartments.length + ' قسمًا' : 'اختر مصنعًا لإدارة أقسامه'"
+          openLabel="إضافة قسم"
+          [canExpand]="canManageDepartments"
+          [expanded]="activeForm === 'department'"
+          [saving]="isSaving"
+          [error]="hasError ? errorMessage : ''"
+          (expandedChange)="onFormExpandedChange('department', $event)"
+        >
+          <form class="factory-structure-form" (ngSubmit)="saveDepartment()" novalidate *plpCan="permissions.departments.manage">
+            <select name="departmentFactoryId" [(ngModel)]="departmentDraft.factoryId" [disabled]="!!departmentDraft.id" required>
+              <option value="">اختر المصنع</option>
+              <option *ngFor="let factory of factories" [value]="factory.id">{{ factory.code }} - {{ factory.name }}</option>
+            </select>
+            <input name="departmentCode" [(ngModel)]="departmentDraft.code" placeholder="كود القسم" required>
+            <input name="departmentNameAr" [(ngModel)]="departmentDraft.nameAr" placeholder="اسم القسم بالعربية" required>
+            <input name="departmentNameEn" [(ngModel)]="departmentDraft.nameEn" placeholder="اسم القسم بالإنجليزية (اختياري)">
+            <input name="departmentOrder" [(ngModel)]="departmentDraft.sequenceOrder" type="number" placeholder="الترتيب">
+            <button pButton type="submit" [label]="departmentDraft.id ? 'تحديث القسم' : 'إضافة قسم'" [disabled]="isSaving"></button>
+          </form>
+        </plp-expandable-form>
+
+        <p-table plpResponsiveTable="scroll" plpTablePagination [plpPaginationPageSize]="10" [plpPaginationResetKey]="selectedFactoryId" [plpStickyActions]="true" [value]="visibleDepartments" dataKey="id" responsiveLayout="scroll">
+          <ng-template pTemplate="header">
+            <tr><th>الكود</th><th>القسم</th><th>الترتيب</th><th>الخطوط</th><th>الحالة</th><th></th></tr>
+          </ng-template>
+          <ng-template pTemplate="body" let-department>
+            <tr [class.factory-structure-selected]="department.id === selectedDepartmentId">
+              <td>{{ department.code }}</td>
+              <td>{{ department.nameAr || department.name }}</td>
+              <td>{{ department.sequenceOrder ?? 0 }}</td>
+              <td>{{ department.productionLineCount ?? 0 }}</td>
+              <td>{{ department.isActive ? 'نشط' : 'معطل' }}</td>
+              <td>
+                <button pButton type="button" class="p-button-sm p-button-text" label="اختيار" (click)="selectDepartment(department.id || '')"></button>
+                <ng-container *plpCan="permissions.departments.manage">
+                  <button pButton type="button" class="p-button-sm p-button-text" icon="pi pi-pencil" aria-label="تعديل القسم" title="تعديل القسم" (click)="editDepartment(department)"></button>
+                  <button pButton type="button" class="p-button-sm p-button-text" [label]="department.isActive ? 'تعطيل' : 'تفعيل'" [disabled]="isSaving" (click)="setDepartmentActive(department, !department.isActive)"></button>
+                  <button pButton type="button" class="p-button-sm p-button-text p-button-danger" icon="pi pi-trash" aria-label="حذف القسم" title="حذف القسم" [disabled]="isSaving" (click)="deleteDepartment(department)"></button>
+                </ng-container>
+              </td>
+            </tr>
+          </ng-template>
+          <ng-template pTemplate="emptymessage">
+            <tr><td colspan="6">لا توجد أقسام محلية لهذا المصنع.</td></tr>
+          </ng-template>
+        </p-table>
+
+        <plp-expandable-form
           title="خطوط الإنتاج"
-          [summary]="selectedFactoryId ? visibleLines.length + ' خطًا · ' + factoryName(selectedFactoryId) : 'اختر مصنعًا لعرض الخطوط'"
+          [summary]="selectedFactoryId ? visibleLines.length + ' خطًا' : 'اختر مصنعًا لعرض الخطوط'"
           openLabel="إضافة خط"
           [canExpand]="canManage"
           [expanded]="activeForm === 'line'"
@@ -88,10 +137,19 @@
           [error]="hasError ? errorMessage : ''"
           (expandedChange)="onFormExpandedChange('line', $event)"
         >
+          <div class="factory-structure-department-filter" *ngIf="selectedFactoryId">
+            <button pButton type="button" class="p-button-sm p-button-text" [class.p-button-outlined]="!selectedDepartmentId" label="كل الخطوط" (click)="selectDepartment('')"></button>
+            <button pButton type="button" class="p-button-sm p-button-text" *ngFor="let department of visibleDepartments" [class.p-button-outlined]="selectedDepartmentId === department.id" [label]="(department.code || '') + ' — ' + (department.nameAr || department.name || '')" (click)="selectDepartment(department.id || '')"></button>
+            <button pButton type="button" class="p-button-sm p-button-text" [class.p-button-outlined]="selectedDepartmentId === 'unassigned'" [label]="'غير مرتبط بقسم (' + unassignedLines.length + ')'" (click)="selectDepartment('unassigned')"></button>
+          </div>
           <form class="factory-structure-form" (ngSubmit)="saveLine()" novalidate *plpCan="permissions.factoryStructure.manage">
             <select name="lineFactoryId" [(ngModel)]="lineDraft.factoryId" [disabled]="!!lineDraft.id" required>
               <option value="">اختر المصنع</option>
               <option *ngFor="let factory of factories" [value]="factory.id">{{ factory.code }} - {{ factory.name }}</option>
+            </select>
+            <select name="lineDepartmentId" [(ngModel)]="lineDraft.departmentId" required>
+              <option value="">اختر القسم</option>
+              <option *ngFor="let department of visibleDepartments" [value]="department.id">{{ department.code }} — {{ department.nameAr || department.name }}</option>
             </select>
             <input name="lineName" [(ngModel)]="lineDraft.name" placeholder="اسم الخط" required>
             <input name="lineCode" [(ngModel)]="lineDraft.lineCode" placeholder="كود الخط">
@@ -102,10 +160,11 @@
 
         <p-table plpResponsiveTable="scroll" plpTablePagination [plpPaginationPageSize]="10" [plpPaginationResetKey]="selectedFactoryId" [plpStickyActions]="true" [value]="visibleLines" dataKey="id" responsiveLayout="scroll">
           <ng-template pTemplate="header">
-            <tr><th>الكود</th><th>الاسم</th><th>الترتيب</th><th>الحالة</th><th></th></tr>
+            <tr><th>القسم</th><th>الكود</th><th>الاسم</th><th>الترتيب</th><th>الحالة</th><th></th></tr>
           </ng-template>
           <ng-template pTemplate="body" let-line>
             <tr [class.factory-structure-selected]="line.id === selectedLineId">
+              <td>{{ line.departmentCode ? line.departmentCode + ' — ' + line.departmentNameAr : 'غير مرتبط' }}</td>
               <td>{{ line.lineCode || '-' }}</td>
               <td>{{ line.name }}</td>
               <td>{{ line.sequenceOrder }}</td>
@@ -171,9 +230,9 @@
 
       <article class="factory-structure-panel">
         <plp-expandable-form
-          title="المراحل الفرعية"
-          [summary]="selectedMainStageId ? visibleSubStages.length + ' مرحلة · ' + mainStageName(selectedMainStageId) : 'اختر مرحلة رئيسية لعرض التفاصيل'"
-          openLabel="إضافة مرحلة فرعية"
+          title="المراحل التشغيلية"
+          [summary]="selectedLineId ? visibleSubStages.length + ' مرحلة تشغيلية' : 'اختر خط إنتاج لعرض المراحل'"
+          openLabel="إضافة مرحلة تشغيلية"
           [canExpand]="canManage"
           [expanded]="activeForm === 'sub-stage'"
           [saving]="isSaving"
@@ -181,21 +240,21 @@
           (expandedChange)="onFormExpandedChange('sub-stage', $event)"
         >
           <form class="factory-structure-form" (ngSubmit)="saveSubStage()" novalidate *plpCan="permissions.factoryStructure.manage">
-            <select name="subMainId" [(ngModel)]="subStageDraft.mainStageId" [disabled]="!selectedMainStageId || !!subStageDraft.id" required>
+            <select *ngIf="visibleMainStages.length > 1 && !subStageDraft.id" name="subMainId" [(ngModel)]="subStageDraft.mainStageId" [disabled]="!selectedLineId" required>
               <option value="">اختر المرحلة الرئيسية</option>
               <option *ngFor="let stage of visibleMainStages" [value]="stage.id">{{ stage.name }}</option>
             </select>
-            <input name="subCode" [(ngModel)]="subStageDraft.code" placeholder="الكود" required>
-            <input name="subName" [(ngModel)]="subStageDraft.name" placeholder="اسم المرحلة الفرعية" required>
+            <input *ngIf="subStageDraft.id" name="subCode" [ngModel]="subStageDraft.code" [ngModelOptions]="{ standalone: true }" placeholder="الكود" readonly aria-label="كود المرحلة للقراءة فقط">
+            <input name="subName" [(ngModel)]="subStageDraft.name" placeholder="اسم المرحلة التشغيلية" required>
             <input name="subOrder" [(ngModel)]="subStageDraft.defaultOrder" type="number" placeholder="الترتيب">
-            <input name="subCapacity" [(ngModel)]="subStageDraft.capacity" type="number" placeholder="عدد تسكين المرحلة">
-            <button pButton type="submit" [label]="subStageDraft.id ? 'تحديث الفرعية' : 'إضافة فرعية'" [disabled]="isSaving"></button>
+            <input name="subCapacity" [(ngModel)]="subStageDraft.capacity" type="number" placeholder="السعة">
+            <button pButton type="submit" [label]="subStageDraft.id ? 'تحديث المرحلة' : 'إضافة مرحلة'" [disabled]="isSaving"></button>
           </form>
         </plp-expandable-form>
 
         <p-table plpResponsiveTable="scroll" plpTablePagination [plpPaginationPageSize]="10" [plpPaginationResetKey]="selectedMainStageId" [plpStickyActions]="true" [value]="visibleSubStages" dataKey="id" responsiveLayout="scroll">
           <ng-template pTemplate="header">
-          <tr><th>الكود</th><th>الاسم</th><th>الترتيب</th><th>عدد تسكين المرحلة</th><th>الحالة</th><th></th></tr>
+            <tr><th>الكود</th><th>المرحلة التشغيلية</th><th>الترتيب</th><th>السعة</th><th>الحالة</th><th></th></tr>
           </ng-template>
           <ng-template pTemplate="body" let-stage>
             <tr [class.factory-structure-selected]="stage.id === selectedSubStageId">
@@ -208,7 +267,11 @@
                 <button pButton type="button" class="p-button-sm p-button-text" label="اختيار" (click)="selectSubStage(stage.id)"></button>
                 <ng-container *plpCan="permissions.factoryStructure.manage">
                   <button pButton type="button" class="p-button-sm p-button-text" icon="pi pi-pencil" aria-label="تعديل المرحلة الفرعية" title="تعديل المرحلة الفرعية" (click)="editSubStage(stage)"></button>
+                  <button pButton type="button" class="p-button-sm p-button-text" label="فحص الارتباطات" [disabled]="isSaving" (click)="openStageDependencyDialog(stage, 'disable')"></button>
                   <button pButton type="button" class="p-button-sm p-button-text" [label]="stage.isActive ? 'تعطيل' : 'تفعيل'" [disabled]="isSaving" (click)="setSubStageActive(stage, !stage.isActive)"></button>
+                </ng-container>
+                <ng-container *plpCan="permissions.stages.delete">
+                  <button pButton type="button" class="p-button-sm p-button-text p-button-danger" icon="pi pi-trash" aria-label="حذف المرحلة التشغيلية" title="حذف المرحلة التشغيلية" [disabled]="isSaving" (click)="openStageDependencyDialog(stage, 'delete')"></button>
                 </ng-container>
               </td>
             </tr>
@@ -271,5 +334,36 @@
         </ng-template>
       </p-table>
     </section>
+
+    <plp-dialog
+      [visible]="stageDependencyDialogVisible"
+      [title]="pendingStageDependencyAction === 'delete' ? 'حذف المرحلة التشغيلية' : 'فحص ارتباطات المرحلة التشغيلية'"
+      [subtitle]="pendingStageDependencyAction === 'delete' ? 'الحذف النهائي متاح فقط عند خلو المرحلة من أي استخدام تشغيلي أو تاريخي.' : 'التعطيل يحافظ على السجل التاريخي ويُرفض فقط عند وجود ارتباطات تشغيلية نشطة.'"
+      size="compact"
+      [saving]="isSaving"
+      [error]="hasError ? errorMessage : ''"
+      [showSave]="canConfirmStageDependencyAction"
+      [saveDisabled]="isSaving || !canConfirmStageDependencyAction"
+      [saveLabel]="pendingStageDependencyAction === 'delete' ? 'تأكيد الحذف' : 'تأكيد التعطيل'"
+      (save)="confirmStageDependencyAction()"
+      (cancel)="closeStageDependencyDialog()"
+      (visibleChange)="onStageDependencyDialogVisibility($event)"
+    >
+      <ng-container *ngIf="stageDependencySummary as summary">
+        <p class="factory-structure-message">{{ pendingStageDependencyAction === 'delete' ? summary.deleteMessageAr : summary.disableMessageAr }}</p>
+        <h3>ارتباطات تشغيلية نشطة</h3>
+        <ul *ngIf="summary.activeBlockers.length; else noActiveStageDependencies">
+          <li *ngFor="let item of summary.activeBlockers">{{ item.labelAr }} ({{ item.count }})</li>
+        </ul>
+        <ng-template #noActiveStageDependencies><p>لا توجد ارتباطات تشغيلية تمنع التعطيل.</p></ng-template>
+        <ng-container *ngIf="pendingStageDependencyAction === 'delete'">
+          <h3>ارتباطات تاريخية</h3>
+          <ul *ngIf="summary.historicalDependencies.length; else noHistoricalStageDependencies">
+            <li *ngFor="let item of summary.historicalDependencies">{{ item.labelAr }} ({{ item.count }})</li>
+          </ul>
+          <ng-template #noHistoricalStageDependencies><p>لا توجد بيانات تاريخية مرتبطة.</p></ng-template>
+        </ng-container>
+      </ng-container>
+    </plp-dialog>
   </ng-container>
 </section>

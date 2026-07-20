@@ -13,6 +13,7 @@ public sealed class ProductionLineConfiguration : IEntityTypeConfiguration<Produ
 
         builder.Property(x => x.Id).ValueGeneratedNever();
         builder.Property(x => x.FactoryId).IsRequired();
+        builder.Property(x => x.DepartmentId).IsRequired(false);
         builder.Property(x => x.Name).IsRequired().HasMaxLength(200);
         builder.Property(x => x.LineCode).HasMaxLength(80);
         builder.Property(x => x.SequenceOrder).IsRequired();
@@ -23,6 +24,7 @@ public sealed class ProductionLineConfiguration : IEntityTypeConfiguration<Produ
         builder.HasIndex(x => new { x.FactoryId, x.LineCode })
             .IsUnique()
             .HasFilter("[LineCode] IS NOT NULL");
+        builder.HasIndex(x => x.DepartmentId);
 
         builder.HasOne(x => x.Factory)
             .WithMany(x => x.ProductionLines)
@@ -32,6 +34,11 @@ public sealed class ProductionLineConfiguration : IEntityTypeConfiguration<Produ
         builder.HasMany(x => x.MainStages)
             .WithOne(x => x.ProductionLine)
             .HasForeignKey(x => x.ProductionLineId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(x => x.Department)
+            .WithMany(x => x.ProductionLines)
+            .HasForeignKey(x => x.DepartmentId)
             .OnDelete(DeleteBehavior.Restrict);
     }
 }

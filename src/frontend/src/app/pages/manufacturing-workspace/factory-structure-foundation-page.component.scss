@@ -76,6 +76,12 @@
   justify-content: start;
 }
 
+.factory-structure-department-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--plp-spacing-1);
+}
+
 .factory-structure-form input,
 .factory-structure-form select {
   min-height: 2.35rem;
