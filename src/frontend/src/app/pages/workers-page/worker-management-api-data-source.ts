@@ -1,4 +1,4 @@
-import { Injectable } from '@angular/core';
+import { Injectable, Optional } from '@angular/core';
 import { Observable, map, of, switchMap, throwError } from 'rxjs';
 import { WorkerPageItem } from '../../shared/models/worker.model';
 import {
@@ -18,6 +18,7 @@ import {
   WorkerManagementDataSource,
   WorkerManagementLocalUpdate
 } from './worker-management.data-source';
+import { ManufacturingRealtimeService } from '../../core/services/manufacturing-realtime.service';
 
 /**
  * Runtime worker workspace source. It uses only Planner APIs backed by the
@@ -26,7 +27,7 @@ import {
  */
 @Injectable()
 export class WorkerManagementApiDataSource implements WorkerManagementDataSource {
-  constructor(private readonly workersApi: WorkersApiService) {}
+  constructor(private readonly workersApi: WorkersApiService, @Optional() private readonly manufacturingRealtime?: ManufacturingRealtimeService) {}
 
   loadPage(query: WorkerManagementQuery): Observable<WorkerManagementPage> {
     return this.workersApi.loadWorkers({
@@ -63,27 +64,27 @@ export class WorkerManagementApiDataSource implements WorkerManagementDataSource
     if (!nameChanged && !statusChanged) return of(worker);
 
     const workerUpdate = nameChanged
-      ? this.workersApi.updateWorker(worker.id, { fullName: update.displayName.trim() })
+      ? this.workersApi.updateWorker(worker.id, { fullName: update.displayName.trim() }, this.localCorrelation())
       : of<WorkerPageItem>(this.toWorkerPageItem(worker));
 
     return workerUpdate.pipe(
       switchMap(updated => statusChanged
         ? this.workersApi.setEmploymentStatus(worker.id, {
           employmentStatus: this.toApiEmploymentStatus(update.employmentStatus)
-        })
+        }, this.localCorrelation())
         : of(updated)),
       map(updated => this.toProfile(updated))
     );
   }
 
   uploadPhoto(workerId: string, photo: File): Observable<WorkerManagementProfile> {
-    return this.workersApi.uploadWorkerPhoto(workerId, photo).pipe(
+    return this.workersApi.uploadWorkerPhoto(workerId, photo, this.localCorrelation()).pipe(
       switchMap(() => this.loadProfile(workerId))
     );
   }
 
   deletePhoto(workerId: string): Observable<WorkerManagementProfile> {
-    return this.workersApi.deleteWorkerPhoto(workerId).pipe(
+    return this.workersApi.deleteWorkerPhoto(workerId, this.localCorrelation()).pipe(
       switchMap(() => this.loadProfile(workerId))
     );
   }
@@ -167,5 +168,9 @@ export class WorkerManagementApiDataSource implements WorkerManagementDataSource
       ...(worker.source.badgeNumber ? { badgeNumber: worker.source.badgeNumber } : {}),
       ...(worker.defaultSubStageId ? { defaultSubStageId: worker.defaultSubStageId } : {})
     };
+  }
+
+  private localCorrelation(): string | undefined {
+    return this.manufacturingRealtime?.registerLocalOperation('employees');
   }
 }

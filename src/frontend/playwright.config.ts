@@ -4,7 +4,7 @@ const externalBaseUrl = process.env['PLAYWRIGHT_BASE_URL'];
 
 export default defineConfig({
   testDir: './e2e',
-  testMatch: '**/*.visual.spec.ts',
+  testMatch: '**/*.spec.ts',
   fullyParallel: false,
   workers: 1,
   reporter: 'line',

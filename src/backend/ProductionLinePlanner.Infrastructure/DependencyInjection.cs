@@ -57,9 +57,17 @@ public static class DependencyInjection
         services.AddSingleton(Options.Create(attendanceSourceOptions));
         services.AddSingleton<ICairoTimeZoneProvider, CairoTimeZoneProvider>();
 
-        services.AddDbContext<AppDbContext>(options =>
+        services.AddScoped<IManufacturingDataChangePublisher, NoopManufacturingDataChangePublisher>();
+        services.AddScoped<IManufacturingRealtimeCorrelationContext, NoopManufacturingRealtimeCorrelationContext>();
+        services.AddScoped<ManufacturingDataChangeTransactionCoordinator>();
+        services.AddScoped<ManufacturingDataChangeSaveChangesInterceptor>();
+        services.AddScoped<ManufacturingDataChangeTransactionInterceptor>();
+        services.AddDbContext<AppDbContext>((serviceProvider, options) =>
         {
             options.UseSqlServer(appConnectionString);
+            options.AddInterceptors(
+                serviceProvider.GetRequiredService<ManufacturingDataChangeSaveChangesInterceptor>(),
+                serviceProvider.GetRequiredService<ManufacturingDataChangeTransactionInterceptor>());
         });
 
         services.AddDbContext<AttendanceDbContext>(options =>

@@ -1,4 +1,4 @@
-import { Component, OnDestroy, OnInit } from '@angular/core';
+import { Component, OnDestroy, OnInit, Optional } from '@angular/core';
 import { Observable, Subject, finalize, forkJoin, takeUntil } from 'rxjs';
 import { PERMISSIONS } from '../../core/config/permission-identifiers';
 import {
@@ -8,6 +8,7 @@ import {
   ProductionLineOption
 } from '../../core/services/manufacturing-master-data-api.service';
 import { PermissionService } from '../../core/services/permission.service';
+import { ManufacturingRealtimeService } from '../../core/services/manufacturing-realtime.service';
 
 interface FactoryDraft {
   id: string;
@@ -68,17 +69,21 @@ export class FactoryStructureFoundationPageComponent implements OnInit, OnDestro
   departmentDraft: DepartmentDraft = this.emptyDepartmentDraft();
   lineDraft: LineDraft = this.emptyLineDraft();
   private readonly destroy$ = new Subject<void>();
+  private stopRealtime?: () => void;
 
   constructor(
     private readonly masterDataApi: ManufacturingMasterDataApiService,
-    private readonly permissionService: PermissionService
+    private readonly permissionService: PermissionService,
+    @Optional() private readonly manufacturingRealtime?: ManufacturingRealtimeService
   ) {}
 
   ngOnInit(): void {
+    this.stopRealtime = this.manufacturingRealtime?.watchScreen({ screen: 'factory-structure', refresh: () => this.reload() });
     this.reload();
   }
 
   ngOnDestroy(): void {
+    this.stopRealtime?.();
     this.destroy$.next();
     this.destroy$.complete();
   }
@@ -165,8 +170,12 @@ export class FactoryStructureFoundationPageComponent implements OnInit, OnDestro
 
   selectFactory(id: string): void {
     this.selectedFactoryId = id;
-    this.selectedDepartmentId = '';
-    this.selectedLineId = '';
+    if (this.selectedDepartmentId && !this.departments.some(item => item.id === this.selectedDepartmentId && item.factoryId === this.selectedFactoryId)) {
+      this.selectedDepartmentId = '';
+    }
+    if (this.selectedLineId && !this.lines.some(item => item.id === this.selectedLineId && item.factoryId === this.selectedFactoryId)) {
+      this.selectedLineId = '';
+    }
     this.lineDraft.factoryId = id;
     this.lineDraft.departmentId = '';
     this.departmentDraft.factoryId = id;
@@ -199,9 +208,10 @@ export class FactoryStructureFoundationPageComponent implements OnInit, OnDestro
       location: this.factoryDraft.location.trim() || null,
       isActive: true
     };
+    const correlationId = this.localCorrelation();
     const request = this.factoryDraft.id
-      ? this.masterDataApi.updateFactory(this.factoryDraft.id, { name: payload.name, location: payload.location, isActive: true })
-      : this.masterDataApi.createFactory(payload);
+      ? this.masterDataApi.updateFactory(this.factoryDraft.id, { name: payload.name, location: payload.location, isActive: true }, correlationId)
+      : this.masterDataApi.createFactory(payload, correlationId);
     this.save(request, () => {
       this.factoryDraft = this.emptyFactoryDraft();
       this.activeForm = null;
@@ -234,6 +244,7 @@ export class FactoryStructureFoundationPageComponent implements OnInit, OnDestro
       sequenceOrder: Number(this.departmentDraft.sequenceOrder) || 0,
       isActive: true
     };
+    const correlationId = this.localCorrelation();
     const request = this.departmentDraft.id
       ? this.masterDataApi.updateDepartment(this.departmentDraft.id, {
         code: payload.code,
@@ -241,8 +252,8 @@ export class FactoryStructureFoundationPageComponent implements OnInit, OnDestro
         nameEn: this.departmentDraft.nameEn.trim(),
         sequenceOrder: payload.sequenceOrder,
         isActive: true
-      })
-      : this.masterDataApi.createDepartment(payload);
+      }, correlationId)
+      : this.masterDataApi.createDepartment(payload, correlationId);
     this.save(request, () => {
       this.departmentDraft = this.emptyDepartmentDraft();
       this.departmentDraft.factoryId = this.selectedFactoryId;
@@ -251,12 +262,12 @@ export class FactoryStructureFoundationPageComponent implements OnInit, OnDestro
   }
 
   setDepartmentActive(item: DepartmentItem, isActive: boolean): void {
-    if (item.id) this.save(this.masterDataApi.updateDepartment(item.id, { isActive }));
+    if (item.id) this.save(this.masterDataApi.updateDepartment(item.id, { isActive }, this.localCorrelation()));
   }
 
   deleteDepartment(item: DepartmentItem): void {
     if (!item.id || !window.confirm(`حذف القسم ${item.nameAr ?? item.name ?? item.code ?? ''} نهائيًا؟`)) return;
-    this.save(this.masterDataApi.deleteDepartment(item.id), () => {
+    this.save(this.masterDataApi.deleteDepartment(item.id, this.localCorrelation()), () => {
       if (this.selectedDepartmentId === item.id) this.selectDepartment('');
     });
   }
@@ -286,6 +297,7 @@ export class FactoryStructureFoundationPageComponent implements OnInit, OnDestro
       sequenceOrder: Number(this.lineDraft.sequenceOrder) || 0,
       isActive: true
     };
+    const correlationId = this.localCorrelation();
     const request = this.lineDraft.id
       ? this.masterDataApi.updateProductionLine(this.lineDraft.id, {
         name: payload.name,
@@ -293,8 +305,8 @@ export class FactoryStructureFoundationPageComponent implements OnInit, OnDestro
         lineCode: payload.lineCode,
         sequenceOrder: payload.sequenceOrder,
         isActive: true
-      })
-      : this.masterDataApi.createProductionLine(payload);
+      }, correlationId)
+      : this.masterDataApi.createProductionLine(payload, correlationId);
     this.save(request, () => {
       this.lineDraft = this.emptyLineDraft();
       this.lineDraft.factoryId = this.selectedFactoryId;
@@ -304,7 +316,7 @@ export class FactoryStructureFoundationPageComponent implements OnInit, OnDestro
   }
 
   setLineActive(item: ProductionLineOption, isActive: boolean): void {
-    this.save(this.masterDataApi.updateProductionLine(item.id, { isActive }));
+    this.save(this.masterDataApi.updateProductionLine(item.id, { isActive }, this.localCorrelation()));
   }
 
   private get normalizedSearch(): string {
@@ -315,11 +327,20 @@ export class FactoryStructureFoundationPageComponent implements OnInit, OnDestro
     if (!this.selectedFactoryId || !this.factories.some(item => item.id === this.selectedFactoryId)) {
       this.selectedFactoryId = this.factories[0]?.id ?? '';
     }
-    this.selectedDepartmentId = '';
-    this.selectedLineId = '';
+    if (this.selectedDepartmentId && this.selectedDepartmentId !== 'unassigned' && !this.departments.some(item => item.id === this.selectedDepartmentId && item.factoryId === this.selectedFactoryId)) {
+      this.selectedDepartmentId = '';
+    }
+    if (this.selectedDepartmentId === 'unassigned' && !this.unassignedLines.length) this.selectedDepartmentId = '';
+    if (this.selectedLineId && !this.lines.some(item => item.id === this.selectedLineId && item.factoryId === this.selectedFactoryId)) {
+      this.selectedLineId = '';
+    }
     this.departmentDraft.factoryId = this.selectedFactoryId;
     this.lineDraft.factoryId = this.selectedFactoryId;
-    this.lineDraft.departmentId = '';
+    this.lineDraft.departmentId = this.selectedDepartmentId === 'unassigned' ? '' : this.selectedDepartmentId;
+  }
+
+  private localCorrelation(): string | undefined {
+    return this.manufacturingRealtime?.registerLocalOperation('factory-structure');
   }
 
   private save(request: Observable<unknown>, success?: () => void): void {

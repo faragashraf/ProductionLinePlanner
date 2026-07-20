@@ -1,13 +1,14 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnDestroy, OnInit, Optional } from '@angular/core';
 import { finalize } from 'rxjs';
 import { DepartmentItem, ManufacturingMasterDataApiService } from '../../core/services/manufacturing-master-data-api.service';
+import { ManufacturingRealtimeService } from '../../core/services/manufacturing-realtime.service';
 
 @Component({
   selector: 'app-manufacturing-departments-page',
   templateUrl: './manufacturing-departments-page.component.html',
   styleUrls: ['./manufacturing-departments-page.component.scss']
 })
-export class ManufacturingDepartmentsPageComponent implements OnInit {
+export class ManufacturingDepartmentsPageComponent implements OnInit, OnDestroy {
   departments: DepartmentItem[] = [];
   filteredDepartments: DepartmentItem[] = [];
   searchTerm = '';
@@ -17,11 +18,16 @@ export class ManufacturingDepartmentsPageComponent implements OnInit {
   errorMessage = 'تعذر تحميل بيانات الأقسام، يرجى المحاولة مرة أخرى.';
   errorRetryText = 'إعادة المحاولة';
 
-  constructor(private readonly api: ManufacturingMasterDataApiService) {}
+  private stopRealtime?: () => void;
+
+  constructor(private readonly api: ManufacturingMasterDataApiService, @Optional() private readonly manufacturingRealtime?: ManufacturingRealtimeService) {}
 
   ngOnInit(): void {
+    this.stopRealtime = this.manufacturingRealtime?.watchScreen({ screen: 'departments', refresh: () => this.loadDepartments() });
     this.loadDepartments();
   }
+
+  ngOnDestroy(): void { this.stopRealtime?.(); }
 
   get isEmpty(): boolean {
     return !this.isLoading && !this.hasError && this.filteredDepartments.length === 0 && this.searchTerm.trim().length === 0;

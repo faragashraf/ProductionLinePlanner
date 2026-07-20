@@ -101,4 +101,12 @@ describe('ManufacturingMasterDataApiService', () => {
 
     expect(stages).toEqual([{ id: 'stage-1', mainStageId: 'legacy-group', productionLineId: 'line-1', name: 'تجهيز', code: 'STG001', capacity: 2, defaultOrder: 1, sequenceOrder: 1, isActive: false }]);
   });
+
+  it('sends the local realtime correlation only with manufacturing mutations', () => {
+    service.createModel({ code: 'RT-1', name: 'موديل لحظي' }, '11111111-1111-1111-1111-111111111111').subscribe();
+
+    const request = http.expectOne(item => item.method === 'POST' && item.url.endsWith('/api/product-models'));
+    expect(request.request.headers.get('X-Manufacturing-Realtime-Correlation-Id')).toBe('11111111-1111-1111-1111-111111111111');
+    request.flush({ success: true, data: { id: 'model-1', code: 'RT-1', name: 'موديل لحظي', isActive: true } });
+  });
 });

@@ -224,14 +224,16 @@ public sealed class RealtimeNotificationFoundationTests
     }
 
     [Fact]
-    public void Hub_declares_no_client_callable_business_methods()
+    public void Hub_exposes_only_lifecycle_and_authorized_manufacturing_group_membership_methods()
     {
         var declaredPublicMethods = typeof(NotificationsHub)
             .GetMethods(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.DeclaredOnly)
             .Select(method => method.Name)
             .ToArray();
 
-        Assert.Equal([nameof(NotificationsHub.OnConnectedAsync), nameof(NotificationsHub.OnDisconnectedAsync)], declaredPublicMethods);
+        Assert.Equal(
+            [nameof(NotificationsHub.OnConnectedAsync), nameof(NotificationsHub.OnDisconnectedAsync), nameof(NotificationsHub.JoinManufacturingScreen), nameof(NotificationsHub.LeaveManufacturingScreen)],
+            declaredPublicMethods);
     }
 
     private static AppDbContext CreateDbContext()

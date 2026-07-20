@@ -79,4 +79,22 @@ describe('WorkersPageComponent', () => {
     component.closeProfile();
     expect(component.workers).toEqual([listItem]);
   });
+
+  it('refreshes the manufacturing employees page through the shared realtime service without losing its query or page', () => {
+    let refresh: (() => void) | undefined;
+    const stop = jasmine.createSpy('stop');
+    const realtime = { watchScreen: jasmine.createSpy('watchScreen').and.callFake((watch: { refresh: () => void }) => { refresh = watch.refresh; return stop; }) };
+    const component = new WorkersPageComponent(facade, permissions, realtime as never, { url: '/manufacturing/employees' } as never);
+    component.ngOnInit();
+    component.search = 'عامل';
+    component.localEmploymentStatus = 'active';
+    component.page = 2;
+    facade.loadWorkers.calls.reset();
+    refresh?.();
+
+    expect(realtime.watchScreen).toHaveBeenCalledWith(jasmine.objectContaining({ screen: 'employees' }));
+    expect(facade.loadWorkers).toHaveBeenCalledWith(jasmine.objectContaining({ search: 'عامل', localEmploymentStatus: 'active', page: 2 }));
+    component.ngOnDestroy();
+    expect(stop).toHaveBeenCalled();
+  });
 });
