@@ -2012,7 +2012,7 @@ stagesApi.MapPost("", async (
     CancellationToken cancellationToken) =>
 {
     if (currentUserService.UserId is not { } actorUserId) return ApiResponse.Failure("Unauthorized", "User context is required.");
-    var result = await stageCatalogService.CreateOperationalStageAsync(request.ProductionLineId, request.MainStageId, request.Name, request.DefaultOrder, request.Capacity, request.IsActive, actorUserId, AuditRequestMetadata.From(httpContext), cancellationToken);
+    var result = await stageCatalogService.CreateOperationalStageAsync(request.ProductionLineId, request.Name, request.Capacity, request.IsActive, actorUserId, AuditRequestMetadata.From(httpContext), cancellationToken);
     return result.IsFailure
         ? ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code))
         : Results.Created($"/api/stages/{result.Value!.Id}", ApiResponse.Success(result.Value));
@@ -2050,7 +2050,7 @@ stagesApi.MapPost("/{stageId:guid}/deactivate", async (
     var result = await stageCatalogService.DeactivateSubStageAsync(stageId, actorUserId, AuditRequestMetadata.From(httpContext), cancellationToken);
     return result.IsFailure
         ? ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code))
-        : Results.NoContent();
+        : Results.Ok(ApiResponse.Success(result.Value!));
 })
     .WithTags("Stages")
     .WithName("DeactivateOperationalStage")

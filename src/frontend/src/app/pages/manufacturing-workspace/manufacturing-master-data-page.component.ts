@@ -52,8 +52,7 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
     departmentId: ['', Validators.required],
     productionLineId: ['', Validators.required],
     name: ['', Validators.required],
-    capacity: [0, [Validators.required, Validators.min(0)]],
-    defaultOrder: [1, [Validators.required, Validators.min(1)]]
+    capacity: [0, [Validators.required, Validators.min(0)]]
   });
   readonly modelForm = this.fb.group({ code: ['', Validators.required], name: ['', Validators.required], description: [''] });
   readonly modelStageForm = this.fb.group({ subStageId: ['', Validators.required], stageOrder: [1, Validators.required], piecePrice: [0, Validators.required], standardSeconds: [null as number | null], compensationMode: ['SharedPercentage', Validators.required], isRequired: [true], isActive: [true] });
@@ -133,13 +132,13 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
   openStageForm(): void {
     this.editStageId = '';
     this.stageFormVisible = true;
-    this.stageForm.patchValue({ name: '', capacity: 0, defaultOrder: 1 });
+    this.stageForm.patchValue({ name: '', capacity: 0 });
   }
 
   editOperationalStage(stage: SubStageOption): void {
     this.editStageId = stage.id;
     this.stageFormVisible = true;
-    this.stageForm.reset({ factoryId: stage.factoryId ?? '', departmentId: stage.departmentId ?? '', productionLineId: stage.productionLineId ?? '', name: stage.name, capacity: stage.capacity, defaultOrder: stage.sequenceOrder });
+    this.stageForm.reset({ factoryId: stage.factoryId ?? '', departmentId: stage.departmentId ?? '', productionLineId: stage.productionLineId ?? '', name: stage.name, capacity: stage.capacity });
     if (stage.factoryId) this.api.departments(stage.factoryId, false).pipe(takeUntil(this.destroy$)).subscribe(departments => this.departments = departments);
     if (stage.departmentId) this.api.productionLinesForDepartment(stage.departmentId).pipe(takeUntil(this.destroy$)).subscribe(lines => this.lines = lines);
   }
@@ -148,8 +147,8 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
     if (this.stageForm.invalid) { this.stageForm.markAllAsTouched(); return; }
     const value = this.stageForm.getRawValue();
     const request = this.editStageId
-      ? this.api.updateOperationalStage(this.editStageId, { name: value.name, capacity: value.capacity, defaultOrder: value.defaultOrder })
-      : this.api.createOperationalStage({ productionLineId: value.productionLineId, name: value.name, capacity: value.capacity, defaultOrder: value.defaultOrder });
+      ? this.api.updateOperationalStage(this.editStageId, { name: value.name, capacity: value.capacity })
+      : this.api.createOperationalStage({ productionLineId: value.productionLineId!, name: value.name!, capacity: value.capacity! });
     this.save(request, () => { this.stageFormVisible = false; this.editStageId = ''; this.loadOperationalStages(); });
   }
 
@@ -163,9 +162,20 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
   }
 
   confirmDependencyAction(): void {
-    if (!this.pendingStage || !this.pendingStageAction || !this.canConfirmDependencyAction) return;
-    const request = this.pendingStageAction === 'delete' ? this.api.deleteOperationalStage(this.pendingStage.id) : this.api.deactivateOperationalStage(this.pendingStage.id);
-    this.save(request, () => { this.closeDependencyDialog(); this.loadOperationalStages(); });
+    if (this.saving || !this.pendingStage || !this.pendingStageAction || !this.canConfirmDependencyAction) return;
+    if (this.pendingStageAction === 'delete') {
+      this.save(this.api.deleteOperationalStage(this.pendingStage.id), () => { this.closeDependencyDialog(); this.loadOperationalStages(); });
+      return;
+    }
+
+    this.save(this.api.deactivateOperationalStage(this.pendingStage.id), stage => {
+      const existingStage = this.operationalStages.find(item => item.id === stage.id);
+      const updatedStage = existingStage ? { ...existingStage, ...stage } : stage;
+      this.operationalStages = this.stageStatusFilter === 'active'
+        ? this.operationalStages.filter(item => item.id !== updatedStage.id)
+        : this.upsert(this.operationalStages, updatedStage, 'sequenceOrder');
+      this.closeDependencyDialog();
+    });
   }
 
   closeDependencyDialog(): void { this.dependencyDialogVisible = false; this.pendingStage = null; this.pendingStageAction = null; this.stageDependencySummary = null; }

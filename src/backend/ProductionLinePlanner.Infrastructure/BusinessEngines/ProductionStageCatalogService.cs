@@ -1,4 +1,6 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
+using Microsoft.Data.SqlClient;
 using ProductionLinePlanner.Application.Common;
 using ProductionLinePlanner.Application.DTOs;
 using ProductionLinePlanner.Application.Engines;
@@ -398,9 +400,10 @@ public sealed class ProductionStageCatalogService(
         CancellationToken cancellationToken = default)
     {
         _ = code; // Legacy aliases retain their payload shape; codes are generated server-side.
+        _ = defaultOrder; // Operational ordering is allocated by the catalog under a transaction.
         var mainStage = await dbContext.MainStages.AsNoTracking().FirstOrDefaultAsync(x => x.Id == mainStageId, cancellationToken);
         if (mainStage is null) return Result<SubStageDto>.Failure(new Error("NotFound", "Main stage was not found."));
-        return await CreateOperationalStageAsync(mainStage.ProductionLineId, mainStageId, name, defaultOrder, capacity, isActive, actorUserId, requestMeta, cancellationToken);
+        return await CreateOperationalStageCoreAsync(mainStage.ProductionLineId, mainStageId, name, capacity, isActive, actorUserId, requestMeta, cancellationToken);
     }
 
     public async Task<Result<SubStageDto>> UpdateSubStageAsync(
@@ -534,7 +537,7 @@ public sealed class ProductionStageCatalogService(
         });
     }
 
-    public async Task<Result> DeactivateSubStageAsync(
+    public async Task<Result<SubStageDto>> DeactivateSubStageAsync(
         Guid subStageId,
         Guid actorUserId,
         string? requestMeta = null,
@@ -542,23 +545,27 @@ public sealed class ProductionStageCatalogService(
     {
         if (actorUserId == Guid.Empty)
         {
-            return Result.Failure(new Error("Unauthorized", "User context is required."));
+            return Result<SubStageDto>.Failure(new Error("Unauthorized", "User context is required."));
         }
 
         if (subStageId == Guid.Empty)
         {
-            return Result.Failure(new Error("ValidationError", "SubStageId is required."));
+            return Result<SubStageDto>.Failure(new Error("ValidationError", "StageId is required."));
         }
 
-        var entity = await dbContext.SubStages.FirstOrDefaultAsync(x => x.Id == subStageId && x.IsActive, cancellationToken);
+        var entity = await dbContext.SubStages.FirstOrDefaultAsync(x => x.Id == subStageId, cancellationToken);
         if (entity is null)
         {
-            return Result.Failure(new Error("NotFound", "Sub stage not found."));
+            return Result<SubStageDto>.Failure(new Error("NotFound", "المرحلة غير موجودة."));
         }
 
+        // A retry or a duplicate browser submission must not turn a completed
+        // deactivation into a false 404. The persisted entity is the response.
+        if (!entity.IsActive) return Result<SubStageDto>.Success(ToDto(entity));
+
         var dependencies = await dependencyInspector.InspectAsync(subStageId, cancellationToken);
-        if (dependencies.IsFailure) return Result.Failure(dependencies.Error!);
-        if (!dependencies.Value!.CanDisable) return Result.Failure(new Error("Conflict", dependencies.Value.DisableMessageAr));
+        if (dependencies.IsFailure) return Result<SubStageDto>.Failure(dependencies.Error!);
+        if (!dependencies.Value!.CanDisable) return Result<SubStageDto>.Failure(new Error("Conflict", dependencies.Value.DisableMessageAr));
 
         var before = new { entity.Id, entity.MainStageId, entity.ProductionLineId, entity.Code, entity.Name, entity.Capacity, entity.DefaultOrder, entity.IsActive };
         dbContext.Entry(entity).Property(nameof(SubStage.IsActive)).CurrentValue = false;
@@ -573,7 +580,7 @@ public sealed class ProductionStageCatalogService(
             requestMeta: requestMeta);
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        return Result.Success();
+        return Result<SubStageDto>.Success(ToDto(entity));
     }
 
     public async Task<PagedResult<SubStageDto>> GetOperationalStagesAsync(
@@ -624,21 +631,29 @@ public sealed class ProductionStageCatalogService(
 
     public async Task<Result<SubStageDto>> CreateOperationalStageAsync(
         Guid productionLineId,
-        Guid? mainStageId,
         string name,
-        int defaultOrder,
         int capacity,
         bool isActive,
         Guid actorUserId,
         string? requestMeta = null,
         CancellationToken cancellationToken = default)
+        => await CreateOperationalStageCoreAsync(productionLineId, null, name, capacity, isActive, actorUserId, requestMeta, cancellationToken);
+
+    private async Task<Result<SubStageDto>> CreateOperationalStageCoreAsync(
+        Guid productionLineId,
+        Guid? requestedMainStageId,
+        string name,
+        int capacity,
+        bool isActive,
+        Guid actorUserId,
+        string? requestMeta,
+        CancellationToken cancellationToken)
     {
         if (actorUserId == Guid.Empty) return Result<SubStageDto>.Failure(new Error("Unauthorized", "User context is required."));
         if (productionLineId == Guid.Empty) return Result<SubStageDto>.Failure(new Error("ValidationError", "ProductionLineId is required."));
         var normalizedName = name?.Trim();
         if (string.IsNullOrWhiteSpace(normalizedName)) return Result<SubStageDto>.Failure(new Error("ValidationError", "Name is required."));
         if (capacity < 0) return Result<SubStageDto>.Failure(new Error("ValidationError", "Capacity must be zero or greater."));
-        if (defaultOrder <= 0) return Result<SubStageDto>.Failure(new Error("ValidationError", "DefaultOrder must be greater than zero."));
 
         if (!await dbContext.ProductionLines.AnyAsync(x => x.Id == productionLineId && x.IsActive, cancellationToken))
         {
@@ -650,42 +665,65 @@ public sealed class ProductionStageCatalogService(
             await using var transaction = dbContext.Database.IsRelational()
                 ? await dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken)
                 : null;
-            var groupResult = await ResolveLegacyGroupAsync(productionLineId, mainStageId, actorUserId, requestMeta, cancellationToken);
-            if (groupResult.IsFailure)
-            {
-                if (transaction is not null) await transaction.RollbackAsync(cancellationToken);
-                return Result<SubStageDto>.Failure(groupResult.Error!);
-            }
-            var selectedGroup = groupResult.Value!;
-            if (await dbContext.SubStages.AnyAsync(x => x.MainStageId == selectedGroup.Id && x.DefaultOrder == defaultOrder && x.IsActive, cancellationToken))
-            {
-                if (transaction is not null) await transaction.RollbackAsync(cancellationToken);
-                return Result<SubStageDto>.Failure(new Error("Conflict", "DefaultOrder must be unique within the production line's compatibility group."));
-            }
-            var code = await AllocateStageCodeAsync(cancellationToken);
-            if (await dbContext.SubStages.AnyAsync(x => x.Code == code, cancellationToken))
-            {
-                if (transaction is not null) await transaction.RollbackAsync(cancellationToken);
-                continue;
-            }
-
-            var entity = new SubStage(Guid.NewGuid(), selectedGroup.Id, normalizedName, code, capacity, defaultOrder, isActive, productionLineId: productionLineId);
-            dbContext.SubStages.Add(entity);
-            await auditEngine.RecordAsync(actorUserId, AuditActionType.Create, nameof(SubStage), entity.Id.ToString(), after: new { entity.Id, entity.MainStageId, entity.ProductionLineId, entity.Code, entity.Name, entity.Capacity, entity.DefaultOrder, entity.IsActive }, requestMeta: requestMeta, cancellationToken: cancellationToken);
             try
             {
+                var groupResult = await ResolveLegacyGroupAsync(productionLineId, requestedMainStageId, actorUserId, requestMeta, cancellationToken);
+                if (groupResult.IsFailure)
+                {
+                    if (transaction is not null) await transaction.RollbackAsync(cancellationToken);
+                    return Result<SubStageDto>.Failure(groupResult.Error!);
+                }
+                var selectedGroup = groupResult.Value!;
+                // Serializable plus IX_SubStages_MainStageId_SequenceOrder protects this range on SQL Server,
+                // so Max + 1 is allocated only while the compatibility group is locked.
+                var highestDefaultOrder = await dbContext.SubStages
+                    .Where(stage => stage.MainStageId == selectedGroup.Id)
+                    .Select(stage => (int?)stage.DefaultOrder)
+                    .MaxAsync(cancellationToken) ?? 0;
+                if (highestDefaultOrder == int.MaxValue)
+                {
+                    if (transaction is not null) await transaction.RollbackAsync(cancellationToken);
+                    return Result<SubStageDto>.Failure(new Error("Conflict", "تعذر تحديد ترتيب المرحلة تلقائيًا. أعد المحاولة."));
+                }
+                var defaultOrder = highestDefaultOrder + 1;
+                var code = await AllocateStageCodeAsync(cancellationToken);
+                if (await dbContext.SubStages.AnyAsync(x => x.Code == code, cancellationToken))
+                {
+                    if (transaction is not null) await transaction.RollbackAsync(cancellationToken);
+                    continue;
+                }
+
+                var entity = new SubStage(Guid.NewGuid(), selectedGroup.Id, normalizedName, code, capacity, defaultOrder, isActive, productionLineId: productionLineId);
+                dbContext.SubStages.Add(entity);
+                await auditEngine.RecordAsync(actorUserId, AuditActionType.Create, nameof(SubStage), entity.Id.ToString(), after: new { entity.Id, entity.MainStageId, entity.ProductionLineId, entity.Code, entity.Name, entity.Capacity, entity.DefaultOrder, entity.IsActive }, requestMeta: requestMeta, cancellationToken: cancellationToken);
                 await dbContext.SaveChangesAsync(cancellationToken);
                 if (transaction is not null) await transaction.CommitAsync(cancellationToken);
                 return Result<SubStageDto>.Success(ToDto(entity));
             }
-            catch (DbUpdateException) when (attempt < 2)
+            catch (Exception exception) when (attempt < 2 && IsConfirmedAllocationConcurrencyConflict(exception))
             {
                 if (transaction is not null) await transaction.RollbackAsync(cancellationToken);
                 dbContext.ChangeTracker.Clear();
             }
         }
 
-        return Result<SubStageDto>.Failure(new Error("Conflict", "تعذر تخصيص كود مرحلة فريد. أعد المحاولة."));
+        return Result<SubStageDto>.Failure(new Error("Conflict", "تعذر تحديد ترتيب المرحلة تلقائيًا بسبب إنشاء متزامن. أعد المحاولة."));
+    }
+
+    private static bool IsConfirmedAllocationConcurrencyConflict(Exception exception)
+    {
+        for (Exception? current = exception; current is not null; current = current.InnerException)
+        {
+            if (current is SqlException { Number: 1205 or 2601 or 2627 }) return true;
+
+            // SQLite is used only by automated concurrency tests. Error 5 is a lock conflict and
+            // error 19 is the equivalent unique-index conflict that the retry resolves safely.
+            if (string.Equals(current.GetType().FullName, "Microsoft.Data.Sqlite.SqliteException", StringComparison.Ordinal)
+                && current.GetType().GetProperty("SqliteErrorCode")?.GetValue(current) is int sqliteError
+                && sqliteError is 5 or 19) return true;
+        }
+
+        return false;
     }
 
     public async Task<Result<StageDependencySummaryDto>> GetSubStageDependenciesAsync(Guid subStageId, CancellationToken cancellationToken = default) =>
@@ -710,7 +748,29 @@ public sealed class ProductionStageCatalogService(
         long value;
         if (dbContext.Database.IsSqlServer())
         {
-            value = await dbContext.Database.SqlQueryRaw<long>("SELECT NEXT VALUE FOR [StageCodeSequence] AS [Value]").SingleAsync(cancellationToken);
+            // SqlQueryRaw composes scalar SQL as a derived table. SQL Server 2016 forbids
+            // NEXT VALUE FOR in that context, so execute the sequence statement directly
+            // on the connection enlisted in the current allocation transaction.
+            var connection = dbContext.Database.GetDbConnection();
+            var openedHere = connection.State != System.Data.ConnectionState.Open;
+            if (openedHere) await connection.OpenAsync(cancellationToken);
+            try
+            {
+                await using var command = connection.CreateCommand();
+                command.CommandText = "SELECT NEXT VALUE FOR [StageCodeSequence]";
+                if (dbContext.Database.CurrentTransaction is { } transaction)
+                {
+                    command.Transaction = transaction.GetDbTransaction();
+                }
+
+                value = await command.ExecuteScalarAsync(cancellationToken) is long nextValue
+                    ? nextValue
+                    : throw new InvalidOperationException("StageCodeSequence did not return a bigint value.");
+            }
+            finally
+            {
+                if (openedHere) await connection.CloseAsync();
+            }
         }
         else
         {

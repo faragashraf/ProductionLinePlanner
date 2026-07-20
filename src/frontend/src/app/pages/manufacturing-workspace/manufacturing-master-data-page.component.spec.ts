@@ -27,7 +27,7 @@ describe('ManufacturingMasterDataPageComponent', () => {
     api.createOperationalStage.and.returnValue(of(stage));
     api.updateOperationalStage.and.returnValue(of(stage));
     api.stageDependencies.and.returnValue(of({ stageId: stage.id, activeBlockers: [], historicalDependencies: [], canDisable: true, canDelete: true, disableMessageAr: '', deleteMessageAr: '' }));
-    api.deactivateOperationalStage.and.returnValue(of(void 0));
+    api.deactivateOperationalStage.and.returnValue(of({ ...stage, isActive: false }));
     api.deleteOperationalStage.and.returnValue(of(void 0));
     api.models.and.returnValue(of([]));
     api.searchSubStages.and.returnValue(of({ items: [], totalCount: 0, pageNumber: 1, pageSize: 50 }));
@@ -56,6 +56,7 @@ describe('ManufacturingMasterDataPageComponent', () => {
     expect((component as never as { subForm?: unknown }).subForm).toBeUndefined();
     expect(Object.keys(component.stageForm.controls)).not.toContain('mainStageId');
     expect(Object.keys(component.stageForm.controls)).not.toContain('code');
+    expect(Object.keys(component.stageForm.controls)).not.toContain('defaultOrder');
   });
 
   it('loads only the selected factory departments and clears dependent context', () => {
@@ -91,12 +92,41 @@ describe('ManufacturingMasterDataPageComponent', () => {
     expect(component.operationalStages).toEqual([stage]);
   });
 
-  it('creates a stage from its direct production-line context without a legacy-group selection or code', () => {
-    component.stageForm.setValue({ factoryId: factory.id, departmentId: department.id, productionLineId: line.id, name: 'تشطيب', capacity: 3, defaultOrder: 2 });
+  it('creates a stage from its direct production-line context without legacy ordering input', () => {
+    component.stageForm.setValue({ factoryId: factory.id, departmentId: department.id, productionLineId: line.id, name: 'تشطيب', capacity: 3 });
 
     component.saveOperationalStage();
 
-    expect(api.createOperationalStage).toHaveBeenCalledWith({ productionLineId: line.id, name: 'تشطيب', capacity: 3, defaultOrder: 2 });
+    expect(api.createOperationalStage).toHaveBeenCalledWith({ productionLineId: line.id, name: 'تشطيب', capacity: 3 });
+    expect(api.operationalStages).toHaveBeenCalledWith({ productionLineId: line.id, isActive: undefined, includeInactive: true });
+    expect(component.operationalStages).toEqual([stage]);
+  });
+
+  it('updates the stage row immediately after a successful deactivation without reloading', () => {
+    const inactiveStage = { ...stage, isActive: false };
+    api.deactivateOperationalStage.and.returnValue(of(inactiveStage));
+    component.operationalStages = [stage];
+    component.pendingStage = stage;
+    component.pendingStageAction = 'disable';
+    component.stageDependencySummary = { stageId: stage.id, activeBlockers: [], historicalDependencies: [], canDisable: true, canDelete: true, disableMessageAr: '', deleteMessageAr: '' };
+
+    component.confirmDependencyAction();
+
+    expect(api.deactivateOperationalStage).toHaveBeenCalledOnceWith(stage.id);
+    expect(component.operationalStages).toEqual([inactiveStage]);
+    expect(api.operationalStages).not.toHaveBeenCalled();
+    expect(component.error).toBe('');
+  });
+
+  it('does not submit a duplicate deactivation while the first request is saving', () => {
+    component.saving = true;
+    component.pendingStage = stage;
+    component.pendingStageAction = 'disable';
+    component.stageDependencySummary = { stageId: stage.id, activeBlockers: [], historicalDependencies: [], canDisable: true, canDelete: true, disableMessageAr: '', deleteMessageAr: '' };
+
+    component.confirmDependencyAction();
+
+    expect(api.deactivateOperationalStage).not.toHaveBeenCalled();
   });
 
   it('keeps model journey price, seconds, and compensation fields on the model-stage form', () => {

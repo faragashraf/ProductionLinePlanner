@@ -38,9 +38,7 @@ public interface IProductionStageCatalogService
 
     Task<Result<SubStageDto>> CreateOperationalStageAsync(
         Guid productionLineId,
-        Guid? mainStageId,
         string name,
-        int defaultOrder,
         int capacity,
         bool isActive,
         Guid actorUserId,
@@ -95,7 +93,7 @@ public interface IProductionStageCatalogService
         string? requestMeta = null,
         CancellationToken cancellationToken = default);
 
-    Task<Result> DeactivateSubStageAsync(
+    Task<Result<SubStageDto>> DeactivateSubStageAsync(
         Guid subStageId,
         Guid actorUserId,
         string? requestMeta = null,
