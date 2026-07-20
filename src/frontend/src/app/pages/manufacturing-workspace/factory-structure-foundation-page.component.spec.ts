@@ -11,6 +11,7 @@ import { PermissionService } from '../../core/services/permission.service';
 import { PlpExpandableFormComponent } from '../../shared/product/plp-expandable-form.component';
 import { PlpResponsiveTableDirective } from '../../shared/product/plp-responsive-table.directive';
 import { PlpTablePaginationDirective } from '../../shared/product/plp-table-pagination.directive';
+import { PlpProductToolbarComponent } from '../../shared/product/plp-toolbar.component';
 import { SharedModule } from '../../shared/shared.module';
 import { FactoryStructureFoundationPageComponent } from './factory-structure-foundation-page.component';
 
@@ -46,7 +47,7 @@ describe('FactoryStructureFoundationPageComponent', () => {
     const grantedPermissions = new Set<string>(manage ? [PERMISSIONS.factoryStructure.manage, PERMISSIONS.departments.manage] : []);
     TestBed.configureTestingModule({
       declarations: [FactoryStructureFoundationPageComponent],
-      imports: [FormsModule, SharedModule, ButtonModule, TableModule, PlpResponsiveTableDirective, PlpTablePaginationDirective, PlpExpandableFormComponent, NoopAnimationsModule],
+      imports: [FormsModule, SharedModule, ButtonModule, TableModule, PlpResponsiveTableDirective, PlpTablePaginationDirective, PlpExpandableFormComponent, PlpProductToolbarComponent, NoopAnimationsModule],
       providers: [
         { provide: ManufacturingMasterDataApiService, useValue: masterData },
         { provide: PermissionService, useValue: {

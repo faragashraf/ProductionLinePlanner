@@ -10,6 +10,7 @@
 @import './app/shared/design-system/foundation/global-foundation.scss';
 @import './app/shared/design-system/shell/enterprise-app-shell.scss';
 @import './app/shared/design-system/primeng/primeng-theme-bridge.scss';
+@import './app/shared/design-system/manufacturing/operational-workspaces.scss';
 @import './app/shared/product/product-experience.scss';
 
 .plp-inline-state {
@@ -83,6 +84,29 @@
   .line-staffing-page__stage-list, .line-staffing-page__selected-region { flex: 1 1 auto; max-block-size: none; min-block-size: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior-y: contain; touch-action: pan-y; -webkit-overflow-scrolling: touch; overflow-anchor: none; scrollbar-gutter: stable; }
   .line-staffing-page__selected-region { position: relative; inset-block-start: auto; align-self: stretch; padding-inline-end: .15rem; }
   .line-staffing-page__selected-stage-command { position: sticky; inset-block-start: 0; z-index: 1; background: #fff; padding-block-end: .75rem; border-block-end: 1px solid #eaecf0; }
+}
+
+@media (min-width: 600px) and (max-width: 1023px) and (orientation: portrait) {
+  .line-staffing-page__workspace {
+    grid-template-columns: minmax(0, 1fr);
+    block-size: auto;
+    overflow: visible;
+    contain: none;
+  }
+
+  .line-staffing-page__stage-region {
+    block-size: min(28rem, 44dvh);
+  }
+
+  .line-staffing-page__selected-region {
+    block-size: auto;
+    overflow: visible;
+    padding-inline-end: 0;
+  }
+
+  .line-staffing-page__selected-region > .p-card {
+    block-size: auto;
+  }
 }
 
 // The tablet staffing workspace owns vertical movement after it has loaded.

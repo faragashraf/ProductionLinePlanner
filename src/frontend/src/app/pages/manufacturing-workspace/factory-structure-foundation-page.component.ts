@@ -111,7 +111,11 @@ export class FactoryStructureFoundationPageComponent implements OnInit, OnDestro
   }
 
   get isEmpty(): boolean {
-    return !this.isLoading && !this.hasError && this.factories.length === 0 && this.lines.length === 0;
+    return !this.isLoading && !this.hasError && !this.hasStructureData;
+  }
+
+  get hasStructureData(): boolean {
+    return this.factories.length > 0 || this.departments.length > 0 || this.lines.length > 0;
   }
 
   get canManage(): boolean {
@@ -122,8 +126,8 @@ export class FactoryStructureFoundationPageComponent implements OnInit, OnDestro
     return this.permissionService.hasPermission(this.permissions.departments.manage);
   }
 
-  onSearch(event: Event): void {
-    this.searchTerm = ((event.target as HTMLInputElement).value ?? '').trim();
+  onSearchValue(value: string): void {
+    this.searchTerm = value.trim();
   }
 
   onClearSearch(): void {

@@ -1,0 +1,61 @@
+/* Shared responsive layout contracts for dense manufacturing workspaces. */
+.production-page {
+  display: grid;
+  gap: var(--plp-space-16);
+  max-inline-size: 100%;
+  min-inline-size: 0;
+}
+
+.production-page > *,
+.production-page__grid > * {
+  max-inline-size: 100%;
+  min-inline-size: 0;
+}
+
+.production-page__grid {
+  display: grid;
+  gap: var(--plp-space-16);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
+}
+
+.production-page__hierarchy,
+.production-page__move-hierarchy {
+  display: grid;
+  gap: var(--plp-space-12);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+@media (min-width: 600px) and (max-width: 1023px) {
+  .production-page__hierarchy,
+  .production-page__move-hierarchy,
+  .production-page__intake-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 599px) {
+  .production-page__grid,
+  .production-page__hierarchy,
+  .production-page__assignment-form,
+  .production-page__move-hierarchy,
+  .production-page__intake-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .production-page__worker {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .production-page__actions > .p-button,
+  .production-page__inline-actions > .p-button,
+  .production-page__orders button {
+    flex: 1 1 100%;
+    margin-inline-start: 0;
+  }
+}
+
+@media (max-width: 540px) {
+  .production-page__worker {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

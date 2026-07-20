@@ -46,4 +46,8 @@ export class ManufacturingWorkspaceLayoutComponent implements OnInit, OnDestroy 
   get activeRoute(): string {
     return this.router.url.split('?')[0];
   }
+
+  get isDashboardRoute(): boolean {
+    return this.activeRoute === '/manufacturing' || this.activeRoute === '/manufacturing/dashboard';
+  }
 }
