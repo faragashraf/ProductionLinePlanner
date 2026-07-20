@@ -25,17 +25,17 @@ describe('ManufacturingMasterDataApiService', () => {
     expect(values).toEqual([[{ id: 'main-1' }], [{ id: 'sub-1', defaultOrder: 4, sequenceOrder: 4 }], [{ id: 'line-1' }], [{ id: 'model-1', isActive: false }]]);
   });
 
-  it('keeps management-model search pagination metadata and sends the opt-in stage summary request', () => {
+  it('keeps model-search pagination metadata without requesting stage summaries', () => {
     let page: unknown;
-    service.modelSearchList('مرحلة الخياطة', 3, 20).subscribe(value => page = value);
+    service.modelSearchPage('موديل لاحق', 3, 20).subscribe(value => page = value);
 
     const request = http.expectOne(item => item.method === 'GET' && item.urlWithParams.includes('/api/product-models?'));
     expect(request.request.urlWithParams).toContain('includeInactive=true');
-    expect(request.request.urlWithParams).toContain('includeStageSearchSummaries=true');
-    expect(request.request.urlWithParams).toContain('search=%D9%85%D8%B1%D8%AD%D9%84%D8%A9%20%D8%A7%D9%84%D8%AE%D9%8A%D8%A7%D8%B7%D8%A9');
+    expect(request.request.urlWithParams).not.toContain('includeStageSearchSummaries');
+    expect(request.request.urlWithParams).toContain('search=%D9%85%D9%88%D8%AF%D9%8A%D9%84%20%D9%84%D8%A7%D8%AD%D9%82');
     expect(request.request.urlWithParams).toContain('page=3');
     expect(request.request.urlWithParams).toContain('pageSize=20');
-    request.flush({ success: true, data: { items: [{ id: 'model-51', code: 'M-51', name: 'موديل لاحق', isActive: true, stages: [{ subStageId: 'stage-1', code: 'SEW', name: 'الخياطة' }] }], totalCount: 51, pageNumber: 3, pageSize: 20 } });
+    request.flush({ success: true, data: { items: [{ id: 'model-51', code: 'M-51', name: 'موديل لاحق', isActive: true }], totalCount: 51, pageNumber: 3, pageSize: 20 } });
 
     expect(page).toEqual(jasmine.objectContaining({ totalCount: 51, pageNumber: 3, pageSize: 20 }));
   });

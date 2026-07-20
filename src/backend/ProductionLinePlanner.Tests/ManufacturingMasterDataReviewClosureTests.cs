@@ -17,78 +17,61 @@ namespace ProductionLinePlanner.Tests;
 public sealed class ManufacturingMasterDataReviewClosureTests
 {
     [Fact]
-    public async Task Model_search_list_includes_related_stage_search_summaries_without_per_model_queries()
+    public async Task Model_list_searches_only_model_name_and_code()
     {
         await using var fixture = await ProductModelFixture.CreateAsync();
-        fixture.DbContext.ProductModelStages.AddRange(
-            new ProductModelStage(Guid.NewGuid(), fixture.Model.Id, fixture.SubStages[0].Id, 1, 1m, null, CompensationMode.FixedAmount),
-            new ProductModelStage(Guid.NewGuid(), fixture.Model.Id, fixture.SubStages[1].Id, 2, 1m, null, CompensationMode.FixedAmount));
+        var codeOnlyModel = new ProductModel(Guid.NewGuid(), "CODE-ONLY", "اسم لا يطابق الكود");
+        fixture.DbContext.ProductModelStages.Add(
+            new ProductModelStage(Guid.NewGuid(), fixture.Model.Id, fixture.SubStages[0].Id, 1, 1m, null, CompensationMode.FixedAmount));
+        fixture.DbContext.ProductModels.Add(codeOnlyModel);
         await fixture.DbContext.SaveChangesAsync();
 
-        var result = await fixture.Service.GetModelSearchListAsync(null, isActive: null);
+        var byName = await fixture.Service.GetModelsAsync("model", isActive: null);
+        var byCode = await fixture.Service.GetModelsAsync("code-only", isActive: null);
+        var byStageName = await fixture.Service.GetModelsAsync("cut", isActive: null);
 
-        Assert.True(result.IsSuccess);
-        var model = Assert.Single(result.Value!);
-        Assert.Collection(model.Stages,
-            stage => { Assert.Equal(fixture.SubStages[0].Id, stage.SubStageId); Assert.Equal("CUT", stage.Code); Assert.Equal("Cut", stage.Name); },
-            stage => { Assert.Equal(fixture.SubStages[1].Id, stage.SubStageId); Assert.Equal("SEW", stage.Code); Assert.Equal("Sew", stage.Name); });
+        Assert.Equal(fixture.Model.Id, Assert.Single(byName.Value!).Id);
+        Assert.Equal(codeOnlyModel.Id, Assert.Single(byCode.Value!).Id);
+        Assert.Empty(byStageName.Value!);
+        Assert.DoesNotContain(typeof(ProductModelDto).GetProperties(), property => property.Name == "Stages");
     }
 
     [Fact]
-    public async Task Model_search_list_filters_before_paging_without_duplicates_and_keeps_general_dto_lightweight()
+    public async Task Model_search_filters_before_count_and_paging()
     {
         await using var fixture = await ProductModelFixture.CreateAsync();
         var lateMatch = new ProductModel(Guid.NewGuid(), "MODEL-055", "Late matching model");
         var inactiveMatch = new ProductModel(Guid.NewGuid(), "MODEL-056", "Inactive matching model", isActive: false);
-        var extraSewStage = new SubStage(Guid.NewGuid(), Guid.NewGuid(), "Sew final", "SEW-FINAL", 1, 4);
         fixture.DbContext.ProductModels.AddRange(Enumerable.Range(1, 54).Select(index => new ProductModel(Guid.NewGuid(), $"MODEL-{index:D3}", $"Model {index:D3}")));
         fixture.DbContext.ProductModels.AddRange(lateMatch, inactiveMatch);
-        fixture.DbContext.SubStages.Add(extraSewStage);
-        fixture.DbContext.ProductModelStages.AddRange(
-            new ProductModelStage(Guid.NewGuid(), lateMatch.Id, fixture.SubStages[1].Id, 1, 1m, null, CompensationMode.FixedAmount),
-            new ProductModelStage(Guid.NewGuid(), lateMatch.Id, extraSewStage.Id, 2, 1m, null, CompensationMode.FixedAmount),
-            new ProductModelStage(Guid.NewGuid(), inactiveMatch.Id, fixture.SubStages[1].Id, 1, 1m, null, CompensationMode.FixedAmount));
         await fixture.DbContext.SaveChangesAsync();
 
-        var sixthPage = await fixture.Service.GetModelSearchListAsync(null, isActive: null, page: 6, pageSize: 10);
-        var byStageName = await fixture.Service.GetModelSearchListAsync("ew", isActive: true, page: 1, pageSize: 10);
-        var byStageCode = await fixture.Service.GetModelSearchListAsync("SEW-FINAL", isActive: true, page: 1, pageSize: 10);
-        var byModel = await fixture.Service.GetModelSearchListAsync("055", isActive: true, page: 1, pageSize: 10);
-        var includingInactive = await fixture.Service.GetModelSearchListAsync("sew", isActive: null, page: 1, pageSize: 10);
-        var generalList = await fixture.Service.GetModelsAsync(null, isActive: null, page: 1, pageSize: 10);
+        var sixthPage = await fixture.Service.GetModelsAsync(null, isActive: null, page: 6, pageSize: 10);
+        var byModel = await fixture.Service.GetModelsAsync("  055  ", isActive: true, page: 1, pageSize: 10);
+        var includingInactive = await fixture.Service.GetModelsAsync("matching model", isActive: null, page: 1, pageSize: 10);
 
         Assert.True(sixthPage.IsSuccess);
         Assert.Contains(sixthPage.Value!, model => model.Id == lateMatch.Id);
-        Assert.True(byStageName.IsSuccess);
-        Assert.Equal(1, byStageName.TotalCount);
-        Assert.Equal(lateMatch.Id, Assert.Single(byStageName.Value!).Id);
-        Assert.True(byStageCode.IsSuccess);
-        Assert.Equal(lateMatch.Id, Assert.Single(byStageCode.Value!).Id);
         Assert.True(byModel.IsSuccess);
+        Assert.Equal(1, byModel.TotalCount);
         Assert.Equal(lateMatch.Id, Assert.Single(byModel.Value!).Id);
         Assert.True(includingInactive.IsSuccess);
         Assert.Equal(2, includingInactive.TotalCount);
-        Assert.DoesNotContain(typeof(ProductModelDto).GetProperties(), property => property.Name == "Stages");
-        Assert.True(generalList.IsSuccess);
     }
 
     [Fact]
-    public async Task Updating_a_model_returns_its_stage_search_summary()
+    public async Task Updating_a_model_returns_the_general_model_dto()
     {
         await using var fixture = await ProductModelFixture.CreateAsync();
-        fixture.DbContext.ProductModelStages.Add(new ProductModelStage(Guid.NewGuid(), fixture.Model.Id, fixture.SubStages[0].Id, 1, 1m, null, CompensationMode.FixedAmount));
-        await fixture.DbContext.SaveChangesAsync();
-
         var updated = await fixture.Service.UpdateModelAsync(
             fixture.Model.Id,
             new UpdateProductModelRequest { Name = "Updated model" },
             fixture.ActorUserId);
 
         Assert.True(updated.IsSuccess);
-        var stage = Assert.Single(updated.Value!.Stages);
-        Assert.Equal(fixture.SubStages[0].Id, stage.SubStageId);
-        Assert.Equal("CUT", stage.Code);
-        Assert.Equal("Cut", stage.Name);
+        Assert.Equal(fixture.Model.Id, updated.Value!.Id);
+        Assert.Equal("Updated model", updated.Value.Name);
+        Assert.DoesNotContain(typeof(ProductModelDto).GetProperties(), property => property.Name == "Stages");
     }
 
     [Fact]

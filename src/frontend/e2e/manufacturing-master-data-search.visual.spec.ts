@@ -13,11 +13,11 @@ const stages = [
   { id: 'stage-3', mainStageId: 'main-1', productionLineId: line.id, factoryId: factory.id, departmentId: department.id, productionLineName: line.name, departmentNameAr: department.nameAr, code: 'PACK-03', name: 'Packing', capacity: 4, defaultOrder: 3, isActive: false }
 ];
 const models = [
-  { id: 'model-1', code: 'SHIRT-01', name: 'موديل قميص', isActive: true, stages: [{ subStageId: 'stage-1', code: 'CUT-01', name: 'مرحلة القص' }, { subStageId: 'stage-2', code: 'SEW-02', name: 'مرحلة الخياطة' }] },
-  { id: 'model-2', code: 'JACKET-02', name: 'Jacket', isActive: true, stages: [{ subStageId: 'stage-2', code: 'SEW-02', name: 'مرحلة الخياطة' }, { subStageId: 'stage-3', code: 'PACK-03', name: 'Packing' }] },
-  { id: 'model-3', code: 'PANTS-03', name: 'موديل بنطال', isActive: true, stages: [{ subStageId: 'stage-1', code: 'CUT-01', name: 'مرحلة القص' }] },
-  ...Array.from({ length: 49 }, (_, index) => ({ id: `model-fill-${index + 1}`, code: `FILL-${String(index + 1).padStart(2, '0')}`, name: `موديل إضافي ${index + 1}`, isActive: true, stages: [] })),
-  { id: 'model-late', code: 'ZZZ-054', name: 'موديل في صفحة لاحقة', isActive: true, stages: [{ subStageId: 'stage-late', code: 'LATE-STAGE', name: 'مرحلة لاحقة خاصة' }] }
+  { id: 'model-1', code: 'SHIRT-01', name: 'موديل قميص', isActive: true },
+  { id: 'model-2', code: 'JACKET-02', name: 'Jacket', isActive: true },
+  { id: 'model-3', code: 'PANTS-03', name: 'موديل بنطال', isActive: true },
+  ...Array.from({ length: 49 }, (_, index) => ({ id: `model-fill-${index + 1}`, code: `FILL-${String(index + 1).padStart(2, '0')}`, name: `موديل إضافي ${index + 1}`, isActive: true })),
+  { id: 'model-late', code: 'ZZZ-054', name: 'موديل في صفحة لاحقة', isActive: true }
 ];
 
 test.beforeAll(async () => { await mkdir(visualOutput, { recursive: true }); });
@@ -40,7 +40,7 @@ async function preparePage(page: Page): Promise<void> {
     else if (pathname.endsWith('/api/stages')) data = { items: stages, totalCount: stages.length, pageNumber: 1, pageSize: 200 };
     else if (pathname.endsWith('/api/product-models')) {
       const search = (url.searchParams.get('search') ?? '').trim().toLocaleLowerCase();
-      const filtered = search ? models.filter(model => [model.code, model.name, ...model.stages.flatMap(stage => [stage.code, stage.name])].some(value => value.toLocaleLowerCase().includes(search))) : models;
+      const filtered = search ? models.filter(model => [model.code, model.name].some(value => value.toLocaleLowerCase().includes(search))) : models;
       const page = Number(url.searchParams.get('page') ?? '1');
       const pageSize = Number(url.searchParams.get('pageSize') ?? '50');
       data = { items: filtered.slice((page - 1) * pageSize, page * pageSize), totalCount: filtered.length, pageNumber: page, pageSize };
@@ -84,6 +84,9 @@ test('stage search is responsive, immediate, clearable, and empty-state safe', a
     await expect(clear).toBeVisible();
     await clear.click();
     await expect(page.locator('tbody')).toContainText('مرحلة القص');
+    await search.fill('sew-02');
+    await expect(page.locator('tbody')).toContainText('مرحلة الخياطة');
+    await clear.click();
     await search.fill('غير موجود');
     await expect(page.getByText('لا توجد مراحل مطابقة للبحث.')).toBeVisible();
     await page.screenshot({ path: path.join(visualOutput, `stages-${name}.png`), fullPage: true });
@@ -91,27 +94,28 @@ test('stage search is responsive, immediate, clearable, and empty-state safe', a
   }
 });
 
-test('model search is server-paginated and finds a related stage beyond the initial page', async ({ page }) => {
+test('model search is server-paginated and searches only model fields beyond the initial page', async ({ page }) => {
   await preparePage(page);
   for (const [name, width, height] of [['desktop-1440x900', 1440, 900], ['tablet-landscape-1280x800', 1280, 800], ['tablet-portrait-800x1280', 800, 1280], ['mobile-390x844', 390, 844]] as const) {
     await page.setViewportSize({ width, height });
     await page.goto('/manufacturing/models');
     await expect(page.getByRole('heading', { name: 'الموديلات وإعدادات المراحل' })).toBeVisible();
-    const search = page.getByPlaceholder('بحث باسم الموديل أو المرحلة');
+    const search = page.getByPlaceholder('بحث باسم أو كود الموديل');
     await expect(search).toBeVisible();
     await expect(page.locator('tbody')).not.toContainText('موديل في صفحة لاحقة');
-    await search.fill('مرحلة لاحقة خاصة');
+    await search.fill('صفحة لاحقة');
     await expect(page.locator('tbody')).toContainText('موديل في صفحة لاحقة');
     await expect(page.locator('.p-paginator-current')).toContainText('من 1');
-    await search.fill('  خياطة ');
+    await search.fill('  موديل قميص ');
     await expect(page.locator('tbody')).toContainText('موديل قميص');
-    await expect(page.locator('tbody')).toContainText('Jacket');
-    await expect(page.locator('tbody')).not.toContainText('موديل بنطال');
-    await search.fill('pack-03');
+    await expect(page.locator('tbody')).not.toContainText('Jacket');
+    await search.fill('jacket-02');
     await expect(page.locator('tbody')).toContainText('Jacket');
     await expect(page.locator('tbody')).not.toContainText('موديل قميص');
+    await search.fill('sew-02');
+    await expect(page.getByText('لا توجد موديلات مطابقة للبحث.')).toBeVisible();
     await search.fill('لا نتيجة');
-    await expect(page.getByText('لا توجد موديلات أو مراحل مرتبطة مطابقة للبحث.')).toBeVisible();
+    await expect(page.getByText('لا توجد موديلات مطابقة للبحث.')).toBeVisible();
     const clear = page.getByRole('button', { name: 'مسح البحث' });
     await clear.click();
     await expect(page.locator('tbody')).toContainText('موديل بنطال');

@@ -7,7 +7,6 @@ import {
   ManufacturingMasterDataApiService,
   ModelStageItem,
   ProductModelItem,
-  ProductModelSearchListItem,
   ProductionLineOption,
   StageDependencySummary,
   SubStageOption
@@ -36,7 +35,7 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
   pendingStageAction: 'disable' | 'delete' | null = null;
   dependencyDialogVisible = false;
 
-  models: ProductModelSearchListItem[] = [];
+  models: ProductModelItem[] = [];
   modelSearch = '';
   modelPage = 1;
   modelTotal = 0;
@@ -89,7 +88,7 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
   get filteredOperationalStages(): SubStageOption[] { return this.operationalStages.filter(stage => matchesSearchTerm(this.stageSearch, [stage.name, stage.code])); }
   get stageResultCount(): number { return this.filteredOperationalStages.length; }
   get stageEmptyMessage(): string { return normalizeSearchText(this.stageSearch) ? 'لا توجد مراحل مطابقة للبحث.' : 'اختر خط إنتاج لعرض مراحل الإنتاج، أو لا توجد مراحل مطابقة.'; }
-  get modelEmptyMessage(): string { return normalizeSearchText(this.modelSearch) ? 'لا توجد موديلات أو مراحل مرتبطة مطابقة للبحث.' : 'لا توجد موديلات لعرضها.'; }
+  get modelEmptyMessage(): string { return normalizeSearchText(this.modelSearch) ? 'لا توجد موديلات مطابقة للبحث.' : 'لا توجد موديلات لعرضها.'; }
   get canConfirmDependencyAction(): boolean {
     return this.pendingStageAction === 'disable' ? !!this.stageDependencySummary?.canDisable : this.pendingStageAction === 'delete' && !!this.stageDependencySummary?.canDelete;
   }
@@ -98,7 +97,7 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
     this.loading = true;
     this.error = '';
     if (this.mode === 'models') {
-      forkJoin({ modelPage: this.api.modelSearchList('', 1, this.modelPageSize), stagePage: this.api.searchSubStages('', 1, this.modelStagePageSize) })
+      forkJoin({ modelPage: this.api.modelSearchPage('', 1, this.modelPageSize), stagePage: this.api.searchSubStages('', 1, this.modelStagePageSize) })
         .pipe(finalize(() => this.loading = false), takeUntil(this.destroy$))
         .subscribe({ next: data => { this.applyModelPage(data.modelPage); this.modelStageOptions = data.stagePage.items; this.modelStageTotal = data.stagePage.totalCount; }, error: error => this.setError(error) });
       return;
@@ -196,7 +195,7 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
   saveModel(): void { if (this.modelForm.valid) this.save(this.editModelId ? this.api.updateModel(this.editModelId, this.modelForm.getRawValue()) : this.api.createModel(this.modelForm.getRawValue()), item => { if (this.selected?.id === item.id) this.selected = { ...this.selected, ...item }; this.editModelId = ''; this.modelFormVisible = false; this.modelForm.reset(); this.loadModelPage(this.modelSearch, this.modelPage); }); }
   editModel(item: ProductModelItem): void { this.editModelId = item.id; this.modelFormVisible = true; this.modelForm.reset(item); }
   select(item: ProductModelItem): void { this.selected = item; this.api.modelStages(item.id).pipe(takeUntil(this.destroy$)).subscribe({ next: stages => this.stages = stages, error: error => this.setError(error) }); }
-  saveModelStage(): void { if (!this.selected || this.modelStageForm.invalid) return; const value = this.modelStageForm.getRawValue(); if (this.stages.some(item => item.subStageId === value.subStageId && item.id !== this.editModelStageId) || this.stages.some(item => item.stageOrder === value.stageOrder && item.id !== this.editModelStageId)) { this.error = 'لا يمكن تكرار المرحلة أو ترتيبها داخل الموديل.'; return; } this.save(this.editModelStageId ? this.api.updateModelStage(this.selected.id, this.editModelStageId, value) : this.api.addModelStage(this.selected.id, value), item => { this.stages = this.upsert(this.stages, item, 'stageOrder'); this.updateModelStageSearchIndex(item); this.editModelStageId = ''; this.modelStageFormVisible = false; }); }
+  saveModelStage(): void { if (!this.selected || this.modelStageForm.invalid) return; const value = this.modelStageForm.getRawValue(); if (this.stages.some(item => item.subStageId === value.subStageId && item.id !== this.editModelStageId) || this.stages.some(item => item.stageOrder === value.stageOrder && item.id !== this.editModelStageId)) { this.error = 'لا يمكن تكرار المرحلة أو ترتيبها داخل الموديل.'; return; } this.save(this.editModelStageId ? this.api.updateModelStage(this.selected.id, this.editModelStageId, value) : this.api.addModelStage(this.selected.id, value), item => { this.stages = this.upsert(this.stages, item, 'stageOrder'); this.editModelStageId = ''; this.modelStageFormVisible = false; }); }
   editModelStage(item: ModelStageItem): void { this.editModelStageId = item.id; this.modelStageFormVisible = true; this.modelStageForm.reset(item); this.ensureSelectedModelStage(item); }
   disableModelStage(id: string): void { if (this.selected && confirm('سيتم تعطيل إعداد المرحلة.')) this.save(this.api.deactivateModelStage(this.selected.id, id), () => this.stages = this.markInactive(this.stages, id)); }
   setModelActive(item: ProductModelItem): void { if (confirm(item.isActive ? 'تعطيل الموديل؟' : 'تفعيل الموديل؟')) this.save(this.api.setModelActivation(item.id, !item.isActive), () => this.models = this.models.map(model => model.id === item.id ? { ...model, isActive: !item.isActive } : model)); }
@@ -211,11 +210,10 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
   stageStatusLabel(isActive: boolean): string { return isActive ? 'فعالة' : 'معطلة'; }
 
   private save<T>(request: Observable<T>, success?: (result: T) => void): void { this.saving = true; this.error = ''; request.pipe(finalize(() => this.saving = false), takeUntil(this.destroy$)).subscribe({ next: result => success?.(result), error: error => this.setError(error) }); }
-  private loadModelPage(search: string, page: number): void { const requestVersion = ++this.modelRequestVersion; this.modelListLoading = true; this.error = ''; this.api.modelSearchList(search, page, this.modelPageSize).pipe(finalize(() => { if (requestVersion === this.modelRequestVersion) this.modelListLoading = false; }), takeUntil(this.destroy$)).subscribe({ next: result => { if (requestVersion === this.modelRequestVersion) this.applyModelPage(result); }, error: error => { if (requestVersion === this.modelRequestVersion) this.setError(error); } }); }
-  private applyModelPage(page: { items: ProductModelSearchListItem[]; totalCount: number; pageNumber: number; pageSize: number }): void { this.models = page.items; this.modelTotal = page.totalCount; this.modelPage = page.pageNumber; this.modelPageSize = page.pageSize; }
+  private loadModelPage(search: string, page: number): void { const requestVersion = ++this.modelRequestVersion; this.modelListLoading = true; this.error = ''; this.api.modelSearchPage(search, page, this.modelPageSize).pipe(finalize(() => { if (requestVersion === this.modelRequestVersion) this.modelListLoading = false; }), takeUntil(this.destroy$)).subscribe({ next: result => { if (requestVersion === this.modelRequestVersion) this.applyModelPage(result); }, error: error => { if (requestVersion === this.modelRequestVersion) this.setError(error); } }); }
+  private applyModelPage(page: { items: ProductModelItem[]; totalCount: number; pageNumber: number; pageSize: number }): void { this.models = page.items; this.modelTotal = page.totalCount; this.modelPage = page.pageNumber; this.modelPageSize = page.pageSize; }
   private loadModelStageOptions(search: string, page: number): Observable<void> { this.modelStageSelectorLoading = true; return this.api.searchSubStages(search, page, this.modelStagePageSize).pipe(map(result => { this.modelStageSearch = search; this.modelStagePage = result.pageNumber; this.modelStageTotal = result.totalCount; this.modelStageOptions = result.items; }), catchError(error => { this.setError(error); return EMPTY; }), finalize(() => this.modelStageSelectorLoading = false)); }
   private ensureSelectedModelStage(item: ModelStageItem): void { if (!this.modelStageOptions.some(option => option.id === item.subStageId)) this.modelStageOptions = [{ id: item.subStageId, mainStageId: '', code: item.subStageCode || '—', name: item.subStageName || 'مرحلة مرتبطة', capacity: 0, sequenceOrder: 0, isActive: false }, ...this.modelStageOptions]; }
-  private updateModelStageSearchIndex(item: ModelStageItem): void { if (!this.selected) return; const option = this.modelStageOptions.find(candidate => candidate.id === item.subStageId); const stage = { subStageId: item.subStageId, code: item.subStageCode ?? option?.code ?? '', name: item.subStageName ?? option?.name ?? this.subName(item.subStageId) }; this.models = this.models.map(model => model.id !== this.selected!.id ? model : { ...model, stages: [...(model.stages ?? []).filter(candidate => candidate.subStageId !== item.subStageId), stage] }); }
   private upsert<T extends { id: string }>(items: readonly T[], item: T, sortKey?: keyof T): T[] { const next = items.some(candidate => candidate.id === item.id) ? items.map(candidate => candidate.id === item.id ? item : candidate) : [...items, item]; return sortKey ? [...next].sort((left, right) => Number(left[sortKey]) - Number(right[sortKey])) : next; }
   private markInactive<T extends { id: string; isActive: boolean }>(items: readonly T[], id: string): T[] { return items.map(item => item.id === id ? { ...item, isActive: false } : item); }
   private setError(error: unknown): void { this.error = error instanceof Error ? error.message : 'تعذر تحميل أو حفظ البيانات.'; }
