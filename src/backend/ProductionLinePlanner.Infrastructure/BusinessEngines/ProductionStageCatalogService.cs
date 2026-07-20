@@ -11,7 +11,8 @@ namespace ProductionLinePlanner.Infrastructure.BusinessEngines;
 
 public sealed class ProductionStageCatalogService(
     AppDbContext dbContext,
-    IAuditEngine auditEngine) : IProductionStageCatalogService
+    IAuditEngine auditEngine,
+    IStageDependencyInspector dependencyInspector) : IProductionStageCatalogService
 {
     public async Task<PagedResult<MainStageDto>> GetMainStagesAsync(
         Guid? productionLineId,
@@ -127,6 +128,7 @@ public sealed class ProductionStageCatalogService(
             {
                 Id = x.Id,
                 MainStageId = x.MainStageId,
+                ProductionLineId = x.ProductionLineId,
                 Code = x.Code,
                 Name = x.Name,
                 Capacity = x.Capacity,
@@ -155,6 +157,7 @@ public sealed class ProductionStageCatalogService(
         {
             Id = entity.Id,
             MainStageId = entity.MainStageId,
+            ProductionLineId = entity.ProductionLineId,
             Code = entity.Code,
             Name = entity.Name,
             Capacity = entity.Capacity,
@@ -394,88 +397,10 @@ public sealed class ProductionStageCatalogService(
         string? requestMeta = null,
         CancellationToken cancellationToken = default)
     {
-        if (actorUserId == Guid.Empty)
-        {
-            return Result<SubStageDto>.Failure(new Error("Unauthorized", "User context is required."));
-        }
-
-        if (mainStageId == Guid.Empty)
-        {
-            return Result<SubStageDto>.Failure(new Error("ValidationError", "MainStageId is required."));
-        }
-
-        var normalizedCode = code?.Trim();
-        if (string.IsNullOrWhiteSpace(normalizedCode))
-        {
-            return Result<SubStageDto>.Failure(new Error("ValidationError", "Code is required."));
-        }
-
-        var normalizedName = name?.Trim();
-        if (string.IsNullOrWhiteSpace(normalizedName))
-        {
-            return Result<SubStageDto>.Failure(new Error("ValidationError", "Name is required."));
-        }
-
-        if (capacity < 0)
-        {
-            return Result<SubStageDto>.Failure(new Error("ValidationError", "Capacity must be zero or greater."));
-        }
-
-        if (defaultOrder <= 0)
-        {
-            return Result<SubStageDto>.Failure(new Error("ValidationError", "DefaultOrder must be greater than zero."));
-        }
-
-        var mainStageExists = await dbContext.MainStages.AnyAsync(x => x.Id == mainStageId && x.IsActive, cancellationToken);
-        if (!mainStageExists)
-        {
-            return Result<SubStageDto>.Failure(new Error("NotFound", "Main stage was not found."));
-        }
-
-        var codeConflict = await dbContext.SubStages.AnyAsync(x => x.Code == normalizedCode, cancellationToken);
-        if (codeConflict)
-        {
-            return Result<SubStageDto>.Failure(new Error("Conflict", "SubStage code must be unique."));
-        }
-
-        var orderConflict = await dbContext.SubStages.AnyAsync(
-            x => x.MainStageId == mainStageId && x.DefaultOrder == defaultOrder && x.IsActive,
-            cancellationToken);
-        if (orderConflict)
-        {
-            return Result<SubStageDto>.Failure(new Error("Conflict", "DefaultOrder must be unique within this main stage."));
-        }
-
-        var entity = new SubStage(
-            id: Guid.NewGuid(),
-            mainStageId: mainStageId,
-            name: normalizedName,
-            code: normalizedCode,
-            capacity: capacity,
-            defaultOrder: defaultOrder,
-            isActive: isActive);
-
-        dbContext.SubStages.Add(entity);
-        await auditEngine.RecordAsync(
-            actorUserId,
-            AuditActionType.Create,
-            nameof(SubStage),
-            entity.Id.ToString(),
-            before: null,
-            after: new { entity.Id, entity.MainStageId, entity.Code, entity.Name, entity.Capacity, entity.DefaultOrder, entity.IsActive },
-            requestMeta: requestMeta);
-        await dbContext.SaveChangesAsync(cancellationToken);
-
-        return Result<SubStageDto>.Success(new SubStageDto
-        {
-            Id = entity.Id,
-            MainStageId = entity.MainStageId,
-            Code = entity.Code,
-            Name = entity.Name,
-            Capacity = entity.Capacity,
-            DefaultOrder = entity.DefaultOrder,
-            IsActive = entity.IsActive
-        });
+        _ = code; // Legacy aliases retain their payload shape; codes are generated server-side.
+        var mainStage = await dbContext.MainStages.AsNoTracking().FirstOrDefaultAsync(x => x.Id == mainStageId, cancellationToken);
+        if (mainStage is null) return Result<SubStageDto>.Failure(new Error("NotFound", "Main stage was not found."));
+        return await CreateOperationalStageAsync(mainStage.ProductionLineId, mainStageId, name, defaultOrder, capacity, isActive, actorUserId, requestMeta, cancellationToken);
     }
 
     public async Task<Result<SubStageDto>> UpdateSubStageAsync(
@@ -532,15 +457,9 @@ public sealed class ProductionStageCatalogService(
             return Result<SubStageDto>.Failure(new Error("ValidationError", "DefaultOrder must be greater than zero."));
         }
 
-        if (normalizedCode is not null)
+        if (normalizedCode is not null && !string.Equals(normalizedCode, entity.Code, StringComparison.OrdinalIgnoreCase))
         {
-            var codeConflict = await dbContext.SubStages.AnyAsync(
-                x => x.Id != subStageId && x.Code == normalizedCode,
-                cancellationToken);
-            if (codeConflict)
-            {
-                return Result<SubStageDto>.Failure(new Error("Conflict", "SubStage code must be unique."));
-            }
+            return Result<SubStageDto>.Failure(new Error("ValidationError", "Stage code is generated by the system and cannot be changed."));
         }
 
         if (defaultOrder is not null)
@@ -558,6 +477,7 @@ public sealed class ProductionStageCatalogService(
         {
             entity.Id,
             entity.MainStageId,
+            entity.ProductionLineId,
             entity.Code,
             entity.Name,
             entity.Capacity,
@@ -567,7 +487,7 @@ public sealed class ProductionStageCatalogService(
 
         if (normalizedCode is not null || normalizedName is not null || defaultOrder is not null || capacity is not null)
         {
-            entity.Rename(normalizedCode ?? entity.Code, normalizedName ?? entity.Name);
+            entity.Rename(normalizedName ?? entity.Name);
             if (capacity is not null)
             {
                 entity.UpdateCapacity(capacity.Value);
@@ -581,6 +501,12 @@ public sealed class ProductionStageCatalogService(
 
         if (isActive is not null)
         {
+            if (!isActive.Value && entity.IsActive)
+            {
+                var dependencies = await dependencyInspector.InspectAsync(subStageId, cancellationToken);
+                if (dependencies.IsFailure) return Result<SubStageDto>.Failure(dependencies.Error!);
+                if (!dependencies.Value!.CanDisable) return Result<SubStageDto>.Failure(new Error("Conflict", dependencies.Value.DisableMessageAr));
+            }
             dbContext.Entry(entity).Property(nameof(SubStage.IsActive)).CurrentValue = isActive.Value;
         }
 
@@ -591,7 +517,7 @@ public sealed class ProductionStageCatalogService(
             nameof(SubStage),
             entity.Id.ToString(),
             before: before,
-            after: new { entity.Id, entity.MainStageId, entity.Code, entity.Name, entity.Capacity, entity.DefaultOrder, entity.IsActive },
+            after: new { entity.Id, entity.MainStageId, entity.ProductionLineId, entity.Code, entity.Name, entity.Capacity, entity.DefaultOrder, entity.IsActive },
             requestMeta: requestMeta);
         await dbContext.SaveChangesAsync(cancellationToken);
 
@@ -599,6 +525,7 @@ public sealed class ProductionStageCatalogService(
         {
             Id = entity.Id,
             MainStageId = entity.MainStageId,
+            ProductionLineId = entity.ProductionLineId,
             Code = entity.Code,
             Name = entity.Name,
             Capacity = entity.Capacity,
@@ -629,21 +556,11 @@ public sealed class ProductionStageCatalogService(
             return Result.Failure(new Error("NotFound", "Sub stage not found."));
         }
 
-        var hasDefaultAssignments = await dbContext.WorkerDefaultAssignments.AnyAsync(x => x.IsActive && x.SubStageId == subStageId, cancellationToken);
-        if (hasDefaultAssignments)
-        {
-            return Result.Failure(new Error("Conflict", "Sub stage cannot be deactivated while active default assignments exist."));
-        }
+        var dependencies = await dependencyInspector.InspectAsync(subStageId, cancellationToken);
+        if (dependencies.IsFailure) return Result.Failure(dependencies.Error!);
+        if (!dependencies.Value!.CanDisable) return Result.Failure(new Error("Conflict", dependencies.Value.DisableMessageAr));
 
-        var hasActiveTemporaryAssignments = await dbContext.WorkerTemporaryAssignments.AnyAsync(
-            x => (x.Status == "Active" || x.Status == "Scheduled") && x.ToSubStageId == subStageId,
-            cancellationToken);
-        if (hasActiveTemporaryAssignments)
-        {
-            return Result.Failure(new Error("Conflict", "Sub stage cannot be deactivated while active temporary assignments exist."));
-        }
-
-        var before = new { entity.Id, entity.MainStageId, entity.Code, entity.Name, entity.Capacity, entity.DefaultOrder, entity.IsActive };
+        var before = new { entity.Id, entity.MainStageId, entity.ProductionLineId, entity.Code, entity.Name, entity.Capacity, entity.DefaultOrder, entity.IsActive };
         dbContext.Entry(entity).Property(nameof(SubStage.IsActive)).CurrentValue = false;
         dbContext.Entry(entity).Property(nameof(SubStage.UpdatedAtUtc)).CurrentValue = DateTime.UtcNow;
         await auditEngine.RecordAsync(
@@ -652,10 +569,209 @@ public sealed class ProductionStageCatalogService(
             nameof(SubStage),
             entity.Id.ToString(),
             before: before,
-            after: new { entity.Id, entity.MainStageId, entity.Code, entity.Name, entity.Capacity, entity.DefaultOrder, entity.IsActive },
+            after: new { entity.Id, entity.MainStageId, entity.ProductionLineId, entity.Code, entity.Name, entity.Capacity, entity.DefaultOrder, entity.IsActive },
             requestMeta: requestMeta);
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return Result.Success();
+    }
+
+    public async Task<PagedResult<SubStageDto>> GetOperationalStagesAsync(
+        Guid? factoryId,
+        Guid? departmentId,
+        Guid? productionLineId,
+        string? name,
+        string? code,
+        bool? isActive,
+        int page = 1,
+        int pageSize = 50,
+        CancellationToken cancellationToken = default)
+    {
+        if (page < 1 || pageSize is < 1 or > 200)
+        {
+            return PagedResult<SubStageDto>.Failure(new Error("ValidationError", "page and pageSize must be positive, pageSize max 200."));
+        }
+
+        var query = dbContext.SubStages.AsNoTracking().AsQueryable();
+        if (factoryId.HasValue) query = query.Where(x => x.ProductionLine!.FactoryId == factoryId.Value);
+        if (departmentId.HasValue) query = query.Where(x => x.ProductionLine!.DepartmentId == departmentId.Value);
+        if (productionLineId.HasValue) query = query.Where(x => x.ProductionLineId == productionLineId.Value);
+        if (isActive.HasValue) query = query.Where(x => x.IsActive == isActive.Value);
+        if (!string.IsNullOrWhiteSpace(name))
+        {
+            var pattern = $"%{name.Trim()}%";
+            query = query.Where(x => EF.Functions.Like(x.Name, pattern));
+        }
+        if (!string.IsNullOrWhiteSpace(code))
+        {
+            var pattern = $"%{code.Trim()}%";
+            query = query.Where(x => EF.Functions.Like(x.Code, pattern));
+        }
+
+        var total = await query.CountAsync(cancellationToken);
+        var items = await query.OrderBy(x => x.ProductionLineId).ThenBy(x => x.DefaultOrder).ThenBy(x => x.Name)
+            .Skip((page - 1) * pageSize).Take(pageSize)
+            .Select(x => new SubStageDto
+            {
+                Id = x.Id, MainStageId = x.MainStageId, ProductionLineId = x.ProductionLineId,
+                FactoryId = x.ProductionLine!.FactoryId, DepartmentId = x.ProductionLine.DepartmentId,
+                FactoryName = x.ProductionLine.Factory!.Name, DepartmentNameAr = x.ProductionLine.Department == null ? null : x.ProductionLine.Department.NameAr,
+                ProductionLineName = x.ProductionLine.Name,
+                Code = x.Code, Name = x.Name, Capacity = x.Capacity, DefaultOrder = x.DefaultOrder, IsActive = x.IsActive
+            }).ToArrayAsync(cancellationToken);
+        return PagedResult<SubStageDto>.Success(items, page, pageSize, total);
+    }
+
+    public async Task<Result<SubStageDto>> CreateOperationalStageAsync(
+        Guid productionLineId,
+        Guid? mainStageId,
+        string name,
+        int defaultOrder,
+        int capacity,
+        bool isActive,
+        Guid actorUserId,
+        string? requestMeta = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (actorUserId == Guid.Empty) return Result<SubStageDto>.Failure(new Error("Unauthorized", "User context is required."));
+        if (productionLineId == Guid.Empty) return Result<SubStageDto>.Failure(new Error("ValidationError", "ProductionLineId is required."));
+        var normalizedName = name?.Trim();
+        if (string.IsNullOrWhiteSpace(normalizedName)) return Result<SubStageDto>.Failure(new Error("ValidationError", "Name is required."));
+        if (capacity < 0) return Result<SubStageDto>.Failure(new Error("ValidationError", "Capacity must be zero or greater."));
+        if (defaultOrder <= 0) return Result<SubStageDto>.Failure(new Error("ValidationError", "DefaultOrder must be greater than zero."));
+
+        if (!await dbContext.ProductionLines.AnyAsync(x => x.Id == productionLineId && x.IsActive, cancellationToken))
+        {
+            return Result<SubStageDto>.Failure(new Error("NotFound", "Production line was not found or is inactive."));
+        }
+
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            await using var transaction = dbContext.Database.IsRelational()
+                ? await dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken)
+                : null;
+            var groupResult = await ResolveLegacyGroupAsync(productionLineId, mainStageId, actorUserId, requestMeta, cancellationToken);
+            if (groupResult.IsFailure)
+            {
+                if (transaction is not null) await transaction.RollbackAsync(cancellationToken);
+                return Result<SubStageDto>.Failure(groupResult.Error!);
+            }
+            var selectedGroup = groupResult.Value!;
+            if (await dbContext.SubStages.AnyAsync(x => x.MainStageId == selectedGroup.Id && x.DefaultOrder == defaultOrder && x.IsActive, cancellationToken))
+            {
+                if (transaction is not null) await transaction.RollbackAsync(cancellationToken);
+                return Result<SubStageDto>.Failure(new Error("Conflict", "DefaultOrder must be unique within the production line's compatibility group."));
+            }
+            var code = await AllocateStageCodeAsync(cancellationToken);
+            if (await dbContext.SubStages.AnyAsync(x => x.Code == code, cancellationToken))
+            {
+                if (transaction is not null) await transaction.RollbackAsync(cancellationToken);
+                continue;
+            }
+
+            var entity = new SubStage(Guid.NewGuid(), selectedGroup.Id, normalizedName, code, capacity, defaultOrder, isActive, productionLineId: productionLineId);
+            dbContext.SubStages.Add(entity);
+            await auditEngine.RecordAsync(actorUserId, AuditActionType.Create, nameof(SubStage), entity.Id.ToString(), after: new { entity.Id, entity.MainStageId, entity.ProductionLineId, entity.Code, entity.Name, entity.Capacity, entity.DefaultOrder, entity.IsActive }, requestMeta: requestMeta, cancellationToken: cancellationToken);
+            try
+            {
+                await dbContext.SaveChangesAsync(cancellationToken);
+                if (transaction is not null) await transaction.CommitAsync(cancellationToken);
+                return Result<SubStageDto>.Success(ToDto(entity));
+            }
+            catch (DbUpdateException) when (attempt < 2)
+            {
+                if (transaction is not null) await transaction.RollbackAsync(cancellationToken);
+                dbContext.ChangeTracker.Clear();
+            }
+        }
+
+        return Result<SubStageDto>.Failure(new Error("Conflict", "تعذر تخصيص كود مرحلة فريد. أعد المحاولة."));
+    }
+
+    public async Task<Result<StageDependencySummaryDto>> GetSubStageDependenciesAsync(Guid subStageId, CancellationToken cancellationToken = default) =>
+        await dependencyInspector.InspectAsync(subStageId, cancellationToken);
+
+    public async Task<Result> DeleteSubStageAsync(Guid subStageId, Guid actorUserId, string? requestMeta = null, CancellationToken cancellationToken = default)
+    {
+        if (actorUserId == Guid.Empty) return Result.Failure(new Error("Unauthorized", "User context is required."));
+        var entity = await dbContext.SubStages.FirstOrDefaultAsync(x => x.Id == subStageId, cancellationToken);
+        if (entity is null) return Result.Failure(new Error("NotFound", "Operational stage not found."));
+        var dependencies = await dependencyInspector.InspectAsync(subStageId, cancellationToken);
+        if (dependencies.IsFailure) return Result.Failure(dependencies.Error!);
+        if (!dependencies.Value!.CanDelete) return Result.Failure(new Error("Conflict", dependencies.Value.DeleteMessageAr));
+        await auditEngine.RecordAsync(actorUserId, AuditActionType.Delete, nameof(SubStage), entity.Id.ToString(), new { entity.Id, entity.MainStageId, entity.ProductionLineId, entity.Code, entity.Name }, null, requestMeta, cancellationToken);
+        dbContext.SubStages.Remove(entity);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return Result.Success();
+    }
+
+    private async Task<string> AllocateStageCodeAsync(CancellationToken cancellationToken)
+    {
+        long value;
+        if (dbContext.Database.IsSqlServer())
+        {
+            value = await dbContext.Database.SqlQueryRaw<long>("SELECT NEXT VALUE FOR [StageCodeSequence] AS [Value]").SingleAsync(cancellationToken);
+        }
+        else
+        {
+            // Non-SQL providers are used only by automated tests; production SQL Server always uses the sequence above.
+            var codes = await dbContext.SubStages.AsNoTracking().Select(x => x.Code).ToArrayAsync(cancellationToken);
+            value = codes.Select(ParseLegacyStageNumber).DefaultIfEmpty(0L).Max() + 1;
+        }
+        return $"STG{value:000}";
+    }
+
+    private static long ParseLegacyStageNumber(string code) =>
+        code.StartsWith("STG", StringComparison.OrdinalIgnoreCase) && long.TryParse(code[3..], out var value) ? value : 0;
+
+    private static SubStageDto ToDto(SubStage entity) => new()
+    {
+        Id = entity.Id, MainStageId = entity.MainStageId, ProductionLineId = entity.ProductionLineId,
+        Code = entity.Code, Name = entity.Name, Capacity = entity.Capacity, DefaultOrder = entity.DefaultOrder, IsActive = entity.IsActive
+    };
+
+    /// <summary>
+    /// MainStage remains a mandatory legacy parent. New operational-stage flows
+    /// never expose it: an explicit legacy request is honored for compatibility,
+    /// otherwise the first active group is selected deterministically. A single
+    /// internal group is created only when a line has no active group at all.
+    /// </summary>
+    private async Task<Result<MainStage>> ResolveLegacyGroupAsync(
+        Guid productionLineId,
+        Guid? requestedMainStageId,
+        Guid actorUserId,
+        string? requestMeta,
+        CancellationToken cancellationToken)
+    {
+        var activeGroups = await dbContext.MainStages
+            .Where(stage => stage.ProductionLineId == productionLineId && stage.IsActive)
+            .OrderBy(stage => stage.SequenceOrder).ThenBy(stage => stage.Name).ThenBy(stage => stage.Id)
+            .ToArrayAsync(cancellationToken);
+
+        if (requestedMainStageId.HasValue)
+        {
+            var requested = activeGroups.FirstOrDefault(stage => stage.Id == requestedMainStageId.Value);
+            return requested is null
+                ? Result<MainStage>.Failure(new Error("ValidationError", "The legacy stage group must belong to the selected active production line."))
+                : Result<MainStage>.Success(requested);
+        }
+
+        if (activeGroups.Length > 0) return Result<MainStage>.Success(activeGroups[0]);
+
+        var nextSequenceOrder = await dbContext.MainStages
+            .Where(stage => stage.ProductionLineId == productionLineId)
+            .Select(stage => (int?)stage.SequenceOrder)
+            .MaxAsync(cancellationToken) ?? 0;
+        var group = new MainStage(Guid.NewGuid(), productionLineId, "Internal operational stage group", nextSequenceOrder + 1);
+        dbContext.MainStages.Add(group);
+        await auditEngine.RecordAsync(
+            actorUserId,
+            AuditActionType.Create,
+            nameof(MainStage),
+            group.Id.ToString(),
+            after: new { group.Id, group.ProductionLineId, group.SequenceOrder, Purpose = "OperationalStageCompatibility" },
+            requestMeta: requestMeta,
+            cancellationToken: cancellationToken);
+        return Result<MainStage>.Success(group);
     }
 }

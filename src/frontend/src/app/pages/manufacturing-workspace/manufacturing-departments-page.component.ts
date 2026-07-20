@@ -45,9 +45,12 @@ export class ManufacturingDepartmentsPageComponent implements OnInit {
     this.loadDepartments();
   }
 
-  trackByDepartmentId(_: number, item: DepartmentItem): number {
-    return item.departmentId;
+  trackByDepartmentId(_: number, item: DepartmentItem): string | number {
+    return item.id ?? item.departmentId ?? item.code ?? item.nameAr ?? item.name ?? '';
   }
+
+  departmentCode(item: DepartmentItem): string { return item.code ?? String(item.departmentId ?? '-'); }
+  departmentName(item: DepartmentItem): string { return item.nameAr ?? item.name ?? '-'; }
 
   displayStatus(item: DepartmentItem): string {
     if (typeof item.status === 'string' && item.status.trim().length > 0) {
@@ -93,8 +96,8 @@ export class ManufacturingDepartmentsPageComponent implements OnInit {
 
     this.filteredDepartments = this.departments.filter((department) => {
       return (
-        String(department.departmentId).includes(normalizedSearch) ||
-        department.name.toLowerCase().includes(normalizedSearch)
+        this.departmentCode(department).toLowerCase().includes(normalizedSearch) ||
+        this.departmentName(department).toLowerCase().includes(normalizedSearch)
       );
     });
   }

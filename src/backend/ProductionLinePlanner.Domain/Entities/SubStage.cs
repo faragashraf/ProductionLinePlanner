@@ -12,7 +12,8 @@ public class SubStage
         int capacity,
         int defaultOrder,
         bool isActive = true,
-        DateTime? createdAtUtc = null)
+        DateTime? createdAtUtc = null,
+        Guid productionLineId = default)
     {
         if (mainStageId == Guid.Empty)
             throw new ArgumentException("MainStageId is required.", nameof(mainStageId));
@@ -27,6 +28,7 @@ public class SubStage
 
         Id = id;
         MainStageId = mainStageId;
+        ProductionLineId = productionLineId;
         Name = name.Trim();
         Code = code.Trim();
         Capacity = capacity;
@@ -39,6 +41,8 @@ public class SubStage
     public Guid Id { get; init; }
     public Guid MainStageId { get; init; }
     public MainStage? MainStage { get; set; }
+    public Guid ProductionLineId { get; private set; }
+    public ProductionLine? ProductionLine { get; private set; }
     public string Name { get; private set; } = string.Empty;
     public string Code { get; private set; } = string.Empty;
     public int Capacity { get; private set; }
@@ -56,6 +60,21 @@ public class SubStage
 
     public List<WorkerDefaultAssignment> DefaultAssignments { get; } = [];
 
+    /// <summary>
+    /// Establishes the direct operational-line relation. It is intentionally
+    /// immutable once set, because the owning MainStage remains the source of
+    /// truth for the hierarchy.
+    /// </summary>
+    public void SetProductionLine(Guid productionLineId)
+    {
+        if (productionLineId == Guid.Empty)
+            throw new ArgumentException("ProductionLineId is required.", nameof(productionLineId));
+        if (ProductionLineId != Guid.Empty && ProductionLineId != productionLineId)
+            throw new InvalidOperationException("A stage cannot be moved to a different production line.");
+
+        ProductionLineId = productionLineId;
+    }
+
     public void UpdateCapacity(int capacity, DateTime? atUtc = null)
     {
         if (capacity < 0)
@@ -65,14 +84,11 @@ public class SubStage
         UpdatedAtUtc = atUtc ?? DateTime.UtcNow;
     }
 
-    public void Rename(string code, string name, DateTime? atUtc = null)
+    public void Rename(string name, DateTime? atUtc = null)
     {
-        if (string.IsNullOrWhiteSpace(code))
-            throw new ArgumentException("Code is required.", nameof(code));
         if (string.IsNullOrWhiteSpace(name))
             throw new ArgumentException("Sub stage name is required.", nameof(name));
 
-        Code = code.Trim();
         Name = name.Trim();
         UpdatedAtUtc = atUtc ?? DateTime.UtcNow;
     }

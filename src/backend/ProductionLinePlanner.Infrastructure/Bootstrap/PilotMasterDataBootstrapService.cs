@@ -463,7 +463,7 @@ public sealed class PilotMasterDataBootstrapService(
             if (subStage is null)
             {
                 var nextOrder = subStages.Where(x => x.MainStageId == main.Id).Select(x => x.DefaultOrder).DefaultIfEmpty(0).Max() + 1;
-                subStage = new SubStage(Guid.NewGuid(), main.Id, plan.Source.SubStageName, plan.Code, 0, nextOrder, true, now);
+                subStage = new SubStage(Guid.NewGuid(), main.Id, plan.Source.SubStageName, plan.Code, 0, nextOrder, true, now, main.ProductionLineId);
                 subStages.Add(subStage);
                 db.SubStages.Add(subStage);
             }

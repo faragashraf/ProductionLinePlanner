@@ -63,7 +63,9 @@ public sealed class NotificationPublisher(
             relatedEntityType,
             command.RelatedEntityId,
             NotificationStatus.Unread,
-            command.CreatedAtUtc);
+            command.CreatedAtUtc,
+            command.EventKey,
+            command.Severity);
 
         dbContext.Notifications.Add(notification);
         try
@@ -176,6 +178,8 @@ public sealed class NotificationPublisher(
         notification.RelatedWorkerId == command.RelatedWorkerId &&
         notification.RelatedEntityType == relatedEntityType &&
         notification.RelatedEntityId == command.RelatedEntityId &&
+        notification.EventKey == command.EventKey &&
+        notification.Severity == command.Severity &&
         (command.CreatedAtUtc is null || notification.CreatedAtUtc == command.CreatedAtUtc.Value);
 
     private static NotificationSummaryDto ToSummary(Notification notification) => new(

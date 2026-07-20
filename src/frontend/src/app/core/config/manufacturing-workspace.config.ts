@@ -92,14 +92,6 @@ export const MANUFACTURING_WORKSPACE_ITEMS: readonly ManufacturingWorkspaceItem[
     permission: PERMISSIONS.models.view
   },
   {
-    id: 'compensation',
-    label: 'تكلفة المراحل',
-    description: 'إعدادات وطرق احتساب تكلفة المراحل ستظهر هنا.',
-    route: '/manufacturing/compensation',
-    icon: 'pi-wallet',
-    permission: PERMISSIONS.compensation.view
-  },
-  {
     id: 'line-staffing',
     label: 'تسكين الخط',
     description: 'تخطيط التسكين الدائم والمؤقت لعمال الخط دون ربطه بحضور اليوم.',

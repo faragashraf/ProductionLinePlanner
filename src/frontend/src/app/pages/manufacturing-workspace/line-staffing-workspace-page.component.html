@@ -5,14 +5,14 @@
     [compact]="true"
   ></plp-page-header>
 
-  <plp-toolbar-shell title="مسار خطة التسكين" description="اختر المصنع ثم الخط ثم الموديل، وبعدها حمّل كل مراحل الموديل في مساحة واحدة.">
+  <plp-toolbar-shell title="مسار خطة التسكين" description="اختر المصنع ثم القسم ثم الخط والموديل، وبعدها حمّل مراحل رحلة الموديل المعدّة مسبقًا.">
     <div toolbar-actions>
       <button pButton type="button" class="p-button-sm p-button-outlined" icon="pi pi-refresh" label="تحديث المراحل" [disabled]="!hasCompleteContext || planLoading" (click)="loadProductStages(true)"></button>
     </div>
   </plp-toolbar-shell>
 
   <plp-section-navigation
-    *ngIf="plan"
+    *ngIf="hasLoadedModelJourney"
     class="line-staffing-page__section-navigation"
     [sections]="sectionNavigationItems"
     [activeId]="activeStaffingSection"
@@ -20,36 +20,44 @@
   ></plp-section-navigation>
 
   <div #tabletContent class="line-staffing-page__tablet-content" [style.--line-staffing-workspace-height.px]="tabletWorkspaceHeightPx">
-    <p class="line-staffing-page__error" *ngIf="planError" role="alert">{{ planError }}</p>
+    <div class="line-staffing-page__error" *ngIf="planError" role="alert">
+      <span>{{ planError }}</span>
+      <button pButton type="button" class="p-button-sm p-button-text" label="إعادة المحاولة" (click)="retryContextLoad()"></button>
+    </div>
     <p class="line-staffing-page__success" *ngIf="successMessage" role="status">{{ successMessage }}</p>
 
     <div #staffingChoices class="line-staffing-page__section-target">
       <p-card header="سياق التسكين">
         <div class="line-staffing-page__context">
-      <label>1. المصنع
-        <select [ngModel]="selectedFactoryId" (ngModelChange)="selectFactory($event)" [ngModelOptions]="{ standalone: true }" [disabled]="factoriesLoading">
-          <option value="">{{ factoriesLoading ? 'جارٍ تحميل المصانع…' : 'اختر المصنع' }}</option>
-          <option *ngFor="let factory of factories; trackBy: trackById" [value]="factory.id">{{ factory.code }} — {{ factory.name }}</option>
-        </select>
-      </label>
-
-      <label *ngIf="selectedFactoryId">2. خط الإنتاج
-        <select [ngModel]="selectedProductionLineId" (ngModelChange)="selectProductionLine($event)" [ngModelOptions]="{ standalone: true }" [disabled]="linesLoading">
-          <option value="">{{ linesLoading ? 'جارٍ تحميل الخطوط…' : 'اختر خط الإنتاج' }}</option>
-          <option *ngFor="let line of visibleProductionLines; trackBy: trackById" [value]="line.id">{{ line.lineCode || '—' }} — {{ line.name }}</option>
-        </select>
-      </label>
-
-      <label *ngIf="selectedProductionLineId">3. المنتج / الموديل
-        <select [ngModel]="selectedProductModelId" (ngModelChange)="selectProductModel($event)" [ngModelOptions]="{ standalone: true }" [disabled]="modelsLoading">
-          <option value="">{{ modelsLoading ? 'جارٍ تحميل الموديلات…' : 'اختر الموديل' }}</option>
-          <option *ngFor="let model of activeProductModels; trackBy: trackById" [value]="model.id">{{ model.code }} — {{ model.name }}</option>
-        </select>
-      </label>
+          <label>1. المصنع
+            <select [ngModel]="selectedFactoryId" (ngModelChange)="selectFactory($event)" [ngModelOptions]="{ standalone: true }" [disabled]="factoriesLoading">
+              <option value="">{{ factoriesLoading ? 'جارٍ تحميل المصانع…' : 'اختر المصنع' }}</option>
+              <option *ngFor="let factory of factories; trackBy: trackById" [value]="factory.id">{{ factory.code }} — {{ factory.name }}</option>
+            </select>
+          </label>
+          <label>2. القسم
+            <select [ngModel]="selectedDepartmentId" (ngModelChange)="selectDepartment($event)" [ngModelOptions]="{ standalone: true }" [disabled]="!selectedFactoryId || departmentsLoading">
+              <option value="">{{ departmentsLoading ? 'جارٍ تحميل الأقسام…' : 'اختر القسم' }}</option>
+              <option *ngFor="let department of activeDepartments; trackBy: trackById" [value]="department.id">{{ department.code }} — {{ department.nameAr || department.name }}</option>
+            </select>
+          </label>
+          <label>3. خط الإنتاج
+            <select [ngModel]="selectedProductionLineId" (ngModelChange)="selectProductionLine($event)" [ngModelOptions]="{ standalone: true }" [disabled]="!selectedDepartmentId || linesLoading">
+              <option value="">{{ linesLoading ? 'جارٍ تحميل الخطوط…' : 'اختر خط الإنتاج' }}</option>
+              <option *ngFor="let line of visibleProductionLines; trackBy: trackById" [value]="line.id">{{ line.lineCode || '—' }} — {{ line.name }}</option>
+            </select>
+          </label>
+          <label>4. المنتج / الموديل
+            <select [ngModel]="selectedProductModelId" (ngModelChange)="selectProductModel($event)" [ngModelOptions]="{ standalone: true }" [disabled]="!selectedProductionLineId || modelsLoading">
+              <option value="">{{ modelsLoading ? 'جارٍ تحميل الموديلات…' : 'اختر الموديل' }}</option>
+              <option *ngFor="let model of activeProductModels; trackBy: trackById" [value]="model.id">{{ model.code }} — {{ model.name }}</option>
+            </select>
+          </label>
 
         </div>
         <p class="line-staffing-page__note" *ngIf="!selectedFactoryId">ابدأ باختيار المصنع. لا يتم تحميل أي بيانات تابعة قبل اكتمال المسار السابق.</p>
-        <p class="line-staffing-page__note" *ngIf="selectedFactoryId && !selectedProductionLineId">اختر خط الإنتاج أولًا.</p>
+        <p class="line-staffing-page__note" *ngIf="selectedFactoryId && !selectedDepartmentId">اختر القسم أولًا. الخطوط غير المرتبطة بقسم لا تدخل مسار التسكين حتى تُربط إداريًا.</p>
+        <p class="line-staffing-page__note" *ngIf="selectedDepartmentId && !selectedProductionLineId">اختر خط الإنتاج التابع للقسم أولًا.</p>
         <p class="line-staffing-page__note" *ngIf="selectedProductionLineId && !selectedProductModelId">اختر الموديل ثم اضغط «تحميل مراحل الموديل».</p>
         <button pButton type="button" icon="pi pi-list" label="تحميل مراحل الموديل" [disabled]="!hasCompleteContext || planLoading" (click)="loadProductStages()"></button>
       </p-card>
@@ -58,6 +66,7 @@
     <plp-loading-skeleton *ngIf="planLoading && !plan" [lines]="8" [showAvatar]="false"></plp-loading-skeleton>
 
     <ng-container *ngIf="plan">
+      <ng-container *ngIf="hasLoadedModelJourney; else noModelJourney">
       <div #staffingSummary class="line-staffing-page__section-target">
         <p-card header="ملخص تسكين الموديل والخط">
       <div class="line-staffing-page__summary-head">
@@ -96,10 +105,10 @@
             <option value="review">تحتاج مراجعة</option>
           </select>
           <div class="line-staffing-page__stage-navigation" aria-label="التنقل بين المراحل">
-            <button pButton type="button" class="p-button-sm p-button-text" label="المرحلة السابقة" [disabled]="!canNavigateStages(-1)" (click)="previousStage()"></button>
-            <button pButton type="button" class="p-button-sm p-button-text" label="المرحلة التالية" [disabled]="!canNavigateStages(1)" (click)="nextStage()"></button>
-            <button pButton type="button" class="p-button-sm p-button-text" label="السابقة التي تحتاج متابعة" [disabled]="!canNavigateStages(-1, true)" (click)="previousProblemStage()"></button>
-            <button pButton type="button" class="p-button-sm p-button-text" label="التالية التي تحتاج متابعة" [disabled]="!canNavigateStages(1, true)" (click)="nextProblemStage()"></button>
+            <button pButton type="button" class="p-button-sm p-button-text p-button-icon-only" icon="pi pi-arrow-right" pTooltip="المرحلة السابقة" tooltipPosition="top" aria-label="المرحلة السابقة" [disabled]="!canNavigateStages(-1)" (click)="previousStage()"></button>
+            <button pButton type="button" class="p-button-sm p-button-text p-button-icon-only" icon="pi pi-arrow-left" pTooltip="المرحلة التالية" tooltipPosition="top" aria-label="المرحلة التالية" [disabled]="!canNavigateStages(1)" (click)="nextStage()"></button>
+            <button pButton type="button" class="p-button-sm p-button-text p-button-icon-only" icon="pi pi-angle-double-right" pTooltip="المرحلة السابقة التي تحتاج متابعة" tooltipPosition="top" aria-label="المرحلة السابقة التي تحتاج متابعة" [disabled]="!canNavigateStages(-1, true)" (click)="previousProblemStage()"></button>
+            <button pButton type="button" class="p-button-sm p-button-text p-button-icon-only" icon="pi pi-angle-double-left" pTooltip="المرحلة التالية التي تحتاج متابعة" tooltipPosition="top" aria-label="المرحلة التالية التي تحتاج متابعة" [disabled]="!canNavigateStages(1, true)" (click)="nextProblemStage()"></button>
           </div>
         </div>
 
@@ -114,7 +123,7 @@
           >
             <div>
               <strong>{{ stage.stageCode }} — {{ stage.stageName }}</strong>
-              <small>{{ stage.mainStageName }} · {{ stage.workerStatusText }}</small>
+              <small>{{ stage.workerStatusText }}</small>
             </div>
             <div class="line-staffing-page__stage-meta">
               <span>دائم: {{ stage.defaultAssignedWorkersCount }}</span>
@@ -136,7 +145,7 @@
               <div class="line-staffing-page__selected-stage">
                 <div>
                   <h2>{{ stage.stageCode }} — {{ stage.stageName }}</h2>
-                  <p>{{ stage.mainStageName }} · {{ stage.workerStatusText }}</p>
+                  <p>{{ stage.workerStatusText }}</p>
                 </div>
                 <div class="line-staffing-page__selected-stage-badges">
                   <plp-status-badge [status]="stageStatusTone(stage)" [label]="stageStatusLabel(stage)"></plp-status-badge>
@@ -189,6 +198,12 @@
         <ng-template #stageGuidance><p-card header="عمال المرحلة المحددة"><p class="line-staffing-page__note">اختر مرحلة من قائمة الموديل لعرض عمالها وإدارة التسكين.</p></p-card></ng-template>
       </aside>
       </section>
+      </ng-container>
+      <ng-template #noModelJourney>
+        <p-card header="مراحل الموديل">
+          <plp-empty-state title="لا توجد رحلة مراحل مهيأة لهذا الموديل" description="انتقل إلى شاشة الموديلات لإعداد رحلة الموديل وترتيب مراحلها، ثم عُد لتحميلها للتسكين."></plp-empty-state>
+        </p-card>
+      </ng-template>
     </ng-container>
   </div>
 
@@ -218,7 +233,7 @@
           <input pInputText type="search" [(ngModel)]="workerSearch" [ngModelOptions]="{ standalone: true }" placeholder="الكود أو الاسم">
         </label>
         <label>القسم
-          <select [(ngModel)]="departmentFilter" [ngModelOptions]="{ standalone: true }"><option value="">كل الأقسام</option><option *ngFor="let department of departments" [value]="department">{{ department }}</option></select>
+          <select [(ngModel)]="departmentFilter" [ngModelOptions]="{ standalone: true }"><option value="">كل الأقسام</option><option *ngFor="let department of workerDepartments" [value]="department">{{ department }}</option></select>
         </label>
         <p class="line-staffing-page__dialog-note line-staffing-page__wide">{{ selectedDefaultWorkersCount }} عامل محدد للتسكين الدائم في هذه المرحلة. العامل المشارك في مراحل أخرى يظل قابلًا للاختيار.</p>
         <section class="line-staffing-page__candidate-list line-staffing-page__wide" aria-label="اختيار عمال المرحلة">
@@ -253,7 +268,7 @@
           <input pInputText type="search" [(ngModel)]="workerSearch" [ngModelOptions]="{ standalone: true }" placeholder="الكود أو الاسم">
         </label>
         <label>القسم
-          <select [(ngModel)]="departmentFilter" [ngModelOptions]="{ standalone: true }"><option value="">كل الأقسام</option><option *ngFor="let department of departments" [value]="department">{{ department }}</option></select>
+          <select [(ngModel)]="departmentFilter" [ngModelOptions]="{ standalone: true }"><option value="">كل الأقسام</option><option *ngFor="let department of workerDepartments" [value]="department">{{ department }}</option></select>
         </label>
         <p class="line-staffing-page__dialog-note">مصدر هذه القائمة دليل العمال بالخدمة الفعالة. لا تستخدم حالة الحضور اليومية في التسكين التنظيمي.</p>
         <section class="line-staffing-page__candidate-list line-staffing-page__wide" aria-label="العمال المتاحون للتسكين">

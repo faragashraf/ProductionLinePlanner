@@ -14,6 +14,7 @@ import {
 import { PlpSectionNavigationItem } from '../../shared/product/plp-section-navigation.component';
 import {
   FactoryItem,
+  DepartmentItem,
   ManufacturingMasterDataApiService,
   ProductModelItem,
   ProductionLineOption
@@ -61,11 +62,13 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
   });
 
   factories: FactoryItem[] = [];
+  departments: DepartmentItem[] = [];
   productionLines: ProductionLineOption[] = [];
   productModels: ProductModelItem[] = [];
   plan: LineStaffingPlan | null = null;
 
   selectedFactoryId = '';
+  selectedDepartmentId = '';
   selectedProductionLineId = '';
   selectedProductModelId = '';
   selectedSubStageId = '';
@@ -76,6 +79,7 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
   dialogWorkers: LineStaffingWorker[] = [];
 
   factoriesLoading = false;
+  departmentsLoading = false;
   linesLoading = false;
   modelsLoading = false;
   planLoading = false;
@@ -94,6 +98,9 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
   pendingParticipation: LineStaffingParticipation | null = null;
   private selectedDefaultWorkerIds = new Set<string>();
   private planRequestVersion = 0;
+  private departmentRequestVersion = 0;
+  private productionLineRequestVersion = 0;
+  private productModelRequestVersion = 0;
   private workerDirectoryRequestVersion = 0;
   private tabletWorkspaceMediaQuery: MediaQueryList | null = null;
   private tabletScrollLockApplied = false;
@@ -154,7 +161,14 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
   }
 
   get visibleProductionLines(): ProductionLineOption[] {
-    return this.productionLines.filter(line => line.factoryId === this.selectedFactoryId && line.isActive);
+    return this.productionLines.filter(line =>
+      line.factoryId === this.selectedFactoryId &&
+      line.departmentId === this.selectedDepartmentId &&
+      line.isActive);
+  }
+
+  get activeDepartments(): DepartmentItem[] {
+    return this.departments.filter(department => department.isActive);
   }
 
   get activeProductModels(): ProductModelItem[] {
@@ -162,7 +176,7 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
   }
 
   get hasCompleteContext(): boolean {
-    return Boolean(this.selectedFactoryId && this.selectedProductionLineId && this.selectedProductModelId);
+    return Boolean(this.selectedFactoryId && this.selectedDepartmentId && this.selectedProductionLineId && this.selectedProductModelId);
   }
 
   get activeStaffingSection(): string {
@@ -176,7 +190,7 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
   get filteredStages(): LineStaffingStage[] {
     const search = this.stageSearch.trim().toLocaleLowerCase('ar');
     return (this.plan?.stages ?? []).filter(stage => {
-      const matchesSearch = !search || `${stage.stageCode} ${stage.stageName} ${stage.mainStageName}`.toLocaleLowerCase('ar').includes(search);
+      const matchesSearch = !search || `${stage.stageCode} ${stage.stageName}`.toLocaleLowerCase('ar').includes(search);
       if (!matchesSearch) return false;
       if (this.stageFilter === 'without-workers') return stage.effectiveAssignedWorkersCount === 0;
       if (this.stageFilter === 'default') return stage.defaultAssignedWorkersCount > 0;
@@ -203,7 +217,7 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
       .sort((left, right) => left.employeeCode.localeCompare(right.employeeCode));
   }
 
-  get departments(): string[] {
+  get workerDepartments(): string[] {
     return [...new Set(this.dialogWorkers.map(worker => worker.departmentName).filter((name): name is string => Boolean(name)))].sort();
   }
 
@@ -284,6 +298,10 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
     return this.visibleProductionLines.find(line => line.id === this.selectedProductionLineId)?.name ?? 'غير محدد';
   }
 
+  get hasLoadedModelJourney(): boolean {
+    return Boolean(this.plan && this.plan.stages.length > 0);
+  }
+
   get selectedProductName(): string {
     const model = this.activeProductModels.find(candidate => candidate.id === this.selectedProductModelId);
     return model ? `${model.code} — ${model.name}` : 'غير محدد';
@@ -292,20 +310,33 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
   selectFactory(factoryId: string): void {
     if (factoryId === this.selectedFactoryId) return;
     this.selectedFactoryId = factoryId;
+    this.selectedDepartmentId = '';
+    this.selectedProductionLineId = '';
+    this.selectedProductModelId = '';
+    this.departments = [];
+    this.productionLines = [];
+    this.productModels = [];
+    this.departmentRequestVersion++;
+    this.productionLineRequestVersion++;
+    this.productModelRequestVersion++;
+    this.clearPlan();
+    if (!factoryId) return;
+
+    this.loadDepartments();
+  }
+
+  selectDepartment(departmentId: string): void {
+    if (departmentId === this.selectedDepartmentId) return;
+    this.selectedDepartmentId = departmentId;
     this.selectedProductionLineId = '';
     this.selectedProductModelId = '';
     this.productionLines = [];
     this.productModels = [];
+    this.productionLineRequestVersion++;
+    this.productModelRequestVersion++;
     this.clearPlan();
-    if (!factoryId) return;
-
-    this.linesLoading = true;
-    this.masterData.allProductionLines()
-      .pipe(finalize(() => this.linesLoading = false), takeUntil(this.destroy$))
-      .subscribe({
-        next: lines => this.productionLines = lines,
-        error: error => this.planError = this.formValidation.serverMessage(error, 'تعذر تحميل خطوط الإنتاج.')
-      });
+    if (!departmentId) return;
+    this.loadProductionLines();
   }
 
   selectProductionLine(lineId: string): void {
@@ -313,16 +344,11 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
     this.selectedProductionLineId = lineId;
     this.selectedProductModelId = '';
     this.productModels = [];
+    this.productModelRequestVersion++;
     this.clearPlan();
     if (!lineId) return;
 
-    this.modelsLoading = true;
-    this.masterData.models()
-      .pipe(finalize(() => this.modelsLoading = false), takeUntil(this.destroy$))
-      .subscribe({
-        next: models => this.productModels = models,
-        error: error => this.planError = this.formValidation.serverMessage(error, 'تعذر تحميل الموديلات.')
-      });
+    this.loadProductModels();
   }
 
   selectProductModel(modelId: string): void {
@@ -769,6 +795,77 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
       .subscribe({
         next: factories => this.factories = factories.filter(factory => factory.isActive),
         error: error => this.planError = this.formValidation.serverMessage(error, 'تعذر تحميل المصانع.')
+      });
+  }
+
+  retryContextLoad(): void {
+    if (this.hasCompleteContext && this.planError) {
+      this.loadProductStages();
+      return;
+    }
+    if (!this.selectedFactoryId) {
+      this.loadFactories();
+      return;
+    }
+    if (!this.selectedDepartmentId) {
+      this.loadDepartments();
+      return;
+    }
+    if (!this.selectedProductionLineId) {
+      this.loadProductionLines();
+      return;
+    }
+    this.loadProductModels();
+  }
+
+  private loadDepartments(): void {
+    if (!this.selectedFactoryId) return;
+    const requestVersion = ++this.departmentRequestVersion;
+    const factoryId = this.selectedFactoryId;
+    this.departmentsLoading = true;
+    this.planError = '';
+    this.masterData.departments(this.selectedFactoryId, false)
+      .pipe(finalize(() => this.departmentsLoading = false), takeUntil(this.destroy$))
+      .subscribe({
+        next: departments => {
+          if (requestVersion !== this.departmentRequestVersion || factoryId !== this.selectedFactoryId) return;
+          this.departments = departments.filter(department => department.factoryId === factoryId && department.isActive);
+        },
+        error: error => this.planError = this.formValidation.serverMessage(error, 'تعذر تحميل أقسام المصنع.')
+      });
+  }
+
+  private loadProductionLines(): void {
+    if (!this.selectedDepartmentId) return;
+    const requestVersion = ++this.productionLineRequestVersion;
+    const factoryId = this.selectedFactoryId;
+    const departmentId = this.selectedDepartmentId;
+    this.linesLoading = true;
+    this.planError = '';
+    this.masterData.productionLinesForDepartment(departmentId)
+      .pipe(finalize(() => this.linesLoading = false), takeUntil(this.destroy$))
+      .subscribe({
+        next: lines => {
+          if (requestVersion !== this.productionLineRequestVersion || factoryId !== this.selectedFactoryId || departmentId !== this.selectedDepartmentId) return;
+          this.productionLines = lines.filter(line => line.factoryId === factoryId && line.departmentId === departmentId && line.isActive);
+        },
+        error: error => this.planError = this.formValidation.serverMessage(error, 'تعذر تحميل خطوط القسم.')
+      });
+  }
+
+  private loadProductModels(): void {
+    const requestVersion = ++this.productModelRequestVersion;
+    const lineId = this.selectedProductionLineId;
+    this.modelsLoading = true;
+    this.planError = '';
+    this.masterData.models()
+      .pipe(finalize(() => this.modelsLoading = false), takeUntil(this.destroy$))
+      .subscribe({
+        next: models => {
+          if (requestVersion !== this.productModelRequestVersion || lineId !== this.selectedProductionLineId) return;
+          this.productModels = models;
+        },
+        error: error => this.planError = this.formValidation.serverMessage(error, 'تعذر تحميل الموديلات.')
       });
   }
 

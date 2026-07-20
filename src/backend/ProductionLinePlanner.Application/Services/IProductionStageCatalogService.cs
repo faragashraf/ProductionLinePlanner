@@ -25,6 +25,28 @@ public interface IProductionStageCatalogService
 
     Task<Result<SubStageDto>> GetSubStageAsync(Guid subStageId, CancellationToken cancellationToken = default);
 
+    Task<PagedResult<SubStageDto>> GetOperationalStagesAsync(
+        Guid? factoryId,
+        Guid? departmentId,
+        Guid? productionLineId,
+        string? name,
+        string? code,
+        bool? isActive,
+        int page = 1,
+        int pageSize = 50,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<SubStageDto>> CreateOperationalStageAsync(
+        Guid productionLineId,
+        Guid? mainStageId,
+        string name,
+        int defaultOrder,
+        int capacity,
+        bool isActive,
+        Guid actorUserId,
+        string? requestMeta = null,
+        CancellationToken cancellationToken = default);
+
     Task<Result<MainStageDto>> CreateMainStageAsync(
         Guid productionLineId,
         string name,
@@ -74,6 +96,14 @@ public interface IProductionStageCatalogService
         CancellationToken cancellationToken = default);
 
     Task<Result> DeactivateSubStageAsync(
+        Guid subStageId,
+        Guid actorUserId,
+        string? requestMeta = null,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<StageDependencySummaryDto>> GetSubStageDependenciesAsync(Guid subStageId, CancellationToken cancellationToken = default);
+
+    Task<Result> DeleteSubStageAsync(
         Guid subStageId,
         Guid actorUserId,
         string? requestMeta = null,

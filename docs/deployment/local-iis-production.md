@@ -11,11 +11,11 @@ This runbook deploys the current application to a private LAN IIS server. It is 
 
 `api` is a filesystem path only. `app` is an IIS application and browser URL prefix at `/app/`.
 
-- Frontend URL: `http://dayoub.local/app/`
+- Frontend URLs: `http://dayoub.local/app/` and the approved LAN origin `http://192.168.1.99/app/`
 - Backend URL: `http://192.168.1.99:9000/`
 - Angular base href: `/app/`
 - Production API and hub origin: `http://192.168.1.99:9000`
-- CORS origin: `http://dayoub.local` only
+- CORS origins: `http://dayoub.local` and `http://192.168.1.99` only. Configure extra approved origins through `Cors__AllowedOrigins__<index>` in the backend IIS environment; do not use a wildcard.
 
 `app` is both the IIS application path and the filesystem folder. The browser URL is `/app/`, while its IIS application root is `C:\inetpub\wwwroot\app`; do not deploy an extra `browser` or `frontend` directory below it.
 
@@ -75,7 +75,7 @@ A hostname-based site is valid only if `dayoub.local` resolves to this IIS serve
 6. Allow inbound TCP `80` and `9000` only from the required LAN range. Retire port 8000 only after the `/app/` URL succeeds.
 7. Grant the `DayoubBackend` app-pool identity Read/Execute on `api`; grant write only to a proven runtime folder. Grant the selected frontend pool identity Read/Execute on `C:\inetpub\wwwroot\app`. Do not grant `Everyone` Full Control.
 
-The current repository has no `AddSignalR`/`MapHub` usage, so WebSocket Protocol is not currently required. Enable it before introducing SignalR.
+The notification hub uses SignalR at `/hubs/notifications`; enable the IIS **WebSocket Protocol** feature before deployment. The CORS policy remains owned by ASP.NET Core, not IIS custom headers.
 
 ## Production configuration and secrets
 

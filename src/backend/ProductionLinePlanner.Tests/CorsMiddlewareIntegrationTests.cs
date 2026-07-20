@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -17,7 +18,46 @@ public sealed class CorsMiddlewareIntegrationTests
 {
     private const string AllowedOrigin = "http://tablet.local.test:4200";
     private const string LoopbackAllowedOrigin = "http://127.0.0.1:4200";
+    private const string LanAllowedOrigin = "http://192.168.1.99";
     private const string DisallowedOrigin = "http://tablet.local.test:4300";
+
+    [Fact]
+    public async Task Notification_hub_negotiate_preflight_allows_the_signalr_header_for_an_exact_configured_origin()
+    {
+        await using var fixture = await CorsFixture.CreateAsync();
+
+        var response = await fixture.SendAsync(
+            HttpMethod.Options,
+            "/hubs/notifications/negotiate?negotiateVersion=1",
+            LanAllowedOrigin,
+            accessControlRequestMethod: "POST",
+            accessControlRequestHeaders: "content-type,x-signalr-user-agent,authorization");
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.Equal(LanAllowedOrigin, CorsOrigin(response));
+        Assert.Contains("POST", string.Join(',', response.Headers.GetValues("Access-Control-Allow-Methods")));
+        var allowedHeaders = string.Join(',', response.Headers.GetValues("Access-Control-Allow-Headers"));
+        Assert.Contains("content-type", allowedHeaders, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("x-signalr-user-agent", allowedHeaders, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("authorization", allowedHeaders, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("true", response.Headers.GetValues("Access-Control-Allow-Credentials").Single());
+    }
+
+    [Fact]
+    public async Task Notification_hub_negotiate_preflight_does_not_grant_an_unconfigured_origin()
+    {
+        await using var fixture = await CorsFixture.CreateAsync();
+
+        var response = await fixture.SendAsync(
+            HttpMethod.Options,
+            "/hubs/notifications/negotiate?negotiateVersion=1",
+            "http://evil.example",
+            accessControlRequestMethod: "POST",
+            accessControlRequestHeaders: "content-type,x-signalr-user-agent,authorization");
+
+        Assert.False(response.Headers.Contains("Access-Control-Allow-Origin"));
+        Assert.False(response.Headers.Contains("Access-Control-Allow-Credentials"));
+    }
 
     [Fact]
     public async Task Allowed_origin_preflight_for_preview_returns_cors_headers()
@@ -133,11 +173,13 @@ public sealed class CorsMiddlewareIntegrationTests
         {
             var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "IntegrationTest" });
             builder.WebHost.UseTestServer();
-            var allowedOrigins = new[] { AllowedOrigin, LoopbackAllowedOrigin };
+            var allowedOrigins = new[] { AllowedOrigin, LoopbackAllowedOrigin, LanAllowedOrigin };
             builder.Services.AddCors(options => options.AddPolicy("test-cors", policy => policy
                 .SetIsOriginAllowed(origin => allowedOrigins.Contains(origin, StringComparer.OrdinalIgnoreCase))
                 .WithMethods("GET", "POST", "OPTIONS")
-                .WithHeaders("Authorization", "Content-Type", "X-Test-Permissions")));
+                .WithHeaders("Accept", "Authorization", "Content-Type", "X-Requested-With", "X-SignalR-User-Agent", "X-Test-Permissions")
+                .AllowCredentials()));
+            builder.Services.AddSignalR();
             builder.Services.AddRateLimiter(options =>
             {
                 options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
@@ -166,11 +208,18 @@ public sealed class CorsMiddlewareIntegrationTests
             app.MapPost("/api/production/records/validation", () => Results.ValidationProblem(new Dictionary<string, string[]> { ["productionDate"] = ["Production date is required."] })).RequireAuthorization("production.record");
             app.MapPost("/api/production/records/conflict", () => Results.Conflict()).RequireAuthorization("production.record");
             app.MapGet("/api/workers/{workerId:guid}/photo", () => Results.Ok()).RequireAuthorization("workers.view").RequireRateLimiting("photo");
+            app.MapHub<CorsTestNotificationsHub>("/hubs/notifications").RequireAuthorization();
             await app.StartAsync();
             return new CorsFixture(app);
         }
 
-        public Task<HttpResponseMessage> SendAsync(HttpMethod method, string path, string origin, IReadOnlyCollection<string>? permissions = null, string? accessControlRequestMethod = null)
+        public Task<HttpResponseMessage> SendAsync(
+            HttpMethod method,
+            string path,
+            string origin,
+            IReadOnlyCollection<string>? permissions = null,
+            string? accessControlRequestMethod = null,
+            string? accessControlRequestHeaders = null)
         {
             var request = new HttpRequestMessage(method, path);
             request.Headers.Add("Origin", origin);
@@ -183,7 +232,7 @@ public sealed class CorsMiddlewareIntegrationTests
             if (accessControlRequestMethod is not null)
             {
                 request.Headers.Add("Access-Control-Request-Method", accessControlRequestMethod);
-                request.Headers.Add("Access-Control-Request-Headers", "authorization,content-type");
+                request.Headers.Add("Access-Control-Request-Headers", accessControlRequestHeaders ?? "authorization,content-type");
             }
 
             return _client.SendAsync(request);
@@ -217,5 +266,9 @@ public sealed class CorsMiddlewareIntegrationTests
             var identity = new ClaimsIdentity(claims, Scheme.Name);
             return Task.FromResult(AuthenticateResult.Success(new AuthenticationTicket(new ClaimsPrincipal(identity), Scheme.Name)));
         }
+    }
+
+    private sealed class CorsTestNotificationsHub : Hub
+    {
     }
 }

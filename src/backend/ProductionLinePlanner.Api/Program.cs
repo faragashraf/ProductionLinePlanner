@@ -57,7 +57,7 @@ var allowedMethods = builder.Configuration
     .Get<string[]>() ?? ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"];
 var allowedHeaders = builder.Configuration
     .GetSection("Cors:AllowedHeaders")
-    .Get<string[]>() ?? ["Accept", "Content-Type", "Authorization", "X-Requested-With"];
+    .Get<string[]>() ?? ["Accept", "Content-Type", "Authorization", "X-Requested-With", "X-SignalR-User-Agent"];
 var corsAllowCredentials = builder.Configuration.GetValue("Cors:AllowCredentials", false);
 var enableHsts = builder.Configuration.GetValue("Hosting:EnableHsts", !builder.Environment.IsDevelopment());
 var enableHttpsRedirection = builder.Configuration.GetValue("Hosting:EnableHttpsRedirection", true);
@@ -344,16 +344,17 @@ app.MapHub<NotificationsHub>(
 var factoriesApi = app.MapGroup("/api/factories").RequireAuthorization().RequireRateLimiting(ApiRateLimitPolicies.NormalRead);
 var productionLinesApi = app.MapGroup("/api/production-lines").RequireAuthorization().RequireRateLimiting(ApiRateLimitPolicies.NormalRead);
 var departmentsApi = app.MapGroup("/api/departments").RequireAuthorization().RequireRateLimiting(ApiRateLimitPolicies.NormalRead);
+var stagesApi = app.MapGroup("/api/stages").RequireAuthorization().RequireRateLimiting(ApiRateLimitPolicies.NormalRead);
 var mainStagesApi = app.MapGroup("/api/main-stages").RequireAuthorization().RequireRateLimiting(ApiRateLimitPolicies.NormalRead);
 var subStagesApi = app.MapGroup("/api/sub-stages").RequireAuthorization().RequireRateLimiting(ApiRateLimitPolicies.NormalRead);
 var workersApi = app.MapGroup("/api/workers").RequireAuthorization().RequireRateLimiting(ApiRateLimitPolicies.NormalRead);
 var productModelsApi = app.MapGroup("/api/product-models").RequireAuthorization().RequireRateLimiting(ApiRateLimitPolicies.NormalRead);
-var compensationApi = app.MapGroup("/api/compensation").RequireAuthorization().RequireRateLimiting(ApiRateLimitPolicies.NormalRead);
 var workerCompensationApi = app.MapGroup("/api/workers/{workerId:guid}/compensation").RequireAuthorization().RequireRateLimiting(ApiRateLimitPolicies.NormalRead);
 var assignmentsApi = app.MapGroup("/api/assignments").RequireAuthorization().RequireRateLimiting(ApiRateLimitPolicies.CriticalProductionWrite);
 var lineStaffingApi = app.MapGroup("/api/line-staffing").RequireAuthorization().RequireRateLimiting(ApiRateLimitPolicies.NormalRead);
 var factoryStructureApi = app.MapGroup("/api/factory-structure").RequireAuthorization().RequireRateLimiting(ApiRateLimitPolicies.CriticalProductionWrite);
 var attendanceApi = app.MapGroup("/api/attendance").RequireAuthorization().RequireRateLimiting(ApiRateLimitPolicies.NormalRead);
+var attendanceDepartmentsApi = app.MapGroup("/api/attendance/departments").RequireAuthorization().RequireRateLimiting(ApiRateLimitPolicies.NormalRead);
 var notificationsApi = app.MapGroup("/api/notifications").RequireAuthorization().RequireRateLimiting(ApiRateLimitPolicies.NormalRead);
 var readinessApi = app.MapGroup("/api/readiness").RequireAuthorization().RequireRateLimiting(ApiRateLimitPolicies.NormalRead);
 
@@ -1259,6 +1260,9 @@ factoriesApi.MapGet("/{factoryId:guid}/production-lines", async (
         {
             Id = x.Id,
             FactoryId = x.FactoryId,
+            DepartmentId = x.DepartmentId,
+            DepartmentCode = x.Department == null ? null : x.Department.Code,
+            DepartmentNameAr = x.Department == null ? null : x.Department.NameAr,
             Name = x.Name,
             LineCode = x.LineCode,
             SequenceOrder = x.SequenceOrder,
@@ -1275,6 +1279,8 @@ factoriesApi.MapGet("/{factoryId:guid}/production-lines", async (
 productionLinesApi.MapGet("", async (
     AppDbContext dbContext,
     CancellationToken cancellationToken,
+    Guid? factoryId = null,
+    Guid? departmentId = null,
     bool includeInactive = false,
     int page = 1,
     int pageSize = 50) =>
@@ -1285,11 +1291,13 @@ productionLinesApi.MapGet("", async (
     }
 
     var query = dbContext.ProductionLines.AsNoTracking();
+    if (factoryId.HasValue) query = query.Where(x => x.FactoryId == factoryId.Value);
+    if (departmentId.HasValue) query = query.Where(x => x.DepartmentId == departmentId.Value);
     if (!includeInactive) query = query.Where(x => x.IsActive);
     var totalCount = await query.CountAsync(cancellationToken);
     var items = await query.OrderBy(x => x.SequenceOrder).ThenBy(x => x.Name).Skip((page - 1) * pageSize).Take(pageSize).Select(x => new ProductionLineDto
     {
-        Id = x.Id, FactoryId = x.FactoryId, Name = x.Name, LineCode = x.LineCode, SequenceOrder = x.SequenceOrder, IsActive = x.IsActive
+        Id = x.Id, FactoryId = x.FactoryId, DepartmentId = x.DepartmentId, DepartmentCode = x.Department == null ? null : x.Department.Code, DepartmentNameAr = x.Department == null ? null : x.Department.NameAr, Name = x.Name, LineCode = x.LineCode, SequenceOrder = x.SequenceOrder, IsActive = x.IsActive
     }).ToArrayAsync(cancellationToken);
     return Results.Ok(new { success = true, data = new { items, totalCount, pageNumber = page, pageSize } });
 })
@@ -1304,6 +1312,7 @@ productionLinesApi.MapGet("/{lineId:guid}", async (
 {
     var entity = await dbContext.ProductionLines
         .AsNoTracking()
+        .Include(x => x.Department)
         .FirstOrDefaultAsync(x => x.Id == lineId && x.IsActive, cancellationToken);
 
     if (entity is null)
@@ -1315,6 +1324,9 @@ productionLinesApi.MapGet("/{lineId:guid}", async (
     {
         Id = entity.Id,
         FactoryId = entity.FactoryId,
+        DepartmentId = entity.DepartmentId,
+        DepartmentCode = entity.Department?.Code,
+        DepartmentNameAr = entity.Department?.NameAr,
         Name = entity.Name,
         LineCode = entity.LineCode,
         SequenceOrder = entity.SequenceOrder,
@@ -1344,6 +1356,11 @@ productionLinesApi.MapPost("", async (
         return ApiResponse.Failure("ValidationError", "FactoryId is required.");
     }
 
+    if (request.DepartmentId is null || request.DepartmentId == Guid.Empty)
+    {
+        return ApiResponse.Failure("ValidationError", "DepartmentId is required when creating a production line.");
+    }
+
     if (string.IsNullOrWhiteSpace(request.Name))
     {
         return ApiResponse.Failure("ValidationError", "Name is required.");
@@ -1358,6 +1375,14 @@ productionLinesApi.MapPost("", async (
     if (!factoryExists)
     {
         return ApiResponse.Failure("ValidationError", "FactoryId does not exist.", 404);
+    }
+
+    var department = await dbContext.Departments.FirstOrDefaultAsync(
+        x => x.Id == request.DepartmentId.Value && x.FactoryId == request.FactoryId && x.IsActive,
+        cancellationToken);
+    if (department is null)
+    {
+        return ApiResponse.Failure("ValidationError", "DepartmentId must reference an active department in the same factory.", 404);
     }
 
     var lineCode = string.IsNullOrWhiteSpace(request.LineCode) ? null : request.LineCode.Trim();
@@ -1378,6 +1403,7 @@ productionLinesApi.MapPost("", async (
         name: request.Name,
         lineCode: lineCode,
         sequenceOrder: request.SequenceOrder,
+        departmentId: request.DepartmentId,
         isActive: request.IsActive);
 
     dbContext.ProductionLines.Add(entity);
@@ -1387,7 +1413,7 @@ productionLinesApi.MapPost("", async (
         nameof(ProductionLine),
         entity.Id.ToString(),
         before: null,
-        after: new { entity.Id, entity.FactoryId, entity.Name, entity.LineCode, entity.SequenceOrder, entity.IsActive },
+        after: new { entity.Id, entity.FactoryId, entity.DepartmentId, entity.Name, entity.LineCode, entity.SequenceOrder, entity.IsActive },
         requestMeta: AuditRequestMetadata.From(httpContext),
         cancellationToken: cancellationToken);
     await dbContext.SaveChangesAsync(cancellationToken);
@@ -1396,6 +1422,9 @@ productionLinesApi.MapPost("", async (
     {
         Id = entity.Id,
         FactoryId = entity.FactoryId,
+        DepartmentId = entity.DepartmentId,
+        DepartmentCode = department.Code,
+        DepartmentNameAr = department.NameAr,
         Name = entity.Name,
         LineCode = entity.LineCode,
         SequenceOrder = entity.SequenceOrder,
@@ -1427,7 +1456,9 @@ productionLinesApi.MapPatch("/{lineId:guid}", async (
         return ApiResponse.Failure("NotFound", "Production line not found.", statusCode: 404);
     }
 
-    if (request.Name is null && request.LineCode is null && request.SequenceOrder is null && request.IsActive is null)
+    var beforeProductionLine = new { entity.Id, entity.FactoryId, entity.DepartmentId, entity.Name, entity.LineCode, entity.SequenceOrder, entity.IsActive };
+
+    if (request.Name is null && request.DepartmentId is null && request.LineCode is null && request.SequenceOrder is null && request.IsActive is null)
     {
         return ApiResponse.Failure("ValidationError", "No updatable fields were provided.");
     }
@@ -1435,6 +1466,7 @@ productionLinesApi.MapPatch("/{lineId:guid}", async (
     var updatedAt = DateTime.UtcNow;
     var hasChanges = false;
     var entry = dbContext.Entry(entity);
+    Department? selectedDepartment = null;
     if (request.Name is { } name && !string.IsNullOrWhiteSpace(name))
     {
         entry.Property(nameof(ProductionLine.Name)).CurrentValue = name.Trim();
@@ -1443,6 +1475,28 @@ productionLinesApi.MapPatch("/{lineId:guid}", async (
     else if (request.Name is not null && string.IsNullOrWhiteSpace(request.Name))
     {
         return ApiResponse.Failure("ValidationError", "Name cannot be empty.");
+    }
+
+    if (request.DepartmentId is not null)
+    {
+        if (request.DepartmentId.Value == Guid.Empty)
+        {
+            return ApiResponse.Failure("ValidationError", "DepartmentId cannot be empty.");
+        }
+
+        selectedDepartment = await dbContext.Departments.FirstOrDefaultAsync(
+            x => x.Id == request.DepartmentId.Value && x.FactoryId == entity.FactoryId && x.IsActive,
+            cancellationToken);
+        if (selectedDepartment is null)
+        {
+            return ApiResponse.Failure("ValidationError", "DepartmentId must reference an active department in the same factory.", 404);
+        }
+
+        if (entity.DepartmentId != selectedDepartment.Id)
+        {
+            entity.SetDepartment(selectedDepartment.Id, updatedAt);
+            hasChanges = true;
+        }
     }
 
     if (request.LineCode is not null)
@@ -1496,7 +1550,6 @@ productionLinesApi.MapPatch("/{lineId:guid}", async (
         return ApiResponse.Failure("ValidationError", "No valid changes detected.");
     }
 
-    var beforeProductionLine = new { entity.Id, entity.FactoryId, entity.Name, entity.LineCode, entity.SequenceOrder, entity.IsActive };
     entry.Property(nameof(ProductionLine.UpdatedAtUtc)).CurrentValue = updatedAt;
     await auditEngine.RecordAsync(
         actorUserId.Value,
@@ -1504,7 +1557,7 @@ productionLinesApi.MapPatch("/{lineId:guid}", async (
         nameof(ProductionLine),
         entity.Id.ToString(),
         before: beforeProductionLine,
-        after: new { entity.Id, entity.FactoryId, entity.Name, entity.LineCode, entity.SequenceOrder, entity.IsActive },
+        after: new { entity.Id, entity.FactoryId, entity.DepartmentId, entity.Name, entity.LineCode, entity.SequenceOrder, entity.IsActive },
         requestMeta: AuditRequestMetadata.From(httpContext),
         cancellationToken: cancellationToken);
     await dbContext.SaveChangesAsync(cancellationToken);
@@ -1513,6 +1566,9 @@ productionLinesApi.MapPatch("/{lineId:guid}", async (
     {
         Id = entity.Id,
         FactoryId = entity.FactoryId,
+        DepartmentId = entity.DepartmentId,
+        DepartmentCode = selectedDepartment?.Code ?? await dbContext.Departments.Where(x => x.Id == entity.DepartmentId).Select(x => x.Code).FirstOrDefaultAsync(cancellationToken),
+        DepartmentNameAr = selectedDepartment?.NameAr ?? await dbContext.Departments.Where(x => x.Id == entity.DepartmentId).Select(x => x.NameAr).FirstOrDefaultAsync(cancellationToken),
         Name = entity.Name,
         LineCode = entity.LineCode,
         SequenceOrder = entity.SequenceOrder,
@@ -1904,6 +1960,119 @@ subStagesApi.MapDelete("/{subStageId:guid}", async (
     .WithName("DeleteSubStage")
     .RequirePermission("stages.manage");
 
+stagesApi.MapGet("", async (
+    IProductionStageCatalogService stageCatalogService,
+    Guid? factoryId,
+    Guid? departmentId,
+    Guid? productionLineId,
+    CancellationToken cancellationToken,
+    string? name = null,
+    string? code = null,
+    bool? isActive = true,
+    bool includeInactive = false,
+    int page = 1,
+    int pageSize = 50) =>
+{
+    var result = await stageCatalogService.GetOperationalStagesAsync(factoryId, departmentId, productionLineId, name, code, includeInactive ? null : isActive, page, pageSize, cancellationToken);
+    return result.IsFailure
+        ? ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code))
+        : Results.Ok(new { success = true, data = new { items = result.Value!, totalCount = result.TotalCount, pageNumber = result.PageNumber, pageSize = result.PageSize } });
+})
+    .WithTags("Stages")
+    .WithName("GetOperationalStages")
+    .RequirePermission("stages.view");
+
+stagesApi.MapGet("/{stageId:guid}", async (Guid stageId, IProductionStageCatalogService stageCatalogService, CancellationToken cancellationToken) =>
+{
+    var result = await stageCatalogService.GetSubStageAsync(stageId, cancellationToken);
+    return result.IsFailure
+        ? ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code))
+        : Results.Ok(ApiResponse.Success(result.Value!));
+})
+    .WithTags("Stages")
+    .WithName("GetOperationalStage")
+    .RequirePermission("stages.view");
+
+stagesApi.MapGet("/{stageId:guid}/dependencies", async (Guid stageId, IProductionStageCatalogService stageCatalogService, CancellationToken cancellationToken) =>
+{
+    var result = await stageCatalogService.GetSubStageDependenciesAsync(stageId, cancellationToken);
+    return result.IsFailure
+        ? ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code))
+        : Results.Ok(ApiResponse.Success(result.Value!));
+})
+    .WithTags("Stages")
+    .WithName("GetOperationalStageDependencies")
+    .RequirePermission("stages.view");
+
+stagesApi.MapPost("", async (
+    CreateOperationalStageRequest request,
+    IProductionStageCatalogService stageCatalogService,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
+    CancellationToken cancellationToken) =>
+{
+    if (currentUserService.UserId is not { } actorUserId) return ApiResponse.Failure("Unauthorized", "User context is required.");
+    var result = await stageCatalogService.CreateOperationalStageAsync(request.ProductionLineId, request.MainStageId, request.Name, request.DefaultOrder, request.Capacity, request.IsActive, actorUserId, AuditRequestMetadata.From(httpContext), cancellationToken);
+    return result.IsFailure
+        ? ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code))
+        : Results.Created($"/api/stages/{result.Value!.Id}", ApiResponse.Success(result.Value));
+})
+    .WithTags("Stages")
+    .WithName("CreateOperationalStage")
+    .RequirePermission("stages.manage");
+
+stagesApi.MapPatch("/{stageId:guid}", async (
+    Guid stageId,
+    UpdateSubStageRequest request,
+    IProductionStageCatalogService stageCatalogService,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
+    CancellationToken cancellationToken) =>
+{
+    if (currentUserService.UserId is not { } actorUserId) return ApiResponse.Failure("Unauthorized", "User context is required.");
+    var result = await stageCatalogService.UpdateSubStageAsync(stageId, request.Code, request.Name, request.DefaultOrder, request.Capacity, request.IsActive, actorUserId, AuditRequestMetadata.From(httpContext), cancellationToken);
+    return result.IsFailure
+        ? ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code))
+        : Results.Ok(ApiResponse.Success(result.Value!));
+})
+    .WithTags("Stages")
+    .WithName("UpdateOperationalStage")
+    .RequirePermission("stages.manage");
+
+stagesApi.MapPost("/{stageId:guid}/deactivate", async (
+    Guid stageId,
+    IProductionStageCatalogService stageCatalogService,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
+    CancellationToken cancellationToken) =>
+{
+    if (currentUserService.UserId is not { } actorUserId) return ApiResponse.Failure("Unauthorized", "User context is required.");
+    var result = await stageCatalogService.DeactivateSubStageAsync(stageId, actorUserId, AuditRequestMetadata.From(httpContext), cancellationToken);
+    return result.IsFailure
+        ? ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code))
+        : Results.NoContent();
+})
+    .WithTags("Stages")
+    .WithName("DeactivateOperationalStage")
+    .RequirePermission("stages.manage");
+
+stagesApi.MapDelete("/{stageId:guid}", async (
+    Guid stageId,
+    IProductionStageCatalogService stageCatalogService,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
+    CancellationToken cancellationToken) =>
+{
+    if (currentUserService.UserId is not { } actorUserId) return ApiResponse.Failure("Unauthorized", "User context is required.");
+    var result = await stageCatalogService.DeleteSubStageAsync(stageId, actorUserId, AuditRequestMetadata.From(httpContext), cancellationToken);
+    return result.IsFailure
+        ? ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code))
+        : Results.NoContent();
+})
+    .WithTags("Stages")
+    .WithName("DeleteOperationalStage")
+    .RequirePermission("stages.delete");
+
 workersApi.MapGet("", async (
     IEmployeeMasterDataService employeeService,
     CancellationToken cancellationToken,
@@ -2043,6 +2212,87 @@ workersApi.MapGet("/{workerId:guid}/current-assignment", async (
     .WithName("GetWorkerCurrentAssignment");
 
 departmentsApi.MapGet("", async (
+    IDepartmentCatalogService departmentCatalog,
+    Guid? factoryId,
+    CancellationToken cancellationToken,
+    string? search = null,
+    bool? isActive = true,
+    bool includeInactive = false,
+    int page = 1,
+    int pageSize = 50) =>
+{
+    var result = await departmentCatalog.GetDepartmentsAsync(factoryId, search, includeInactive ? null : isActive, page, pageSize, cancellationToken);
+    if (result.IsFailure) return ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code));
+    return Results.Ok(new { success = true, data = new { items = result.Value!, totalCount = result.TotalCount, pageNumber = result.PageNumber, pageSize = result.PageSize } });
+})
+    .RequirePermission("departments.view")
+    .WithTags("Departments")
+    .WithName("GetLocalDepartments");
+
+departmentsApi.MapGet("/{departmentId:guid}", async (Guid departmentId, IDepartmentCatalogService departmentCatalog, CancellationToken cancellationToken) =>
+{
+    var result = await departmentCatalog.GetDepartmentAsync(departmentId, cancellationToken);
+    return result.IsFailure
+        ? ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code))
+        : Results.Ok(ApiResponse.Success(result.Value!));
+})
+    .RequirePermission("departments.view")
+    .WithTags("Departments")
+    .WithName("GetLocalDepartment");
+
+departmentsApi.MapPost("", async (
+    CreateDepartmentRequest request,
+    IDepartmentCatalogService departmentCatalog,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
+    CancellationToken cancellationToken) =>
+{
+    if (currentUserService.UserId is not { } actorUserId) return ApiResponse.Failure("Unauthorized", "User context is required.");
+    var result = await departmentCatalog.CreateAsync(request.FactoryId, request.Code, request.NameAr, request.NameEn, request.SequenceOrder, request.IsActive, actorUserId, AuditRequestMetadata.From(httpContext), cancellationToken);
+    return result.IsFailure
+        ? ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code))
+        : Results.Created($"/api/departments/{result.Value!.Id}", ApiResponse.Success(result.Value));
+})
+    .RequirePermission("departments.manage")
+    .WithTags("Departments")
+    .WithName("CreateLocalDepartment");
+
+departmentsApi.MapPatch("/{departmentId:guid}", async (
+    Guid departmentId,
+    UpdateDepartmentRequest request,
+    IDepartmentCatalogService departmentCatalog,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
+    CancellationToken cancellationToken) =>
+{
+    if (currentUserService.UserId is not { } actorUserId) return ApiResponse.Failure("Unauthorized", "User context is required.");
+    var result = await departmentCatalog.UpdateAsync(departmentId, request.Code, request.NameAr, request.NameEn, request.SequenceOrder, request.IsActive, actorUserId, AuditRequestMetadata.From(httpContext), cancellationToken);
+    return result.IsFailure
+        ? ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code))
+        : Results.Ok(ApiResponse.Success(result.Value!));
+})
+    .RequirePermission("departments.manage")
+    .WithTags("Departments")
+    .WithName("UpdateLocalDepartment");
+
+departmentsApi.MapDelete("/{departmentId:guid}", async (
+    Guid departmentId,
+    IDepartmentCatalogService departmentCatalog,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
+    CancellationToken cancellationToken) =>
+{
+    if (currentUserService.UserId is not { } actorUserId) return ApiResponse.Failure("Unauthorized", "User context is required.");
+    var result = await departmentCatalog.DeleteAsync(departmentId, actorUserId, AuditRequestMetadata.From(httpContext), cancellationToken);
+    return result.IsFailure
+        ? ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code))
+        : Results.NoContent();
+})
+    .RequirePermission("departments.manage")
+    .WithTags("Departments")
+    .WithName("DeleteLocalDepartment");
+
+attendanceDepartmentsApi.MapGet("", async (
     IDepartmentAdministrationService departmentService,
     CancellationToken cancellationToken) =>
 {
@@ -2065,8 +2315,8 @@ departmentsApi.MapGet("", async (
     .WithTags("Departments")
     .WithName("GetDepartments");
 
-departmentsApi.MapPost("", async (
-    CreateDepartmentRequest request,
+attendanceDepartmentsApi.MapPost("", async (
+    CreateAttendanceDepartmentRequest request,
     IDepartmentAdministrationService departmentService,
     ICurrentUserService currentUserService,
     HttpContext httpContext,
@@ -2085,15 +2335,15 @@ departmentsApi.MapPost("", async (
         return ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code));
     }
 
-    return Results.Created($"/api/departments/{result.Value!.DepartmentId}", ApiResponse.Success(result.Value));
+    return Results.Created($"/api/attendance/departments/{result.Value!.DepartmentId}", ApiResponse.Success(result.Value));
 })
     .RequirePermission("departments.manage")
     .WithTags("Departments")
     .WithName("CreateDepartment");
 
-departmentsApi.MapPatch("/{departmentId:int}", async (
+attendanceDepartmentsApi.MapPatch("/{departmentId:int}", async (
     int departmentId,
-    UpdateDepartmentRequest request,
+    UpdateAttendanceDepartmentRequest request,
     IDepartmentAdministrationService departmentService,
     ICurrentUserService currentUserService,
     CancellationToken cancellationToken) =>
@@ -2116,7 +2366,7 @@ departmentsApi.MapPatch("/{departmentId:int}", async (
     .WithTags("Departments")
     .WithName("UpdateDepartment");
 
-departmentsApi.MapPost("/{departmentId:int}/move-worker", async (
+attendanceDepartmentsApi.MapPost("/{departmentId:int}/move-worker", async (
     int departmentId,
     MoveWorkerToDepartmentRequest request,
     IDepartmentAdministrationService departmentService,
@@ -2149,7 +2399,7 @@ departmentsApi.MapPost("/{departmentId:int}/move-worker", async (
     .WithTags("Departments")
     .WithName("MoveWorkerToDepartment");
 
-departmentsApi.MapDelete("/{departmentId:int}", async (
+attendanceDepartmentsApi.MapDelete("/{departmentId:int}", async (
     int departmentId,
     IDepartmentAdministrationService departmentService,
     ICurrentUserService currentUserService,
@@ -2474,92 +2724,6 @@ productModelsApi.MapPost("/{modelId:guid}/stages/copy", async (
     .RequirePermission("models.manage")
     .WithTags("ProductModels")
     .WithName("CopyModelStages");
-
-compensationApi.MapGet("/models", async (
-    IProductModelService productModelService,
-    CancellationToken cancellationToken,
-    string? search = null,
-    bool includeInactive = false,
-    int page = 1,
-    int pageSize = 50) =>
-{
-    var result = await productModelService.GetModelsAsync(search, includeInactive ? null : true, page, pageSize, cancellationToken);
-    if (result.IsFailure)
-    {
-        return ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code));
-    }
-
-    return Results.Ok(new
-    {
-        success = true,
-        data = new
-        {
-            items = result.Value ?? Array.Empty<ProductModelDto>(),
-            totalCount = result.TotalCount,
-            pageNumber = result.PageNumber,
-            pageSize = result.PageSize
-        }
-    });
-})
-    .RequirePermission("compensation.view")
-    .WithTags("Compensation")
-    .WithName("GetCompensationProductModels");
-
-compensationApi.MapGet("/models/{modelId:guid}/stages", async (
-    Guid modelId,
-    IProductModelService productModelService,
-    CancellationToken cancellationToken) =>
-{
-    var result = await productModelService.GetModelStagesAsync(modelId, cancellationToken);
-    if (result.IsFailure)
-    {
-        return ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code));
-    }
-
-    return Results.Ok(ApiResponse.Success(result.Value ?? Array.Empty<ProductModelStageDto>()));
-})
-    .RequirePermission("compensation.view")
-    .WithTags("Compensation")
-    .WithName("GetCompensationProductModelStages");
-
-compensationApi.MapPatch("/models/{modelId:guid}/stages/{modelStageId:guid}", async (
-    Guid modelId,
-    Guid modelStageId,
-    UpsertProductModelStageRequest request,
-    IProductModelService productModelService,
-    ICurrentUserService currentUserService,
-    HttpContext httpContext,
-    CancellationToken cancellationToken) =>
-{
-    if (request.InvalidCompensationMode is not null)
-    {
-        return ApiResponse.Failure("ValidationError", request.InvalidCompensationMode, StatusCodes.Status400BadRequest);
-    }
-
-    if (request.SubStageId is not null || request.StageOrder is not null || request.IsRequired is not null || request.IsActive is not null ||
-        request.HasEffectiveFrom || request.EffectiveFrom is not null)
-    {
-        return ApiResponse.Failure("ValidationError", "Only compensation mode, piece price, and standard seconds can be changed from compensation configuration.", StatusCodes.Status400BadRequest);
-    }
-
-    var actorUserId = currentUserService.UserId;
-    if (actorUserId is null)
-    {
-        return ApiResponse.Failure("Unauthorized", "User context is required.");
-    }
-
-    var requestMeta = $"{httpContext.Request.Method} {httpContext.Request.Path}";
-    var result = await productModelService.UpdateModelStageAsync(modelId, modelStageId, request, actorUserId.Value, requestMeta, cancellationToken);
-    if (result.IsFailure)
-    {
-        return ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code));
-    }
-
-    return Results.Ok(ApiResponse.Success(result.Value!));
-})
-    .RequirePermission("compensation.manage")
-    .WithTags("Compensation")
-    .WithName("UpdateCompensationProductModelStage");
 
 workerCompensationApi.MapGet("/current", async (
     Guid workerId,

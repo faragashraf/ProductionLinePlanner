@@ -17,6 +17,7 @@ public sealed class SubStageConfiguration : IEntityTypeConfiguration<SubStage>
 
         builder.Property(x => x.Id).ValueGeneratedNever();
         builder.Property(x => x.MainStageId).IsRequired();
+        builder.Property(x => x.ProductionLineId).IsRequired();
         builder.Property(x => x.Name).IsRequired().HasMaxLength(200);
         builder.Property(x => x.Code).IsRequired().HasMaxLength(120).UseCollation("SQL_Latin1_General_CP1_CI_AS");
         builder.Property(x => x.Capacity).IsRequired();
@@ -26,10 +27,16 @@ public sealed class SubStageConfiguration : IEntityTypeConfiguration<SubStage>
         builder.Property(x => x.UpdatedAtUtc).IsRequired();
         builder.HasIndex(x => x.Code).IsUnique();
         builder.HasIndex(x => new { x.MainStageId, x.DefaultOrder }).IsUnique();
+        builder.HasIndex(x => x.ProductionLineId);
 
         builder.HasOne(x => x.MainStage)
             .WithMany(x => x.SubStages)
             .HasForeignKey(x => x.MainStageId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(x => x.ProductionLine)
+            .WithMany()
+            .HasForeignKey(x => x.ProductionLineId)
             .OnDelete(DeleteBehavior.Restrict);
 
         builder.HasMany(x => x.DefaultAssignments)

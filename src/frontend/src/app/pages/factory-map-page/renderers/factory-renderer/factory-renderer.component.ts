@@ -29,6 +29,22 @@ export class FactoryRendererComponent {
     this.lineSelected.emit(lineId);
   }
 
+  get lineGroups(): Array<{ key: string; name: string; lines: ProductionLineLayout[] }> {
+    const groups = new Map<string, { key: string; name: string; lines: ProductionLineLayout[] }>();
+    for (const line of this.layout.lines) {
+      const key = line.departmentId || 'unassigned';
+      const name = line.departmentName || 'غير مرتبط بقسم';
+      const group = groups.get(key) ?? { key, name, lines: [] };
+      group.lines.push(line);
+      groups.set(key, group);
+    }
+    return [...groups.values()];
+  }
+
+  trackByGroup(_index: number, group: { key: string }): string {
+    return group.key;
+  }
+
   trackByLine(_index: number, line: ProductionLineLayout): string {
     return line.id;
   }

@@ -163,6 +163,7 @@ public sealed class PermissionSeedService(
             "production.approve",
             "stages.view",
             "stages.manage",
+            "stages.delete",
             "models.view",
             "models.manage",
             "roles.view",

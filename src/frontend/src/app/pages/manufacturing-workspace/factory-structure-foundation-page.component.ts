@@ -1,19 +1,13 @@
 import { Component, OnDestroy, OnInit } from '@angular/core';
-import { Router } from '@angular/router';
-import { EMPTY, Observable, Subject, catchError, distinctUntilChanged, forkJoin, switchMap, takeUntil, tap, finalize } from 'rxjs';
+import { Observable, Subject, finalize, forkJoin, takeUntil } from 'rxjs';
 import { PERMISSIONS } from '../../core/config/permission-identifiers';
-import { PRODUCTION_RECORDING_ACCESS } from '../../core/config/manufacturing-workspace.config';
-import { AssignmentsApiService, AssignmentWorker } from '../../core/services/assignments-api.service';
 import {
+  DepartmentItem,
   FactoryItem,
-  MainStageOption,
   ManufacturingMasterDataApiService,
-  ProductionLineOption,
-  SubStageOption
+  ProductionLineOption
 } from '../../core/services/manufacturing-master-data-api.service';
-import { WorkersApiService } from '../../core/services/workers-api.service';
 import { PermissionService } from '../../core/services/permission.service';
-import { WorkerPageItem } from '../../shared/models/worker.model';
 
 interface FactoryDraft {
   id: string;
@@ -22,33 +16,31 @@ interface FactoryDraft {
   location: string;
 }
 
+interface DepartmentDraft {
+  id: string;
+  factoryId: string;
+  code: string;
+  nameAr: string;
+  nameEn: string;
+  sequenceOrder: number;
+}
+
 interface LineDraft {
   id: string;
   factoryId: string;
+  departmentId: string;
   name: string;
   lineCode: string;
   sequenceOrder: number;
 }
 
-interface MainStageDraft {
-  id: string;
-  productionLineId: string;
-  name: string;
-  sequenceOrder: number;
-  isCritical: boolean;
-}
+type FactoryStructureFormId = 'factory' | 'department' | 'line';
 
-interface SubStageDraft {
-  id: string;
-  mainStageId: string;
-  code: string;
-  name: string;
-  defaultOrder: number;
-  capacity: number;
-}
-
-type FactoryStructureFormId = 'factory' | 'line' | 'main-stage' | 'sub-stage' | 'assignment';
-
+/**
+ * Administrative view of the physical factory hierarchy only.
+ * Stage administration and worker staffing intentionally live in their
+ * dedicated workspace screens so this page remains Factory → Department → Line.
+ */
 @Component({
   selector: 'app-factory-structure-foundation-page',
   templateUrl: './factory-structure-foundation-page.component.html',
@@ -58,17 +50,11 @@ export class FactoryStructureFoundationPageComponent implements OnInit, OnDestro
   readonly permissions = PERMISSIONS;
 
   factories: FactoryItem[] = [];
+  departments: DepartmentItem[] = [];
   lines: ProductionLineOption[] = [];
-  mainStages: MainStageOption[] = [];
-  subStages: SubStageOption[] = [];
-  workers: WorkerPageItem[] = [];
-  assignedWorkers: AssignmentWorker[] = [];
-
   selectedFactoryId = '';
+  selectedDepartmentId = '';
   selectedLineId = '';
-  selectedMainStageId = '';
-  selectedSubStageId = '';
-  selectedWorkerId = '';
   searchTerm = '';
   isLoading = false;
   isSaving = false;
@@ -79,28 +65,16 @@ export class FactoryStructureFoundationPageComponent implements OnInit, OnDestro
   activeForm: FactoryStructureFormId | null = null;
 
   factoryDraft: FactoryDraft = this.emptyFactoryDraft();
+  departmentDraft: DepartmentDraft = this.emptyDepartmentDraft();
   lineDraft: LineDraft = this.emptyLineDraft();
-  mainStageDraft: MainStageDraft = this.emptyMainStageDraft();
-  subStageDraft: SubStageDraft = this.emptySubStageDraft();
-  private mainStagesRequestId = 0;
-  private subStagesRequestId = 0;
-  private assignedWorkersRequestId = 0;
-  private readonly selectedLineChanges$ = new Subject<string>();
-  private readonly selectedMainStageChanges$ = new Subject<string>();
-  private readonly selectedSubStageChanges$ = new Subject<string>();
-  private readonly reloadAssignedWorkers$ = new Subject<string>();
   private readonly destroy$ = new Subject<void>();
 
   constructor(
     private readonly masterDataApi: ManufacturingMasterDataApiService,
-    private readonly assignmentsApi: AssignmentsApiService,
-    private readonly workersApi: WorkersApiService,
-    private readonly permissionService: PermissionService,
-    private readonly router: Router
+    private readonly permissionService: PermissionService
   ) {}
 
   ngOnInit(): void {
-    this.bindSelectionStreams();
     this.reload();
   }
 
@@ -112,27 +86,27 @@ export class FactoryStructureFoundationPageComponent implements OnInit, OnDestro
   get filteredFactories(): FactoryItem[] {
     const search = this.normalizedSearch;
     return this.factories.filter(item =>
-      search.length === 0 ||
-      item.name.toLowerCase().includes(search) ||
-      item.code.toLowerCase().includes(search)
-    );
+      !search || item.name.toLowerCase().includes(search) || item.code.toLowerCase().includes(search));
+  }
+
+  get visibleDepartments(): DepartmentItem[] {
+    return this.selectedFactoryId
+      ? this.departments.filter(item => item.factoryId === this.selectedFactoryId)
+      : [];
   }
 
   get visibleLines(): ProductionLineOption[] {
-    return this.selectedFactoryId
+    const factoryLines = this.selectedFactoryId
       ? this.lines.filter(item => item.factoryId === this.selectedFactoryId)
       : [];
+    if (!this.selectedDepartmentId) return factoryLines;
+    if (this.selectedDepartmentId === 'unassigned') return factoryLines.filter(item => !item.departmentId);
+    return factoryLines.filter(item => item.departmentId === this.selectedDepartmentId);
   }
 
-  get visibleMainStages(): MainStageOption[] {
-    return this.selectedLineId
-      ? this.mainStages.filter(item => item.productionLineId === this.selectedLineId)
-      : [];
-  }
-
-  get visibleSubStages(): SubStageOption[] {
-    return this.selectedMainStageId
-      ? this.subStages.filter(item => item.mainStageId === this.selectedMainStageId)
+  get unassignedLines(): ProductionLineOption[] {
+    return this.selectedFactoryId
+      ? this.lines.filter(item => item.factoryId === this.selectedFactoryId && !item.departmentId)
       : [];
   }
 
@@ -140,27 +114,12 @@ export class FactoryStructureFoundationPageComponent implements OnInit, OnDestro
     return !this.isLoading && !this.hasError && this.factories.length === 0 && this.lines.length === 0;
   }
 
-  get selectedWorkerExistsInOptions(): boolean {
-    return this.workers.some(worker => worker.id === this.selectedWorkerId);
-  }
-
   get canManage(): boolean {
     return this.permissionService.hasPermission(this.permissions.factoryStructure.manage);
   }
 
-  get productionRecordingContext(): { factoryId: string; productionLineId: string; mainStageId: string; subStageId: string } | null {
-    const factory = this.factories.find(item => item.id === this.selectedFactoryId && item.isActive);
-    const line = this.lines.find(item => item.id === this.selectedLineId && item.factoryId === factory?.id && item.isActive);
-    const mainStage = this.mainStages.find(item => item.id === this.selectedMainStageId && item.productionLineId === line?.id && item.isActive);
-    const subStage = this.subStages.find(item => item.id === this.selectedSubStageId && item.mainStageId === mainStage?.id && item.isActive);
-
-    return factory && line && mainStage && subStage
-      ? { factoryId: factory.id, productionLineId: line.id, mainStageId: mainStage.id, subStageId: subStage.id }
-      : null;
-  }
-
-  get canOpenProductionRecording(): boolean {
-    return !!this.productionRecordingContext && this.permissionService.hasAccess(PRODUCTION_RECORDING_ACCESS);
+  get canManageDepartments(): boolean {
+    return this.permissionService.hasPermission(this.permissions.departments.manage);
   }
 
   onSearch(event: Event): void {
@@ -175,15 +134,6 @@ export class FactoryStructureFoundationPageComponent implements OnInit, OnDestro
     this.activeForm = expanded ? formId : null;
   }
 
-  openProductionRecording(): void {
-    const context = this.productionRecordingContext;
-    if (!context || !this.permissionService.hasAccess(PRODUCTION_RECORDING_ACCESS)) {
-      return;
-    }
-
-    void this.router.navigate(['/manufacturing/production-recording'], { queryParams: context });
-  }
-
   reload(): void {
     this.isLoading = true;
     this.hasError = false;
@@ -191,82 +141,54 @@ export class FactoryStructureFoundationPageComponent implements OnInit, OnDestro
 
     forkJoin({
       factories: this.masterDataApi.factories(),
-      lines: this.masterDataApi.allProductionLines()
+      lines: this.masterDataApi.allProductionLines(),
+      departments: this.masterDataApi.departments(undefined, true)
     })
       .pipe(finalize(() => {
         this.isLoading = false;
         this.hasLoadedOnce = true;
-      }))
+      }), takeUntil(this.destroy$))
       .subscribe({
         next: data => {
           this.factories = data.factories;
           this.lines = data.lines;
+          this.departments = data.departments;
           this.resetSelectionsForReload();
         },
-        error: error => {
-          this.hasError = true;
-          this.errorMessage = this.extractErrorMessage(error);
-        }
+        error: error => this.setLoadError(error)
       });
   }
 
   selectFactory(id: string): void {
     this.selectedFactoryId = id;
-    this.clearLineAndDownstream();
+    this.selectedDepartmentId = '';
+    this.selectedLineId = '';
     this.lineDraft.factoryId = id;
+    this.lineDraft.departmentId = '';
+    this.departmentDraft.factoryId = id;
+  }
+
+  selectDepartment(id: string): void {
+    this.selectedDepartmentId = id;
+    this.selectedLineId = '';
+    this.lineDraft.factoryId = this.selectedFactoryId;
+    this.lineDraft.departmentId = id === 'unassigned' ? '' : id;
   }
 
   selectLine(id: string): void {
-    if (id === this.selectedLineId) {
-      return;
-    }
-
     this.selectedLineId = id;
-    this.clearMainStageAndDownstream();
-    this.mainStages = [];
-    this.mainStageDraft.productionLineId = id;
-    this.selectedLineChanges$.next(id);
-  }
-
-  selectMainStage(id: string): void {
-    if (id === this.selectedMainStageId) {
-      return;
-    }
-
-    this.selectedMainStageId = id;
-    this.clearSubStageAndDownstream();
-    this.subStages = [];
-    this.subStageDraft.mainStageId = id;
-    this.selectedMainStageChanges$.next(id);
-  }
-
-  selectSubStage(id: string): void {
-    if (id === this.selectedSubStageId) {
-      return;
-    }
-
-    this.selectedSubStageId = id;
-    this.assignedWorkers = [];
-    this.selectedSubStageChanges$.next(id);
   }
 
   editFactory(item: FactoryItem): void {
-    this.factoryDraft = {
-      id: item.id,
-      name: item.name,
-      code: item.code,
-      location: item.location ?? ''
-    };
+    this.factoryDraft = { id: item.id, name: item.name, code: item.code, location: item.location ?? '' };
     this.activeForm = 'factory';
   }
 
   saveFactory(): void {
     if (!this.factoryDraft.name.trim() || !this.factoryDraft.code.trim()) {
-      this.errorMessage = 'اسم المصنع وكوده مطلوبان.';
-      this.hasError = true;
+      this.setValidationError('اسم المصنع وكوده مطلوبان.');
       return;
     }
-
     const payload = {
       name: this.factoryDraft.name.trim(),
       code: this.factoryDraft.code.trim(),
@@ -276,10 +198,62 @@ export class FactoryStructureFoundationPageComponent implements OnInit, OnDestro
     const request = this.factoryDraft.id
       ? this.masterDataApi.updateFactory(this.factoryDraft.id, { name: payload.name, location: payload.location, isActive: true })
       : this.masterDataApi.createFactory(payload);
-
     this.save(request, () => {
       this.factoryDraft = this.emptyFactoryDraft();
       this.activeForm = null;
+    });
+  }
+
+  editDepartment(item: DepartmentItem): void {
+    if (!item.id || !item.factoryId) return;
+    this.departmentDraft = {
+      id: item.id,
+      factoryId: item.factoryId,
+      code: item.code ?? '',
+      nameAr: item.nameAr ?? item.name ?? '',
+      nameEn: item.nameEn ?? '',
+      sequenceOrder: item.sequenceOrder ?? 0
+    };
+    this.activeForm = 'department';
+  }
+
+  saveDepartment(): void {
+    if (!this.departmentDraft.factoryId || !this.departmentDraft.code.trim() || !this.departmentDraft.nameAr.trim()) {
+      this.setValidationError('المصنع وكود القسم واسمه بالعربية مطلوبة.');
+      return;
+    }
+    const payload = {
+      factoryId: this.departmentDraft.factoryId,
+      code: this.departmentDraft.code.trim(),
+      nameAr: this.departmentDraft.nameAr.trim(),
+      nameEn: this.departmentDraft.nameEn.trim() || null,
+      sequenceOrder: Number(this.departmentDraft.sequenceOrder) || 0,
+      isActive: true
+    };
+    const request = this.departmentDraft.id
+      ? this.masterDataApi.updateDepartment(this.departmentDraft.id, {
+        code: payload.code,
+        nameAr: payload.nameAr,
+        nameEn: this.departmentDraft.nameEn.trim(),
+        sequenceOrder: payload.sequenceOrder,
+        isActive: true
+      })
+      : this.masterDataApi.createDepartment(payload);
+    this.save(request, () => {
+      this.departmentDraft = this.emptyDepartmentDraft();
+      this.departmentDraft.factoryId = this.selectedFactoryId;
+      this.activeForm = null;
+    });
+  }
+
+  setDepartmentActive(item: DepartmentItem, isActive: boolean): void {
+    if (item.id) this.save(this.masterDataApi.updateDepartment(item.id, { isActive }));
+  }
+
+  deleteDepartment(item: DepartmentItem): void {
+    if (!item.id || !window.confirm(`حذف القسم ${item.nameAr ?? item.name ?? item.code ?? ''} نهائيًا؟`)) return;
+    this.save(this.masterDataApi.deleteDepartment(item.id), () => {
+      if (this.selectedDepartmentId === item.id) this.selectDepartment('');
     });
   }
 
@@ -287,6 +261,7 @@ export class FactoryStructureFoundationPageComponent implements OnInit, OnDestro
     this.lineDraft = {
       id: item.id,
       factoryId: item.factoryId,
+      departmentId: item.departmentId ?? '',
       name: item.name,
       lineCode: item.lineCode ?? '',
       sequenceOrder: item.sequenceOrder
@@ -295,14 +270,13 @@ export class FactoryStructureFoundationPageComponent implements OnInit, OnDestro
   }
 
   saveLine(): void {
-    if (!this.lineDraft.factoryId || !this.lineDraft.name.trim()) {
-      this.errorMessage = 'المصنع واسم الخط مطلوبان.';
-      this.hasError = true;
+    if (!this.lineDraft.factoryId || !this.lineDraft.name.trim() || (!this.lineDraft.id && !this.lineDraft.departmentId)) {
+      this.setValidationError('المصنع والقسم واسم الخط مطلوبة عند إنشاء خط جديد.');
       return;
     }
-
     const payload = {
       factoryId: this.lineDraft.factoryId,
+      departmentId: this.lineDraft.departmentId || null,
       name: this.lineDraft.name.trim(),
       lineCode: this.lineDraft.lineCode.trim() || null,
       sequenceOrder: Number(this.lineDraft.sequenceOrder) || 0,
@@ -311,160 +285,22 @@ export class FactoryStructureFoundationPageComponent implements OnInit, OnDestro
     const request = this.lineDraft.id
       ? this.masterDataApi.updateProductionLine(this.lineDraft.id, {
         name: payload.name,
+        ...(payload.departmentId ? { departmentId: payload.departmentId } : {}),
         lineCode: payload.lineCode,
         sequenceOrder: payload.sequenceOrder,
         isActive: true
       })
       : this.masterDataApi.createProductionLine(payload);
-
     this.save(request, () => {
       this.lineDraft = this.emptyLineDraft();
       this.lineDraft.factoryId = this.selectedFactoryId;
+      this.lineDraft.departmentId = this.selectedDepartmentId === 'unassigned' ? '' : this.selectedDepartmentId;
       this.activeForm = null;
     });
   }
 
   setLineActive(item: ProductionLineOption, isActive: boolean): void {
     this.save(this.masterDataApi.updateProductionLine(item.id, { isActive }));
-  }
-
-  editMainStage(item: MainStageOption): void {
-    this.mainStageDraft = {
-      id: item.id,
-      productionLineId: item.productionLineId,
-      name: item.name,
-      sequenceOrder: item.sequenceOrder,
-      isCritical: item.isCritical
-    };
-    this.activeForm = 'main-stage';
-  }
-
-  saveMainStage(): void {
-    if (!this.mainStageDraft.productionLineId || !this.mainStageDraft.name.trim()) {
-      this.errorMessage = 'خط الإنتاج واسم المرحلة مطلوبان.';
-      this.hasError = true;
-      return;
-    }
-
-    const payload = {
-      productionLineId: this.mainStageDraft.productionLineId,
-      name: this.mainStageDraft.name.trim(),
-      sequenceOrder: Number(this.mainStageDraft.sequenceOrder) || 0,
-      isCritical: this.mainStageDraft.isCritical,
-      isActive: true
-    };
-    const request = this.mainStageDraft.id
-      ? this.masterDataApi.updateMain(this.mainStageDraft.id, {
-        name: payload.name,
-        sequenceOrder: payload.sequenceOrder,
-        isCritical: payload.isCritical,
-        isActive: true
-      })
-      : this.masterDataApi.createMain(payload);
-
-    this.save(request, () => {
-      this.mainStageDraft = this.emptyMainStageDraft();
-      this.mainStageDraft.productionLineId = this.selectedLineId;
-      this.activeForm = null;
-    });
-  }
-
-  setMainStageActive(item: MainStageOption, isActive: boolean): void {
-    this.save(this.masterDataApi.updateMain(item.id, { isActive }));
-  }
-
-  editSubStage(item: SubStageOption): void {
-    this.subStageDraft = {
-      id: item.id,
-      mainStageId: item.mainStageId,
-      code: item.code,
-      name: item.name,
-      defaultOrder: item.sequenceOrder,
-      capacity: item.capacity
-    };
-    this.activeForm = 'sub-stage';
-  }
-
-  saveSubStage(): void {
-    if (!this.subStageDraft.mainStageId || !this.subStageDraft.code.trim() || !this.subStageDraft.name.trim()) {
-      this.errorMessage = 'المرحلة الرئيسية وكود واسم المرحلة الفرعية مطلوبة.';
-      this.hasError = true;
-      return;
-    }
-
-    const payload = {
-      mainStageId: this.subStageDraft.mainStageId,
-      code: this.subStageDraft.code.trim(),
-      name: this.subStageDraft.name.trim(),
-      defaultOrder: Number(this.subStageDraft.defaultOrder) || 1,
-      capacity: Number(this.subStageDraft.capacity) || 0,
-      isActive: true
-    };
-    const request = this.subStageDraft.id
-      ? this.masterDataApi.updateSub(this.subStageDraft.id, {
-        code: payload.code,
-        name: payload.name,
-        defaultOrder: payload.defaultOrder,
-        capacity: payload.capacity,
-        isActive: true
-      })
-      : this.masterDataApi.createSub(payload);
-
-    this.save(request, () => {
-      this.subStageDraft = this.emptySubStageDraft();
-      this.subStageDraft.mainStageId = this.selectedMainStageId;
-      this.activeForm = null;
-    });
-  }
-
-  setSubStageActive(item: SubStageOption, isActive: boolean): void {
-    this.save(this.masterDataApi.updateSub(item.id, { isActive }));
-  }
-
-  assignWorker(): void {
-    if (!this.selectedSubStageId) {
-      this.errorMessage = 'اختر العامل والمرحلة الفرعية أولاً.';
-      this.hasError = true;
-      return;
-    }
-
-    if (!this.selectedWorkerId) {
-      this.errorMessage = 'اختر العامل والمرحلة الفرعية أولاً.';
-      this.hasError = true;
-      return;
-    }
-
-    if (!this.selectedWorkerExistsInOptions) {
-      this.errorMessage = 'العامل المحدد غير متاح لهذه المرحلة الفرعية.';
-      this.hasError = true;
-      return;
-    }
-
-    this.save(
-      this.assignmentsApi.createFactoryStructureDefaultAssignment({
-        workerId: this.selectedWorkerId,
-        subStageId: this.selectedSubStageId,
-        reason: 'Factory structure assignment'
-      }),
-      () => {
-        this.selectedWorkerId = '';
-        this.reloadAssignedWorkers$.next(this.selectedSubStageId);
-        this.activeForm = null;
-      },
-      false
-    );
-  }
-
-  factoryName(id: string): string {
-    return this.factories.find(item => item.id === id)?.name ?? '-';
-  }
-
-  lineName(id: string): string {
-    return this.lines.find(item => item.id === id)?.name ?? '-';
-  }
-
-  mainStageName(id: string): string {
-    return this.mainStages.find(item => item.id === id)?.name ?? '-';
   }
 
   private get normalizedSearch(): string {
@@ -475,204 +311,44 @@ export class FactoryStructureFoundationPageComponent implements OnInit, OnDestro
     if (!this.selectedFactoryId || !this.factories.some(item => item.id === this.selectedFactoryId)) {
       this.selectedFactoryId = this.factories[0]?.id ?? '';
     }
-
-    this.lineDraft.factoryId = this.selectedFactoryId;
-    this.clearLineAndDownstream();
-  }
-
-  private bindSelectionStreams(): void {
-    this.selectedLineChanges$
-      .pipe(
-        distinctUntilChanged(),
-        switchMap(lineId => {
-          if (!lineId) {
-            this.mainStages = [];
-            return EMPTY;
-          }
-
-          const requestId = ++this.mainStagesRequestId;
-          return this.masterDataApi.mainStagesForLine(lineId).pipe(
-            tap(stages => {
-              if (requestId === this.mainStagesRequestId && this.selectedLineId === lineId) {
-                this.mainStages = stages;
-              }
-            }),
-            catchError(error => {
-              if (requestId === this.mainStagesRequestId && this.selectedLineId === lineId) {
-                this.mainStages = [];
-                this.hasError = true;
-                this.errorMessage = this.extractErrorMessage(error);
-              }
-              return EMPTY;
-            })
-          );
-        }),
-        takeUntil(this.destroy$)
-      )
-      .subscribe();
-
-    this.selectedMainStageChanges$
-      .pipe(
-        distinctUntilChanged(),
-        switchMap(mainStageId => {
-          if (!mainStageId) {
-            this.subStages = [];
-            return EMPTY;
-          }
-
-          const requestId = ++this.subStagesRequestId;
-          return this.masterDataApi.subStagesForMainStage(mainStageId).pipe(
-            tap(stages => {
-              if (requestId === this.subStagesRequestId && this.selectedMainStageId === mainStageId) {
-                this.subStages = stages;
-              }
-            }),
-            catchError(error => {
-              if (requestId === this.subStagesRequestId && this.selectedMainStageId === mainStageId) {
-                this.subStages = [];
-                this.hasError = true;
-                this.errorMessage = this.extractErrorMessage(error);
-              }
-              return EMPTY;
-            })
-          );
-        }),
-        takeUntil(this.destroy$)
-      )
-      .subscribe();
-
-    this.selectedSubStageChanges$
-      .pipe(
-        distinctUntilChanged(),
-        switchMap(subStageId => this.loadWorkersForSubStage(subStageId)),
-        takeUntil(this.destroy$)
-      )
-      .subscribe();
-
-    this.selectedSubStageChanges$
-      .pipe(
-        distinctUntilChanged(),
-        switchMap(subStageId => this.loadAssignedWorkersForSubStage(subStageId)),
-        takeUntil(this.destroy$)
-      )
-      .subscribe();
-
-    this.reloadAssignedWorkers$
-      .pipe(
-        switchMap(subStageId => this.loadAssignedWorkersForSubStage(subStageId)),
-        takeUntil(this.destroy$)
-      )
-      .subscribe();
-  }
-
-  private loadAssignedWorkersForSubStage(subStageId: string): Observable<unknown> {
-    if (!subStageId) {
-      this.assignedWorkers = [];
-      return EMPTY;
-    }
-
-    const requestId = ++this.assignedWorkersRequestId;
-    return this.assignmentsApi.getFactoryStructureSubStageWorkers(subStageId).pipe(
-      tap(data => {
-        if (requestId === this.assignedWorkersRequestId && this.selectedSubStageId === subStageId) {
-          this.assignedWorkers = data.workers;
-        }
-      }),
-      catchError(error => {
-        if (requestId === this.assignedWorkersRequestId && this.selectedSubStageId === subStageId) {
-          this.assignedWorkers = [];
-          this.hasError = true;
-          this.errorMessage = this.extractErrorMessage(error);
-        }
-        return EMPTY;
-      })
-    );
-  }
-
-  private loadWorkersForSubStage(subStageId: string): Observable<unknown> {
-    if (!subStageId) {
-      this.workers = [];
-      return EMPTY;
-    }
-
-    return this.workersApi.loadFactoryStructureEligibleWorkers(subStageId).pipe(
-      tap(workers => {
-        if (this.selectedSubStageId === subStageId) {
-          this.workers = workers;
-        }
-      }),
-      catchError(error => {
-        if (this.selectedSubStageId === subStageId) {
-          this.workers = [];
-          this.hasError = true;
-          this.errorMessage = this.extractErrorMessage(error);
-        }
-        return EMPTY;
-      })
-    );
-  }
-
-  private clearLineAndDownstream(): void {
+    this.selectedDepartmentId = '';
     this.selectedLineId = '';
-    this.mainStages = [];
-    this.mainStageDraft = this.emptyMainStageDraft();
-    this.clearMainStageAndDownstream();
-    this.mainStagesRequestId++;
+    this.departmentDraft.factoryId = this.selectedFactoryId;
+    this.lineDraft.factoryId = this.selectedFactoryId;
+    this.lineDraft.departmentId = '';
   }
 
-  private clearMainStageAndDownstream(): void {
-    this.selectedMainStageId = '';
-    this.subStages = [];
-    this.subStageDraft = this.emptySubStageDraft();
-    this.clearSubStageAndDownstream();
-    this.subStagesRequestId++;
-    this.selectedMainStageChanges$.next('');
-  }
-
-  private clearSubStageAndDownstream(): void {
-    this.selectedSubStageId = '';
-    this.selectedWorkerId = '';
-    this.assignedWorkers = [];
-    this.workers = [];
-    this.assignedWorkersRequestId++;
-  }
-
-  private save(request: Observable<unknown>, success?: () => void, reload = true): void {
+  private save(request: Observable<unknown>, success?: () => void): void {
     this.isSaving = true;
     this.hasError = false;
     this.successMessage = '';
-    request.subscribe({
+    request.pipe(takeUntil(this.destroy$)).subscribe({
       next: () => {
         success?.();
         this.successMessage = 'تم حفظ التغيير.';
         this.isSaving = false;
-        if (reload) {
-          this.reload();
-        }
+        this.reload();
       },
       error: error => {
         this.isSaving = false;
-        this.hasError = true;
-        this.errorMessage = this.extractErrorMessage(error);
+        this.setLoadError(error);
       }
     });
   }
 
-  private emptyFactoryDraft(): FactoryDraft {
-    return { id: '', name: '', code: '', location: '' };
+  private setValidationError(message: string): void {
+    this.hasError = true;
+    this.errorMessage = message;
   }
 
-  private emptyLineDraft(): LineDraft {
-    return { id: '', factoryId: '', name: '', lineCode: '', sequenceOrder: 0 };
+  private setLoadError(error: unknown): void {
+    this.hasError = true;
+    this.errorMessage = this.extractErrorMessage(error);
   }
 
-  private emptyMainStageDraft(): MainStageDraft {
-    return { id: '', productionLineId: '', name: '', sequenceOrder: 0, isCritical: false };
-  }
-
-  private emptySubStageDraft(): SubStageDraft {
-    return { id: '', mainStageId: '', code: '', name: '', defaultOrder: 1, capacity: 0 };
-  }
+  private emptyFactoryDraft(): FactoryDraft { return { id: '', name: '', code: '', location: '' }; }
+  private emptyDepartmentDraft(): DepartmentDraft { return { id: '', factoryId: '', code: '', nameAr: '', nameEn: '', sequenceOrder: 0 }; }
+  private emptyLineDraft(): LineDraft { return { id: '', factoryId: '', departmentId: '', name: '', lineCode: '', sequenceOrder: 0 }; }
 
   private extractErrorMessage(error: unknown): string {
     return error instanceof Error && error.message.length > 0

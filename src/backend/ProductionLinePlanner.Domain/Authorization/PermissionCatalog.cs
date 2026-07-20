@@ -36,6 +36,7 @@ public static class PermissionCatalog
 
         new("stages.view", "stages", "عرض المراحل", "View stages", false),
         new("stages.manage", "stages", "إدارة المراحل", "Manage stages", true),
+        new("stages.delete", "stages", "حذف المراحل غير المستخدمة", "Delete unused stages", true),
         new("stages.import", "stages", "استيراد مراحل", "Import stages", true),
         new("stages.export", "stages", "تصدير المراحل", "Export stages", true),
 

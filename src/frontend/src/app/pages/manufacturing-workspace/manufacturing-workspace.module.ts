@@ -15,7 +15,6 @@ import { ProductionCostRecordingPageComponent } from './production-cost-recordin
 import { ManufacturingMasterDataPageComponent } from './manufacturing-master-data-page.component';
 import { ManufacturingDepartmentsPageComponent } from './manufacturing-departments-page.component';
 import { FactoryStructureFoundationPageComponent } from './factory-structure-foundation-page.component';
-import { ManufacturingCompensationPageComponent } from './manufacturing-compensation-page.component';
 import { LineStaffingWorkspacePageComponent } from './line-staffing-workspace-page.component';
 import { DailyProductionOperationsPageComponent } from './daily-production-operations-page.component';
 import { ManufacturingWorkspaceRoutingModule } from './manufacturing-workspace-routing.module';
@@ -40,7 +39,6 @@ import { ReportsResultsToolbarComponent } from '../reports-workspace/reports-res
     ManufacturingMasterDataPageComponent,
     ManufacturingDepartmentsPageComponent,
     FactoryStructureFoundationPageComponent,
-    ManufacturingCompensationPageComponent,
     LineStaffingWorkspacePageComponent,
     DailyProductionOperationsPageComponent,
     ReportsWorkspacePageComponent,

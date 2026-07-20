@@ -25,7 +25,9 @@ public sealed record PublishUserNotificationCommand(
     Guid? RelatedWorkerId = null,
     string? RelatedEntityType = null,
     Guid? RelatedEntityId = null,
-    DateTime? CreatedAtUtc = null);
+    DateTime? CreatedAtUtc = null,
+    string? EventKey = null,
+    NotificationSeverity? Severity = null);
 
 public sealed record NotificationPublishResultDto(
     Guid NotificationId,
