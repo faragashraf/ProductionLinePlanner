@@ -1,351 +1,1338 @@
-<section class="production-page" [attr.aria-busy]="loading || saving || assignmentSaving">
-  <plp-page-header title="تشغيل وتسجيل الإنتاج" description="اختر مسار العمل مرة واحدة، ثم عيّن العمال وسجّل الدفعات الفعلية دون مغادرة الصفحة."></plp-page-header>
+<section
+  class="production-page"
+  [attr.aria-busy]="loading || saving || assignmentSaving"
+>
+  <plp-page-header
+    title="تشغيل وتسجيل الإنتاج"
+    description="اختر مسار العمل مرة واحدة، ثم عيّن العمال وسجّل الدفعات الفعلية دون مغادرة الصفحة."
+  ></plp-page-header>
   <p class="production-page__error" *ngIf="error" role="alert">{{ error }}</p>
-  <p class="production-page__success" *ngIf="recordActionSuccess" role="status">{{ recordActionSuccess }}</p>
+  <p class="production-page__success" *ngIf="recordActionSuccess" role="status">
+    {{ recordActionSuccess }}
+  </p>
 
   <p-card header="مسار الإنتاج الحالي" *ngIf="!loading">
     <div class="production-page__hierarchy" aria-label="اختيار مسار الإنتاج">
-      <label>1. المصنع
-        <select [ngModel]="selectedFactoryId" (ngModelChange)="selectFactory($event)" [ngModelOptions]="{standalone: true}">
+      <label
+        >1. المصنع
+        <select
+          [ngModel]="selectedFactoryId"
+          (ngModelChange)="selectFactory($event)"
+          [ngModelOptions]="{ standalone: true }"
+        >
           <option value="">اختر المصنع</option>
-          <option *ngFor="let factory of factories; trackBy: trackById" [value]="factory.id">{{ factory.code }} — {{ factory.name }}</option>
+          <option
+            *ngFor="let factory of factories; trackBy: trackById"
+            [value]="factory.id"
+          >
+            {{ factory.code }} — {{ factory.name }}
+          </option>
         </select>
       </label>
-      <label>2. خط الإنتاج
-        <select [ngModel]="selectedProductionLineId" (ngModelChange)="selectProductionLine($event)" [ngModelOptions]="{standalone: true}" [disabled]="!selectedFactoryId || loadingLines">
-          <option value="">{{ loadingLines ? 'جارٍ تحميل الخطوط…' : 'اختر خط الإنتاج' }}</option>
-          <option *ngFor="let line of productionLines; trackBy: trackById" [value]="line.id">{{ line.lineCode || '-' }} — {{ line.name }}</option>
+      <label
+        >2. خط الإنتاج
+        <select
+          [ngModel]="selectedProductionLineId"
+          (ngModelChange)="selectProductionLine($event)"
+          [ngModelOptions]="{ standalone: true }"
+          [disabled]="!selectedFactoryId || loadingLines"
+        >
+          <option value="">
+            {{ loadingLines ? "جارٍ تحميل الخطوط…" : "اختر خط الإنتاج" }}
+          </option>
+          <option
+            *ngFor="let line of productionLines; trackBy: trackById"
+            [value]="line.id"
+          >
+            {{ line.lineCode || "-" }} — {{ line.name }}
+          </option>
         </select>
       </label>
-      <label>3. المرحلة الرئيسية
-        <select [ngModel]="selectedMainStageId" (ngModelChange)="selectMainStage($event)" [ngModelOptions]="{standalone: true}" [disabled]="!selectedProductionLineId || loadingMainStages">
-          <option value="">{{ loadingMainStages ? 'جارٍ تحميل المراحل…' : 'اختر المرحلة الرئيسية' }}</option>
-          <option *ngFor="let stage of mainStages; trackBy: trackById" [value]="stage.id">{{ stage.sequenceOrder }} — {{ stage.name }}</option>
+      <label
+        >3. المرحلة الرئيسية
+        <select
+          [ngModel]="selectedMainStageId"
+          (ngModelChange)="selectMainStage($event)"
+          [ngModelOptions]="{ standalone: true }"
+          [disabled]="!selectedProductionLineId || loadingMainStages"
+        >
+          <option value="">
+            {{
+              loadingMainStages
+                ? "جارٍ تحميل المراحل…"
+                : "اختر المرحلة الرئيسية"
+            }}
+          </option>
+          <option
+            *ngFor="let stage of mainStages; trackBy: trackById"
+            [value]="stage.id"
+          >
+            {{ stage.sequenceOrder }} — {{ stage.name }}
+          </option>
         </select>
       </label>
-      <label>4. المرحلة الفرعية
-        <select [ngModel]="selectedSubStageId" (ngModelChange)="selectSubStage($event)" [ngModelOptions]="{standalone: true}" [disabled]="!selectedMainStageId || loadingSubStages">
-          <option value="">{{ loadingSubStages ? 'جارٍ تحميل المراحل…' : 'اختر المرحلة الفرعية' }}</option>
-          <option *ngFor="let stage of subStages; trackBy: trackById" [value]="stage.id">{{ stage.code }} — {{ stage.name }}</option>
+      <label
+        >4. المرحلة الفرعية
+        <select
+          [ngModel]="selectedSubStageId"
+          (ngModelChange)="selectSubStage($event)"
+          [ngModelOptions]="{ standalone: true }"
+          [disabled]="!selectedMainStageId || loadingSubStages"
+        >
+          <option value="">
+            {{
+              loadingSubStages ? "جارٍ تحميل المراحل…" : "اختر المرحلة الفرعية"
+            }}
+          </option>
+          <option
+            *ngFor="let stage of subStages; trackBy: trackById"
+            [value]="stage.id"
+          >
+            {{ stage.code }} — {{ stage.name }}
+          </option>
         </select>
       </label>
     </div>
-    <p class="production-page__context-note" *ngIf="!selectedFactoryId">ابدأ باختيار المصنع. لن تظهر أي بيانات تابعة قبل تحديد المسار السابق.</p>
-    <p class="production-page__context-note" *ngIf="selectedFactoryId && !selectedProductionLineId">اختر خط الإنتاج لعرض المراحل الرئيسية المتاحة فقط.</p>
-    <p class="production-page__context-note" *ngIf="selectedProductionLineId && !selectedMainStageId">اختر المرحلة الرئيسية لعرض مراحلها الفرعية.</p>
-    <p class="production-page__context-note" *ngIf="selectedMainStageId && !selectedSubStageId">اختر المرحلة الفرعية لفتح تسكين العمال وتسجيل الإنتاج.</p>
-    <div class="production-page__selected-context" *ngIf="selectedFactoryId || selectedProductionLineId || selectedProductModelId || selectedMainStageId || selectedSubStageId">
+    <p class="production-page__context-note" *ngIf="!selectedFactoryId">
+      ابدأ باختيار المصنع. لن تظهر أي بيانات تابعة قبل تحديد المسار السابق.
+    </p>
+    <p
+      class="production-page__context-note"
+      *ngIf="selectedFactoryId && !selectedProductionLineId"
+    >
+      اختر خط الإنتاج لعرض المراحل الرئيسية المتاحة فقط.
+    </p>
+    <p
+      class="production-page__context-note"
+      *ngIf="selectedProductionLineId && !selectedMainStageId"
+    >
+      اختر المرحلة الرئيسية لعرض مراحلها الفرعية.
+    </p>
+    <p
+      class="production-page__context-note"
+      *ngIf="selectedMainStageId && !selectedSubStageId"
+    >
+      اختر المرحلة الفرعية لفتح تسكين العمال وتسجيل الإنتاج.
+    </p>
+    <div
+      class="production-page__selected-context"
+      *ngIf="
+        selectedFactoryId ||
+        selectedProductionLineId ||
+        selectedProductModelId ||
+        selectedMainStageId ||
+        selectedSubStageId
+      "
+    >
       <plp-product-metadata-row label="مسار الإنتاج المحدد">
-        <plp-product-metadata-item label="المصنع" [value]="selectedFactoryLabel"></plp-product-metadata-item>
-        <plp-product-metadata-item label="الخط" [value]="selectedProductionLineLabel"></plp-product-metadata-item>
-        <plp-product-metadata-item label="المرحلة الرئيسية" [value]="selectedMainStageLabel"></plp-product-metadata-item>
-        <plp-product-metadata-item label="المرحلة الفرعية" [value]="selectedSubStageLabel"></plp-product-metadata-item>
+        <plp-product-metadata-item
+          label="المصنع"
+          [value]="selectedFactoryLabel"
+        ></plp-product-metadata-item>
+        <plp-product-metadata-item
+          label="الخط"
+          [value]="selectedProductionLineLabel"
+        ></plp-product-metadata-item>
+        <plp-product-metadata-item
+          label="المرحلة الرئيسية"
+          [value]="selectedMainStageLabel"
+        ></plp-product-metadata-item>
+        <plp-product-metadata-item
+          label="المرحلة الفرعية"
+          [value]="selectedSubStageLabel"
+        ></plp-product-metadata-item>
       </plp-product-metadata-row>
       <plp-product-metadata-row label="بيانات تشغيل الإنتاج">
-        <plp-product-metadata-item label="المنتج" [value]="selectedProductLabel"></plp-product-metadata-item>
-        <plp-product-metadata-item label="تاريخ الإنتاج" [value]="selectedProductionDate"></plp-product-metadata-item>
+        <plp-product-metadata-item
+          label="المنتج"
+          [value]="selectedProductLabel"
+        ></plp-product-metadata-item>
+        <plp-product-metadata-item
+          label="تاريخ الإنتاج"
+          [value]="selectedProductionDate"
+        ></plp-product-metadata-item>
       </plp-product-metadata-row>
     </div>
   </p-card>
 
   <div class="production-page__grid" *ngIf="!loading; else skeleton">
     <p-card header="أمر الإنتاج للمسار المحدد">
-      <form [formGroup]="orderForm" (ngSubmit)="createOrder()" class="production-page__form">
-        <label>رقم الأمر <input pInputText formControlName="orderNumber"></label>
-        <label>الموديل <select formControlName="productModelId"><option value="">اختر الموديل</option><option *ngFor="let model of models" [value]="model.id">{{ model.code }} — {{ model.name }}</option></select></label>
-        <label>خط الإنتاج <input pInputText [value]="selectedProductionLineId ? 'المسار المحدد أعلاه' : 'اختر المصنع والخط أولًا'" readonly aria-readonly="true"></label>
-        <label>تاريخ الإنتاج <input type="date" formControlName="productionDate"></label>
-        <label>الكمية المخططة <input type="number" formControlName="plannedQuantity"></label>
-        <label class="production-page__wide">ملاحظات <input pInputText formControlName="notes"></label>
-        <ul class="production-page__validation-summary production-page__wide" *ngIf="orderMissingRequirements.length" role="status">
-          <li *ngFor="let message of orderMissingRequirements">{{ message }}</li>
+      <form
+        [formGroup]="orderForm"
+        (ngSubmit)="createOrder()"
+        class="production-page__form"
+      >
+        <label
+          >رقم الأمر <input pInputText formControlName="orderNumber"
+        /></label>
+        <label
+          >الموديل
+          <select formControlName="productModelId">
+            <option value="">اختر الموديل</option>
+            <option *ngFor="let model of models" [value]="model.id">
+              {{ model.code }} — {{ model.name }}
+            </option>
+          </select></label
+        >
+        <label
+          >خط الإنتاج
+          <input
+            pInputText
+            [value]="
+              selectedProductionLineId
+                ? 'المسار المحدد أعلاه'
+                : 'اختر المصنع والخط أولًا'
+            "
+            readonly
+            aria-readonly="true"
+        /></label>
+        <label
+          >تاريخ الإنتاج <input type="date" formControlName="productionDate"
+        /></label>
+        <label
+          >الكمية المخططة
+          <input type="number" formControlName="plannedQuantity"
+        /></label>
+        <label class="production-page__wide"
+          >ملاحظات <input pInputText formControlName="notes"
+        /></label>
+        <ul
+          class="production-page__validation-summary production-page__wide"
+          *ngIf="orderMissingRequirements.length"
+          role="status"
+        >
+          <li *ngFor="let message of orderMissingRequirements">
+            {{ message }}
+          </li>
         </ul>
-        <button pButton type="submit" *ngIf="canRecord" [label]="editingOrderId ? 'تحديث المسودة' : 'إنشاء أمر'" [disabled]="saving || !selectedProductionLineId"></button>
+        <button
+          pButton
+          type="submit"
+          *ngIf="canRecord"
+          [label]="editingOrderId ? 'تحديث المسودة' : 'إنشاء أمر'"
+          [disabled]="saving || !selectedProductionLineId"
+        ></button>
       </form>
-      <div class="production-page__filters"><input pInputText [(ngModel)]="orderSearch" [ngModelOptions]="{standalone: true}" placeholder="بحث بالأمر أو الموديل"><select [(ngModel)]="orderStatusFilter" [ngModelOptions]="{standalone: true}"><option value="">كل الحالات</option><option value="Draft">مسودة</option><option value="Active">نشط</option><option value="Completed">مكتمل</option><option value="Cancelled">ملغي</option></select></div>
-      <div class="production-page__orders" *ngIf="selectedProductionLineId && workflowOrders().length; else noWorkflowOrders">
-        <article *ngFor="let order of workflowOrders(); trackBy: trackById" [hidden]="!filteredOrders().includes(order)"><strong>{{ order.orderNumber }}</strong><span>{{ order.productModelCode }} | {{ order.plannedQuantity }} زوج | {{ order.status }}</span><button pButton *ngIf="canRecord && !order.isImported && order.status === 'Draft'" type="button" label="تعديل" class="p-button-text" (click)="editOrder(order)"></button><button pButton *ngIf="canRecord && !order.isImported && order.status === 'Draft'" type="button" label="تفعيل" class="p-button-text" (click)="activate(order)"></button><button pButton *ngIf="canRecord && !order.isImported && order.status === 'Active'" type="button" label="إكمال" class="p-button-text" (click)="transitionOrder(order, 'complete')"></button><button pButton *ngIf="canApprove && !order.isImported && (order.status === 'Draft' || order.status === 'Active')" type="button" label="إلغاء" class="p-button-text p-button-danger" (click)="transitionOrder(order, 'cancel')"></button></article>
+      <div class="production-page__filters">
+        <input
+          pInputText
+          [(ngModel)]="orderSearch"
+          [ngModelOptions]="{ standalone: true }"
+          placeholder="بحث بالأمر أو الموديل"
+        /><select
+          [(ngModel)]="orderStatusFilter"
+          [ngModelOptions]="{ standalone: true }"
+        >
+          <option value="">كل الحالات</option>
+          <option value="Draft">مسودة</option>
+          <option value="Active">نشط</option>
+          <option value="Completed">مكتمل</option>
+          <option value="Cancelled">ملغي</option>
+        </select>
       </div>
-      <ng-template #noWorkflowOrders><p class="production-page__context-note">اختر خط إنتاج لعرض أو إنشاء أوامر هذا الخط. لا يتم خلط أوامر الخطوط المختلفة.</p></ng-template>
+      <div
+        class="production-page__orders"
+        *ngIf="
+          selectedProductionLineId && workflowOrders().length;
+          else noWorkflowOrders
+        "
+      >
+        <article
+          *ngFor="let order of workflowOrders(); trackBy: trackById"
+          [hidden]="!filteredOrders().includes(order)"
+        >
+          <strong>{{ order.orderNumber }}</strong
+          ><span
+            >{{ order.productModelCode }} | {{ order.plannedQuantity }} زوج |
+            {{ order.status }}</span
+          ><button
+            pButton
+            *ngIf="canRecord && !order.isImported && order.status === 'Draft'"
+            type="button"
+            label="تعديل"
+            class="p-button-text"
+            (click)="editOrder(order)"
+          ></button
+          ><button
+            pButton
+            *ngIf="canRecord && !order.isImported && order.status === 'Draft'"
+            type="button"
+            label="تفعيل"
+            class="p-button-text"
+            (click)="activate(order)"
+          ></button
+          ><button
+            pButton
+            *ngIf="canRecord && !order.isImported && order.status === 'Active'"
+            type="button"
+            label="إكمال"
+            class="p-button-text"
+            (click)="transitionOrder(order, 'complete')"
+          ></button
+          ><button
+            pButton
+            *ngIf="
+              canApprove &&
+              !order.isImported &&
+              (order.status === 'Draft' || order.status === 'Active')
+            "
+            type="button"
+            label="إلغاء"
+            class="p-button-text p-button-danger"
+            (click)="transitionOrder(order, 'cancel')"
+          ></button>
+        </article>
+      </div>
+      <ng-template #noWorkflowOrders
+        ><p class="production-page__context-note">
+          اختر خط إنتاج لعرض أو إنشاء أوامر هذا الخط. لا يتم خلط أوامر الخطوط
+          المختلفة.
+        </p></ng-template
+      >
     </p-card>
 
-    <p-card header="تسكين عمال المرحلة" *ngIf="showWorkerPanel; else assignmentBlocked">
-      <section class="production-page__attendance" [attr.aria-busy]="attendanceLoading || attendanceSyncing">
+    <p-card
+      header="تسكين عمال المرحلة"
+      *ngIf="showWorkerPanel; else assignmentBlocked"
+    >
+      <section
+        class="production-page__attendance"
+        [attr.aria-busy]="attendanceLoading || attendanceSyncing"
+      >
         <div class="production-page__allocation-head">
           <div>
             <h3>حالة حضور تاريخ الإنتاج</h3>
-            <p>تاريخ الحضور: <strong>{{ attendanceDate }}</strong></p>
+            <p>
+              تاريخ الحضور: <strong>{{ attendanceDate }}</strong>
+            </p>
           </div>
-          <plp-status-badge [status]="attendanceStatus" [label]="attendanceStatusLabel"></plp-status-badge>
+          <plp-status-badge
+            [status]="attendanceStatus"
+            [label]="attendanceStatusLabel"
+          ></plp-status-badge>
           <button
             *ngIf="canSyncAttendance"
             pButton
             type="button"
             class="p-button-sm"
             icon="pi pi-refresh"
-            [label]="attendanceSyncing ? 'جارٍ تحديث الحضور…' : 'تحديث حضور تاريخ الإنتاج'"
+            [label]="
+              attendanceSyncing
+                ? 'جارٍ تحديث الحضور…'
+                : 'تحديث حضور تاريخ الإنتاج'
+            "
             [disabled]="attendanceSyncing"
             (click)="syncAttendanceToday()"
           ></button>
         </div>
 
         <div class="production-page__metrics" *ngIf="canViewAttendance">
-          <span>على رأس العمل: <strong>{{ activeAttendanceWorkersCount }}</strong></span>
-          <span>سجلات حضور محلية: <strong>{{ workersWithAttendanceCount }}</strong></span>
-          <span>بصمات حضور مؤكدة: <strong>{{ actualCheckInWorkersCount }}</strong></span>
-          <span>بلا بصمة مصدر / غير مؤكد: <strong>{{ noSourceCheckInWorkersCount }}</strong></span>
-          <span>المتاحون للمرحلة: <strong>{{ availableWorkersCount }}</strong></span>
-          <span>غير المتاحين للمرحلة: <strong>{{ unavailableWorkersCount }}</strong></span>
+          <span
+            >على رأس العمل:
+            <strong>{{ activeAttendanceWorkersCount }}</strong></span
+          >
+          <span
+            >سجلات حضور محلية:
+            <strong>{{ workersWithAttendanceCount }}</strong></span
+          >
+          <span
+            >بصمات حضور مؤكدة:
+            <strong>{{ actualCheckInWorkersCount }}</strong></span
+          >
+          <span
+            >بلا بصمة مصدر / غير مؤكد:
+            <strong>{{ noSourceCheckInWorkersCount }}</strong></span
+          >
+          <span
+            >المتاحون للمرحلة:
+            <strong>{{ availableWorkersCount }}</strong></span
+          >
+          <span
+            >غير المتاحين للمرحلة:
+            <strong>{{ unavailableWorkersCount }}</strong></span
+          >
         </div>
 
-        <p class="production-page__context-note" *ngIf="lastSuccessfulAttendanceSyncLabel">آخر مزامنة ناجحة ضمن هذه الجلسة: {{ lastSuccessfulAttendanceSyncLabel }}.</p>
-        <p class="production-page__success" *ngIf="attendanceSuccess" role="status">{{ attendanceSuccess }}</p>
-        <p class="production-page__error" *ngIf="attendanceError" role="alert">{{ attendanceError }}</p>
-        <p class="production-page__context-note" *ngIf="!isSelectedProductionDateToday">سيجلب التحديث بيانات تاريخ الإنتاج المحدد، وليس وقت إنشاء السجل.</p>
-        <div class="production-page__context-note" *ngIf="showAttendanceEmptyState">
+        <p
+          class="production-page__context-note"
+          *ngIf="lastSuccessfulAttendanceSyncLabel"
+        >
+          آخر مزامنة ناجحة ضمن هذه الجلسة:
+          {{ lastSuccessfulAttendanceSyncLabel }}.
+        </p>
+        <p
+          class="production-page__success"
+          *ngIf="attendanceSuccess"
+          role="status"
+        >
+          {{ attendanceSuccess }}
+        </p>
+        <p class="production-page__error" *ngIf="attendanceError" role="alert">
+          {{ attendanceError }}
+        </p>
+        <p
+          class="production-page__context-note"
+          *ngIf="!isSelectedProductionDateToday"
+        >
+          سيجلب التحديث بيانات تاريخ الإنتاج المحدد، وليس وقت إنشاء السجل.
+        </p>
+        <div
+          class="production-page__context-note"
+          *ngIf="showAttendanceEmptyState"
+        >
           <p>لا توجد بيانات حضور متاحة لهذا التاريخ.</p>
-          <p *ngIf="canSyncAttendance">اضغط «تحديث الحضور الآن» لجلب آخر بيانات البصمة.</p>
-          <p *ngIf="!isSelectedProductionDateToday">استخدم «تحديث حضور تاريخ الإنتاج» لقراءة هذا التاريخ نفسه من المصدر.</p>
+          <p *ngIf="canSyncAttendance">
+            اضغط «تحديث الحضور الآن» لجلب آخر بيانات البصمة.
+          </p>
+          <p *ngIf="!isSelectedProductionDateToday">
+            استخدم «تحديث حضور تاريخ الإنتاج» لقراءة هذا التاريخ نفسه من المصدر.
+          </p>
         </div>
 
         <div class="production-page__metrics" *ngIf="attendanceSyncResult">
-          <span>عمّال مطابقون: <strong>{{ attendanceSyncResult.matchedWorkersCount }}</strong></span>
-          <span>سجلات مضافة: <strong>{{ attendanceSyncResult.insertedRecords }}</strong></span>
-          <span>سجلات محدّثة: <strong>{{ attendanceSyncResult.updatedRecords }}</strong></span>
-          <span>سجلات مصدر اليوم: <strong>{{ attendanceSyncResult.sourceCheckInsCount }}</strong></span>
+          <span
+            >عمّال مطابقون:
+            <strong>{{
+              attendanceSyncResult.matchedWorkersCount
+            }}</strong></span
+          >
+          <span
+            >سجلات مضافة:
+            <strong>{{ attendanceSyncResult.insertedRecords }}</strong></span
+          >
+          <span
+            >سجلات محدّثة:
+            <strong>{{ attendanceSyncResult.updatedRecords }}</strong></span
+          >
+          <span
+            >سجلات مصدر اليوم:
+            <strong>{{
+              attendanceSyncResult.sourceCheckInsCount
+            }}</strong></span
+          >
         </div>
       </section>
 
       <ng-container *ngIf="canViewAssignments; else assignmentPermission">
-        <section class="production-page__stage-readiness" *ngIf="selectedStageReadiness as stageReadiness">
+        <section
+          class="production-page__stage-readiness"
+          *ngIf="selectedStageReadiness as stageReadiness"
+        >
           <div class="production-page__allocation-head">
-            <div><h3>جاهزية المرحلة المحددة</h3><p>{{ stageReadiness.workerStatusText }}</p></div>
-            <plp-status-badge [status]="stageReadiness.status === 'Ready' ? 'ready' : stageReadiness.status === 'NeedsAssignment' ? 'warning' : 'critical'" [label]="readinessStatusLabel(stageReadiness.status)"></plp-status-badge>
+            <div>
+              <h3>جاهزية المرحلة المحددة</h3>
+              <p>{{ stageReadiness.workerStatusText }}</p>
+            </div>
+            <plp-status-badge
+              [status]="
+                stageReadiness.status === 'Ready'
+                  ? 'ready'
+                  : stageReadiness.status === 'NeedsAssignment'
+                    ? 'warning'
+                    : 'critical'
+              "
+              [label]="readinessStatusLabel(stageReadiness.status)"
+            ></plp-status-badge>
           </div>
-          <p class="production-page__context-note" *ngIf="stageReadiness.hasAuthoritativeRequiredWorkerCount">العدد المطلوب المعتمد: {{ stageReadiness.requiredWorkers }}. العاملون المؤهلون حاليًا: {{ stageReadiness.eligibleWorkers }}.</p>
-          <p class="production-page__context-note" *ngIf="!stageReadiness.hasAuthoritativeRequiredWorkerCount">لا يوجد عدد عمال مطلوب معتمد لهذه المرحلة؛ يظهر العدد الفعلي فقط دون افتراض هدف.</p>
-          <p class="production-page__financial-note" *ngIf="stageReadiness.isFinancialReviewPending">إعداد SharedPercentage لهذه المرحلة مؤقت ويحتاج مراجعة مالية؛ لا يمنع اختبار سير العمل أو حفظ مسودة مستوفية للشروط التشغيلية.</p>
+          <p
+            class="production-page__context-note"
+            *ngIf="stageReadiness.hasAuthoritativeRequiredWorkerCount"
+          >
+            العدد المطلوب المعتمد: {{ stageReadiness.requiredWorkers }}.
+            العاملون المؤهلون حاليًا: {{ stageReadiness.eligibleWorkers }}.
+          </p>
+          <p
+            class="production-page__context-note"
+            *ngIf="!stageReadiness.hasAuthoritativeRequiredWorkerCount"
+          >
+            لا يوجد عدد عمال مطلوب معتمد لهذه المرحلة؛ يظهر العدد الفعلي فقط دون
+            افتراض هدف.
+          </p>
+          <p
+            class="production-page__financial-note"
+            *ngIf="stageReadiness.isFinancialReviewPending"
+          >
+            إعداد SharedPercentage لهذه المرحلة مؤقت ويحتاج مراجعة مالية؛ لا
+            يمنع اختبار سير العمل أو حفظ مسودة مستوفية للشروط التشغيلية.
+          </p>
         </section>
-        <p class="production-page__context-note" *ngIf="loadingWorkers">جارٍ تحميل التسكين الحالي وحالة الحضور…</p>
-        <div class="production-page__error" *ngIf="workerContextError" role="alert">
+        <p class="production-page__context-note" *ngIf="loadingWorkers">
+          جارٍ تحميل التسكين الحالي وحالة الحضور…
+        </p>
+        <div
+          class="production-page__error"
+          *ngIf="workerContextError"
+          role="alert"
+        >
           {{ workerContextError }}
-          <button pButton type="button" class="p-button-text" label="إعادة المحاولة" (click)="retryWorkerContext()" [disabled]="loadingWorkers"></button>
+          <button
+            pButton
+            type="button"
+            class="p-button-text"
+            label="إعادة المحاولة"
+            (click)="retryWorkerContext()"
+            [disabled]="loadingWorkers"
+          ></button>
         </div>
-        <p class="production-page__success" *ngIf="assignmentSuccess" role="status">{{ assignmentSuccess }}</p>
-        <div class="production-page__current-workers" *ngIf="!loadingWorkers && !workerContextError && currentWorkers.length; else noCurrentWorkers">
-          <article *ngFor="let worker of currentWorkers; trackBy: trackByWorkerId">
+        <p
+          class="production-page__success"
+          *ngIf="assignmentSuccess"
+          role="status"
+        >
+          {{ assignmentSuccess }}
+        </p>
+        <div
+          class="production-page__current-workers"
+          *ngIf="
+            !loadingWorkers && !workerContextError && currentWorkers.length;
+            else noCurrentWorkers
+          "
+        >
+          <article
+            *ngFor="let worker of currentWorkers; trackBy: trackByWorkerId"
+          >
             <div class="production-page__worker-identity">
-              <plp-worker-avatar [fullName]="worker.fullName" [code]="worker.employeeCode" [photoReference]="worker.photoReference" size="md"></plp-worker-avatar>
+              <plp-worker-avatar
+                [fullName]="worker.fullName"
+                [code]="worker.employeeCode"
+                [photoReference]="worker.photoReference"
+                size="md"
+              ></plp-worker-avatar>
               <strong>{{ worker.fullName }}</strong>
             </div>
-            <plp-product-metadata-row [label]="'بيانات العامل ' + worker.fullName">
-              <plp-product-metadata-item label="الكود" [value]="worker.employeeCode"></plp-product-metadata-item>
-              <plp-product-metadata-item label="الحضور" [value]="workerAttendanceLabel(worker)"></plp-product-metadata-item>
-              <plp-product-metadata-item *ngIf="worker.departmentName" label="القسم" [value]="worker.departmentName"></plp-product-metadata-item>
-              <plp-product-metadata-item label="التسكين" [value]="worker.assignmentType === 'Temporary' ? 'نقل مؤقت ساري' : worker.assignmentType === 'Replacement' ? 'بديل مؤقت' : 'تسكين حالي'"></plp-product-metadata-item>
+            <plp-product-metadata-row
+              [label]="'بيانات العامل ' + worker.fullName"
+            >
+              <plp-product-metadata-item
+                label="الكود"
+                [value]="worker.employeeCode"
+              ></plp-product-metadata-item>
+              <plp-product-metadata-item
+                label="الحضور"
+                [value]="workerAttendanceLabel(worker)"
+              ></plp-product-metadata-item>
+              <plp-product-metadata-item
+                *ngIf="worker.departmentName"
+                label="القسم"
+                [value]="worker.departmentName"
+              ></plp-product-metadata-item>
+              <plp-product-metadata-item
+                label="التسكين"
+                value="تسكين دائم"
+              ></plp-product-metadata-item>
             </plp-product-metadata-row>
             <div class="production-page__inline-actions">
-              <button pButton type="button" class="p-button-text" [label]="isRecordableWorker(worker) ? 'إضافته لدفعة الإنتاج' : 'غير متاح للإنتاج بسبب الحضور'" (click)="addWorker(worker)" [disabled]="!isRecordableWorker(worker) || isRecordReadOnly || saving"></button>
-              <button pButton type="button" *ngIf="canManageAssignments && worker.assignmentId" class="p-button-text" label="نقل العامل" (click)="openMoveDialog(worker)" [disabled]="assignmentSaving"></button>
-              <button pButton type="button" *ngIf="canManageAssignments && worker.assignmentId" class="p-button-text" label="استبدال العامل" (click)="openReplaceDialog(worker)" [disabled]="assignmentSaving"></button>
-              <button pButton type="button" *ngIf="canManageAssignments && worker.assignmentId" class="p-button-text p-button-danger" label="إلغاء التسكين" (click)="openUnassignDialog(worker)" [disabled]="assignmentSaving"></button>
+              <button
+                pButton
+                type="button"
+                class="p-button-text"
+                [label]="
+                  isRecordableWorker(worker)
+                    ? 'إضافته لدفعة الإنتاج'
+                    : 'غير متاح للإنتاج بسبب الحضور'
+                "
+                (click)="addWorker(worker)"
+                [disabled]="
+                  !isRecordableWorker(worker) || isRecordReadOnly || saving
+                "
+              ></button>
+              <button
+                pButton
+                type="button"
+                *ngIf="canManageAssignments && worker.assignmentId"
+                class="p-button-text p-button-danger"
+                label="إلغاء التسكين"
+                (click)="openUnassignDialog(worker)"
+                [disabled]="assignmentSaving"
+              ></button>
             </div>
           </article>
         </div>
-        <ng-template #noCurrentWorkers><p class="production-page__context-note" *ngIf="!loadingWorkers && !workerContextError">لا يوجد عمال مسكنون حاليًا لهذه المرحلة. استخدم نموذج التسكين أدناه.</p></ng-template>
+        <ng-template #noCurrentWorkers
+          ><p
+            class="production-page__context-note"
+            *ngIf="!loadingWorkers && !workerContextError"
+          >
+            لا يوجد عمال مسكنون حاليًا لهذه المرحلة. استخدم نموذج التسكين أدناه.
+          </p></ng-template
+        >
 
-        <form *ngIf="canManageAssignments" [formGroup]="assignmentForm" (ngSubmit)="applyAssignment()" class="production-page__assignment-form">
-          <h3>إضافة أو نقل عامل حاضر</h3>
-          <label>بحث العامل <input pInputText [(ngModel)]="workerSearch" [ngModelOptions]="{standalone: true}" placeholder="الكود أو الاسم"></label>
-          <div class="production-page__wide production-page__candidate-list" aria-label="العمال الحاضرون المؤهلون للتسكين">
-            <button type="button" *ngFor="let worker of assignmentCandidates; trackBy: trackByWorkerId" [class.is-selected]="assignmentForm.controls.workerId.value === worker.workerId" (click)="selectReplacementWorker(worker)">
-              <plp-worker-avatar [fullName]="worker.fullName" [code]="worker.employeeCode" [photoReference]="worker.photoReference" size="sm" [decorative]="true"></plp-worker-avatar>
+        <form
+          *ngIf="canManageAssignments"
+          [formGroup]="assignmentForm"
+          (ngSubmit)="applyAssignment()"
+          class="production-page__assignment-form"
+        >
+          <h3>إضافة عامل بتسكين دائم</h3>
+          <label
+            >بحث العامل
+            <input
+              pInputText
+              [(ngModel)]="workerSearch"
+              [ngModelOptions]="{ standalone: true }"
+              placeholder="الكود أو الاسم"
+          /></label>
+          <div
+            class="production-page__wide production-page__candidate-list"
+            aria-label="العمال الحاضرون المؤهلون للتسكين"
+          >
+            <button
+              type="button"
+              *ngFor="
+                let worker of assignmentCandidates;
+                trackBy: trackByWorkerId
+              "
+              [class.is-selected]="
+                assignmentForm.controls.workerId.value === worker.workerId
+              "
+              (click)="selectAssignmentWorker(worker)"
+            >
+              <plp-worker-avatar
+                [fullName]="worker.fullName"
+                [code]="worker.employeeCode"
+                [photoReference]="worker.photoReference"
+                size="sm"
+                [decorative]="true"
+              ></plp-worker-avatar>
               <span>
                 <strong>{{ worker.fullName }}</strong>
-                <plp-product-metadata-row [label]="'بيانات المرشح ' + worker.fullName">
-                  <plp-product-metadata-item label="الكود" [value]="worker.employeeCode"></plp-product-metadata-item>
-                  <plp-product-metadata-item *ngIf="worker.departmentName" label="القسم" [value]="worker.departmentName"></plp-product-metadata-item>
-                  <plp-product-metadata-item label="الإتاحة" [value]="workerAvailabilityLabel(worker)"></plp-product-metadata-item>
+                <plp-product-metadata-row
+                  [label]="'بيانات المرشح ' + worker.fullName"
+                >
+                  <plp-product-metadata-item
+                    label="الكود"
+                    [value]="worker.employeeCode"
+                  ></plp-product-metadata-item>
+                  <plp-product-metadata-item
+                    *ngIf="worker.departmentName"
+                    label="القسم"
+                    [value]="worker.departmentName"
+                  ></plp-product-metadata-item>
+                  <plp-product-metadata-item
+                    label="الإتاحة"
+                    [value]="workerAvailabilityLabel(worker)"
+                  ></plp-product-metadata-item>
                 </plp-product-metadata-row>
               </span>
             </button>
-            <p class="production-page__context-note" *ngIf="!assignmentCandidates.length">لا يوجد عامل حاضر مؤهل للإضافة في تاريخ الإنتاج المحدد. راجع عدد البصمات المؤكدة أعلاه ثم حدّث الحضور إذا كانت لديك الصلاحية.</p>
+            <p
+              class="production-page__context-note"
+              *ngIf="!assignmentCandidates.length"
+            >
+              لا يوجد عامل حاضر مؤهل للإضافة في تاريخ الإنتاج المحدد. راجع عدد
+              البصمات المؤكدة أعلاه ثم حدّث الحضور إذا كانت لديك الصلاحية.
+            </p>
           </div>
-          <label>نوع التسكين <select formControlName="mode"><option value="default">تسكين حالي</option><option value="temporary">نقل مؤقت</option></select></label>
-          <label>السبب <input pInputText formControlName="reason" [placeholder]="assignmentForm.controls.mode.value === 'temporary' ? 'سبب النقل المؤقت (إلزامي)' : 'سبب النقل عند تغيير المرحلة'"></label>
-          <ng-container *ngIf="assignmentForm.controls.mode.value === 'temporary'"><label>من وقت <input type="datetime-local" formControlName="startAtLocal"></label><label>إلى وقت <input type="datetime-local" formControlName="endAtLocal"></label></ng-container>
-          <ul class="production-page__validation-summary production-page__wide" *ngIf="assignmentMissingRequirements.length" role="status">
-            <li *ngFor="let message of assignmentMissingRequirements">{{ message }}</li>
+          <label
+            >السبب
+            <input
+              pInputText
+              formControlName="reason"
+              placeholder="سبب التسكين عند تغيير المرحلة"
+          /></label>
+          <ul
+            class="production-page__validation-summary production-page__wide"
+            *ngIf="assignmentMissingRequirements.length"
+            role="status"
+          >
+            <li *ngFor="let message of assignmentMissingRequirements">
+              {{ message }}
+            </li>
           </ul>
-          <button pButton type="submit" label="حفظ التسكين" [disabled]="assignmentSaving"></button>
+          <button
+            pButton
+            type="submit"
+            label="حفظ التسكين"
+            [disabled]="assignmentSaving"
+          ></button>
         </form>
-        <p class="production-page__context-note" *ngIf="workerContext && workerContext.unavailableWorkersCount">العامل غير الحاضر لا يظهر كمرشح. العامل الحاضر المعيّن بمرحلة أخرى يتطلب نقلًا أو استبدالًا صريحًا؛ وجود سجل حضور محلي لا يساوي بصمة حضور مؤكدة.</p>
+        <p
+          class="production-page__context-note"
+          *ngIf="workerContext && workerContext.unavailableWorkersCount"
+        >
+          العامل غير الحاضر لا يظهر كمرشح. العامل الحاضر المعيّن بمرحلة أخرى
+          لا يظهر العامل الحاضر المعيّن بمرحلة أخرى كمرشح لهذه المرحلة؛ وجود سجل حضور محلي لا يساوي بصمة حضور
+          مؤكدة.
+        </p>
       </ng-container>
-      <ng-template #assignmentPermission><p class="production-page__context-note">لا تملك صلاحية عرض تسكينات العمال لهذه المرحلة.</p></ng-template>
+      <ng-template #assignmentPermission
+        ><p class="production-page__context-note">
+          لا تملك صلاحية عرض تسكينات العمال لهذه المرحلة.
+        </p></ng-template
+      >
     </p-card>
-    <ng-template #assignmentBlocked><p-card header="تسكين عمال المرحلة"><p class="production-page__context-note">اختر المرحلة الفرعية أولًا. لن يتم طلب أو عرض العمال قبل ذلك.</p></p-card></ng-template>
+    <ng-template #assignmentBlocked
+      ><p-card header="تسكين عمال المرحلة"
+        ><p class="production-page__context-note">
+          اختر المرحلة الفرعية أولًا. لن يتم طلب أو عرض العمال قبل ذلك.
+        </p></p-card
+      ></ng-template
+    >
 
     <p-card header="ملخص جاهزية المنتج والخط">
-      <p class="production-page__context-note" *ngIf="!hasProductReadinessContext">اختر الخط والموديل وتاريخ الإنتاج لعرض الجاهزية.</p>
-      <div class="production-page__readiness-skeleton" *ngIf="hasProductReadinessContext && productReadinessLoading" role="status" aria-live="polite">
+      <p
+        class="production-page__context-note"
+        *ngIf="!hasProductReadinessContext"
+      >
+        اختر الخط والموديل وتاريخ الإنتاج لعرض الجاهزية.
+      </p>
+      <div
+        class="production-page__readiness-skeleton"
+        *ngIf="hasProductReadinessContext && productReadinessLoading"
+        role="status"
+        aria-live="polite"
+      >
         <span></span><span></span><span></span>
         <p>جارٍ حساب جاهزية مراحل المنتج لتاريخ الإنتاج المحدد…</p>
       </div>
-      <div class="production-page__error" *ngIf="hasProductReadinessContext && productReadinessError" role="alert">
+      <div
+        class="production-page__error"
+        *ngIf="hasProductReadinessContext && productReadinessError"
+        role="alert"
+      >
         {{ productReadinessError }}
-        <button pButton type="button" class="p-button-text" label="إعادة المحاولة" (click)="retryProductReadiness()" [disabled]="productReadinessLoading"></button>
+        <button
+          pButton
+          type="button"
+          class="p-button-text"
+          label="إعادة المحاولة"
+          (click)="retryProductReadiness()"
+          [disabled]="productReadinessLoading"
+        ></button>
       </div>
-      <p class="production-page__context-note" *ngIf="hasProductReadinessContext && !productReadinessLoading && !productReadinessError && !productReadiness">لا تتوفر بيانات جاهزية للموديل والخط وتاريخ الإنتاج المحددة.</p>
+      <p
+        class="production-page__context-note"
+        *ngIf="
+          hasProductReadinessContext &&
+          !productReadinessLoading &&
+          !productReadinessError &&
+          !productReadiness
+        "
+      >
+        لا تتوفر بيانات جاهزية للموديل والخط وتاريخ الإنتاج المحددة.
+      </p>
       <ng-container *ngIf="productReadiness as readiness">
-        <div class="production-page__allocation-head"><div><h3>{{ readiness.productModelCode }} — {{ readiness.productModelName }}</h3><p>تاريخ الإنتاج: {{ readiness.productionDate }}</p></div><plp-status-badge [status]="readiness.readyForProductionEntry ? 'ready' : 'warning'" [label]="readiness.readyForProductionEntry ? 'جاهزية تشغيلية مكتملة' : 'توجد مراحل تحتاج متابعة'"></plp-status-badge></div>
+        <div class="production-page__allocation-head">
+          <div>
+            <h3>
+              {{ readiness.productModelCode }} —
+              {{ readiness.productModelName }}
+            </h3>
+            <p>تاريخ الإنتاج: {{ readiness.productionDate }}</p>
+          </div>
+          <plp-status-badge
+            [status]="readiness.readyForProductionEntry ? 'ready' : 'warning'"
+            [label]="
+              readiness.readyForProductionEntry
+                ? 'جاهزية تشغيلية مكتملة'
+                : 'توجد مراحل تحتاج متابعة'
+            "
+          ></plp-status-badge>
+        </div>
         <div class="production-page__metrics">
-          <span>إجمالي المراحل: <strong>{{ readiness.totalStages }}</strong></span>
-          <span>مراحل جاهزة: <strong>{{ readiness.readyStages }}</strong></span>
-          <span>بدون عمال: <strong>{{ readiness.stagesWithoutWorkers }}</strong></span>
-          <span>دون بيانات حضور: <strong>{{ readiness.stagesWithoutAttendanceData }}</strong></span>
-          <span>غير مكتملة: <strong>{{ readiness.incompleteStages }}</strong></span>
-          <span>مراحل تحتاج مراجعة تكلفة: <strong>{{ readiness.stagesNeedingCompensationReview }}</strong></span>
+          <span
+            >إجمالي المراحل: <strong>{{ readiness.totalStages }}</strong></span
+          >
+          <span
+            >مراحل جاهزة: <strong>{{ readiness.readyStages }}</strong></span
+          >
+          <span
+            >بدون عمال:
+            <strong>{{ readiness.stagesWithoutWorkers }}</strong></span
+          >
+          <span
+            >دون بيانات حضور:
+            <strong>{{ readiness.stagesWithoutAttendanceData }}</strong></span
+          >
+          <span
+            >غير مكتملة: <strong>{{ readiness.incompleteStages }}</strong></span
+          >
+          <span
+            >مراحل تحتاج مراجعة تكلفة:
+            <strong>{{
+              readiness.stagesNeedingCompensationReview
+            }}</strong></span
+          >
         </div>
         <div class="production-page__readiness-states">
-          <span [class.is-ready]="readiness.readyForWorkflowTest">اختبار سير العمل: {{ readiness.readyForWorkflowTest ? 'جاهز' : 'يحتاج إعدادًا' }}</span>
-          <span [class.is-ready]="readiness.readyForProductionEntry">إدخال الإنتاج: {{ readiness.readyForProductionEntry ? 'جاهز' : 'يتطلب استكمال التسكين/الحضور' }}</span>
-          <span [class.is-ready]="readiness.readyForFinancialApproval">الاعتماد المالي: {{ readiness.readyForFinancialApproval ? 'جاهز' : 'تكلفة المرحلة تحتاج اعتمادًا قبل الاعتماد المالي' }}</span>
+          <span [class.is-ready]="readiness.readyForWorkflowTest"
+            >اختبار سير العمل:
+            {{
+              readiness.readyForWorkflowTest ? "جاهز" : "يحتاج إعدادًا"
+            }}</span
+          >
+          <span [class.is-ready]="readiness.readyForProductionEntry"
+            >إدخال الإنتاج:
+            {{
+              readiness.readyForProductionEntry
+                ? "جاهز"
+                : "يتطلب استكمال التسكين/الحضور"
+            }}</span
+          >
+          <span [class.is-ready]="readiness.readyForFinancialApproval"
+            >الاعتماد المالي:
+            {{
+              readiness.readyForFinancialApproval
+                ? "جاهز"
+                : "تكلفة المرحلة تحتاج اعتمادًا قبل الاعتماد المالي"
+            }}</span
+          >
         </div>
-        <p class="production-page__financial-note" *ngIf="readiness.stagesNeedingCompensationReview">تظل {{ readiness.stagesNeedingCompensationReview }} مرحلة تستخدم طريقة احتساب تكلفة SharedPercentage بإعداد مؤقت؛ لا يمنع ذلك اختبار سير العمل أو إنشاء مسودة إنتاج للمرحلة المؤهلة، لكنه يحتاج مراجعة قبل الاعتماد المالي.</p>
-        <button pButton type="button" class="p-button-text" [label]="showReadinessProblems ? 'إخفاء المراحل التي تحتاج متابعة' : 'عرض المراحل التي تحتاج متابعة'" (click)="toggleReadinessProblems()"></button>
-        <div class="production-page__problem-stages" *ngIf="showReadinessProblems">
+        <p
+          class="production-page__financial-note"
+          *ngIf="readiness.stagesNeedingCompensationReview"
+        >
+          تظل {{ readiness.stagesNeedingCompensationReview }} مرحلة تستخدم طريقة
+          احتساب تكلفة SharedPercentage بإعداد مؤقت؛ لا يمنع ذلك اختبار سير
+          العمل أو إنشاء مسودة إنتاج للمرحلة المؤهلة، لكنه يحتاج مراجعة قبل
+          الاعتماد المالي.
+        </p>
+        <button
+          pButton
+          type="button"
+          class="p-button-text"
+          [label]="
+            showReadinessProblems
+              ? 'إخفاء المراحل التي تحتاج متابعة'
+              : 'عرض المراحل التي تحتاج متابعة'
+          "
+          (click)="toggleReadinessProblems()"
+        ></button>
+        <div
+          class="production-page__problem-stages"
+          *ngIf="showReadinessProblems"
+        >
           <article *ngFor="let stage of readiness.problemStages">
-            <strong>{{ stage.stageOrder }} — {{ stage.stageCode }} {{ stage.stageName }}</strong>
-            <span>{{ readinessStatusLabel(stage.status) }} · {{ stage.workerStatusText }}</span>
-            <small *ngIf="stage.isFinancialReviewPending">إعداد تكلفة المرحلة مؤقت ويحتاج مراجعة قبل الاعتماد المالي</small>
+            <strong
+              >{{ stage.stageOrder }} — {{ stage.stageCode }}
+              {{ stage.stageName }}</strong
+            >
+            <span
+              >{{ readinessStatusLabel(stage.status) }} ·
+              {{ stage.workerStatusText }}</span
+            >
+            <small *ngIf="stage.isFinancialReviewPending"
+              >إعداد تكلفة المرحلة مؤقت ويحتاج مراجعة قبل الاعتماد المالي</small
+            >
           </article>
-          <p class="production-page__context-note" *ngIf="!readiness.problemStages.length">لا توجد مراحل تحتاج متابعة في المنتج المحدد.</p>
+          <p
+            class="production-page__context-note"
+            *ngIf="!readiness.problemStages.length"
+          >
+            لا توجد مراحل تحتاج متابعة في المنتج المحدد.
+          </p>
         </div>
       </ng-container>
     </p-card>
 
-    <p-card header="تسجيل دفعة إنتاج" *ngIf="selectedSubStageId; else recordingBlocked">
-      <div class="production-page__actions"><button pButton type="button" *ngIf="canRecord" label="مسودة جديدة" class="p-button-outlined" (click)="newRecord()" [disabled]="saving || !hierarchyComplete"></button><span *ngIf="editingRecordId">{{ isRecordReadOnly ? 'سجل تاريخي للعرض فقط' : 'تعديل مسودة' }}</span></div>
-      <p class="production-page__error" *ngIf="draftContextUnavailable" role="alert">{{ draftContextUnavailable }}</p>
-      <section class="production-page__entry-checklist" aria-label="متطلبات تسجيل الدفعة">
-        <span>أمر الإنتاج: <strong>{{ selectedOrder ? 'محدد' : 'مطلوب' }}</strong></span>
-        <span>تاريخ الإنتاج: <strong>{{ selectedProductionDate ? 'محدد' : 'مطلوب' }}</strong></span>
-        <span>المنتج: <strong>{{ selectedProductModelId ? selectedProductLabel : 'مطلوب' }}</strong></span>
-        <span>المرحلة: <strong>{{ selectedSubStageId ? 'محددة' : 'مطلوبة' }}</strong></span>
-        <span>الحضور: <strong>{{ hasActualCheckIns ? 'بصمات مؤكدة متاحة' : 'يلزم تحقق' }}</strong></span>
-        <span>عمال الدفعة: <strong>{{ workers.length ? 'مكتمل مبدئيًا' : 'مطلوب' }}</strong></span>
-        <span>الكمية: <strong>{{ recordForm.controls.producedQuantity.value !== null ? 'مدخلة' : 'مطلوبة' }}</strong></span>
+    <p-card
+      header="تسجيل دفعة إنتاج"
+      *ngIf="selectedSubStageId; else recordingBlocked"
+    >
+      <div class="production-page__actions">
+        <button
+          pButton
+          type="button"
+          *ngIf="canRecord"
+          label="مسودة جديدة"
+          class="p-button-outlined"
+          (click)="newRecord()"
+          [disabled]="saving || !hierarchyComplete"
+        ></button
+        ><span *ngIf="editingRecordId">{{
+          isRecordReadOnly ? "سجل تاريخي للعرض فقط" : "تعديل مسودة"
+        }}</span>
+      </div>
+      <p
+        class="production-page__error"
+        *ngIf="draftContextUnavailable"
+        role="alert"
+      >
+        {{ draftContextUnavailable }}
+      </p>
+      <section
+        class="production-page__entry-checklist"
+        aria-label="متطلبات تسجيل الدفعة"
+      >
+        <span
+          >أمر الإنتاج:
+          <strong>{{ selectedOrder ? "محدد" : "مطلوب" }}</strong></span
+        >
+        <span
+          >تاريخ الإنتاج:
+          <strong>{{ selectedProductionDate ? "محدد" : "مطلوب" }}</strong></span
+        >
+        <span
+          >المنتج:
+          <strong>{{
+            selectedProductModelId ? selectedProductLabel : "مطلوب"
+          }}</strong></span
+        >
+        <span
+          >المرحلة:
+          <strong>{{ selectedSubStageId ? "محددة" : "مطلوبة" }}</strong></span
+        >
+        <span
+          >الحضور:
+          <strong>{{
+            hasActualCheckIns ? "بصمات مؤكدة متاحة" : "يلزم تحقق"
+          }}</strong></span
+        >
+        <span
+          >عمال الدفعة:
+          <strong>{{
+            workers.length ? "مكتمل مبدئيًا" : "مطلوب"
+          }}</strong></span
+        >
+        <span
+          >الكمية:
+          <strong>{{
+            recordForm.controls.producedQuantity.value !== null
+              ? "مدخلة"
+              : "مطلوبة"
+          }}</strong></span
+        >
       </section>
-      <form [formGroup]="recordForm" (ngSubmit)="saveDraft()" class="production-page__form">
-        <label>أمر الإنتاج
-          <select formControlName="productionOrderId" (change)="loadOrderStages()" [disabled]="!hierarchyComplete"><option value="">اختر أمرًا نشطًا لهذا الخط</option><option *ngFor="let order of workflowOrders()" [value]="order.id" [disabled]="order.status !== 'Active'">{{ order.orderNumber }} — {{ order.productModelCode }} — {{ order.status }}</option></select>
+      <form
+        [formGroup]="recordForm"
+        (ngSubmit)="saveDraft()"
+        class="production-page__form"
+      >
+        <label
+          >أمر الإنتاج
+          <select
+            formControlName="productionOrderId"
+            (change)="loadOrderStages()"
+            [disabled]="!hierarchyComplete"
+          >
+            <option value="">اختر أمرًا نشطًا لهذا الخط</option>
+            <option
+              *ngFor="let order of workflowOrders()"
+              [value]="order.id"
+              [disabled]="order.status !== 'Active'"
+            >
+              {{ order.orderNumber }} — {{ order.productModelCode }} —
+              {{ order.status }}
+            </option>
+          </select>
         </label>
-        <label>مرحلة الموديل
-          <select formControlName="productModelStageId" [disabled]="!recordForm.controls.productionOrderId.value"><option value="">اختر المرحلة المطابقة للمسار</option><option *ngFor="let stage of modelStages" [value]="stage.id">{{ stage.subStageCode || '' }} {{ stage.subStageName || stage.subStageId }} | {{ stage.compensationMode }}</option></select>
+        <label
+          >مرحلة الموديل
+          <select
+            formControlName="productModelStageId"
+            [disabled]="!recordForm.controls.productionOrderId.value"
+          >
+            <option value="">اختر المرحلة المطابقة للمسار</option>
+            <option *ngFor="let stage of modelStages" [value]="stage.id">
+              {{ stage.subStageCode || "" }}
+              {{ stage.subStageName || stage.subStageId }} |
+              {{ stage.compensationMode }}
+            </option>
+          </select>
         </label>
-        <div class="production-page__wide production-page__snapshot" *ngIf="selectedStage() as stage">سيُحفظ Snapshot لسعر المرحلة {{ stage.piecePrice }} وطريقة احتساب التكلفة {{ stage.compensationMode }} عند إنشاء المسودة.</div>
-        <label>تاريخ السجل <input type="date" formControlName="productionDate"></label>
-        <label>الكمية المنتجة <input type="number" formControlName="producedQuantity"></label>
-        <label>المقبول <input type="number" formControlName="acceptedQuantity"></label>
-        <label>المرفوض <input type="number" formControlName="rejectedQuantity"></label>
-        <label class="production-page__wide">ملاحظات <input pInputText formControlName="notes"></label>
-        <section class="production-page__wide production-page__allocations" formArrayName="workers">
-          <div class="production-page__allocation-head"><h3>العمال الفعليون في الدفعة</h3><button pButton type="button" label="إضافة من التسكين الحالي" class="p-button-outlined" (click)="addWorker()" [disabled]="!currentWorkers.length || isRecordReadOnly"></button></div>
-          <p>الكمية تُحفظ مرة واحدة للدفعة. أضف فقط العمال المسكنين حاليًا لهذه المرحلة؛ حساب الاستحقاق النهائي يأتي من الخادم والإعدادات الفعلية.</p>
-          <div *ngFor="let worker of workers.controls; let i = index" [formGroupName]="i" class="production-page__worker">
-            <select formControlName="workerId"><option value="">اختر العامل من التسكين الحالي</option><option *ngFor="let option of recordingWorkers; trackBy: trackByWorkerId" [value]="option.workerId" [disabled]="!canSelectWorker(option.workerId, i)">{{ option.employeeCode }} — {{ option.fullName }}</option></select>
-            <input *ngIf="selectedStage()?.compensationMode === 'SharedPercentage'" type="number" placeholder="النسبة %" formControlName="percentage"><input *ngIf="selectedStage()?.compensationMode === 'FixedAmount'" type="number" placeholder="قيمة ثابتة" formControlName="fixedAmount"><span *ngIf="selectedStage()?.compensationMode === 'FullRatePerWorker'">سعر كامل لكل عامل</span><button pButton type="button" icon="pi pi-times" class="p-button-danger p-button-text" aria-label="إزالة العامل من التوزيع" title="إزالة العامل من التوزيع" (click)="removeWorker(i)" [disabled]="isRecordReadOnly"></button>
+        <div
+          class="production-page__wide production-page__snapshot"
+          *ngIf="selectedStage() as stage"
+        >
+          سيُحفظ Snapshot لسعر المرحلة {{ stage.piecePrice }} وطريقة احتساب
+          التكلفة {{ stage.compensationMode }} عند إنشاء المسودة.
+        </div>
+        <label
+          >تاريخ السجل <input type="date" formControlName="productionDate"
+        /></label>
+        <label
+          >الكمية المنتجة
+          <input type="number" formControlName="producedQuantity"
+        /></label>
+        <label
+          >المقبول <input type="number" formControlName="acceptedQuantity"
+        /></label>
+        <label
+          >المرفوض <input type="number" formControlName="rejectedQuantity"
+        /></label>
+        <label class="production-page__wide"
+          >ملاحظات <input pInputText formControlName="notes"
+        /></label>
+        <section
+          class="production-page__wide production-page__allocations"
+          formArrayName="workers"
+        >
+          <div class="production-page__allocation-head">
+            <h3>العمال الفعليون في الدفعة</h3>
+            <button
+              pButton
+              type="button"
+              label="إضافة من التسكين الحالي"
+              class="p-button-outlined"
+              (click)="addWorker()"
+              [disabled]="!currentWorkers.length || isRecordReadOnly"
+            ></button>
+          </div>
+          <p>
+            الكمية تُحفظ مرة واحدة للدفعة. أضف فقط العمال المسكنين حاليًا لهذه
+            المرحلة؛ حساب الاستحقاق النهائي يأتي من الخادم والإعدادات الفعلية.
+          </p>
+          <div
+            *ngFor="let worker of workers.controls; let i = index"
+            [formGroupName]="i"
+            class="production-page__worker"
+          >
+            <select formControlName="workerId">
+              <option value="">اختر العامل من التسكين الحالي</option>
+              <option
+                *ngFor="
+                  let option of recordingWorkers;
+                  trackBy: trackByWorkerId
+                "
+                [value]="option.workerId"
+                [disabled]="!canSelectWorker(option.workerId, i)"
+              >
+                {{ option.employeeCode }} — {{ option.fullName }}
+              </option>
+            </select>
+            <input
+              *ngIf="selectedStage()?.compensationMode === 'SharedPercentage'"
+              type="number"
+              placeholder="النسبة %"
+              formControlName="percentage"
+            /><input
+              *ngIf="selectedStage()?.compensationMode === 'FixedAmount'"
+              type="number"
+              placeholder="قيمة ثابتة"
+              formControlName="fixedAmount"
+            /><span
+              *ngIf="selectedStage()?.compensationMode === 'FullRatePerWorker'"
+              >سعر كامل لكل عامل</span
+            ><button
+              pButton
+              type="button"
+              icon="pi pi-times"
+              class="p-button-danger p-button-text"
+              aria-label="إزالة العامل من التوزيع"
+              title="إزالة العامل من التوزيع"
+              (click)="removeWorker(i)"
+              [disabled]="isRecordReadOnly"
+            ></button>
           </div>
         </section>
-        <ul class="production-page__validation-summary production-page__wide" *ngIf="recordMissingRequirements.length" role="status">
-          <li *ngFor="let message of recordMissingRequirements">{{ message }}</li>
+        <ul
+          class="production-page__validation-summary production-page__wide"
+          *ngIf="recordMissingRequirements.length"
+          role="status"
+        >
+          <li *ngFor="let message of recordMissingRequirements">
+            {{ message }}
+          </li>
         </ul>
-        <p class="production-page__preview-stale production-page__wide" *ngIf="previewIsStale" role="alert">{{ previewStaleMessage }}</p>
-        <div class="production-page__wide production-page__actions"><button pButton type="button" *ngIf="canRecord && !isRecordReadOnly" label="حساب معاينة" class="p-button-outlined" (click)="calculatePreview()" [disabled]="saving || restoringDraftContext || isDraftContextUnavailable"></button><button pButton type="submit" *ngIf="canRecord && !isRecordReadOnly" label="حفظ مسودة" [disabled]="saving || restoringDraftContext || isDraftContextUnavailable || !previewIsFresh"></button></div>
+        <p
+          class="production-page__preview-stale production-page__wide"
+          *ngIf="previewIsStale"
+          role="alert"
+        >
+          {{ previewStaleMessage }}
+        </p>
+        <div class="production-page__wide production-page__actions">
+          <button
+            pButton
+            type="button"
+            *ngIf="canRecord && !isRecordReadOnly"
+            label="حساب معاينة"
+            class="p-button-outlined"
+            (click)="calculatePreview()"
+            [disabled]="
+              saving || restoringDraftContext || isDraftContextUnavailable
+            "
+          ></button
+          ><button
+            pButton
+            type="submit"
+            *ngIf="canRecord && !isRecordReadOnly"
+            label="حفظ مسودة"
+            [disabled]="
+              saving ||
+              restoringDraftContext ||
+              isDraftContextUnavailable ||
+              !previewIsFresh
+            "
+          ></button>
+        </div>
       </form>
     </p-card>
-    <ng-template #recordingBlocked><p-card header="تسجيل دفعة إنتاج"><p class="production-page__context-note">يتاح تسجيل الإنتاج بعد اكتمال مسار المصنع والخط والمرحلتين.</p></p-card></ng-template>
+    <ng-template #recordingBlocked
+      ><p-card header="تسجيل دفعة إنتاج"
+        ><p class="production-page__context-note">
+          يتاح تسجيل الإنتاج بعد اكتمال مسار المصنع والخط والمرحلتين.
+        </p></p-card
+      ></ng-template
+    >
   </div>
 
   <p-card header="سجلات الإنتاج التاريخية" *ngIf="!loading">
-    <div class="production-page__filters"><select [(ngModel)]="recordOrderFilter" [ngModelOptions]="{standalone: true}"><option value="">كل الأوامر</option><option *ngFor="let order of orders" [value]="order.id">{{ order.orderNumber }}</option></select><input type="date" [(ngModel)]="recordDateFilter" [ngModelOptions]="{standalone: true}"><select [(ngModel)]="recordStatusFilter" [ngModelOptions]="{standalone: true}"><option value="">كل الحالات</option><option value="Draft">مسودة</option><option value="Approved">معتمد</option><option value="Cancelled">ملغي</option></select></div>
-    <p-table plpResponsiveTable="scroll" plpTablePagination [plpPaginationPageSize]="10" [plpPaginationResetKey]="recordOrderFilter + recordStatusFilter + recordDateFilter" [plpStickyActions]="true" [value]="filteredRecords()" dataKey="id" responsiveLayout="scroll"><ng-template pTemplate="header"><tr><th>الأمر</th><th>المسار Snapshot</th><th>المرحلة</th><th>التاريخ</th><th>الحالة</th><th>الإجراء</th></tr></ng-template><ng-template pTemplate="body" let-record><tr><td>{{ orderNumber(record) }}</td><td>{{ record.factoryName }} / {{ record.productionLineName }}</td><td>{{ record.stageName }}</td><td>{{ record.productionDate }}</td><td><plp-status-badge [status]="record.status === 'Approved' ? 'ready' : record.status === 'Cancelled' ? 'critical' : 'warning'" [label]="recordStatusLabel(record.status)"></plp-status-badge><small *ngIf="record.status === 'Cancelled'">{{ record.approvalCancellationReason }}<br>ألغاه: {{ record.approvalCancelledByUserId || '-' }} · {{ record.approvalCancelledAtUtc || '-' }}<br>إجمالي الاعتماد الأصلي: {{ record.totalWorkerEarnings }}</small></td><td><button pButton type="button" label="فتح" class="p-button-text" (click)="openRecord(record)" [disabled]="saving"></button><button pButton type="button" *ngIf="canApprove && record.status === 'Draft'" label="اعتماد" class="p-button-text" (click)="approve(record)" [disabled]="saving || !hasConsistentEntitlementTotal(record)"></button><small *ngIf="record.status === 'Draft' && !hasConsistentEntitlementTotal(record)">لا يمكن الاعتماد: إجمالي المستحقات غير متسق.</small><button pButton type="button" *ngIf="canApprove && record.status === 'Approved'" label="إلغاء اعتماد الإنتاج" class="p-button-text p-button-danger" (click)="openProductionApprovalCancellationDialog(record)" [disabled]="saving"></button></td></tr></ng-template></p-table>
+    <div class="production-page__filters">
+      <select
+        [(ngModel)]="recordOrderFilter"
+        [ngModelOptions]="{ standalone: true }"
+      >
+        <option value="">كل الأوامر</option>
+        <option *ngFor="let order of orders" [value]="order.id">
+          {{ order.orderNumber }}
+        </option></select
+      ><input
+        type="date"
+        [(ngModel)]="recordDateFilter"
+        [ngModelOptions]="{ standalone: true }"
+      /><select
+        [(ngModel)]="recordStatusFilter"
+        [ngModelOptions]="{ standalone: true }"
+      >
+        <option value="">كل الحالات</option>
+        <option value="Draft">مسودة</option>
+        <option value="Approved">معتمد</option>
+        <option value="Cancelled">ملغي</option>
+      </select>
+    </div>
+    <p-table
+      plpResponsiveTable="scroll"
+      plpTablePagination
+      [plpPaginationPageSize]="10"
+      [plpPaginationResetKey]="
+        recordOrderFilter + recordStatusFilter + recordDateFilter
+      "
+      [plpStickyActions]="true"
+      [value]="filteredRecords()"
+      dataKey="id"
+      responsiveLayout="scroll"
+      ><ng-template pTemplate="header"
+        ><tr>
+          <th>الأمر</th>
+          <th>المسار Snapshot</th>
+          <th>المرحلة</th>
+          <th>التاريخ</th>
+          <th>الحالة</th>
+          <th>الإجراء</th>
+        </tr></ng-template
+      ><ng-template pTemplate="body" let-record
+        ><tr>
+          <td>{{ orderNumber(record) }}</td>
+          <td>{{ record.factoryName }} / {{ record.productionLineName }}</td>
+          <td>{{ record.stageName }}</td>
+          <td>{{ record.productionDate }}</td>
+          <td>
+            <plp-status-badge
+              [status]="
+                record.status === 'Approved'
+                  ? 'ready'
+                  : record.status === 'Cancelled'
+                    ? 'critical'
+                    : 'warning'
+              "
+              [label]="recordStatusLabel(record.status)"
+            ></plp-status-badge
+            ><small *ngIf="record.status === 'Cancelled'"
+              >{{ record.approvalCancellationReason }}<br />ألغاه:
+              {{ record.approvalCancelledByUserId || "-" }} ·
+              {{ record.approvalCancelledAtUtc || "-" }}<br />إجمالي الاعتماد
+              الأصلي: {{ record.totalWorkerEarnings }}</small
+            >
+          </td>
+          <td>
+            <button
+              pButton
+              type="button"
+              label="فتح"
+              class="p-button-text"
+              (click)="openRecord(record)"
+              [disabled]="saving"
+            ></button
+            ><button
+              pButton
+              type="button"
+              *ngIf="canApprove && record.status === 'Draft'"
+              label="اعتماد"
+              class="p-button-text"
+              (click)="approve(record)"
+              [disabled]="saving || !hasConsistentEntitlementTotal(record)"
+            ></button
+            ><small
+              *ngIf="
+                record.status === 'Draft' &&
+                !hasConsistentEntitlementTotal(record)
+              "
+              >لا يمكن الاعتماد: إجمالي المستحقات غير متسق.</small
+            ><button
+              pButton
+              type="button"
+              *ngIf="canApprove && record.status === 'Approved'"
+              label="إلغاء اعتماد الإنتاج"
+              class="p-button-text p-button-danger"
+              (click)="openProductionApprovalCancellationDialog(record)"
+              [disabled]="saving"
+            ></button>
+          </td></tr></ng-template
+    ></p-table>
   </p-card>
-  <p-card header="معاينة الحساب الحالية من الخادم" *ngIf="preview && previewIsFresh" styleClass="production-page__preview"><div class="production-page__metrics"><span>المصنع/الخط: <strong>{{ preview.factoryName }} / {{ preview.productionLineName }}</strong></span><span>إنتاج الدفعة: <strong>{{ preview.producedQuantity }}</strong></span><span>المقبول: <strong>{{ preview.acceptedQuantity }}</strong></span><span>إجمالي المستحقات: <strong>{{ preview.totalWorkerEarnings }}</strong></span></div><div *ngFor="let worker of preview.workers"><strong>{{ worker.workerCode }} — {{ worker.workerName }}</strong> | مكافئ {{ worker.equivalentQuantity }} | مستحق {{ worker.calculatedEarning }}</div></p-card>
-  <p-card header="السجلات اليومية المعتمدة" *ngIf="!loading"><p-table plpResponsiveTable="scroll" plpTablePagination [plpPaginationPageSize]="10" [plpPaginationResetKey]="report.length" [value]="report" responsiveLayout="scroll"><ng-template pTemplate="header"><tr><th>الأمر</th><th>المرحلة</th><th>الإنتاج الفعلي</th><th>المقبول</th><th>التكلفة</th></tr></ng-template><ng-template pTemplate="body" let-row><tr><td>{{ row.orderNumber }}</td><td>{{ row.stageName }}</td><td>{{ row.producedQuantity }}</td><td>{{ row.acceptedQuantity }}</td><td>{{ row.stageCost }}</td></tr></ng-template></p-table></p-card>
+  <p-card
+    header="معاينة الحساب الحالية من الخادم"
+    *ngIf="preview && previewIsFresh"
+    styleClass="production-page__preview"
+    ><div class="production-page__metrics">
+      <span
+        >المصنع/الخط:
+        <strong
+          >{{ preview.factoryName }} / {{ preview.productionLineName }}</strong
+        ></span
+      ><span
+        >إنتاج الدفعة: <strong>{{ preview.producedQuantity }}</strong></span
+      ><span
+        >المقبول: <strong>{{ preview.acceptedQuantity }}</strong></span
+      ><span
+        >إجمالي المستحقات:
+        <strong>{{ preview.totalWorkerEarnings }}</strong></span
+      >
+    </div>
+    <div *ngFor="let worker of preview.workers">
+      <strong>{{ worker.workerCode }} — {{ worker.workerName }}</strong> | مكافئ
+      {{ worker.equivalentQuantity }} | مستحق {{ worker.calculatedEarning }}
+    </div></p-card
+  >
+  <p-card header="السجلات اليومية المعتمدة" *ngIf="!loading"
+    ><p-table
+      plpResponsiveTable="scroll"
+      plpTablePagination
+      [plpPaginationPageSize]="10"
+      [plpPaginationResetKey]="report.length"
+      [value]="report"
+      responsiveLayout="scroll"
+      ><ng-template pTemplate="header"
+        ><tr>
+          <th>الأمر</th>
+          <th>المرحلة</th>
+          <th>الإنتاج الفعلي</th>
+          <th>المقبول</th>
+          <th>التكلفة</th>
+        </tr></ng-template
+      ><ng-template pTemplate="body" let-row
+        ><tr>
+          <td>{{ row.orderNumber }}</td>
+          <td>{{ row.stageName }}</td>
+          <td>{{ row.producedQuantity }}</td>
+          <td>{{ row.acceptedQuantity }}</td>
+          <td>{{ row.stageCost }}</td>
+        </tr></ng-template
+      ></p-table
+    ></p-card
+  >
 
-  <plp-dialog [(visible)]="productionApprovalCancellationDialogVisible" title="إلغاء اعتماد الإنتاج" subtitle="سيبقى السجل ولقطاته المالية محفوظة للمراجعة، وسيُستبعد من إجماليات الإنتاج المعتمدة." size="compact" [saving]="saving" [saveDisabled]="!productionApprovalCancellationForm.controls.reason.value?.trim()" saveLabel="تأكيد إلغاء الاعتماد" (save)="confirmProductionApprovalCancellation()" (cancel)="closeProductionApprovalCancellationDialog()">
-    <form [formGroup]="productionApprovalCancellationForm" class="production-page__form">
+  <plp-dialog
+    [(visible)]="productionApprovalCancellationDialogVisible"
+    title="إلغاء اعتماد الإنتاج"
+    subtitle="سيبقى السجل ولقطاته المالية محفوظة للمراجعة، وسيُستبعد من إجماليات الإنتاج المعتمدة."
+    size="compact"
+    [saving]="saving"
+    [saveDisabled]="
+      !productionApprovalCancellationForm.controls.reason.value?.trim()
+    "
+    saveLabel="تأكيد إلغاء الاعتماد"
+    (save)="confirmProductionApprovalCancellation()"
+    (cancel)="closeProductionApprovalCancellationDialog()"
+  >
+    <form
+      [formGroup]="productionApprovalCancellationForm"
+      class="production-page__form"
+    >
       <ng-container *ngIf="pendingProductionApprovalCancellation as record">
-        <p class="production-page__context-note">الأمر: <strong>{{ orderNumber(record) }}</strong> · التاريخ: <strong>{{ record.productionDate }}</strong> · المرحلة: <strong>{{ record.stageName }}</strong></p>
-        <p class="production-page__context-note">إجمالي الاعتماد الحالي: <strong>{{ record.totalWorkerEarnings }}</strong></p>
+        <p class="production-page__context-note">
+          الأمر: <strong>{{ orderNumber(record) }}</strong> · التاريخ:
+          <strong>{{ record.productionDate }}</strong> · المرحلة:
+          <strong>{{ record.stageName }}</strong>
+        </p>
+        <p class="production-page__context-note">
+          إجمالي الاعتماد الحالي:
+          <strong>{{ record.totalWorkerEarnings }}</strong>
+        </p>
       </ng-container>
-      <label>سبب إلغاء اعتماد الإنتاج <input pInputText formControlName="reason" maxlength="500" placeholder="سبب واضح للمراجعة المالية والتشغيلية"></label>
-      <p class="production-page__context-note">لن يتم حذف السجل أو تعديل تسكينات العمال أو أي مصدر حضور.</p>
+      <label
+        >سبب إلغاء اعتماد الإنتاج
+        <input
+          pInputText
+          formControlName="reason"
+          maxlength="500"
+          placeholder="سبب واضح للمراجعة المالية والتشغيلية"
+      /></label>
+      <p class="production-page__context-note">
+        لن يتم حذف السجل أو تعديل تسكينات العمال أو أي مصدر حضور.
+      </p>
     </form>
   </plp-dialog>
 
-  <plp-dialog [(visible)]="unassignDialogVisible" title="إلغاء تسكين العامل" subtitle="سينتهي التسكين التشغيلي الآن، ولن تتغير أي دفعة إنتاج محفوظة." size="compact" [saving]="assignmentSaving" [saveDisabled]="!assignmentForm.controls.reason.value?.trim()" saveLabel="تأكيد إلغاء التسكين" (save)="confirmUnassign()" (cancel)="closeUnassignDialog()">
+  <plp-dialog
+    [(visible)]="unassignDialogVisible"
+    title="إلغاء تسكين العامل"
+    subtitle="سينتهي التسكين التشغيلي الآن، ولن تتغير أي دفعة إنتاج محفوظة."
+    size="compact"
+    [saving]="assignmentSaving"
+    [saveDisabled]="!assignmentForm.controls.reason.value?.trim()"
+    saveLabel="تأكيد إلغاء التسكين"
+    (save)="confirmUnassign()"
+    (cancel)="closeUnassignDialog()"
+  >
     <form [formGroup]="assignmentForm" class="production-page__form">
-<p class="production-page__worker-identity" *ngIf="pendingUnassignWorker"><plp-worker-avatar [fullName]="pendingUnassignWorker.fullName" [code]="pendingUnassignWorker.employeeCode" [photoReference]="pendingUnassignWorker.photoReference" size="md"></plp-worker-avatar><strong>{{ pendingUnassignWorker.employeeCode }} — {{ pendingUnassignWorker.fullName }}</strong></p>
-      <label>سبب الإلغاء <input pInputText formControlName="reason" maxlength="500" placeholder="مثال: انتهاء الوردية أو تغيير خطة التشغيل"></label>
+      <p class="production-page__worker-identity" *ngIf="pendingUnassignWorker">
+        <plp-worker-avatar
+          [fullName]="pendingUnassignWorker.fullName"
+          [code]="pendingUnassignWorker.employeeCode"
+          [photoReference]="pendingUnassignWorker.photoReference"
+          size="md"
+        ></plp-worker-avatar
+        ><strong
+          >{{ pendingUnassignWorker.employeeCode }} —
+          {{ pendingUnassignWorker.fullName }}</strong
+        >
+      </p>
+      <label
+        >سبب الإلغاء
+        <input
+          pInputText
+          formControlName="reason"
+          maxlength="500"
+          placeholder="مثال: انتهاء الوردية أو تغيير خطة التشغيل"
+      /></label>
       <ng-container *ngIf="assignmentDraftWarning">
-        <p class="production-page__context-note">{{ assignmentDraftWarning }}</p>
-        <label><input type="radio" [(ngModel)]="assignmentDraftUpdateMode" [ngModelOptions]="{standalone: true}" value="draft-too"> تحديث التسكين والدفعة الحالية</label>
-        <label><input type="radio" [(ngModel)]="assignmentDraftUpdateMode" [ngModelOptions]="{standalone: true}" value="assignment-only"> تحديث التسكين فقط</label>
+        <p class="production-page__context-note">
+          {{ assignmentDraftWarning }}
+        </p>
+        <label
+          ><input
+            type="radio"
+            [(ngModel)]="assignmentDraftUpdateMode"
+            [ngModelOptions]="{ standalone: true }"
+            value="draft-too"
+          />
+          تحديث التسكين والدفعة الحالية</label
+        >
+        <label
+          ><input
+            type="radio"
+            [(ngModel)]="assignmentDraftUpdateMode"
+            [ngModelOptions]="{ standalone: true }"
+            value="assignment-only"
+          />
+          تحديث التسكين فقط</label
+        >
       </ng-container>
-      <ul class="production-page__validation-summary" *ngIf="assignmentMissingRequirements.length" role="status"><li *ngFor="let message of assignmentMissingRequirements">{{ message }}</li></ul>
+      <ul
+        class="production-page__validation-summary"
+        *ngIf="assignmentMissingRequirements.length"
+        role="status"
+      >
+        <li *ngFor="let message of assignmentMissingRequirements">
+          {{ message }}
+        </li>
+      </ul>
     </form>
   </plp-dialog>
 
-  <plp-dialog [(visible)]="moveDialogVisible" title="نقل العامل" subtitle="اختر الوجهة بالترتيب. ينفذ الخادم النقل بصورة ذرية بعد التحقق من التسكين الحالي." size="wide" [saving]="assignmentSaving" [saveDisabled]="!moveSubStageId || !assignmentForm.controls.reason.value?.trim()" saveLabel="تأكيد نقل العامل" (save)="confirmMove()" (cancel)="closeMoveDialog()">
-    <form [formGroup]="assignmentForm" class="production-page__form">
-<p class="production-page__worker-identity" *ngIf="movingWorker"><plp-worker-avatar [fullName]="movingWorker.fullName" [code]="movingWorker.employeeCode" [photoReference]="movingWorker.photoReference" size="md"></plp-worker-avatar><strong>{{ movingWorker.employeeCode }} — {{ movingWorker.fullName }}</strong> — {{ movingWorker.assignmentType === 'Default' ? 'تسكين حالي' : 'نقل مؤقت ساري' }}</p>
-      <div class="production-page__move-hierarchy" aria-label="وجهة نقل العامل">
-        <label>المصنع
-          <select [ngModel]="moveFactoryId" (ngModelChange)="selectMoveFactory($event)" [ngModelOptions]="{standalone: true}"><option value="">اختر المصنع</option><option *ngFor="let factory of factories; trackBy: trackById" [value]="factory.id">{{ factory.code }} — {{ factory.name }}</option></select>
-        </label>
-        <label>خط الإنتاج
-          <select [ngModel]="moveProductionLineId" (ngModelChange)="selectMoveProductionLine($event)" [ngModelOptions]="{standalone: true}" [disabled]="!moveFactoryId || loadingMoveLines"><option value="">{{ loadingMoveLines ? 'جارٍ تحميل الخطوط…' : 'اختر خط الإنتاج' }}</option><option *ngFor="let line of moveLines; trackBy: trackById" [value]="line.id">{{ line.lineCode || '-' }} — {{ line.name }}</option></select>
-        </label>
-        <label>المرحلة الرئيسية
-          <select [ngModel]="moveMainStageId" (ngModelChange)="selectMoveMainStage($event)" [ngModelOptions]="{standalone: true}" [disabled]="!moveProductionLineId || loadingMoveMainStages"><option value="">{{ loadingMoveMainStages ? 'جارٍ تحميل المراحل…' : 'اختر المرحلة الرئيسية' }}</option><option *ngFor="let stage of moveMainStages; trackBy: trackById" [value]="stage.id">{{ stage.sequenceOrder }} — {{ stage.name }}</option></select>
-        </label>
-        <label>المرحلة الفرعية
-          <select [(ngModel)]="moveSubStageId" [ngModelOptions]="{standalone: true}" [disabled]="!moveMainStageId || loadingMoveSubStages"><option value="">{{ loadingMoveSubStages ? 'جارٍ تحميل المراحل…' : 'اختر المرحلة الفرعية' }}</option><option *ngFor="let stage of moveSubStages; trackBy: trackById" [value]="stage.id">{{ stage.code }} — {{ stage.name }}</option></select>
-        </label>
-      </div>
-      <label>وقت السريان <input type="datetime-local" formControlName="startAtLocal" [readonly]="movingWorker?.assignmentType === 'Default'"></label>
-      <label *ngIf="movingWorker?.assignmentType !== 'Default'">ينتهي النقل البديل عند <input type="datetime-local" formControlName="endAtLocal"></label>
-      <label>سبب النقل <input pInputText formControlName="reason" maxlength="500" placeholder="سبب النقل (إلزامي)"></label>
-      <ng-container *ngIf="assignmentDraftWarning">
-        <p class="production-page__context-note">{{ assignmentDraftWarning }}</p>
-        <label><input type="radio" [(ngModel)]="assignmentDraftUpdateMode" [ngModelOptions]="{standalone: true}" value="draft-too"> تحديث التسكين والدفعة الحالية</label>
-        <label><input type="radio" [(ngModel)]="assignmentDraftUpdateMode" [ngModelOptions]="{standalone: true}" value="assignment-only"> تحديث التسكين فقط</label>
-      </ng-container>
-      <ul class="production-page__validation-summary" *ngIf="assignmentMissingRequirements.length" role="status"><li *ngFor="let message of assignmentMissingRequirements">{{ message }}</li></ul>
-    </form>
-  </plp-dialog>
-
-  <plp-dialog [(visible)]="replaceDialogVisible" title="استبدال عامل حاضر" subtitle="الاستبدال مؤقت، ويحتفظ الخادم بسجل التسكين والسبب دون تعديل الدفعات التاريخية." size="wide" [saving]="assignmentSaving" [saveDisabled]="!assignmentForm.controls.workerId.value || !assignmentForm.controls.reason.value?.trim()" saveLabel="تأكيد الاستبدال" (save)="confirmReplacement()" (cancel)="closeReplaceDialog()">
-    <form [formGroup]="assignmentForm" class="production-page__form">
-<p class="production-page__worker-identity" *ngIf="replacingWorker"><plp-worker-avatar [fullName]="replacingWorker.fullName" [code]="replacingWorker.employeeCode" [photoReference]="replacingWorker.photoReference" size="md"></plp-worker-avatar><strong>استبدال: {{ replacingWorker.employeeCode }} — {{ replacingWorker.fullName }}</strong></p>
-      <div class="production-page__candidate-list production-page__wide">
-        <button type="button" *ngFor="let worker of assignmentCandidates; trackBy: trackByWorkerId" [class.is-selected]="assignmentForm.controls.workerId.value === worker.workerId" (click)="selectReplacementWorker(worker)">
-          <plp-worker-avatar [fullName]="worker.fullName" [code]="worker.employeeCode" [photoReference]="worker.photoReference" size="sm" [decorative]="true"></plp-worker-avatar><span>{{ worker.employeeCode }} — {{ worker.fullName }}</span>
-        </button>
-        <p class="production-page__context-note" *ngIf="!assignmentCandidates.length">لا يوجد عامل حاضر مؤهل للاستبدال في تاريخ الإنتاج المحدد.</p>
-      </div>
-      <label>من وقت <input type="datetime-local" formControlName="startAtLocal"></label>
-      <label>إلى وقت <input type="datetime-local" formControlName="endAtLocal"></label>
-      <label>سبب الاستبدال <input pInputText formControlName="reason" maxlength="500" placeholder="سبب الاستبدال (إلزامي)"></label>
-      <ng-container *ngIf="assignmentDraftWarning">
-        <p class="production-page__context-note">{{ assignmentDraftWarning }}</p>
-        <label><input type="radio" [(ngModel)]="assignmentDraftUpdateMode" [ngModelOptions]="{standalone: true}" value="draft-too"> تحديث التسكين والدفعة الحالية</label>
-        <label><input type="radio" [(ngModel)]="assignmentDraftUpdateMode" [ngModelOptions]="{standalone: true}" value="assignment-only"> تحديث التسكين فقط</label>
-      </ng-container>
-      <ul class="production-page__validation-summary" *ngIf="assignmentMissingRequirements.length" role="status"><li *ngFor="let message of assignmentMissingRequirements">{{ message }}</li></ul>
-    </form>
-  </plp-dialog>
-  <ng-template #skeleton><plp-loading-skeleton [lines]="6" [cardLike]="true"></plp-loading-skeleton></ng-template>
+  <ng-template #skeleton
+    ><plp-loading-skeleton [lines]="6" [cardLike]="true"></plp-loading-skeleton
+  ></ng-template>
 </section>

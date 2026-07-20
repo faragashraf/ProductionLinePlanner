@@ -25,7 +25,7 @@ describe('LineStaffingWorkspacePageComponent', () => {
 
   beforeEach(() => {
     masterData = jasmine.createSpyObj<ManufacturingMasterDataApiService>('ManufacturingMasterDataApiService', ['factories', 'departments', 'productionLinesForDepartment', 'models']);
-    assignments = jasmine.createSpyObj<AssignmentsApiService>('AssignmentsApiService', ['getLineStaffingPlan', 'getLineStaffingStageRefresh', 'getActiveLineStaffingWorkers', 'updateStageDefaultAssignments', 'removeDefaultAssignment', 'cancelTemporaryAssignment', 'createTemporaryAssignment', 'createReplacementAssignment', 'moveCurrentAssignment']);
+    assignments = jasmine.createSpyObj<AssignmentsApiService>('AssignmentsApiService', ['getLineStaffingPlan', 'getLineStaffingStageRefresh', 'getActiveLineStaffingWorkers', 'updateStageDefaultAssignments', 'removeDefaultAssignment']);
     masterData.factories.and.returnValue(of([{ id: factoryId, code: 'F1', name: 'المصنع', isActive: true }]));
     masterData.departments.and.returnValue(of([{ id: departmentId, factoryId, code: 'SEW', nameAr: 'الخياطة', isActive: true }]));
     masterData.productionLinesForDepartment.and.returnValue(of([{ id: lineId, factoryId, departmentId, name: 'خط الخياطة', sequenceOrder: 1, isActive: true }]));
@@ -35,7 +35,6 @@ describe('LineStaffingWorkspacePageComponent', () => {
     assignments.getActiveLineStaffingWorkers.and.returnValue(of(plan().workers));
     assignments.updateStageDefaultAssignments.and.returnValue(of({ subStageId: defaultStageId, addedWorkersCount: 1, removedWorkersCount: 0, activeWorkerIds: ['worker-one', 'worker-two'] }));
     assignments.removeDefaultAssignment.and.returnValue(of({} as any));
-    assignments.cancelTemporaryAssignment.and.returnValue(of({} as any));
     routeFragments = new BehaviorSubject<string | null>(null);
     route = { fragment: routeFragments.asObservable() } as ActivatedRoute;
     router = jasmine.createSpyObj<Router>('Router', ['navigate']);
@@ -121,12 +120,11 @@ describe('LineStaffingWorkspacePageComponent', () => {
     expect(component.selectedStage).toBeNull();
   });
 
-  it('keeps the staffing form date-free and exposes time-only assignment controls', () => {
-    expect('referenceDate' in component).toBeFalse();
-    expect(component.assignmentForm.contains('startTime')).toBeTrue();
-    expect(component.assignmentForm.contains('endTime')).toBeTrue();
-    expect(component.assignmentForm.contains('startAtLocal')).toBeFalse();
-    expect(component.assignmentForm.contains('endAtLocal')).toBeFalse();
+  it('keeps the staffing form permanent-only with no temporary fields or mode selector state', () => {
+    expect(component.assignmentForm.contains('workerId')).toBeTrue();
+    expect(component.assignmentForm.contains('startTime')).toBeFalse();
+    expect(component.assignmentForm.contains('endTime')).toBeFalse();
+    expect(component.assignmentForm.contains('temporaryParticipationMode')).toBeFalse();
   });
 
   it('loads every active staffing worker immediately without an attendance prerequisite and filters stages in place', () => {
@@ -185,29 +183,13 @@ describe('LineStaffingWorkspacePageComponent', () => {
     expect(assignments.getActiveLineStaffingWorkers).toHaveBeenCalledTimes(workerDirectoryRequests);
   });
 
-  it('routes every scoped assignment action through the one shared sheet state and retains worker context', () => {
+  it('exposes only permanent assignment and permanent cancellation through the shared sheet', () => {
     initialize(component);
     const assignedWorker = component.plan!.workers[0];
 
     component.openDefaultAssignment();
     expect(component.assignmentDialogVisible).toBeTrue();
     expect(component.assignmentDialogMode).toBe('default');
-    component.closeAssignmentDialog();
-
-    component.openTemporaryAssignment();
-    expect(component.assignmentDialogVisible).toBeTrue();
-    expect(component.assignmentDialogMode).toBe('temporary');
-    component.closeAssignmentDialog();
-
-    component.openReplacement(assignedWorker);
-    expect(component.assignmentDialogVisible).toBeTrue();
-    expect(component.assignmentDialogMode).toBe('replacement');
-    expect(component.assignmentDialogSubtitle).toContain(assignedWorker.employeeCode);
-    component.closeAssignmentDialog();
-
-    component.openMove(assignedWorker);
-    expect(component.assignmentDialogVisible).toBeTrue();
-    expect(component.assignmentDialogMode).toBe('move');
     component.closeAssignmentDialog();
 
     component.openCancellation(assignedWorker);
@@ -288,37 +270,6 @@ describe('LineStaffingWorkspacePageComponent', () => {
 
     component.toggleDefaultWorker(component.availableWorkers[1], false);
     expect(component.assignmentMissingRequirements).not.toContain('سبب تغيير التعيين الدائم مطلوب');
-  });
-
-  it('keeps temporary assignment in the shared form state until reason and a valid period are supplied', () => {
-    initialize(component);
-    component.openTemporaryAssignment();
-    component.selectDialogWorker(component.availableWorkers[1]);
-
-    expect(component.assignmentDialogVisible).toBeTrue();
-    expect(component.assignmentMissingRequirements).toContain('سبب التسكين المؤقت مطلوب');
-    expect(component.assignmentMissingRequirements).toContain('وقت النهاية مطلوب');
-
-    component.assignmentForm.controls.startTime.setValue(null);
-    expect(component.assignmentMissingRequirements).toContain('وقت البداية مطلوب');
-
-    component.assignmentForm.patchValue({
-      startTime: new Date(2026, 6, 16, 8, 0),
-      endTime: new Date(2026, 6, 16, 12, 0),
-      reason: 'تغطية مؤقتة'
-    });
-
-    expect(component.assignmentMissingRequirements).toEqual([]);
-    expect(component.assignmentDialogVisible).toBeTrue();
-  });
-
-  it('shows temporary-assignment candidates before an end date is entered instead of silently filtering them away', () => {
-    initialize(component);
-    component.openTemporaryAssignment();
-
-    expect(assignments.getActiveLineStaffingWorkers).toHaveBeenCalledWith(component.staffingReferenceDate);
-    expect(component.availableWorkers.map(worker => worker.employeeCode)).toEqual(['100', '101']);
-    expect(component.assignmentForm.controls.endTime.value).toBeNull();
   });
 
   it('navigates both directions through the current filter and problem stages without reloading the plan', () => {
@@ -709,7 +660,7 @@ describe('LineStaffingWorkspacePageComponent', () => {
     expect(assignments.getLineStaffingStageRefresh).not.toHaveBeenCalled();
   });
 
-  it('keeps a worker assigned to another stage selectable as an additional participation', () => {
+  it('keeps a worker assigned to another stage selectable for permanent assignment', () => {
     initialize(component);
     component.selectStage(temporaryStageId);
     component.openDefaultAssignment();
@@ -719,15 +670,13 @@ describe('LineStaffingWorkspacePageComponent', () => {
     expect(component.workerParticipationStageNames(worker)).toEqual(['تجميع']);
   });
 
-  it('keeps worker search and selection behavior unchanged with structured participation metadata', () => {
+  it('keeps permanent worker search behavior without opening a non-permanent dialog', () => {
     initialize(component);
-    component.openTemporaryAssignment();
+    component.openDefaultAssignment();
     component.workerSearch = '101';
 
     expect(component.availableWorkers.map(worker => worker.workerId)).toEqual(['worker-two']);
-    component.selectDialogWorker(component.availableWorkers[0]);
-    expect(component.selectedDialogWorker?.workerId).toBe('worker-two');
-    expect(component.workerParticipationStageNames(component.selectedDialogWorker!)).toEqual([]);
+    expect(component.assignmentDialogMode).toBe('default');
   });
 
   it('uses only the independently scrollable stage list for explicit next-stage navigation without moving focus', fakeAsync(() => {
@@ -773,7 +722,7 @@ describe('LineStaffingWorkspacePageComponent', () => {
     expect(selectedPanel.scrollTop).toBe(74);
   }));
 
-  it('labels provisional SharedPercentage setup as a temporary stage-cost configuration', () => {
+  it('labels provisional SharedPercentage setup as a stage-cost configuration', () => {
     initialize(component);
 
     expect(component.compensationStatusLabel(component.selectedStage!)).toBe('إعداد تكلفة المرحلة مؤقت');

@@ -55,12 +55,10 @@ describe('ProductionCostRecordingPageComponent', () => {
     api.calculatePreview.and.returnValue(of(draft())); api.createDraft.and.returnValue(of(draft())); api.updateDraft.and.returnValue(of(draft())); api.cancelProductionApproval.and.returnValue(of(draft('Cancelled')));
     masterData = jasmine.createSpyObj('ManufacturingMasterDataApiService', ['factories', 'productionLines', 'allProductionLines', 'mainStagesForLine', 'allMainStages', 'subStagesForMainStage', 'allSubStages']);
     masterData.factories.and.returnValue(of([])); masterData.productionLines.and.returnValue(of([])); masterData.allProductionLines.and.returnValue(of([])); masterData.mainStagesForLine.and.returnValue(of([])); masterData.allMainStages.and.returnValue(of([])); masterData.subStagesForMainStage.and.returnValue(of([])); masterData.allSubStages.and.returnValue(of([]));
-    assignments = jasmine.createSpyObj('AssignmentsApiService', ['getSubStageWorkerContext', 'createDefaultAssignment', 'createTemporaryAssignment', 'createReplacementAssignment', 'removeDefaultAssignment', 'cancelTemporaryAssignment', 'moveCurrentAssignment']);
+    assignments = jasmine.createSpyObj('AssignmentsApiService', ['getSubStageWorkerContext', 'createDefaultAssignment', 'removeDefaultAssignment']);
     assignments.getSubStageWorkerContext.and.returnValue(of({ subStageId: 'sub-1', currentWorkers: [], presentWorkers: [], availableWorkers: [], unavailableWorkersCount: 0 }));
     assignments.createDefaultAssignment.and.returnValue(of({ assignmentId: 'a-1', workerId: 'worker-1', assignmentType: 'Default', subStageId: 'sub-1', fromSubStageId: null, toSubStageId: null, startsAtUtc: null, endsAtUtc: null, status: 'Active', replacementForWorkerId: null }));
     assignments.removeDefaultAssignment.and.returnValue(of({ assignmentId: 'a-1', workerId: 'worker-1', assignmentType: 'Default', subStageId: 'sub-1', fromSubStageId: null, toSubStageId: null, startsAtUtc: null, endsAtUtc: null, status: 'Cancelled', replacementForWorkerId: null }));
-    assignments.cancelTemporaryAssignment.and.returnValue(of({ assignmentId: 'a-1', workerId: 'worker-1', assignmentType: 'Temporary', subStageId: null, fromSubStageId: 'sub-1', toSubStageId: 'sub-2', startsAtUtc: null, endsAtUtc: null, status: 'Cancelled', replacementForWorkerId: null }));
-    assignments.moveCurrentAssignment.and.returnValue(of({ assignmentId: 'a-2', workerId: 'worker-1', assignmentType: 'Default', subStageId: 'sub-2', fromSubStageId: 'sub-1', toSubStageId: 'sub-2', startsAtUtc: null, endsAtUtc: null, status: 'Active', replacementForWorkerId: null }));
     attendance = jasmine.createSpyObj('AttendanceApiService', ['getToday', 'syncToday', 'getForProductionDate', 'syncForProductionDate']);
     attendance.getToday.and.returnValue(of({ date: '2026-07-15T00:00:00Z', items: [] }));
     attendance.syncToday.and.returnValue(of(syncResult));
@@ -462,30 +460,26 @@ describe('ProductionCostRecordingPageComponent', () => {
   it('edits a current assignment inside the workflow and respects assignment permission', () => {
     component.selectedSubStageId = 'sub-1';
     component.workerContext = { subStageId: 'sub-1', currentWorkers: [], presentWorkers: [{ workerId: 'worker-1', employeeCode: 'W1', fullName: 'Worker', attendanceStatus: 'Present', attendanceTimeUtc: null, assignmentType: null, effectiveSubStageId: null, isAvailable: true }], availableWorkers: [], unavailableWorkersCount: 0 };
-    component.assignmentForm.patchValue({ workerId: 'worker-1', mode: 'default' });
+    component.assignmentForm.patchValue({ workerId: 'worker-1' });
     component.applyAssignment();
     expect(assignments.createDefaultAssignment).toHaveBeenCalledWith({ workerId: 'worker-1', subStageId: 'sub-1' });
     permissions.values = ['assignments.view'];
-    component.assignmentForm.patchValue({ workerId: 'worker-1', mode: 'default' });
+    component.assignmentForm.patchValue({ workerId: 'worker-1' });
     component.applyAssignment();
     expect(assignments.createDefaultAssignment).toHaveBeenCalledTimes(1);
   });
 
-  it('blocks an invalid temporary assignment locally and shows its Arabic missing-field reasons', () => {
-    component.selectedSubStageId = 'sub-1';
+  it('keeps only permanent assignments in the active worker list', () => {
     component.workerContext = {
       subStageId: 'sub-1',
-      currentWorkers: [],
-      presentWorkers: [{ workerId: 'worker-1', employeeCode: 'W1', fullName: 'Worker', attendanceStatus: 'Present', attendanceTimeUtc: null, assignmentType: 'Default', effectiveSubStageId: 'sub-2', isAvailable: false }],
-      availableWorkers: [], unavailableWorkersCount: 0
+      currentWorkers: [
+        { workerId: 'permanent', employeeCode: 'P1', fullName: 'Permanent', attendanceStatus: 'Present', attendanceTimeUtc: null, assignmentType: 'Default', effectiveSubStageId: 'sub-1', isAvailable: true },
+        { workerId: 'historical-temporary', employeeCode: 'T1', fullName: 'Historical', attendanceStatus: 'Present', attendanceTimeUtc: null, assignmentType: 'Temporary', effectiveSubStageId: 'sub-1', isAvailable: true }
+      ],
+      presentWorkers: [], availableWorkers: [], unavailableWorkersCount: 0
     };
-    component.assignmentForm.patchValue({ workerId: 'worker-1', mode: 'temporary', reason: '', startAtLocal: '', endAtLocal: '' });
 
-    component.applyAssignment();
-
-    expect(assignments.createTemporaryAssignment).not.toHaveBeenCalled();
-    expect(component.error).toContain('السبب مطلوب');
-    expect(component.error).toContain('وقت السريان مطلوب');
+    expect(component.currentWorkers.map(worker => worker.workerId)).toEqual(['permanent']);
   });
 
   it('keeps an absent assigned worker visible but excludes them from production participants', () => {
@@ -624,7 +618,7 @@ describe('ProductionCostRecordingPageComponent', () => {
     expect(component.draftContextUnavailable).toContain('تعذر استعادة مسار');
   });
 
-  it('unassigns and moves a current worker from the same workflow with mandatory reasons', () => {
+  it('unassigns a permanent current worker with a mandatory reason', () => {
     component.selectedFactoryId = 'factory-1'; component.selectedSubStageId = 'sub-1';
     const worker = { workerId: 'worker-1', employeeCode: 'W1', fullName: 'Worker', attendanceStatus: 'Present' as const, attendanceTimeUtc: null, assignmentId: 'assignment-1', assignmentType: 'Default' as const, effectiveSubStageId: 'sub-1', isAvailable: true };
     component.openUnassignDialog(worker);
@@ -632,11 +626,6 @@ describe('ProductionCostRecordingPageComponent', () => {
     component.confirmUnassign();
     expect(assignments.removeDefaultAssignment).toHaveBeenCalledWith('worker-1', 'sub-1', 'انتهاء الوردية');
 
-    component.openMoveDialog(worker);
-    component.moveSubStageId = 'sub-2';
-    component.assignmentForm.patchValue({ reason: 'نقل للتشغيل', startAtLocal: '2026-07-14T12:00' });
-    component.confirmMove();
-    expect(assignments.moveCurrentAssignment).toHaveBeenCalledWith(jasmine.objectContaining({ workerId: 'worker-1', sourceAssignmentId: 'assignment-1', fromSubStageId: 'sub-1', toSubStageId: 'sub-2', reason: 'نقل للتشغيل' }));
   });
 
   it('does not send an invalid draft and explains the missing Arabic requirements', () => {
@@ -647,7 +636,7 @@ describe('ProductionCostRecordingPageComponent', () => {
     expect(component.error).toContain('الكمية المنتجة مطلوبة');
   });
 
-  it('invalidates a current preview when quantity, worker replacement, or unassignment changes the unsaved batch', () => {
+  it('invalidates a current preview when quantity or permanent unassignment changes the unsaved batch', () => {
     configureValidDraft(component);
     const currentPreview = { ...draft(), workers: [{ workerId: 'worker-1', workerCode: 'W1', workerName: 'Worker 1', percentage: 100, equivalentQuantity: 10, calculatedEarning: 10 }] };
     api.calculatePreview.and.returnValue(of(currentPreview));
@@ -661,7 +650,7 @@ describe('ProductionCostRecordingPageComponent', () => {
     expect(component.previewIsStale).toBeTrue();
     expect(component.previewStaleMessage).toBe('تم تغيير بيانات الدفعة. أعد حساب المعاينة.');
 
-    // Restore a fresh preview then exercise the same lifecycle through a replacement.
+    // Restore a fresh preview then exercise the same lifecycle through a removed participant.
     component.recordForm.controls.producedQuantity.setValue(10);
     component.calculatePreview();
     (component as any).assignmentDraftUpdateMode = 'draft-too';

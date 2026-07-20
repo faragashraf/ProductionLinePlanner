@@ -188,22 +188,7 @@ describe('AssignmentsApiService', () => {
     expect(status).toBe('Default');
   });
 
-  it('posts an atomic move request with the source assignment concurrency guard', () => {
-    service.moveCurrentAssignment({
-      workerId,
-      sourceAssignmentId: '4d9e766d-f18b-4cc4-9d1a-fad375d5296f',
-      fromSubStageId: subStageId,
-      toSubStageId: 'df19ab2b-49df-445d-a516-4d5d070d8de2',
-      effectiveAtUtc: '2026-07-14T09:00:00.000Z',
-      reason: 'نقل تشغيل'
-    }).subscribe();
-
-    const request = http.expectOne(httpRequest => httpRequest.method === 'POST' && httpRequest.url.endsWith('/api/assignments/move'));
-    expect(request.request.body).toEqual(jasmine.objectContaining({ sourceAssignmentId: '4d9e766d-f18b-4cc4-9d1a-fad375d5296f', reason: 'نقل تشغيل' }));
-    request.flush({ success: true, data: { assignmentId: 'assignment-2', workerId, assignmentType: 'Default', subStageId: 'df19ab2b-49df-445d-a516-4d5d070d8de2' } });
-  });
-
-  it('loads one attendance-free line staffing plan for the selected factory, line, model and reference date', () => {
+  it('loads one attendance-free permanent line staffing plan for the selected factory, line and model', () => {
     let planName = '';
     service.getLineStaffingPlan(factoryId, productionLineId, productModelId, '2026-07-13').subscribe(plan => planName = plan.productModelName);
 
@@ -213,7 +198,8 @@ describe('AssignmentsApiService', () => {
       httpRequest.urlWithParams.includes(`factoryId=${factoryId}`) &&
       httpRequest.urlWithParams.includes(`productionLineId=${productionLineId}`) &&
       httpRequest.urlWithParams.includes(`productModelId=${productModelId}`) &&
-      httpRequest.urlWithParams.includes('staffingReferenceDate=2026-07-13')
+      httpRequest.urlWithParams.includes('staffingReferenceDate=2026-07-13') &&
+      !httpRequest.urlWithParams.includes('asOfUtc=')
     );
     request.flush({
       success: true,
@@ -230,14 +216,15 @@ describe('AssignmentsApiService', () => {
     expect(planName).toBe('جرومان');
   });
 
-  it('loads the shared active staffing worker source without attendance or a production date', () => {
+  it('loads the shared active permanent staffing worker source without attendance', () => {
     let workers = 0;
     service.getActiveLineStaffingWorkers('2026-07-13').subscribe(items => workers = items.length);
 
     const request = http.expectOne(httpRequest =>
       httpRequest.method === 'GET' &&
       httpRequest.urlWithParams.includes('/api/line-staffing/workers?') &&
-      httpRequest.urlWithParams.includes('staffingReferenceDate=2026-07-13')
+      httpRequest.urlWithParams.includes('staffingReferenceDate=2026-07-13') &&
+      !httpRequest.urlWithParams.includes('asOfUtc=')
     );
     request.flush({
       success: true,
