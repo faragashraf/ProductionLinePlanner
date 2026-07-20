@@ -13,6 +13,13 @@ public interface IProductModelService
         int pageSize = 50,
         CancellationToken cancellationToken = default);
 
+    Task<PagedResult<ProductModelSearchListItemDto>> GetModelSearchListAsync(
+        string? search,
+        bool? isActive = true,
+        int page = 1,
+        int pageSize = 50,
+        CancellationToken cancellationToken = default);
+
     Task<Result<ProductModelDto>> GetModelAsync(Guid modelId, CancellationToken cancellationToken = default);
 
     Task<Result<ProductModelDto>> CreateModelAsync(
@@ -21,7 +28,7 @@ public interface IProductModelService
         string? requestMeta = null,
         CancellationToken cancellationToken = default);
 
-    Task<Result<ProductModelDto>> UpdateModelAsync(
+    Task<Result<ProductModelSearchListItemDto>> UpdateModelAsync(
         Guid modelId,
         UpdateProductModelRequest request,
         Guid actorUserId,

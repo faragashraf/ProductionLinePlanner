@@ -39,7 +39,7 @@ class ActionHostComponent {
 @Component({
   standalone: true,
   imports: [PlpProductToolbarComponent],
-  template: `<plp-product-toolbar [searchValue]="query" (searchValueChange)="query = $event"></plp-product-toolbar>`
+  template: `<plp-product-toolbar [searchValue]="query" [clearEnabled]="true" (searchValueChange)="query = $event"></plp-product-toolbar>`
 })
 class ToolbarHostComponent {
   query = '';
@@ -353,6 +353,17 @@ describe('Product Experience Framework', () => {
     input.dispatchEvent(new Event('input'));
 
     expect(fixture.componentInstance.query).toBe('خط خياطة');
+  });
+
+  it('clears a populated toolbar search through its shared contract', () => {
+    const fixture = createComponent(ToolbarHostComponent);
+    fixture.componentInstance.query = 'مرحلة القص';
+    fixture.detectChanges();
+
+    const clearButton = fixture.nativeElement.querySelector('.plp-product-toolbar__clear') as HTMLButtonElement;
+    clearButton.click();
+
+    expect(fixture.componentInstance.query).toBe('');
   });
 
   it('builds a standard PrimeNG confirmation request through the wrapper service', () => {

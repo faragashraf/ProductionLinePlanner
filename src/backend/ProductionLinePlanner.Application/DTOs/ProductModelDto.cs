@@ -10,3 +10,20 @@ public sealed class ProductModelDto
     public DateTime CreatedAtUtc { get; init; }
     public DateTime UpdatedAtUtc { get; init; }
 }
+
+public sealed class ProductModelSearchListItemDto
+{
+    public Guid Id { get; init; }
+    public string Code { get; init; } = string.Empty;
+    public string Name { get; init; } = string.Empty;
+    public string? Description { get; init; }
+    public bool IsActive { get; init; }
+    public ProductModelStageSearchDto[] Stages { get; init; } = Array.Empty<ProductModelStageSearchDto>();
+}
+
+public sealed class ProductModelStageSearchDto
+{
+    public Guid SubStageId { get; init; }
+    public string Code { get; init; } = string.Empty;
+    public string Name { get; init; } = string.Empty;
+}

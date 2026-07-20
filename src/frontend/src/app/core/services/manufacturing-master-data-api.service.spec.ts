@@ -14,7 +14,7 @@ describe('ManufacturingMasterDataApiService', () => {
 
   afterEach(() => http.verify());
 
-  it('unwraps paginated stage, line, and model responses including inactive models', () => {
+  it('unwraps paginated stage, line, and general model responses without search-stage payloads', () => {
     let values: unknown[][] = [];
     service.mainStages().subscribe(value => values.push(value)); service.subStages().subscribe(value => values.push(value)); service.productionLines().subscribe(value => values.push(value)); service.models().subscribe(value => values.push(value));
     const page = (items: unknown[]) => ({ success: true, data: { items, totalCount: items.length, pageNumber: 1, pageSize: 50 } });
@@ -23,6 +23,21 @@ describe('ManufacturingMasterDataApiService', () => {
     http.expectOne(request => request.url.endsWith('/api/production-lines')).flush(page([{ id: 'line-1' }]));
     http.expectOne(request => request.url.endsWith('/api/product-models?includeInactive=true')).flush(page([{ id: 'model-1', isActive: false }]));
     expect(values).toEqual([[{ id: 'main-1' }], [{ id: 'sub-1', defaultOrder: 4, sequenceOrder: 4 }], [{ id: 'line-1' }], [{ id: 'model-1', isActive: false }]]);
+  });
+
+  it('keeps management-model search pagination metadata and sends the opt-in stage summary request', () => {
+    let page: unknown;
+    service.modelSearchList('مرحلة الخياطة', 3, 20).subscribe(value => page = value);
+
+    const request = http.expectOne(item => item.method === 'GET' && item.urlWithParams.includes('/api/product-models?'));
+    expect(request.request.urlWithParams).toContain('includeInactive=true');
+    expect(request.request.urlWithParams).toContain('includeStageSearchSummaries=true');
+    expect(request.request.urlWithParams).toContain('search=%D9%85%D8%B1%D8%AD%D9%84%D8%A9%20%D8%A7%D9%84%D8%AE%D9%8A%D8%A7%D8%B7%D8%A9');
+    expect(request.request.urlWithParams).toContain('page=3');
+    expect(request.request.urlWithParams).toContain('pageSize=20');
+    request.flush({ success: true, data: { items: [{ id: 'model-51', code: 'M-51', name: 'موديل لاحق', isActive: true, stages: [{ subStageId: 'stage-1', code: 'SEW', name: 'الخياطة' }] }], totalCount: 51, pageNumber: 3, pageSize: 20 } });
+
+    expect(page).toEqual(jasmine.objectContaining({ totalCount: 51, pageNumber: 3, pageSize: 20 }));
   });
 
   it('loads active and inactive operational stages and maps DefaultOrder once at the API boundary', () => {

@@ -59,6 +59,50 @@ public sealed class ProductModelService(
         return PagedResult<ProductModelDto>.Success(items, page, pageSize, total);
     }
 
+    public async Task<PagedResult<ProductModelSearchListItemDto>> GetModelSearchListAsync(
+        string? search,
+        bool? isActive = true,
+        int page = 1,
+        int pageSize = 50,
+        CancellationToken cancellationToken = default)
+    {
+        if (page < 1 || pageSize < 1 || pageSize > 200)
+        {
+            return PagedResult<ProductModelSearchListItemDto>.Failure(new Error("ValidationError", "page and pageSize must be positive, pageSize max 200."));
+        }
+
+        var query = dbContext.ProductModels.AsNoTracking().AsQueryable();
+        if (isActive.HasValue)
+        {
+            query = query.Where(x => x.IsActive == isActive.Value);
+        }
+
+        var searchTerm = string.IsNullOrWhiteSpace(search) ? null : $"%{search.Trim().ToLower()}%";
+        if (searchTerm is not null)
+        {
+            query = query.Where(model =>
+                EF.Functions.Like(model.Code.ToLower(), searchTerm) ||
+                EF.Functions.Like(model.Name.ToLower(), searchTerm) ||
+                dbContext.ProductModelStages.Any(mapping =>
+                    mapping.ProductModelId == model.Id &&
+                    (EF.Functions.Like(mapping.SubStage!.Code.ToLower(), searchTerm) ||
+                     EF.Functions.Like(mapping.SubStage!.Name.ToLower(), searchTerm))));
+        }
+
+        var total = await query.CountAsync(cancellationToken);
+        var models = await query
+            .OrderBy(x => x.Code)
+            .ThenBy(x => x.Name)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToArrayAsync(cancellationToken);
+
+        var stagesByModelId = await GetStagesByModelIdAsync(models.Select(model => model.Id), cancellationToken);
+        var items = models.Select(model => ToSearchListItem(model, stagesByModelId.GetValueOrDefault(model.Id) ?? Array.Empty<ProductModelStageSearchDto>())).ToArray();
+
+        return PagedResult<ProductModelSearchListItemDto>.Success(items, page, pageSize, total);
+    }
+
     public async Task<Result<ProductModelDto>> GetModelAsync(Guid modelId, CancellationToken cancellationToken = default)
     {
         if (modelId == Guid.Empty)
@@ -143,7 +187,7 @@ public sealed class ProductModelService(
         });
     }
 
-    public async Task<Result<ProductModelDto>> UpdateModelAsync(
+    public async Task<Result<ProductModelSearchListItemDto>> UpdateModelAsync(
         Guid modelId,
         UpdateProductModelRequest request,
         Guid actorUserId,
@@ -152,35 +196,35 @@ public sealed class ProductModelService(
     {
         if (actorUserId == Guid.Empty)
         {
-            return Result<ProductModelDto>.Failure(new Error("Unauthorized", "User context is required."));
+            return Result<ProductModelSearchListItemDto>.Failure(new Error("Unauthorized", "User context is required."));
         }
 
         if (modelId == Guid.Empty)
         {
-            return Result<ProductModelDto>.Failure(new Error("ValidationError", "ModelId is required."));
+            return Result<ProductModelSearchListItemDto>.Failure(new Error("ValidationError", "ModelId is required."));
         }
 
         var entity = await dbContext.ProductModels.FirstOrDefaultAsync(x => x.Id == modelId, cancellationToken);
         if (entity is null)
         {
-            return Result<ProductModelDto>.Failure(new Error("NotFound", "Model not found."));
+            return Result<ProductModelSearchListItemDto>.Failure(new Error("NotFound", "Model not found."));
         }
 
         var normalizedCode = request.Code?.Trim();
         var normalizedName = request.Name?.Trim();
         if (request.Code is null && request.Name is null && request.Description is null && request.IsActive is null)
         {
-            return Result<ProductModelDto>.Failure(new Error("ValidationError", "No updatable fields were provided."));
+            return Result<ProductModelSearchListItemDto>.Failure(new Error("ValidationError", "No updatable fields were provided."));
         }
 
         if (normalizedCode is not null && string.IsNullOrWhiteSpace(normalizedCode))
         {
-            return Result<ProductModelDto>.Failure(new Error("ValidationError", "Code cannot be empty."));
+            return Result<ProductModelSearchListItemDto>.Failure(new Error("ValidationError", "Code cannot be empty."));
         }
 
         if (normalizedName is not null && string.IsNullOrWhiteSpace(normalizedName))
         {
-            return Result<ProductModelDto>.Failure(new Error("ValidationError", "Name cannot be empty."));
+            return Result<ProductModelSearchListItemDto>.Failure(new Error("ValidationError", "Name cannot be empty."));
         }
 
         if (normalizedCode is not null && !string.Equals(entity.Code, normalizedCode, StringComparison.Ordinal))
@@ -190,7 +234,7 @@ public sealed class ProductModelService(
                 cancellationToken);
             if (codeExists)
             {
-                return Result<ProductModelDto>.Failure(new Error("Conflict", "Model code must be unique."));
+                return Result<ProductModelSearchListItemDto>.Failure(new Error("Conflict", "Model code must be unique."));
             }
 
             dbContext.Entry(entity).Property(nameof(ProductModel.Code)).CurrentValue = normalizedCode;
@@ -224,16 +268,8 @@ public sealed class ProductModelService(
             requestMeta: requestMeta);
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        return Result<ProductModelDto>.Success(new ProductModelDto
-        {
-            Id = entity.Id,
-            Code = entity.Code,
-            Name = entity.Name,
-            Description = entity.Description,
-            IsActive = entity.IsActive,
-            CreatedAtUtc = entity.CreatedAtUtc,
-            UpdatedAtUtc = entity.UpdatedAtUtc
-        });
+        var stagesByModelId = await GetStagesByModelIdAsync([entity.Id], cancellationToken);
+        return Result<ProductModelSearchListItemDto>.Success(ToSearchListItem(entity, stagesByModelId.GetValueOrDefault(entity.Id) ?? Array.Empty<ProductModelStageSearchDto>()));
     }
 
     public async Task<Result> SetModelActivationAsync(
@@ -703,4 +739,44 @@ public sealed class ProductModelService(
 
         return Result.Success();
     }
+
+    private async Task<Dictionary<Guid, ProductModelStageSearchDto[]>> GetStagesByModelIdAsync(IEnumerable<Guid> modelIds, CancellationToken cancellationToken)
+    {
+        var ids = modelIds.Distinct().ToArray();
+        if (ids.Length == 0)
+        {
+            return [];
+        }
+
+        var mappings = await dbContext.ProductModelStages
+            .AsNoTracking()
+            .Where(mapping => ids.Contains(mapping.ProductModelId))
+            .OrderBy(mapping => mapping.ProductModelId)
+            .ThenBy(mapping => mapping.StageOrder)
+            .Select(mapping => new
+            {
+                mapping.ProductModelId,
+                Stage = new ProductModelStageSearchDto
+                {
+                    SubStageId = mapping.SubStageId,
+                    Code = mapping.SubStage != null ? mapping.SubStage.Code : string.Empty,
+                    Name = mapping.SubStage != null ? mapping.SubStage.Name : string.Empty
+                }
+            })
+            .ToArrayAsync(cancellationToken);
+
+        return mappings
+            .GroupBy(mapping => mapping.ProductModelId)
+            .ToDictionary(group => group.Key, group => group.Select(mapping => mapping.Stage).ToArray());
+    }
+
+    private static ProductModelSearchListItemDto ToSearchListItem(ProductModel model, ProductModelStageSearchDto[] stages) => new()
+    {
+        Id = model.Id,
+        Code = model.Code,
+        Name = model.Name,
+        Description = model.Description,
+        IsActive = model.IsActive,
+        Stages = stages
+    };
 }

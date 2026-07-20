@@ -2431,9 +2431,31 @@ productModelsApi.MapGet("", async (
     string? search = null,
     bool? isActive = true,
     bool includeInactive = false,
+    bool includeStageSearchSummaries = false,
     int page = 1,
     int pageSize = 50) =>
 {
+    if (includeStageSearchSummaries)
+    {
+        var managementResult = await productModelService.GetModelSearchListAsync(search, includeInactive ? null : isActive, page, pageSize, cancellationToken);
+        if (managementResult.IsFailure)
+        {
+            return ApiResponse.Failure(managementResult.Error?.Code ?? "ValidationError", managementResult.Error?.Message ?? "Validation failed.", MapFailureStatusCode(managementResult.Error?.Code));
+        }
+
+        return Results.Ok(new
+        {
+            success = true,
+            data = new
+            {
+                items = managementResult.Value ?? Array.Empty<ProductModelSearchListItemDto>(),
+                totalCount = managementResult.TotalCount,
+                pageNumber = managementResult.PageNumber,
+                pageSize = managementResult.PageSize
+            }
+        });
+    }
+
     var result = await productModelService.GetModelsAsync(search, includeInactive ? null : isActive, page, pageSize, cancellationToken);
     if (result.IsFailure)
     {

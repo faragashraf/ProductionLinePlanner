@@ -1,4 +1,4 @@
-import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { ComponentFixture, TestBed, fakeAsync, tick } from '@angular/core/testing';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
 import { of } from 'rxjs';
@@ -13,11 +13,14 @@ describe('ManufacturingMasterDataPageComponent', () => {
   const department = { id: 'department-1', factoryId: factory.id, code: 'CUT', nameAr: 'القص', isActive: true };
   const line = { id: 'line-1', factoryId: factory.id, departmentId: department.id, name: 'خط القص', lineCode: 'L1', sequenceOrder: 1, isActive: true };
   const stage = { id: 'stage-1', mainStageId: 'legacy-group-1', productionLineId: line.id, factoryId: factory.id, departmentId: department.id, factoryName: factory.name, departmentNameAr: department.nameAr, productionLineName: line.name, name: 'تجهيز', code: 'STG001', capacity: 2, sequenceOrder: 1, isActive: true };
+  const englishStage = { ...stage, id: 'stage-2', name: 'Cutting Line', code: 'CUT-02', sequenceOrder: 2 };
+  const firstModel = { id: 'model-1', code: 'MOD-001', name: 'موديل القميص', isActive: true, stages: [{ subStageId: stage.id, code: stage.code, name: stage.name }] };
+  const secondModel = { id: 'model-2', code: 'MOD-002', name: 'Jacket Model', isActive: true, stages: [{ subStageId: englishStage.id, code: englishStage.code, name: englishStage.name }] };
 
   beforeEach(async () => {
     api = jasmine.createSpyObj<ManufacturingMasterDataApiService>('ManufacturingMasterDataApiService', [
       'factories', 'departments', 'productionLinesForDepartment', 'operationalStages', 'createOperationalStage', 'updateOperationalStage',
-      'stageDependencies', 'deactivateOperationalStage', 'deleteOperationalStage', 'models', 'searchSubStages', 'modelStages',
+      'stageDependencies', 'deactivateOperationalStage', 'deleteOperationalStage', 'models', 'modelSearchList', 'searchSubStages', 'modelStages',
       'createModel', 'updateModel', 'setModelActivation', 'addModelStage', 'updateModelStage', 'deactivateModelStage'
     ]);
     api.factories.and.returnValue(of([factory]));
@@ -30,10 +33,11 @@ describe('ManufacturingMasterDataPageComponent', () => {
     api.deactivateOperationalStage.and.returnValue(of(void 0));
     api.deleteOperationalStage.and.returnValue(of(void 0));
     api.models.and.returnValue(of([]));
+    api.modelSearchList.and.returnValue(of({ items: [], totalCount: 0, pageNumber: 1, pageSize: 10 }));
     api.searchSubStages.and.returnValue(of({ items: [], totalCount: 0, pageNumber: 1, pageSize: 50 }));
     api.modelStages.and.returnValue(of([]));
     api.createModel.and.returnValue(of({ id: 'model-1', code: 'MOD', name: 'موديل', isActive: true }));
-    api.updateModel.and.returnValue(of({ id: 'model-1', code: 'MOD', name: 'موديل', isActive: true }));
+    api.updateModel.and.returnValue(of({ id: 'model-1', code: 'MOD', name: 'موديل', isActive: true, stages: [] }));
     api.setModelActivation.and.returnValue(of(void 0));
     api.addModelStage.and.returnValue(of({ id: 'model-stage-1', subStageId: stage.id, stageOrder: 1, piecePrice: 1, standardSeconds: 20, compensationMode: 'SharedPercentage', isRequired: true, isActive: true }));
     api.updateModelStage.and.returnValue(of({ id: 'model-stage-1', subStageId: stage.id, stageOrder: 1, piecePrice: 1, standardSeconds: 20, compensationMode: 'SharedPercentage', isRequired: true, isActive: true }));
@@ -103,5 +107,77 @@ describe('ManufacturingMasterDataPageComponent', () => {
     expect(component.modelStageForm.controls.piecePrice).toBeDefined();
     expect(component.modelStageForm.controls.standardSeconds).toBeDefined();
     expect(component.modelStageForm.controls.compensationMode).toBeDefined();
+  });
+
+  it('filters stages by Arabic name, partial code, English casing, and ignores outer whitespace without changing order', () => {
+    component.operationalStages = [stage, englishStage];
+
+    component.onStageSearch('  جه ');
+    expect(component.filteredOperationalStages).toEqual([stage]);
+    component.onStageSearch('001');
+    expect(component.filteredOperationalStages).toEqual([stage]);
+    component.onStageSearch('  cutting  ');
+    expect(component.filteredOperationalStages).toEqual([englishStage]);
+    component.onStageSearch('');
+    expect(component.filteredOperationalStages).toEqual([stage, englishStage]);
+  });
+
+  it('reports the stage-search empty state when no stage matches', () => {
+    component.operationalStages = [stage];
+    component.onStageSearch('غير موجود');
+
+    expect(component.filteredOperationalStages).toEqual([]);
+    expect(component.stageEmptyMessage).toBe('لا توجد مراحل مطابقة للبحث.');
+  });
+
+  it('requests a server-side model search from the first page after the debounce', fakeAsync(() => {
+    (component as { mode: 'stages' | 'models' }).mode = 'models';
+    api.modelSearchList.and.returnValue(of({ items: [firstModel], totalCount: 51, pageNumber: 1, pageSize: 10 }));
+    component.ngOnInit();
+    api.modelSearchList.calls.reset();
+
+    component.onModelSearch('  تجهيز  ');
+    tick(250);
+
+    expect(api.modelSearchList).toHaveBeenCalledWith('  تجهيز  ', 1, 10);
+    expect(component.models).toEqual([firstModel]);
+    expect(component.modelTotal).toBe(51);
+    expect(component.modelPage).toBe(1);
+  }));
+
+  it('loads the requested server page and does not locally filter its rows', () => {
+    component.models = [firstModel, secondModel];
+    component.modelPage = 1;
+    component.modelSearch = 'الخياطة';
+    api.modelSearchList.and.returnValue(of({ items: [secondModel], totalCount: 11, pageNumber: 2, pageSize: 10 }));
+
+    component.onModelLazyLoad({ first: 10, rows: 10 });
+
+    expect(api.modelSearchList).toHaveBeenCalledWith('الخياطة', 2, 10);
+    expect(component.models).toEqual([secondModel]);
+    expect(component.modelTotal).toBe(11);
+    expect(component.modelPage).toBe(2);
+  });
+
+  it('keeps stage search data after a model update response and the management-list refresh', fakeAsync(() => {
+    (component as { mode: 'stages' | 'models' }).mode = 'models';
+    component.models = [firstModel];
+    component.editModelId = firstModel.id;
+    component.modelForm.setValue({ code: firstModel.code, name: 'اسم محدّث', description: '' });
+    api.updateModel.and.returnValue(of({ ...firstModel, name: 'اسم محدّث' }));
+    api.modelSearchList.and.returnValue(of({ items: [{ ...firstModel, name: 'اسم محدّث' }], totalCount: 1, pageNumber: 1, pageSize: 10 }));
+
+    component.saveModel();
+    tick();
+
+    expect(api.updateModel).toHaveBeenCalled();
+    expect(component.models[0].stages).toEqual(firstModel.stages);
+  }));
+
+  it('reports the model-search empty state when the server returns no matching models', () => {
+    component.modelSearch = 'مرحلة غير موجودة';
+    component.models = [];
+
+    expect(component.modelEmptyMessage).toBe('لا توجد موديلات أو مراحل مرتبطة مطابقة للبحث.');
   });
 });
