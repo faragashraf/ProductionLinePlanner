@@ -82,6 +82,7 @@ public static class DependencyInjection
         services.AddSingleton<INotificationTemplateResolver, NotificationTemplateResolver>();
         services.AddScoped<INotificationRecipientResolver, NotificationRecipientResolver>();
         services.AddScoped<INotificationPolicyEngine, NotificationPolicyEngine>();
+        services.AddScoped<IAssignmentNotificationDispatcher, AssignmentNotificationDispatcher>();
         services.AddScoped<INotificationPolicyCatalogReconciler, NotificationPolicyCatalogReconciler>();
         services.AddScoped<INotificationPolicyAdminService, NotificationPolicyAdminService>();
         services.AddScoped<ICapabilityGroupResolver, CapabilityGroupResolver>();

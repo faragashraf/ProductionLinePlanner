@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using ProductionLinePlanner.Application.Common;
 using ProductionLinePlanner.Application.DTOs;
 using ProductionLinePlanner.Application.Engines;
+using ProductionLinePlanner.Application.Notifications;
 using ProductionLinePlanner.Application.Requests;
 using ProductionLinePlanner.Domain.Entities;
 using ProductionLinePlanner.Domain.Enums;
@@ -25,11 +26,16 @@ public sealed class AssignmentEngine : IAssignmentEngine
 
     private readonly AppDbContext _dbContext;
     private readonly IAuditEngine _auditEngine;
+    private readonly IAssignmentNotificationDispatcher? _assignmentNotificationDispatcher;
 
-    public AssignmentEngine(AppDbContext dbContext, IAuditEngine auditEngine)
+    public AssignmentEngine(
+        AppDbContext dbContext,
+        IAuditEngine auditEngine,
+        IAssignmentNotificationDispatcher? assignmentNotificationDispatcher = null)
     {
         _dbContext = dbContext;
         _auditEngine = auditEngine;
+        _assignmentNotificationDispatcher = assignmentNotificationDispatcher;
     }
 
     public async Task<Result<CurrentWorkerAssignmentDto>> GetCurrentAssignmentAsync(
@@ -285,6 +291,8 @@ public sealed class AssignmentEngine : IAssignmentEngine
             return Result<AssignmentActionResultDto>.Failure(new Error("Conflict", "The worker assignment changed while it was being saved. Refresh and try again."));
         }
 
+        await DispatchAssignmentNotificationAsync(actorUserId, assignment.WorkerId, null, assignment.SubStageId, assignment.Id, assignment.AssignmentType.ToString(), cancellationToken);
+
         return Result<AssignmentActionResultDto>.Success(new AssignmentActionResultDto
         {
             AssignmentId = assignment.Id,
@@ -342,6 +350,7 @@ public sealed class AssignmentEngine : IAssignmentEngine
             var currentWorkerIdSet = currentAssignments.Select(assignment => assignment.WorkerId).ToHashSet();
             var workerIdsToAdd = requestedWorkerIds.Where(workerId => !currentWorkerIdSet.Contains(workerId)).ToArray();
             var assignmentsToRemove = currentAssignments.Where(assignment => !requestedWorkerIdSet.Contains(assignment.WorkerId)).ToArray();
+            var notificationRequests = new List<AssignmentNotificationDispatchRequest>();
             var now = DateTime.UtcNow;
 
             foreach (var workerId in workerIdsToAdd)
@@ -359,6 +368,7 @@ public sealed class AssignmentEngine : IAssignmentEngine
                 _dbContext.AssignmentTimelineEntries.Add(new AssignmentTimelineEntry(
                     Guid.NewGuid(), workerId, null, subStageId, AssignmentType.Default.ToString(), TimelineActionCreate,
                     string.Empty, now, null, actorUserId, false, null, null, now));
+                notificationRequests.Add(new AssignmentNotificationDispatchRequest(actorUserId, workerId, null, subStageId, assignment.Id, assignment.AssignmentType.ToString()));
                 await _auditEngine.RecordAsync(actorUserId, AuditActionType.Create, nameof(WorkerDefaultAssignment), assignment.Id.ToString(), null, assignment, requestMeta, cancellationToken);
             }
 
@@ -369,6 +379,7 @@ public sealed class AssignmentEngine : IAssignmentEngine
                 _dbContext.AssignmentTimelineEntries.Add(new AssignmentTimelineEntry(
                     Guid.NewGuid(), assignment.WorkerId, subStageId, null, AssignmentType.Default.ToString(), TimelineActionCancel,
                     BulkStageSelectionRemovalReason, assignment.AssignedAt, now, actorUserId, false, null, null, now));
+                notificationRequests.Add(new AssignmentNotificationDispatchRequest(actorUserId, assignment.WorkerId, subStageId, null, assignment.Id, assignment.AssignmentType.ToString()));
                 await _auditEngine.RecordAsync(
                     actorUserId,
                     AuditActionType.Cancel,
@@ -383,6 +394,9 @@ public sealed class AssignmentEngine : IAssignmentEngine
             await _dbContext.SaveChangesAsync(cancellationToken);
             if (transaction is not null)
                 await transaction.CommitAsync(cancellationToken);
+
+            foreach (var notificationRequest in notificationRequests)
+                await DispatchAssignmentNotificationAsync(notificationRequest, cancellationToken);
 
             return Result<StageDefaultAssignmentsUpdateResultDto>.Success(new StageDefaultAssignmentsUpdateResultDto(
                 subStageId,
@@ -462,6 +476,8 @@ public sealed class AssignmentEngine : IAssignmentEngine
         {
             return Result<AssignmentActionResultDto>.Failure(new Error("Conflict", "The worker assignment changed while it was being saved. Refresh and try again."));
         }
+
+        await DispatchAssignmentNotificationAsync(actorUserId, assignment.WorkerId, assignment.SubStageId, null, assignment.Id, assignment.AssignmentType.ToString(), cancellationToken);
 
         return Result<AssignmentActionResultDto>.Success(new AssignmentActionResultDto
         {
@@ -608,6 +624,8 @@ public sealed class AssignmentEngine : IAssignmentEngine
 
             await _dbContext.SaveChangesAsync(cancellationToken);
             if (transaction is not null) await transaction.CommitAsync(cancellationToken);
+
+            await DispatchAssignmentNotificationAsync(actorUserId, entity.WorkerId, entity.FromSubStageId, entity.ToSubStageId, entity.Id, entity.AssignmentType.ToString(), cancellationToken);
 
             return Result<AssignmentActionResultDto>.Success(new AssignmentActionResultDto
             {
@@ -785,6 +803,8 @@ public sealed class AssignmentEngine : IAssignmentEngine
         await _dbContext.SaveChangesAsync(cancellationToken);
         if (transaction is not null) await transaction.CommitAsync(cancellationToken);
 
+        await DispatchAssignmentNotificationAsync(actorUserId, entity.WorkerId, entity.FromSubStageId, entity.ToSubStageId, entity.Id, entity.AssignmentType.ToString(), cancellationToken);
+
         return Result<AssignmentActionResultDto>.Success(new AssignmentActionResultDto
         {
             AssignmentId = entity.Id,
@@ -897,6 +917,8 @@ public sealed class AssignmentEngine : IAssignmentEngine
             return Result<CancelTemporaryAssignmentResultDto>.Failure(new Error("Conflict", "تم تعديل التعيين المؤقت بواسطة مستخدم آخر. حدّث البيانات وحاول مرة أخرى."));
         }
 
+        await DispatchAssignmentNotificationAsync(actorUserId, assignment.WorkerId, assignment.FromSubStageId, assignment.ToSubStageId, assignment.Id, assignment.AssignmentType.ToString(), cancellationToken);
+
         return Result<CancelTemporaryAssignmentResultDto>.Success(new CancelTemporaryAssignmentResultDto
         {
             AssignmentId = assignment.Id,
@@ -969,6 +991,7 @@ public sealed class AssignmentEngine : IAssignmentEngine
                     await _auditEngine.RecordAsync(actorUserId, AuditActionType.Create, nameof(WorkerTemporaryAssignment), temporary.Id.ToString(), null, temporary, requestMeta, cancellationToken);
                     await _dbContext.SaveChangesAsync(cancellationToken);
                     if (transaction is not null) await transaction.CommitAsync(cancellationToken);
+                    await DispatchAssignmentNotificationAsync(actorUserId, temporary.WorkerId, temporary.FromSubStageId, temporary.ToSubStageId, temporary.Id, temporary.AssignmentType.ToString(), cancellationToken);
                     return ToAssignmentResult(temporary);
                 }
 
@@ -982,6 +1005,7 @@ public sealed class AssignmentEngine : IAssignmentEngine
                 await _auditEngine.RecordAsync(actorUserId, AuditActionType.Update, nameof(WorkerDefaultAssignment), defaultAssignment.Id.ToString(), before, destination, requestMeta, cancellationToken);
                 await _dbContext.SaveChangesAsync(cancellationToken);
                 if (transaction is not null) await transaction.CommitAsync(cancellationToken);
+                await DispatchAssignmentNotificationAsync(actorUserId, destination.WorkerId, request.FromSubStageId, destination.SubStageId, destination.Id, destination.AssignmentType.ToString(), cancellationToken);
                 return Result<AssignmentActionResultDto>.Success(new AssignmentActionResultDto { AssignmentId = destination.Id, WorkerId = destination.WorkerId, SubStageId = destination.SubStageId, AssignmentType = AssignmentType.Default.ToString(), StartsAtUtc = destination.AssignedAt, Status = "Active", IsCreated = true });
             }
 
@@ -1024,6 +1048,7 @@ public sealed class AssignmentEngine : IAssignmentEngine
             await _auditEngine.RecordAsync(actorUserId, AuditActionType.Update, nameof(WorkerTemporaryAssignment), sourceTemporary.Id.ToString(), sourceBefore, replacement, requestMeta, cancellationToken);
             await _dbContext.SaveChangesAsync(cancellationToken);
             if (transaction is not null) await transaction.CommitAsync(cancellationToken);
+            await DispatchAssignmentNotificationAsync(actorUserId, replacement.WorkerId, replacement.FromSubStageId, replacement.ToSubStageId, replacement.Id, replacement.AssignmentType.ToString(), cancellationToken);
             return ToAssignmentResult(replacement);
         }
         catch (DbUpdateException)
@@ -1355,6 +1380,23 @@ public sealed class AssignmentEngine : IAssignmentEngine
         ToSubStageId: null,
         ReplacementForWorkerId: null);
 
+    private Task DispatchAssignmentNotificationAsync(
+        Guid actorUserId,
+        Guid workerId,
+        Guid? fromSubStageId,
+        Guid? toSubStageId,
+        Guid assignmentId,
+        string assignmentType,
+        CancellationToken cancellationToken) =>
+        DispatchAssignmentNotificationAsync(
+            new AssignmentNotificationDispatchRequest(actorUserId, workerId, fromSubStageId, toSubStageId, assignmentId, assignmentType),
+            cancellationToken);
+
+    private Task DispatchAssignmentNotificationAsync(
+        AssignmentNotificationDispatchRequest request,
+        CancellationToken cancellationToken) =>
+        _assignmentNotificationDispatcher?.DispatchAsync(request, cancellationToken) ?? Task.CompletedTask;
+
     private void AddAssignmentTimeline(WorkerTemporaryAssignment assignment, string action, string reason, Guid actorUserId, DateTime now)
         => _dbContext.AssignmentTimelineEntries.Add(new AssignmentTimelineEntry(
             Guid.NewGuid(), assignment.WorkerId, assignment.FromSubStageId, assignment.ToSubStageId,
@@ -1454,6 +1496,17 @@ public sealed class AssignmentEngine : IAssignmentEngine
         catch (DbUpdateConcurrencyException)
         {
             return Result<int>.Failure(new Error("Conflict", "تمت معالجة انتهاء التعيين المؤقت بواسطة مستخدم آخر."));
+        }
+        foreach (var assignment in endedAssignments)
+        {
+            await DispatchAssignmentNotificationAsync(
+                assignment.AssignedByUserId,
+                assignment.WorkerId,
+                assignment.FromSubStageId,
+                assignment.ToSubStageId,
+                assignment.Id,
+                assignment.AssignmentType.ToString(),
+                cancellationToken);
         }
         return Result<int>.Success(endedAssignments.Count);
     }
