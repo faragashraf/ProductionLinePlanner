@@ -1,4 +1,4 @@
-import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { ComponentFixture, TestBed, fakeAsync, tick } from '@angular/core/testing';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
 import { of } from 'rxjs';
@@ -13,11 +13,14 @@ describe('ManufacturingMasterDataPageComponent', () => {
   const department = { id: 'department-1', factoryId: factory.id, code: 'CUT', nameAr: 'القص', isActive: true };
   const line = { id: 'line-1', factoryId: factory.id, departmentId: department.id, name: 'خط القص', lineCode: 'L1', sequenceOrder: 1, isActive: true };
   const stage = { id: 'stage-1', mainStageId: 'legacy-group-1', productionLineId: line.id, factoryId: factory.id, departmentId: department.id, factoryName: factory.name, departmentNameAr: department.nameAr, productionLineName: line.name, name: 'تجهيز', code: 'STG001', capacity: 2, sequenceOrder: 1, isActive: true };
+  const englishStage = { ...stage, id: 'stage-2', name: 'Cutting Line', code: 'CUT-02', sequenceOrder: 2 };
+  const firstModel = { id: 'model-1', code: 'MOD-001', name: 'موديل القميص', isActive: true };
+  const secondModel = { id: 'model-2', code: 'MOD-002', name: 'Jacket Model', isActive: true };
 
   beforeEach(async () => {
     api = jasmine.createSpyObj<ManufacturingMasterDataApiService>('ManufacturingMasterDataApiService', [
       'factories', 'departments', 'productionLinesForDepartment', 'operationalStages', 'createOperationalStage', 'updateOperationalStage',
-      'stageDependencies', 'deactivateOperationalStage', 'deleteOperationalStage', 'models', 'searchSubStages', 'modelStages',
+      'stageDependencies', 'deactivateOperationalStage', 'deleteOperationalStage', 'models', 'modelSearchPage', 'searchSubStages', 'modelStages',
       'createModel', 'updateModel', 'setModelActivation', 'addModelStage', 'updateModelStage', 'deactivateModelStage'
     ]);
     api.factories.and.returnValue(of([factory]));
@@ -30,6 +33,7 @@ describe('ManufacturingMasterDataPageComponent', () => {
     api.deactivateOperationalStage.and.returnValue(of({ ...stage, isActive: false }));
     api.deleteOperationalStage.and.returnValue(of(void 0));
     api.models.and.returnValue(of([]));
+    api.modelSearchPage.and.returnValue(of({ items: [], totalCount: 0, pageNumber: 1, pageSize: 10 }));
     api.searchSubStages.and.returnValue(of({ items: [], totalCount: 0, pageNumber: 1, pageSize: 50 }));
     api.modelStages.and.returnValue(of([]));
     api.createModel.and.returnValue(of({ id: 'model-1', code: 'MOD', name: 'موديل', isActive: true }));
@@ -133,5 +137,74 @@ describe('ManufacturingMasterDataPageComponent', () => {
     expect(component.modelStageForm.controls.piecePrice).toBeDefined();
     expect(component.modelStageForm.controls.standardSeconds).toBeDefined();
     expect(component.modelStageForm.controls.compensationMode).toBeDefined();
+  });
+
+  it('filters stages by Arabic name, partial code, English casing, and ignores outer whitespace without changing order', () => {
+    component.operationalStages = [stage, englishStage];
+
+    component.onStageSearch('  جه ');
+    expect(component.filteredOperationalStages).toEqual([stage]);
+    component.onStageSearch('001');
+    expect(component.filteredOperationalStages).toEqual([stage]);
+    component.onStageSearch('  cutting  ');
+    expect(component.filteredOperationalStages).toEqual([englishStage]);
+    component.onStageSearch('');
+    expect(component.filteredOperationalStages).toEqual([stage, englishStage]);
+  });
+
+  it('reports the stage-search empty state when no stage matches', () => {
+    component.operationalStages = [stage];
+    component.onStageSearch('غير موجود');
+
+    expect(component.filteredOperationalStages).toEqual([]);
+    expect(component.stageEmptyMessage).toBe('لا توجد مراحل مطابقة للبحث.');
+  });
+
+  it('requests a server-side model search from the first page after the debounce', fakeAsync(() => {
+    (component as { mode: 'stages' | 'models' }).mode = 'models';
+    api.modelSearchPage.and.returnValue(of({ items: [firstModel], totalCount: 51, pageNumber: 1, pageSize: 10 }));
+    component.ngOnInit();
+    api.modelSearchPage.calls.reset();
+
+    component.onModelSearch('  موديل  ');
+    tick(250);
+
+    expect(api.modelSearchPage).toHaveBeenCalledWith('  موديل  ', 1, 10);
+    expect(component.models).toEqual([firstModel]);
+    expect(component.modelTotal).toBe(51);
+    expect(component.modelPage).toBe(1);
+  }));
+
+  it('loads the requested server page and does not locally filter its rows', () => {
+    component.models = [firstModel, secondModel];
+    component.modelPage = 1;
+    component.modelSearch = 'Jacket';
+    api.modelSearchPage.and.returnValue(of({ items: [secondModel], totalCount: 11, pageNumber: 2, pageSize: 10 }));
+
+    component.onModelLazyLoad({ first: 10, rows: 10 });
+
+    expect(api.modelSearchPage).toHaveBeenCalledWith('Jacket', 2, 10);
+    expect(component.models).toEqual([secondModel]);
+    expect(component.modelTotal).toBe(11);
+    expect(component.modelPage).toBe(2);
+  });
+
+  it('keeps model and stage searches independent when either value is cleared', () => {
+    component.onStageSearch('قص');
+    component.onModelSearch('MOD-001');
+
+    expect(component.stageSearch).toBe('قص');
+    expect(component.modelSearch).toBe('MOD-001');
+    component.onModelSearch('');
+    expect(component.stageSearch).toBe('قص');
+    component.onStageSearch('');
+    expect(component.modelSearch).toBe('');
+  });
+
+  it('reports the model-search empty state when the server returns no matching models', () => {
+    component.modelSearch = 'موديل غير موجود';
+    component.models = [];
+
+    expect(component.modelEmptyMessage).toBe('لا توجد موديلات مطابقة للبحث.');
   });
 });

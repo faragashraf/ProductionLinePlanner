@@ -32,10 +32,12 @@ public sealed class ProductModelService(
             query = query.Where(x => x.IsActive == isActive.Value);
         }
 
-        var searchTerm = string.IsNullOrWhiteSpace(search) ? null : $"%{search.Trim()}%";
+        var searchTerm = string.IsNullOrWhiteSpace(search) ? null : $"%{search.Trim().ToLower()}%";
         if (searchTerm is not null)
         {
-            query = query.Where(x => EF.Functions.Like(x.Code, searchTerm) || EF.Functions.Like(x.Name, searchTerm));
+            query = query.Where(x =>
+                EF.Functions.Like(x.Code.ToLower(), searchTerm) ||
+                EF.Functions.Like(x.Name.ToLower(), searchTerm));
         }
 
         var total = await query.CountAsync(cancellationToken);
@@ -703,4 +705,5 @@ public sealed class ProductModelService(
 
         return Result.Success();
     }
+
 }

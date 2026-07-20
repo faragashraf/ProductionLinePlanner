@@ -26,6 +26,7 @@ import { PlpDialogComponent } from '../../shared/product/plp-dialog.component';
 import { PlpFormSheetComponent } from '../../shared/product/plp-form-sheet.component';
 import { PlpSectionNavigationComponent } from '../../shared/product/plp-section-navigation.component';
 import { PlpFormComponent } from '../../shared/product/plp-form.component';
+import { PlpProductToolbarComponent } from '../../shared/product/plp-toolbar.component';
 import { ReportsWorkspacePageComponent } from '../reports-workspace/reports-workspace-page.component';
 import { ReportsFilterBarComponent } from '../reports-workspace/reports-filter-bar.component';
 import { ReportsSummaryCardsComponent } from '../reports-workspace/reports-summary-cards.component';
@@ -66,6 +67,7 @@ import { ReportsResultsToolbarComponent } from '../reports-workspace/reports-res
     PlpFormSheetComponent,
     PlpSectionNavigationComponent,
     PlpFormComponent,
+    PlpProductToolbarComponent,
     ManufacturingWorkspaceRoutingModule
   ]
 })

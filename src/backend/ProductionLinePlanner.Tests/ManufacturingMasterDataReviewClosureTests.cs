@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Migrations.Operations;
 using ProductionLinePlanner.Application.Abstractions;
 using ProductionLinePlanner.Application.Common;
+using ProductionLinePlanner.Application.DTOs;
 using ProductionLinePlanner.Application.Requests;
 using ProductionLinePlanner.Domain.Entities;
 using ProductionLinePlanner.Domain.Enums;
@@ -15,6 +16,64 @@ namespace ProductionLinePlanner.Tests;
 
 public sealed class ManufacturingMasterDataReviewClosureTests
 {
+    [Fact]
+    public async Task Model_list_searches_only_model_name_and_code()
+    {
+        await using var fixture = await ProductModelFixture.CreateAsync();
+        var codeOnlyModel = new ProductModel(Guid.NewGuid(), "CODE-ONLY", "اسم لا يطابق الكود");
+        fixture.DbContext.ProductModelStages.Add(
+            new ProductModelStage(Guid.NewGuid(), fixture.Model.Id, fixture.SubStages[0].Id, 1, 1m, null, CompensationMode.FixedAmount));
+        fixture.DbContext.ProductModels.Add(codeOnlyModel);
+        await fixture.DbContext.SaveChangesAsync();
+
+        var byName = await fixture.Service.GetModelsAsync("model", isActive: null);
+        var byCode = await fixture.Service.GetModelsAsync("code-only", isActive: null);
+        var byStageName = await fixture.Service.GetModelsAsync("cut", isActive: null);
+
+        Assert.Equal(fixture.Model.Id, Assert.Single(byName.Value!).Id);
+        Assert.Equal(codeOnlyModel.Id, Assert.Single(byCode.Value!).Id);
+        Assert.Empty(byStageName.Value!);
+        Assert.DoesNotContain(typeof(ProductModelDto).GetProperties(), property => property.Name == "Stages");
+    }
+
+    [Fact]
+    public async Task Model_search_filters_before_count_and_paging()
+    {
+        await using var fixture = await ProductModelFixture.CreateAsync();
+        var lateMatch = new ProductModel(Guid.NewGuid(), "MODEL-055", "Late matching model");
+        var inactiveMatch = new ProductModel(Guid.NewGuid(), "MODEL-056", "Inactive matching model", isActive: false);
+        fixture.DbContext.ProductModels.AddRange(Enumerable.Range(1, 54).Select(index => new ProductModel(Guid.NewGuid(), $"MODEL-{index:D3}", $"Model {index:D3}")));
+        fixture.DbContext.ProductModels.AddRange(lateMatch, inactiveMatch);
+        await fixture.DbContext.SaveChangesAsync();
+
+        var sixthPage = await fixture.Service.GetModelsAsync(null, isActive: null, page: 6, pageSize: 10);
+        var byModel = await fixture.Service.GetModelsAsync("  055  ", isActive: true, page: 1, pageSize: 10);
+        var includingInactive = await fixture.Service.GetModelsAsync("matching model", isActive: null, page: 1, pageSize: 10);
+
+        Assert.True(sixthPage.IsSuccess);
+        Assert.Contains(sixthPage.Value!, model => model.Id == lateMatch.Id);
+        Assert.True(byModel.IsSuccess);
+        Assert.Equal(1, byModel.TotalCount);
+        Assert.Equal(lateMatch.Id, Assert.Single(byModel.Value!).Id);
+        Assert.True(includingInactive.IsSuccess);
+        Assert.Equal(2, includingInactive.TotalCount);
+    }
+
+    [Fact]
+    public async Task Updating_a_model_returns_the_general_model_dto()
+    {
+        await using var fixture = await ProductModelFixture.CreateAsync();
+        var updated = await fixture.Service.UpdateModelAsync(
+            fixture.Model.Id,
+            new UpdateProductModelRequest { Name = "Updated model" },
+            fixture.ActorUserId);
+
+        Assert.True(updated.IsSuccess);
+        Assert.Equal(fixture.Model.Id, updated.Value!.Id);
+        Assert.Equal("Updated model", updated.Value.Name);
+        Assert.DoesNotContain(typeof(ProductModelDto).GetProperties(), property => property.Name == "Stages");
+    }
+
     [Fact]
     public void Manufacturing_migration_remediates_existing_sub_stages_before_constraints_and_indexes()
     {
