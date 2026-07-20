@@ -158,6 +158,16 @@ export class FactoryStructureFoundationPageComponent implements OnInit, OnDestro
       : [];
   }
 
+  /**
+   * Stage creation follows the same rule as the backend: only active
+   * MainStages are eligible operational groups. Inactive groups remain
+   * visible in the grouping-management area, but can never be selected for
+   * a new operational stage.
+   */
+  get activeMainStages(): MainStageOption[] {
+    return this.visibleMainStages.filter(item => item.isActive);
+  }
+
   get visibleSubStages(): SubStageOption[] {
     return this.selectedMainStageId
       ? this.subStages.filter(item => item.mainStageId === this.selectedMainStageId)
@@ -500,7 +510,20 @@ export class FactoryStructureFoundationPageComponent implements OnInit, OnDestro
   }
 
   saveSubStage(): void {
-    if (!this.selectedLineId || !this.subStageDraft.name.trim() || (this.visibleMainStages.length > 1 && !this.subStageDraft.mainStageId)) {
+    const activeGroups = this.activeMainStages;
+    if (!this.selectedLineId || !this.subStageDraft.name.trim()) {
+      this.errorMessage = 'الخط واسم المرحلة مطلوبان؛ اختر مجموعة المراحل عند وجود أكثر من مجموعة.';
+      this.hasError = true;
+      return;
+    }
+
+    if (!this.subStageDraft.id && activeGroups.length === 0) {
+      this.errorMessage = 'لا يمكن إنشاء مرحلة تشغيلية قبل إنشاء مجموعة مراحل نشطة للخط.';
+      this.hasError = true;
+      return;
+    }
+
+    if (!this.subStageDraft.id && activeGroups.length > 1 && !this.subStageDraft.mainStageId) {
       this.errorMessage = 'الخط واسم المرحلة مطلوبان؛ اختر مجموعة المراحل عند وجود أكثر من مجموعة.';
       this.hasError = true;
       return;
@@ -508,7 +531,7 @@ export class FactoryStructureFoundationPageComponent implements OnInit, OnDestro
 
     const payload = {
       productionLineId: this.selectedLineId,
-      mainStageId: this.visibleMainStages.length > 1 ? this.subStageDraft.mainStageId : undefined,
+      mainStageId: activeGroups.length === 1 ? activeGroups[0].id : activeGroups.length > 1 ? this.subStageDraft.mainStageId : undefined,
       name: this.subStageDraft.name.trim(),
       defaultOrder: Number(this.subStageDraft.defaultOrder) || 1,
       capacity: Number(this.subStageDraft.capacity) || 0,
@@ -525,7 +548,7 @@ export class FactoryStructureFoundationPageComponent implements OnInit, OnDestro
 
     this.save(request, () => {
       this.subStageDraft = this.emptySubStageDraft();
-      this.subStageDraft.mainStageId = this.selectedMainStageId || (this.visibleMainStages.length === 1 ? this.visibleMainStages[0].id : '');
+      this.syncStageGroupingDraft();
       this.activeForm = null;
     });
   }
@@ -653,6 +676,7 @@ export class FactoryStructureFoundationPageComponent implements OnInit, OnDestro
             tap(stages => {
               if (requestId === this.mainStagesRequestId && this.selectedLineId === lineId) {
                 this.mainStages = stages;
+                this.syncStageGroupingDraft();
               }
             }),
             catchError(error => {
@@ -768,6 +792,13 @@ export class FactoryStructureFoundationPageComponent implements OnInit, OnDestro
         return EMPTY;
       })
     );
+  }
+
+  private syncStageGroupingDraft(): void {
+    if (this.subStageDraft.id) return;
+
+    const activeGroups = this.activeMainStages;
+    this.subStageDraft.mainStageId = activeGroups.length === 1 ? activeGroups[0].id : '';
   }
 
   private clearLineAndDownstream(): void {

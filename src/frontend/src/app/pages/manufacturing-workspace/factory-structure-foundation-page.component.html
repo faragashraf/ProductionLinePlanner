@@ -240,9 +240,9 @@
           (expandedChange)="onFormExpandedChange('sub-stage', $event)"
         >
           <form class="factory-structure-form" (ngSubmit)="saveSubStage()" novalidate *plpCan="permissions.factoryStructure.manage">
-            <select *ngIf="visibleMainStages.length > 1 && !subStageDraft.id" name="subMainId" [(ngModel)]="subStageDraft.mainStageId" [disabled]="!selectedLineId" required>
+            <select *ngIf="activeMainStages.length > 1 && !subStageDraft.id" name="subMainId" [(ngModel)]="subStageDraft.mainStageId" [disabled]="!selectedLineId" required>
               <option value="">اختر المرحلة الرئيسية</option>
-              <option *ngFor="let stage of visibleMainStages" [value]="stage.id">{{ stage.name }}</option>
+              <option *ngFor="let stage of activeMainStages" [value]="stage.id">{{ stage.name }}</option>
             </select>
             <input *ngIf="subStageDraft.id" name="subCode" [ngModel]="subStageDraft.code" [ngModelOptions]="{ standalone: true }" placeholder="الكود" readonly aria-label="كود المرحلة للقراءة فقط">
             <input name="subName" [(ngModel)]="subStageDraft.name" placeholder="اسم المرحلة التشغيلية" required>

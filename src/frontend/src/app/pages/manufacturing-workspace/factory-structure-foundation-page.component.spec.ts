@@ -36,6 +36,8 @@ describe('FactoryStructureFoundationPageComponent', () => {
       'updateMain',
       'createSub',
       'updateSub',
+      'createOperationalStage',
+      'updateOperationalStage',
       'stageDependencies',
       'deactivateOperationalStage',
       'deleteOperationalStage'
@@ -86,6 +88,8 @@ describe('FactoryStructureFoundationPageComponent', () => {
     }));
     masterData.deactivateOperationalStage.and.returnValue(of({}));
     masterData.deleteOperationalStage.and.returnValue(of({}));
+    masterData.createOperationalStage.and.returnValue(of({ id: 'sub-new', mainStageId: 'main-1', productionLineId: 'line-1', code: 'STG003', name: 'مرحلة جديدة', capacity: 0, sequenceOrder: 1, isActive: true }));
+    masterData.updateOperationalStage.and.returnValue(of({ id: 'sub-1', mainStageId: 'main-1', productionLineId: 'line-1', code: 'STG001', name: 'مرحلة', capacity: 0, sequenceOrder: 1, isActive: true }));
     masterData.mainStagesForLine.and.callFake((lineId: string) => of(lineId === 'line-1'
       ? [{ id: 'main-1', productionLineId: 'line-1', name: 'الخياطة', sequenceOrder: 1, isCritical: false, isActive: true }]
       : [{ id: 'main-2', productionLineId: 'line-2', name: 'التجهيز', sequenceOrder: 1, isCritical: false, isActive: true }]));
@@ -216,6 +220,79 @@ describe('FactoryStructureFoundationPageComponent', () => {
     expect(component.visibleMainStages.map(stage => stage.id)).toEqual(['main-2']);
     expect(component.visibleSubStages).toEqual([]);
     expect(component.assignedWorkers).toEqual([]);
+  });
+
+  it('auto-selects the only active grouping and hides the selector', () => {
+    const fixture = configure({ manage: true });
+    const component = fixture.componentInstance;
+
+    component.activeForm = 'sub-stage';
+    component.selectLine('line-1');
+    fixture.detectChanges();
+
+    expect(component.activeMainStages.map(stage => stage.id)).toEqual(['main-1']);
+    expect(component.subStageDraft.mainStageId).toBe('main-1');
+    expect(fixture.debugElement.query(By.css('select[name="subMainId"]'))).toBeNull();
+  });
+
+  it('ignores an inactive grouping when auto-selecting the only active grouping', () => {
+    const fixture = configure({ manage: true });
+    const component = fixture.componentInstance;
+    const masterData = TestBed.inject(ManufacturingMasterDataApiService) as jasmine.SpyObj<ManufacturingMasterDataApiService>;
+    masterData.mainStagesForLine.and.returnValue(of([
+      { id: 'main-active', productionLineId: 'line-1', name: 'نشطة', sequenceOrder: 1, isCritical: false, isActive: true },
+      { id: 'main-inactive', productionLineId: 'line-1', name: 'معطلة', sequenceOrder: 2, isCritical: false, isActive: false }
+    ]));
+
+    component.activeForm = 'sub-stage';
+    component.selectLine('line-1');
+    fixture.detectChanges();
+
+    expect(component.activeMainStages.map(stage => stage.id)).toEqual(['main-active']);
+    expect(component.subStageDraft.mainStageId).toBe('main-active');
+    expect(fixture.debugElement.query(By.css('select[name="subMainId"]'))).toBeNull();
+  });
+
+  it('shows the grouping selector only when more than one active grouping exists', () => {
+    const fixture = configure({ manage: true });
+    const component = fixture.componentInstance;
+    const masterData = TestBed.inject(ManufacturingMasterDataApiService) as jasmine.SpyObj<ManufacturingMasterDataApiService>;
+    masterData.mainStagesForLine.and.returnValue(of([
+      { id: 'main-a', productionLineId: 'line-1', name: 'نشطة أ', sequenceOrder: 1, isCritical: false, isActive: true },
+      { id: 'main-b', productionLineId: 'line-1', name: 'نشطة ب', sequenceOrder: 2, isCritical: false, isActive: true },
+      { id: 'main-inactive', productionLineId: 'line-1', name: 'معطلة', sequenceOrder: 3, isCritical: false, isActive: false }
+    ]));
+
+    component.activeForm = 'sub-stage';
+    component.selectLine('line-1');
+    fixture.detectChanges();
+
+    const selector = fixture.debugElement.query(By.css('select[name="subMainId"]'));
+    const optionValues = selector.queryAll(By.css('option')).map(option => option.nativeElement.value);
+
+    expect(component.subStageDraft.mainStageId).toBe('');
+    expect(optionValues).toEqual(['', 'main-a', 'main-b']);
+    expect(selector.nativeElement.textContent).not.toContain('معطلة');
+  });
+
+  it('blocks creation with the backend-equivalent message when the line has no active grouping', () => {
+    const fixture = configure({ manage: true });
+    const component = fixture.componentInstance;
+    const masterData = TestBed.inject(ManufacturingMasterDataApiService) as jasmine.SpyObj<ManufacturingMasterDataApiService>;
+    masterData.mainStagesForLine.and.returnValue(of([
+      { id: 'main-inactive', productionLineId: 'line-1', name: 'معطلة', sequenceOrder: 1, isCritical: false, isActive: false }
+    ]));
+
+    component.activeForm = 'sub-stage';
+    component.selectLine('line-1');
+    component.subStageDraft.name = 'مرحلة جديدة';
+    fixture.detectChanges();
+    component.saveSubStage();
+
+    expect(component.activeMainStages).toEqual([]);
+    expect(fixture.debugElement.query(By.css('select[name="subMainId"]'))).toBeNull();
+    expect(component.errorMessage).toBe('لا يمكن إنشاء مرحلة تشغيلية قبل إنشاء مجموعة مراحل نشطة للخط.');
+    expect(masterData.createOperationalStage).not.toHaveBeenCalled();
   });
 
   it('does not request main stages repeatedly for the same selected line', () => {
