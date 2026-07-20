@@ -3,6 +3,7 @@ import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
 import { of } from 'rxjs';
 import { ManufacturingMasterDataApiService } from '../../core/services/manufacturing-master-data-api.service';
+import { ManufacturingRealtimeService } from '../../core/services/manufacturing-realtime.service';
 import { ManufacturingMasterDataPageComponent } from './manufacturing-master-data-page.component';
 
 describe('ManufacturingMasterDataPageComponent', () => {
@@ -48,6 +49,7 @@ describe('ManufacturingMasterDataPageComponent', () => {
       imports: [FormsModule, ReactiveFormsModule],
       providers: [
         { provide: ManufacturingMasterDataApiService, useValue: api },
+        { provide: ManufacturingRealtimeService, useValue: { watchScreen: () => () => undefined, registerLocalOperation: () => 'local-correlation' } },
         { provide: ActivatedRoute, useValue: { snapshot: { routeConfig: { path: 'stages' } } } }
       ]
     }).overrideComponent(ManufacturingMasterDataPageComponent, { set: { template: '' } }).compileComponents();
@@ -96,12 +98,51 @@ describe('ManufacturingMasterDataPageComponent', () => {
     expect(component.operationalStages).toEqual([stage]);
   });
 
+  it('clears the complete stage context when its selected factory no longer exists after a realtime refresh', () => {
+    component.stageForm.setValue({ factoryId: factory.id, departmentId: department.id, productionLineId: line.id, name: '', capacity: 0 });
+    component.departments = [department];
+    component.lines = [line];
+    component.operationalStages = [stage];
+    api.factories.and.returnValue(of([]));
+
+    (component as never as { refreshStagesFromRealtime(): void }).refreshStagesFromRealtime();
+
+    expect(component.stageForm.getRawValue()).toEqual(jasmine.objectContaining({ factoryId: '', departmentId: '', productionLineId: '' }));
+    expect(component.departments).toEqual([]);
+    expect(component.lines).toEqual([]);
+    expect(component.operationalStages).toEqual([]);
+  });
+
+  it('clears the selected department and dependent line when that department no longer exists after a realtime refresh', () => {
+    component.stageForm.setValue({ factoryId: factory.id, departmentId: department.id, productionLineId: line.id, name: '', capacity: 0 });
+    component.lines = [line];
+    component.operationalStages = [stage];
+    api.departments.and.returnValue(of([]));
+
+    (component as never as { refreshStagesFromRealtime(): void }).refreshStagesFromRealtime();
+
+    expect(component.stageForm.getRawValue()).toEqual(jasmine.objectContaining({ factoryId: factory.id, departmentId: '', productionLineId: '' }));
+    expect(component.lines).toEqual([]);
+    expect(component.operationalStages).toEqual([]);
+  });
+
+  it('clears the selected line and its stages when that line no longer exists after a realtime refresh', () => {
+    component.stageForm.setValue({ factoryId: factory.id, departmentId: department.id, productionLineId: line.id, name: '', capacity: 0 });
+    component.operationalStages = [stage];
+    api.productionLinesForDepartment.and.returnValue(of([]));
+
+    (component as never as { refreshStagesFromRealtime(): void }).refreshStagesFromRealtime();
+
+    expect(component.stageForm.getRawValue()).toEqual(jasmine.objectContaining({ factoryId: factory.id, departmentId: department.id, productionLineId: '' }));
+    expect(component.operationalStages).toEqual([]);
+  });
+
   it('creates a stage from its direct production-line context without legacy ordering input', () => {
     component.stageForm.setValue({ factoryId: factory.id, departmentId: department.id, productionLineId: line.id, name: 'تشطيب', capacity: 3 });
 
     component.saveOperationalStage();
 
-    expect(api.createOperationalStage).toHaveBeenCalledWith({ productionLineId: line.id, name: 'تشطيب', capacity: 3 });
+    expect(api.createOperationalStage).toHaveBeenCalledWith({ productionLineId: line.id, name: 'تشطيب', capacity: 3 }, 'local-correlation');
     expect(api.operationalStages).toHaveBeenCalledWith({ productionLineId: line.id, isActive: undefined, includeInactive: true });
     expect(component.operationalStages).toEqual([stage]);
   });
@@ -116,7 +157,7 @@ describe('ManufacturingMasterDataPageComponent', () => {
 
     component.confirmDependencyAction();
 
-    expect(api.deactivateOperationalStage).toHaveBeenCalledOnceWith(stage.id);
+    expect(api.deactivateOperationalStage).toHaveBeenCalledOnceWith(stage.id, 'local-correlation');
     expect(component.operationalStages).toEqual([inactiveStage]);
     expect(api.operationalStages).not.toHaveBeenCalled();
     expect(component.error).toBe('');

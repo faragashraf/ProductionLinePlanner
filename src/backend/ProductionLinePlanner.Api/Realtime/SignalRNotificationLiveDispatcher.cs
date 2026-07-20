@@ -4,7 +4,7 @@ using ProductionLinePlanner.Application.Realtime;
 namespace ProductionLinePlanner.Api.Realtime;
 
 public sealed class SignalRNotificationLiveDispatcher(
-    IHubContext<NotificationsHub, INotificationsClient> hubContext,
+    IHubContext<NotificationsHub, IRealtimeClient> hubContext,
     ICapabilityGroupResolver capabilityGroupResolver) : INotificationLiveDispatcher
 {
     public Task SendToUserAsync(

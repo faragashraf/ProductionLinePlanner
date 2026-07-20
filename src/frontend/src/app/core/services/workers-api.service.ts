@@ -1,4 +1,4 @@
-import { HttpClient, HttpParams } from '@angular/common/http';
+import { HttpClient, HttpHeaders, HttpParams } from '@angular/common/http';
 import { Injectable } from '@angular/core';
 import { map, Observable, timeout } from 'rxjs';
 import { ApiResponse } from '../models/api-response.model';
@@ -92,9 +92,9 @@ export class WorkersApiService {
   }
 
   /** Updates one worker and returns the authoritative row shape for local reconciliation. */
-  updateWorker(workerId: string, update: WorkerIdentityUpdate): Observable<WorkerPageItem> {
+  updateWorker(workerId: string, update: WorkerIdentityUpdate, correlationId?: string): Observable<WorkerPageItem> {
     return this.http
-      .patch<ApiResponse<unknown>>(buildApiUrl(`/api/workers/${encodeURIComponent(workerId)}`), update)
+      .patch<ApiResponse<unknown>>(buildApiUrl(`/api/workers/${encodeURIComponent(workerId)}`), update, { headers: this.correlationHeaders(correlationId) })
       .pipe(
         timeout(STANDARD_API_TIMEOUT_MS),
         map(response => this.mapWorker(this.normalizeObject(this.extractPayload(response)), 0))
@@ -110,11 +110,12 @@ export class WorkersApiService {
       );
   }
 
-  setEmploymentStatus(workerId: string, update: WorkerEmploymentStatusUpdate): Observable<WorkerPageItem> {
+  setEmploymentStatus(workerId: string, update: WorkerEmploymentStatusUpdate, correlationId?: string): Observable<WorkerPageItem> {
     return this.http
       .patch<ApiResponse<unknown>>(
         buildApiUrl(`/api/workers/${encodeURIComponent(workerId)}/employment-status`),
-        update
+        update,
+        { headers: this.correlationHeaders(correlationId) }
       )
       .pipe(
         timeout(STANDARD_API_TIMEOUT_MS),
@@ -122,11 +123,11 @@ export class WorkersApiService {
       );
   }
 
-  uploadWorkerPhoto(workerId: string, photo: File): Observable<void> {
+  uploadWorkerPhoto(workerId: string, photo: File, correlationId?: string): Observable<void> {
     const form = new FormData();
     form.append('photo', photo, photo.name);
     return this.http
-      .put<ApiResponse<unknown>>(buildApiUrl(`/api/workers/${encodeURIComponent(workerId)}/photo`), form)
+      .put<ApiResponse<unknown>>(buildApiUrl(`/api/workers/${encodeURIComponent(workerId)}/photo`), form, { headers: this.correlationHeaders(correlationId) })
       .pipe(
         timeout(STANDARD_API_TIMEOUT_MS),
         map(response => {
@@ -136,9 +137,9 @@ export class WorkersApiService {
       );
   }
 
-  deleteWorkerPhoto(workerId: string): Observable<void> {
+  deleteWorkerPhoto(workerId: string, correlationId?: string): Observable<void> {
     return this.http
-      .delete(buildApiUrl(`/api/workers/${encodeURIComponent(workerId)}/photo`), { observe: 'response' })
+      .delete(buildApiUrl(`/api/workers/${encodeURIComponent(workerId)}/photo`), { observe: 'response', headers: this.correlationHeaders(correlationId) })
       .pipe(
         timeout(STANDARD_API_TIMEOUT_MS),
         map(() => undefined)
@@ -159,6 +160,10 @@ export class WorkersApiService {
     }
 
     return params;
+  }
+
+  private correlationHeaders(correlationId?: string): HttpHeaders | undefined {
+    return correlationId ? new HttpHeaders({ 'X-Manufacturing-Realtime-Correlation-Id': correlationId }) : undefined;
   }
 
   private mapWorker(worker: RawRecord, index: number): WorkerPageItem {

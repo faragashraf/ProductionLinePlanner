@@ -1,8 +1,10 @@
-import { Component, OnDestroy, OnInit } from '@angular/core';
+import { Component, OnDestroy, OnInit, Optional } from '@angular/core';
+import { Router } from '@angular/router';
 import { PermissionService } from '../../core/services/permission.service';
 import { PERMISSIONS } from '../../core/config/permission-identifiers';
 import { Subject, catchError, debounceTime, distinctUntilChanged, finalize, map, of, switchMap, takeUntil } from 'rxjs';
 import { WorkerManagementFacade } from './worker-management.facade';
+import { ManufacturingRealtimeService } from '../../core/services/manufacturing-realtime.service';
 import {
   WorkerAssignmentStatus,
   WorkerLocalEmploymentStatus,
@@ -37,6 +39,7 @@ export class WorkersPageComponent implements OnInit, OnDestroy {
   private readonly search$ = new Subject<string>();
   private readonly storageKey = 'plp.worker-management.filters.v1';
   private loadSequence = 0;
+  private stopRealtime?: () => void;
 
   readonly permissions = PERMISSIONS;
   readonly employmentStatuses = [
@@ -64,11 +67,16 @@ export class WorkersPageComponent implements OnInit, OnDestroy {
 
   constructor(
     private readonly facade: WorkerManagementFacade,
-    private readonly permissionService: PermissionService
+    private readonly permissionService: PermissionService,
+    @Optional() private readonly manufacturingRealtime?: ManufacturingRealtimeService,
+    @Optional() private readonly router?: Router
   ) {}
 
   ngOnInit(): void {
     this.restoreFilters();
+    if (this.router?.url.includes('/manufacturing/employees')) {
+      this.stopRealtime = this.manufacturingRealtime?.watchScreen({ screen: 'employees', refresh: () => this.reload(this.page) });
+    }
     this.load$.pipe(
       switchMap(query => {
         const requestId = ++this.loadSequence;
@@ -109,6 +117,7 @@ export class WorkersPageComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    this.stopRealtime?.();
     this.destroy$.next();
     this.destroy$.complete();
   }

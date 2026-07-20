@@ -4,6 +4,7 @@ import { ButtonModule } from 'primeng/button';
 import { TableModule } from 'primeng/table';
 import { Observable, of, throwError } from 'rxjs';
 import { DepartmentItem, ManufacturingMasterDataApiService } from '../../core/services/manufacturing-master-data-api.service';
+import { ManufacturingRealtimeService } from '../../core/services/manufacturing-realtime.service';
 import { SharedModule } from '../../shared/shared.module';
 import { PlpResponsiveTableDirective } from '../../shared/product/plp-responsive-table.directive';
 import { PlpTablePaginationDirective } from '../../shared/product/plp-table-pagination.directive';
@@ -20,7 +21,10 @@ describe('ManufacturingDepartmentsPageComponent', () => {
     TestBed.configureTestingModule({
       declarations: [ManufacturingDepartmentsPageComponent],
       imports: [SharedModule, ButtonModule, TableModule, PlpResponsiveTableDirective, PlpTablePaginationDirective],
-      providers: [{ provide: ManufacturingMasterDataApiService, useValue: api }]
+      providers: [
+        { provide: ManufacturingMasterDataApiService, useValue: api },
+        { provide: ManufacturingRealtimeService, useValue: { watchScreen: () => () => undefined } }
+      ]
     });
 
     const fixture = TestBed.createComponent(ManufacturingDepartmentsPageComponent);

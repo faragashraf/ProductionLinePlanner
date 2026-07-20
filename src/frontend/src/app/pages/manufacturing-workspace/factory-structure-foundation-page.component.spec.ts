@@ -7,6 +7,7 @@ import { TableModule } from 'primeng/table';
 import { BehaviorSubject, of } from 'rxjs';
 import { PERMISSIONS } from '../../core/config/permission-identifiers';
 import { ManufacturingMasterDataApiService } from '../../core/services/manufacturing-master-data-api.service';
+import { ManufacturingRealtimeService } from '../../core/services/manufacturing-realtime.service';
 import { PermissionService } from '../../core/services/permission.service';
 import { PlpExpandableFormComponent } from '../../shared/product/plp-expandable-form.component';
 import { PlpResponsiveTableDirective } from '../../shared/product/plp-responsive-table.directive';
@@ -49,6 +50,7 @@ describe('FactoryStructureFoundationPageComponent', () => {
       imports: [FormsModule, SharedModule, ButtonModule, TableModule, PlpResponsiveTableDirective, PlpTablePaginationDirective, PlpExpandableFormComponent, NoopAnimationsModule],
       providers: [
         { provide: ManufacturingMasterDataApiService, useValue: masterData },
+        { provide: ManufacturingRealtimeService, useValue: { watchScreen: () => () => undefined, registerLocalOperation: () => 'local-correlation' } },
         { provide: PermissionService, useValue: {
           permissions$: of([...grantedPermissions]),
           hydrationState$: hydration.asObservable(),

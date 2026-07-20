@@ -180,11 +180,13 @@ builder.Services.AddRateLimiter(options =>
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUserService, CurrentUserService>();
+builder.Services.AddScoped<IManufacturingRealtimeCorrelationContext, HttpManufacturingRealtimeCorrelationContext>();
 builder.Services.AddSingleton<IPasswordHasher<AppUser>, PasswordHasher<AppUser>>();
 builder.Services.AddSingleton<IUserPasswordHasher, UserPasswordHasher>();
 builder.Services.AddSignalR(options => options.EnableDetailedErrors = false);
 builder.Services.AddSingleton<IUserIdProvider, AuthenticatedUserIdProvider>();
 builder.Services.AddScoped<INotificationLiveDispatcher, SignalRNotificationLiveDispatcher>();
+builder.Services.AddScoped<IManufacturingDataChangePublisher, SignalRManufacturingDataChangePublisher>();
 builder.Services.AddScoped<IStartupDatabaseMigrationExecutor, EfCoreStartupDatabaseMigrationExecutor>();
 builder.Services.AddScoped<StartupDatabaseMigrationRunner>();
 
