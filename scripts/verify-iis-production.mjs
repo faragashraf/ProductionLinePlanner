@@ -62,7 +62,8 @@ assert(!filesRecursively(backendRoot).some(path => ['.cs', '.csproj', '.sln'].in
 
 try {
   const config = JSON.parse(productionSettings);
-  assert(config?.Cors?.AllowedOrigins?.length === 1 && config.Cors.AllowedOrigins[0] === 'http://dayoub.local', 'Production CORS must allow only the Dayoub frontend origin.');
+  const allowedOrigins = config?.Cors?.AllowedOrigins;
+  assert(Array.isArray(allowedOrigins) && allowedOrigins.length === 2 && allowedOrigins.includes('http://dayoub.local') && allowedOrigins.includes('http://192.168.1.99'), 'Production CORS must allow only the approved Dayoub and LAN frontend origins.');
   assert(config?.Cors?.AllowInsecureHttpOrigins === true, 'Production config must explicitly opt in to its local HTTP CORS origin.');
   assert(config?.Cors?.AllowCredentials === true, 'Production CORS must permit credentialed SignalR-compatible requests for the exact origin.');
   assert(config?.Hosting?.EnableHttpsRedirection === false && config?.Hosting?.EnableHsts === false, 'Local HTTP IIS deployment must disable HTTPS redirection and HSTS.');
