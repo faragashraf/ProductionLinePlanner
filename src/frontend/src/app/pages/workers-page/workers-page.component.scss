@@ -100,10 +100,14 @@
   min-inline-size: 0;
 }
 
-.worker-management-page__identity strong,
 .worker-management-page__identity small,
 .worker-management-page__assignment span {
   overflow-wrap: anywhere;
+}
+
+.worker-management-page__identity strong {
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 
 .worker-management-page__identity span,
@@ -136,4 +140,15 @@
 .worker-management-page__table .plp-code {
   overflow-wrap: normal;
   white-space: nowrap;
+}
+
+@media (min-width: 801px) {
+  :host ::ng-deep .worker-management-page__table .p-datatable-table {
+    min-inline-size: 70rem;
+    table-layout: auto;
+  }
+
+  .worker-management-page__identity {
+    min-inline-size: 16rem;
+  }
 }

@@ -7,6 +7,7 @@ import { DepartmentItem, ManufacturingMasterDataApiService } from '../../core/se
 import { SharedModule } from '../../shared/shared.module';
 import { PlpResponsiveTableDirective } from '../../shared/product/plp-responsive-table.directive';
 import { PlpTablePaginationDirective } from '../../shared/product/plp-table-pagination.directive';
+import { PlpProductToolbarComponent } from '../../shared/product/plp-toolbar.component';
 import { ManufacturingDepartmentsPageComponent } from './manufacturing-departments-page.component';
 
 describe('ManufacturingDepartmentsPageComponent', () => {
@@ -19,7 +20,7 @@ describe('ManufacturingDepartmentsPageComponent', () => {
 
     TestBed.configureTestingModule({
       declarations: [ManufacturingDepartmentsPageComponent],
-      imports: [SharedModule, ButtonModule, TableModule, PlpResponsiveTableDirective, PlpTablePaginationDirective],
+      imports: [SharedModule, ButtonModule, TableModule, PlpResponsiveTableDirective, PlpTablePaginationDirective, PlpProductToolbarComponent],
       providers: [{ provide: ManufacturingMasterDataApiService, useValue: api }]
     });
 

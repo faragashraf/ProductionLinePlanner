@@ -242,14 +242,21 @@
 }
 
 .plp-app-shell__nav-list {
+  align-content: start;
   display: grid;
   gap: var(--plp-space-24);
+  grid-auto-rows: max-content;
+  min-block-size: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: var(--plp-space-12);
 }
 
 .plp-app-shell__nav-group {
+  align-content: start;
   display: grid;
   gap: var(--plp-space-8);
+  grid-auto-rows: max-content;
 }
 
 .plp-app-shell__nav-group + .plp-app-shell__nav-group {

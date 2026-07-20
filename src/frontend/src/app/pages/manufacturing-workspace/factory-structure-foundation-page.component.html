@@ -5,20 +5,24 @@
     </div>
   </plp-page-header>
 
-  <div class="factory-structure-toolbar">
-    <label class="sr-only" for="factoryStructureSearch">بحث</label>
-    <input id="factoryStructureSearch" class="factory-structure-search" type="search" [value]="searchTerm" placeholder="ابحث باسم المصنع أو الكود" aria-label="بحث في المصانع" (input)="onSearch($event)" />
-    <button *ngIf="searchTerm" pButton class="p-button-sm p-button-text" type="button" label="مسح البحث" (click)="onClearSearch()"></button>
-  </div>
+  <plp-product-toolbar
+    searchInputId="factoryStructureSearch"
+    searchLabel="بحث في المصانع"
+    searchPlaceholder="ابحث باسم المصنع أو الكود"
+    [searchValue]="searchTerm"
+    [clearEnabled]="true"
+    (searchValueChange)="onSearchValue($event)"
+  ></plp-product-toolbar>
 
   <plp-loading-skeleton *ngIf="isLoading && !hasLoadedOnce" [lines]="8" [showAvatar]="false"></plp-loading-skeleton>
-  <plp-error-state *ngIf="hasError && hasLoadedOnce && !isLoading" [title]="'تعذر تحميل بنية المصنع'" [description]="errorMessage" [actionText]="'إعادة المحاولة'" (action)="reload()"></plp-error-state>
+  <p class="factory-structure-refresh-status" *ngIf="isLoading && hasLoadedOnce" role="status"><i class="pi pi-spin pi-spinner" aria-hidden="true"></i>جارٍ تحديث بنية المصنع مع إبقاء البيانات الحالية ظاهرة.</p>
+  <plp-error-state *ngIf="hasError && hasLoadedOnce" [title]="'تعذر تحميل بنية المصنع'" [description]="errorMessage" [actionText]="'إعادة المحاولة'" (action)="reload()"></plp-error-state>
   <p class="factory-structure-message" *ngIf="successMessage && !hasError">{{ successMessage }}</p>
   <section class="factory-structure-empty" *ngIf="isEmpty && hasLoadedOnce && !isLoading && !hasError">
     <plp-empty-state title="لا توجد بيانات مصنع" description="لا توجد مصانع أو خطوط إنتاج لعرضها حالياً." actionText="تحديث" (action)="reload()"></plp-empty-state>
   </section>
 
-  <ng-container *ngIf="!isLoading && !isEmpty">
+  <ng-container *ngIf="hasStructureData">
     <section class="factory-structure-grid">
       <article class="factory-structure-panel">
         <plp-expandable-form title="المصانع" [summary]="filteredFactories.length + ' مصنعًا'" openLabel="إضافة مصنع" [canExpand]="canManage" [expanded]="activeForm === 'factory'" [saving]="isSaving" [error]="hasError ? errorMessage : ''" (expandedChange)="onFormExpandedChange('factory', $event)">
@@ -31,7 +35,7 @@
         </plp-expandable-form>
         <p-table plpResponsiveTable="scroll" plpTablePagination [plpPaginationPageSize]="10" [plpPaginationResetKey]="searchTerm" [plpStickyActions]="true" [value]="filteredFactories" dataKey="id" responsiveLayout="scroll">
           <ng-template pTemplate="header"><tr><th>الكود</th><th>الاسم</th><th>الموقع</th><th>الحالة</th><th></th></tr></ng-template>
-          <ng-template pTemplate="body" let-factory><tr [class.factory-structure-selected]="factory.id === selectedFactoryId"><td>{{ factory.code }}</td><td>{{ factory.name }}</td><td>{{ factory.location || '-' }}</td><td>{{ factory.isActive ? 'نشط' : 'معطل' }}</td><td><button pButton type="button" class="p-button-sm p-button-text" label="اختيار" (click)="selectFactory(factory.id)"></button><ng-container *plpCan="permissions.factoryStructure.manage"><button pButton type="button" class="p-button-sm p-button-text" icon="pi pi-pencil" aria-label="تعديل المصنع" title="تعديل المصنع" (click)="editFactory(factory)"></button></ng-container></td></tr></ng-template>
+          <ng-template pTemplate="body" let-factory><tr [class.factory-structure-selected]="factory.id === selectedFactoryId"><td><span class="plp-code">{{ factory.code }}</span></td><td>{{ factory.name }}</td><td>{{ factory.location || '-' }}</td><td><plp-status-badge [status]="factory.isActive ? 'ready' : 'warning'" [label]="factory.isActive ? 'نشط' : 'معطل'" [compact]="true"></plp-status-badge></td><td><button pButton type="button" class="p-button-sm p-button-text" label="اختيار" (click)="selectFactory(factory.id)"></button><ng-container *plpCan="permissions.factoryStructure.manage"><button pButton type="button" class="p-button-sm p-button-text" icon="pi pi-pencil" aria-label="تعديل المصنع" title="تعديل المصنع" (click)="editFactory(factory)"></button></ng-container></td></tr></ng-template>
         </p-table>
       </article>
 
@@ -44,7 +48,7 @@
         </plp-expandable-form>
         <p-table plpResponsiveTable="scroll" plpTablePagination [plpPaginationPageSize]="10" [plpPaginationResetKey]="selectedFactoryId" [plpStickyActions]="true" [value]="visibleDepartments" dataKey="id" responsiveLayout="scroll">
           <ng-template pTemplate="header"><tr><th>الكود</th><th>القسم</th><th>الترتيب</th><th>الخطوط</th><th>الحالة</th><th></th></tr></ng-template>
-          <ng-template pTemplate="body" let-department><tr [class.factory-structure-selected]="department.id === selectedDepartmentId"><td>{{ department.code }}</td><td>{{ department.nameAr || department.name }}</td><td>{{ department.sequenceOrder ?? 0 }}</td><td>{{ department.productionLineCount ?? 0 }}</td><td>{{ department.isActive ? 'نشط' : 'معطل' }}</td><td><button pButton type="button" class="p-button-sm p-button-text" label="اختيار" (click)="selectDepartment(department.id || '')"></button><ng-container *plpCan="permissions.departments.manage"><button pButton type="button" class="p-button-sm p-button-text" icon="pi pi-pencil" aria-label="تعديل القسم" title="تعديل القسم" (click)="editDepartment(department)"></button><button pButton type="button" class="p-button-sm p-button-text" [label]="department.isActive ? 'تعطيل' : 'تفعيل'" [disabled]="isSaving" (click)="setDepartmentActive(department, !department.isActive)"></button><button pButton type="button" class="p-button-sm p-button-text p-button-danger" icon="pi pi-trash" aria-label="حذف القسم" title="حذف القسم" [disabled]="isSaving" (click)="deleteDepartment(department)"></button></ng-container></td></tr></ng-template>
+          <ng-template pTemplate="body" let-department><tr [class.factory-structure-selected]="department.id === selectedDepartmentId"><td><span class="plp-code">{{ department.code }}</span></td><td>{{ department.nameAr || department.name }}</td><td><span class="plp-quantity">{{ department.sequenceOrder ?? 0 }}</span></td><td><span class="plp-quantity">{{ department.productionLineCount ?? 0 }}</span></td><td><plp-status-badge [status]="department.isActive ? 'ready' : 'warning'" [label]="department.isActive ? 'نشط' : 'معطل'" [compact]="true"></plp-status-badge></td><td><button pButton type="button" class="p-button-sm p-button-text" label="اختيار" (click)="selectDepartment(department.id || '')"></button><ng-container *plpCan="permissions.departments.manage"><button pButton type="button" class="p-button-sm p-button-text" icon="pi pi-pencil" aria-label="تعديل القسم" title="تعديل القسم" (click)="editDepartment(department)"></button><button pButton type="button" class="p-button-sm p-button-text" [label]="department.isActive ? 'تعطيل' : 'تفعيل'" [disabled]="isSaving" (click)="setDepartmentActive(department, !department.isActive)"></button><button pButton type="button" class="p-button-sm p-button-text p-button-danger" icon="pi pi-trash" aria-label="حذف القسم" title="حذف القسم" [disabled]="isSaving" (click)="deleteDepartment(department)"></button></ng-container></td></tr></ng-template>
           <ng-template pTemplate="emptymessage"><tr><td colspan="6">لا توجد أقسام محلية لهذا المصنع.</td></tr></ng-template>
         </p-table>
 
@@ -57,7 +61,7 @@
         </plp-expandable-form>
         <p-table plpResponsiveTable="scroll" plpTablePagination [plpPaginationPageSize]="10" [plpPaginationResetKey]="selectedFactoryId + selectedDepartmentId" [plpStickyActions]="true" [value]="visibleLines" dataKey="id" responsiveLayout="scroll">
           <ng-template pTemplate="header"><tr><th>القسم</th><th>الكود</th><th>الاسم</th><th>الترتيب</th><th>الحالة</th><th></th></tr></ng-template>
-          <ng-template pTemplate="body" let-line><tr [class.factory-structure-selected]="line.id === selectedLineId"><td>{{ line.departmentCode ? line.departmentCode + ' — ' + line.departmentNameAr : 'غير مرتبط' }}</td><td>{{ line.lineCode || '-' }}</td><td>{{ line.name }}</td><td>{{ line.sequenceOrder }}</td><td>{{ line.isActive ? 'نشط' : 'معطل' }}</td><td><button pButton type="button" class="p-button-sm p-button-text" label="اختيار" (click)="selectLine(line.id)"></button><ng-container *plpCan="permissions.factoryStructure.manage"><button pButton type="button" class="p-button-sm p-button-text" icon="pi pi-pencil" aria-label="تعديل الخط" title="تعديل الخط" (click)="editLine(line)"></button><button pButton type="button" class="p-button-sm p-button-text" [label]="line.isActive ? 'تعطيل' : 'تفعيل'" [disabled]="isSaving" (click)="setLineActive(line, !line.isActive)"></button></ng-container></td></tr></ng-template>
+          <ng-template pTemplate="body" let-line><tr [class.factory-structure-selected]="line.id === selectedLineId"><td>{{ line.departmentCode ? line.departmentCode + ' — ' + line.departmentNameAr : 'غير مرتبط' }}</td><td><span class="plp-code">{{ line.lineCode || '-' }}</span></td><td>{{ line.name }}</td><td><span class="plp-quantity">{{ line.sequenceOrder }}</span></td><td><plp-status-badge [status]="line.isActive ? 'ready' : 'warning'" [label]="line.isActive ? 'نشط' : 'معطل'" [compact]="true"></plp-status-badge></td><td><button pButton type="button" class="p-button-sm p-button-text" label="اختيار" (click)="selectLine(line.id)"></button><ng-container *plpCan="permissions.factoryStructure.manage"><button pButton type="button" class="p-button-sm p-button-text" icon="pi pi-pencil" aria-label="تعديل الخط" title="تعديل الخط" (click)="editLine(line)"></button><button pButton type="button" class="p-button-sm p-button-text" [label]="line.isActive ? 'تعطيل' : 'تفعيل'" [disabled]="isSaving" (click)="setLineActive(line, !line.isActive)"></button></ng-container></td></tr></ng-template>
           <ng-template pTemplate="emptymessage"><tr><td colspan="6">لا توجد خطوط مطابقة للقسم المحدد.</td></tr></ng-template>
         </p-table>
       </article>

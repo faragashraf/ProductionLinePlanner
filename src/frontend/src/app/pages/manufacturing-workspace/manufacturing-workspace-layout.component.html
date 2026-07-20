@@ -1,14 +1,18 @@
 <section class="manufacturing-workspace">
-  <header class="manufacturing-workspace__header">
+  <header
+    class="manufacturing-workspace__header"
+    [class.manufacturing-workspace__header--compact]="!isDashboardRoute"
+  >
     <div>
-      <span class="manufacturing-workspace__eyebrow">Manufacturing Workspace</span>
-      <h1>مساحة التصنيع</h1>
+      <span class="manufacturing-workspace__eyebrow">مساحة التشغيل الصناعي</span>
+      <h1 *ngIf="isDashboardRoute; else workspaceContextTitle">مساحة التصنيع</h1>
+      <ng-template #workspaceContextTitle><h2>مساحة التصنيع</h2></ng-template>
       <p>أساس موحّد لإدارة بيانات المصنع قبل بدء عمليات الإنشاء والتعديل.</p>
     </div>
     <span class="manufacturing-workspace__status"><i class="pi pi-shield"></i> عرض حسب الصلاحيات</span>
   </header>
 
-  <div #workspaceNavigationShell class="manufacturing-workspace__navigation-shell">
+  <div #workspaceNavigationShell class="manufacturing-workspace__navigation-shell" aria-label="المزيد من أقسام مساحة التصنيع متاح بالسحب الأفقي">
     <nav
       class="manufacturing-workspace__navigation"
       aria-label="تنقل مساحة التصنيع"

@@ -242,13 +242,14 @@ export class AppShellComponent implements OnInit, OnDestroy {
 
   private checkViewport(): void {
     const viewportWidth = typeof window === 'undefined' ? 0 : window.innerWidth;
+    const viewportHeight = typeof window === 'undefined' ? 0 : window.innerHeight;
 
     if (viewportWidth >= 1024) {
       this.navigationMode = 'desktop';
       return;
     }
 
-    if (viewportWidth >= 768) {
+    if (viewportWidth >= 768 && viewportWidth > viewportHeight) {
       this.navigationMode = 'tablet-landscape';
       return;
     }

@@ -5,6 +5,7 @@
   <plp-page-header
     title="تشغيل وتسجيل الإنتاج"
     description="اختر مسار العمل مرة واحدة، ثم عيّن العمال وسجّل الدفعات الفعلية دون مغادرة الصفحة."
+    [compact]="true"
   ></plp-page-header>
   <p class="production-page__error" *ngIf="error" role="alert">{{ error }}</p>
   <p class="production-page__success" *ngIf="recordActionSuccess" role="status">

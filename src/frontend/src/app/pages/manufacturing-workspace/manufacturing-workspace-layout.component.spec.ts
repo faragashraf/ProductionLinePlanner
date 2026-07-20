@@ -61,4 +61,17 @@ describe('ManufacturingWorkspaceLayoutComponent', () => {
     expect(tab?.classList.contains('manufacturing-workspace__nav-item--active')).toBeTrue();
     expect(tab?.getAttribute('aria-current')).toBe('page');
   });
+
+  it('keeps the full workspace hero on the dashboard', () => {
+    const fixture = configure([PERMISSIONS.production.view], '/manufacturing/dashboard');
+    expect(fixture.nativeElement.querySelector('.manufacturing-workspace__header--compact')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.manufacturing-workspace__header h1')?.textContent).toContain('مساحة التصنيع');
+  });
+
+  it('uses a compact context header on child routes without duplicating the page h1', () => {
+    const fixture = configure([PERMISSIONS.production.view], '/manufacturing/daily-production-operations');
+    expect(fixture.nativeElement.querySelector('.manufacturing-workspace__header--compact')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('.manufacturing-workspace__header h1')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.manufacturing-workspace__header h2')?.textContent).toContain('مساحة التصنيع');
+  });
 });

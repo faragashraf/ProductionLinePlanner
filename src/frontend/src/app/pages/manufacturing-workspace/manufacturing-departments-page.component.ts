@@ -31,8 +31,8 @@ export class ManufacturingDepartmentsPageComponent implements OnInit {
     return !this.isLoading && !this.hasError && this.filteredDepartments.length === 0 && this.searchTerm.trim().length > 0;
   }
 
-  onSearch(event: Event): void {
-    this.searchTerm = ((event.target as HTMLInputElement).value ?? '').trim();
+  onSearchValue(value: string): void {
+    this.searchTerm = value.trim();
     this.applyFilter();
   }
 
@@ -80,8 +80,9 @@ export class ManufacturingDepartmentsPageComponent implements OnInit {
         },
         error: (error) => {
           this.hasError = true;
-          this.departments = [];
-          this.filteredDepartments = [];
+          if (this.departments.length === 0) {
+            this.filteredDepartments = [];
+          }
           this.errorMessage = this.extractErrorMessage(error);
         }
       });

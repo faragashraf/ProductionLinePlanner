@@ -102,5 +102,21 @@ test('overlay drawer identity', async ({ page }) => {
   const drawer = page.locator('.plp-app-shell-overlay-nav');
   await expect(drawer).toBeVisible();
   await expectSingleIdentity(page, '.plp-app-shell-overlay-nav .plp-app-shell__sidebar-identity');
+  const linkHeights = await drawer.locator('.plp-app-shell__nav-link').evaluateAll(links => links.map(link => link.getBoundingClientRect().height));
+  expect(linkHeights.length).toBeGreaterThan(0);
+  expect(Math.max(...linkHeights)).toBeLessThanOrEqual(56);
   await page.screenshot({ path: path.join(visualOutput, 'overlay-drawer-600x1000.png'), fullPage: true });
+});
+
+test('tablet portrait keeps the content full-width behind overlay navigation', async ({ page }) => {
+  await page.setViewportSize({ width: 800, height: 1280 });
+  await openShell(page);
+  await expect(page.locator('.plp-app-shell__desktop-nav')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'فتح القائمة' })).toBeVisible();
+  const geometry = await page.locator('.plp-app-shell__main').evaluate(main => ({
+    width: main.getBoundingClientRect().width,
+    viewportWidth: document.documentElement.clientWidth
+  }));
+  expect(geometry.width).toBeGreaterThanOrEqual(geometry.viewportWidth - 1);
+  await page.screenshot({ path: path.join(visualOutput, 'tablet-portrait-overlay-800x1280.png'), fullPage: true });
 });

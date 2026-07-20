@@ -20,6 +20,7 @@ describe('AppShellComponent', () => {
   let permissions: PermissionServiceStub;
   let authService: jasmine.SpyObj<AuthService>;
   let originalInnerWidth: number;
+  let originalInnerHeight: number;
 
   const navigation: AppNavigationItem[] = [
     { id: 'dashboard', label: 'لوحة التحكم', route: '/dashboard', icon: 'pi-home', order: 10, group: 'workspace' },
@@ -29,7 +30,8 @@ describe('AppShellComponent', () => {
 
   beforeEach(() => {
     originalInnerWidth = window.innerWidth;
-    setViewport(390);
+    originalInnerHeight = window.innerHeight;
+    setViewport(390, 844);
     router = new RouterStub('/dashboard');
     permissions = new PermissionServiceStub(navigation);
     authService = jasmine.createSpyObj<AuthService>('AuthService', ['logout']);
@@ -56,7 +58,7 @@ describe('AppShellComponent', () => {
   });
 
   afterEach(() => {
-    setViewport(originalInnerWidth);
+    setViewport(originalInnerWidth, originalInnerHeight);
   });
 
   it('renders the existing permission-filtered navigation and preserves the business router outlet', fakeAsync(() => {
@@ -183,7 +185,7 @@ describe('AppShellComponent', () => {
     expect(sidebarIdentity.textContent).not.toContain(PRODUCT_IDENTITY.nameAr);
     expect(component.navigationMode).toBe('phone');
 
-    setViewport(600);
+    setViewport(600, 960);
     component.onResize();
     fixture.detectChanges();
     expect(component.navigationMode).toBe('tablet-portrait');
@@ -192,7 +194,7 @@ describe('AppShellComponent', () => {
     sidebar = getOverlaySidebar();
     expect(sidebar).toBeTruthy();
 
-    setViewport(800);
+    setViewport(800, 600);
     component.onResize();
     fixture.detectChanges();
     expect(component.navigationMode).toBe('tablet-landscape');
@@ -316,7 +318,7 @@ describe('AppShellComponent', () => {
     tick(200);
     expect(component.sidebarOpen).toBeFalse();
 
-    setViewport(700);
+    setViewport(700, 1000);
     component.onResize();
     openOverlayDrawer();
     router.eventsSubject.next(new NavigationEnd(2, '/workers', '/workers'));
@@ -328,13 +330,13 @@ describe('AppShellComponent', () => {
   it('keeps overlay navigation for phone and tablet portrait while using a collapsible persistent sidebar on larger breakpoints', () => {
     expect(component.navigationMode).toBe('phone');
 
-    setViewport(700);
+    setViewport(700, 1000);
     component.onResize();
     expect(component.navigationMode).toBe('tablet-portrait');
     expect(component.isOverlayNavigation).toBeTrue();
     expect(fixture.nativeElement.querySelector('[aria-label="فتح القائمة"]')).not.toBeNull();
 
-    setViewport(800);
+    setViewport(800, 600);
     component.onResize();
     fixture.detectChanges();
     expect(component.navigationMode).toBe('tablet-landscape');
@@ -374,14 +376,15 @@ describe('AppShellComponent', () => {
   });
 
   it('keeps scrolling inside page content while the shell switches between overlay and persistent navigation', () => {
-    const scenarios: Array<[number, ShellNavigationMode, boolean]> = [
-      [700, 'tablet-portrait', true],
-      [800, 'tablet-landscape', false],
-      [1280, 'desktop', false]
+    const scenarios: Array<[number, number, ShellNavigationMode, boolean]> = [
+      [700, 1000, 'tablet-portrait', true],
+      [800, 1280, 'tablet-portrait', true],
+      [960, 600, 'tablet-landscape', false],
+      [1280, 800, 'desktop', false]
     ];
 
-    for (const [width, expectedMode, isOverlay] of scenarios) {
-      setViewport(width);
+    for (const [width, height, expectedMode, isOverlay] of scenarios) {
+      setViewport(width, height);
       component.onResize();
       fixture.detectChanges();
 
@@ -390,7 +393,7 @@ describe('AppShellComponent', () => {
       const shellStyle = window.getComputedStyle(shell);
       const mainStyle = window.getComputedStyle(main);
 
-      expect(component.navigationMode).withContext(`width ${width}`).toBe(expectedMode);
+      expect(component.navigationMode).withContext(`${width}x${height}`).toBe(expectedMode);
       expect(shellStyle.overflowY).withContext(`shell width ${width}`).toBe('hidden');
       expect(mainStyle.overflowY).withContext(`content width ${width}`).toBe('auto');
 
@@ -403,24 +406,27 @@ describe('AppShellComponent', () => {
   });
 
   it('keeps a navigation mode available at every required breakpoint boundary', () => {
-    const expectedModes: Array<[number, ShellNavigationMode]> = [
-      [320, 'phone'],
-      [360, 'phone'],
-      [390, 'phone'],
-      [599, 'phone'],
-      [600, 'tablet-portrait'],
-      [767, 'tablet-portrait'],
-      [768, 'tablet-landscape'],
-      [1023, 'tablet-landscape'],
-      [1024, 'desktop'],
-      [1280, 'desktop']
+    const expectedModes: Array<[number, number, ShellNavigationMode]> = [
+      [320, 800, 'phone'],
+      [360, 800, 'phone'],
+      [390, 844, 'phone'],
+      [599, 960, 'phone'],
+      [600, 960, 'tablet-portrait'],
+      [767, 1024, 'tablet-portrait'],
+      [768, 1024, 'tablet-portrait'],
+      [800, 1280, 'tablet-portrait'],
+      [962, 1280, 'tablet-portrait'],
+      [960, 600, 'tablet-landscape'],
+      [1023, 768, 'tablet-landscape'],
+      [1024, 1366, 'desktop'],
+      [1280, 800, 'desktop']
     ];
 
-    for (const [width, expectedMode] of expectedModes) {
-      setViewport(width);
+    for (const [width, height, expectedMode] of expectedModes) {
+      setViewport(width, height);
       component.onResize();
 
-      expect(component.navigationMode).withContext(`width ${width}`).toBe(expectedMode);
+      expect(component.navigationMode).withContext(`${width}x${height}`).toBe(expectedMode);
       expect(component.isOverlayNavigation || component.hasPersistentNavigation)
         .withContext(`width ${width}`)
         .toBeTrue();
@@ -458,8 +464,9 @@ describe('AppShellComponent', () => {
     expect(router.navigateByUrl).toHaveBeenCalledOnceWith('/login');
   });
 
-  function setViewport(width: number): void {
+  function setViewport(width: number, height = 900): void {
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: width });
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: height });
   }
 
   function openOverlayDrawer(): void {

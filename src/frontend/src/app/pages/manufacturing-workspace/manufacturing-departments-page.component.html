@@ -14,23 +14,24 @@
     </div>
   </plp-page-header>
 
-  <div class="departments-toolbar">
-    <label class="sr-only" for="departmentsSearch">بحث</label>
-    <input
-      id="departmentsSearch"
-      class="departments-search"
-      type="search"
-      [value]="searchTerm"
-      placeholder="ابحث باسم القسم أو الكود"
-      aria-label="بحث في الأقسام"
-      (input)="onSearch($event)"
-    />
-  </div>
+  <plp-product-toolbar
+    searchInputId="departmentsSearch"
+    searchLabel="بحث في الأقسام"
+    searchPlaceholder="ابحث باسم القسم أو الكود"
+    [searchValue]="searchTerm"
+    [clearEnabled]="true"
+    (searchValueChange)="onSearchValue($event)"
+  ></plp-product-toolbar>
 
   <plp-loading-skeleton *ngIf="isLoading && !hasLoadedOnce" [lines]="5" [showAvatar]="false"></plp-loading-skeleton>
 
+  <p class="departments-refresh-status" *ngIf="isLoading && hasLoadedOnce" role="status">
+    <i class="pi pi-spin pi-spinner" aria-hidden="true"></i>
+    جارٍ تحديث قائمة الأقسام مع إبقاء البيانات الحالية ظاهرة.
+  </p>
+
   <plp-error-state
-    *ngIf="hasError && hasLoadedOnce && !isLoading"
+    *ngIf="hasError && hasLoadedOnce"
     [title]="'تعذر تحميل قائمة الأقسام'"
     [description]="errorMessage"
     [actionText]="errorRetryText"
@@ -55,7 +56,7 @@
     ></plp-empty-state>
   </section>
 
-  <section class="departments-table-shell" *ngIf="!isLoading && !hasError && filteredDepartments.length > 0">
+  <section class="departments-table-shell" *ngIf="filteredDepartments.length > 0" [attr.aria-busy]="isLoading || null">
     <p-table plpResponsiveTable="scroll" plpTablePagination [plpPaginationPageSize]="10" [plpPaginationResetKey]="searchTerm" [value]="filteredDepartments" dataKey="id" responsiveLayout="scroll" [scrollHeight]="'auto'">
       <ng-template pTemplate="header">
         <tr>
@@ -66,11 +67,9 @@
       </ng-template>
       <ng-template pTemplate="body" let-department>
         <tr>
-          <td>{{ departmentCode(department) }}</td>
+          <td><span class="plp-code">{{ departmentCode(department) }}</span></td>
           <td>{{ departmentName(department) }}</td>
-          <td>
-            <span class="departments-status">{{ displayStatus(department) }}</span>
-          </td>
+          <td><plp-status-badge [status]="department.isActive === false ? 'inactive' : 'ready'" [label]="displayStatus(department)" [compact]="true"></plp-status-badge></td>
         </tr>
       </ng-template>
       <ng-template pTemplate="emptymessage">
