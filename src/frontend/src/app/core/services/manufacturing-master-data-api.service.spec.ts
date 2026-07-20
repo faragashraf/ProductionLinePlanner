@@ -60,33 +60,30 @@ describe('ManufacturingMasterDataApiService', () => {
     expect(attendanceDepartments).toEqual([{ departmentId: 4, name: 'Challenger' }]);
   });
 
-  it('maps active compensation model options from the endpoint envelope', () => {
-    let models: unknown[] = [];
-    service.compensationModels().subscribe(value => models = value);
+  it('loads only production lines belonging to the selected operational department', () => {
+    let lines: unknown[] = [];
+    service.productionLinesForDepartment('department-1').subscribe(value => lines = value);
 
-    const request = http.expectOne(item => item.method === 'GET' && item.urlWithParams.includes('/api/compensation/models?includeInactive=false'));
-    request.flush({ success: true, data: { items: [{ id: 'model-grm001', code: 'GRM001', name: 'جرومان', isActive: true }] } });
-
-    expect(models).toEqual([{ id: 'model-grm001', code: 'GRM001', name: 'جرومان', isActive: true }]);
-  });
-
-  it('maps stage configuration and sends only compensation-editable fields on save', () => {
-    let stageCount = 0;
-    service.compensationModelStages('model-grm001').subscribe(value => stageCount = value.length);
-    http.expectOne(item => item.method === 'GET' && item.url.endsWith('/api/compensation/models/model-grm001/stages')).flush({
+    http.expectOne(request => request.url.endsWith('/api/production-lines?departmentId=department-1&pageSize=200')).flush({
       success: true,
-      data: [{ id: 'stage-1', productModelId: 'model-grm001', subStageId: 'sub-1', subStageCode: 'STG001', subStageName: 'تجهيز', stageOrder: 1, piecePrice: 0.5, standardSeconds: 22, compensationMode: 'SharedPercentage', isRequired: true, isActive: true }]
+      data: { items: [{ id: 'line-1', factoryId: 'factory-1', departmentId: 'department-1', name: 'خط الخياطة', sequenceOrder: 1, isActive: true }] }
     });
 
-    service.updateCompensationModelStage('model-grm001', 'stage-1', {
-      compensationMode: 'FullRatePerWorker',
-      piecePrice: 0.75,
-      standardSeconds: 18
-    }).subscribe();
-    const request = http.expectOne(item => item.method === 'PATCH' && item.url.endsWith('/api/compensation/models/model-grm001/stages/stage-1'));
-    expect(request.request.body).toEqual({ compensationMode: 'FullRatePerWorker', piecePrice: 0.75, standardSeconds: 18 });
-    request.flush({ success: true, data: { id: 'stage-1', subStageId: 'sub-1', stageOrder: 1, piecePrice: 0.75, standardSeconds: 18, compensationMode: 'FullRatePerWorker', isRequired: true, isActive: true } });
+    expect(lines).toEqual([{ id: 'line-1', factoryId: 'factory-1', departmentId: 'department-1', name: 'خط الخياطة', sequenceOrder: 1, isActive: true }]);
+  });
 
-    expect(stageCount).toBe(1);
+  it('loads operational stages through the factory, department, line, and status filters', () => {
+    let stages: unknown[] = [];
+    service.operationalStages({ factoryId: 'factory-1', departmentId: 'department-1', productionLineId: 'line-1', isActive: false, includeInactive: true }).subscribe(value => stages = value);
+
+    const request = http.expectOne(item => item.method === 'GET' && item.urlWithParams.includes('/api/stages?'));
+    expect(request.request.urlWithParams).toContain('factoryId=factory-1');
+    expect(request.request.urlWithParams).toContain('departmentId=department-1');
+    expect(request.request.urlWithParams).toContain('productionLineId=line-1');
+    expect(request.request.urlWithParams).toContain('isActive=false');
+    expect(request.request.urlWithParams).toContain('includeInactive=true');
+    request.flush({ success: true, data: { items: [{ id: 'stage-1', mainStageId: 'legacy-group', productionLineId: 'line-1', name: 'تجهيز', code: 'STG001', capacity: 2, defaultOrder: 1, isActive: false }], totalCount: 1, pageNumber: 1, pageSize: 200 } });
+
+    expect(stages).toEqual([{ id: 'stage-1', mainStageId: 'legacy-group', productionLineId: 'line-1', name: 'تجهيز', code: 'STG001', capacity: 2, defaultOrder: 1, sequenceOrder: 1, isActive: false }]);
   });
 });

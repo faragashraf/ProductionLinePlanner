@@ -2,7 +2,6 @@ import { PERMISSIONS } from '../../core/config/permission-identifiers';
 import { PermissionCanActivateGuard } from '../../core/guards/permission-can-activate.guard';
 import { PermissionCanMatchGuard } from '../../core/guards/permission-can-match.guard';
 import { FactoryStructureFoundationPageComponent } from './factory-structure-foundation-page.component';
-import { ManufacturingCompensationPageComponent } from './manufacturing-compensation-page.component';
 import { ManufacturingDepartmentsPageComponent } from './manufacturing-departments-page.component';
 import { LineStaffingWorkspacePageComponent } from './line-staffing-workspace-page.component';
 import { DailyProductionOperationsPageComponent } from './daily-production-operations-page.component';
@@ -42,14 +41,12 @@ describe('ManufacturingWorkspaceRoutingModule', () => {
     expect(route?.data?.['permission']).toBe(PERMISSIONS.factoryStructure.view);
   });
 
-  it('routes compensation to the operational compensation page with compensation.view permission', () => {
+  it('redirects the removed compensation screen to model setup without a dead route', () => {
     const route = childRoutes.find(item => item.path === 'compensation');
 
-    expect(route?.component).toBe(ManufacturingCompensationPageComponent);
-    expect(route?.component).not.toBe(ManufacturingPlaceholderPageComponent);
-    expect(route?.canMatch).toContain(PermissionCanMatchGuard);
-    expect(route?.canActivate).toContain(PermissionCanActivateGuard);
-    expect(route?.data?.['permission']).toBe(PERMISSIONS.compensation.view);
+    expect(route?.redirectTo).toBe('models');
+    expect(route?.pathMatch).toBe('full');
+    expect(route?.component).toBeUndefined();
   });
 
   it('requires production view and recording permission for the Production Recording route', () => {

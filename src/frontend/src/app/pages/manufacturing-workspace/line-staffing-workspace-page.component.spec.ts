@@ -9,6 +9,7 @@ import { FormSubmissionValidationService } from '../../shared/forms/form-submiss
 import { LineStaffingWorkspacePageComponent } from './line-staffing-workspace-page.component';
 
 const factoryId = '43dde27f-7ee3-4e90-9f3b-582fc90a3b0';
+const departmentId = '3adcd4d8-06da-4e9a-a2d8-5c1ac48274d9';
 const lineId = 'c0550d1f-4bf7-432c-b19b-672763d490fc';
 const modelId = '46593736-2fe2-450d-84a1-f304b712e07f';
 const defaultStageId = 'c0ec408d-74ab-4299-88cd-1a7543cc335b';
@@ -23,10 +24,11 @@ describe('LineStaffingWorkspacePageComponent', () => {
   let component: LineStaffingWorkspacePageComponent;
 
   beforeEach(() => {
-    masterData = jasmine.createSpyObj<ManufacturingMasterDataApiService>('ManufacturingMasterDataApiService', ['factories', 'allProductionLines', 'models']);
+    masterData = jasmine.createSpyObj<ManufacturingMasterDataApiService>('ManufacturingMasterDataApiService', ['factories', 'departments', 'productionLinesForDepartment', 'models']);
     assignments = jasmine.createSpyObj<AssignmentsApiService>('AssignmentsApiService', ['getLineStaffingPlan', 'getLineStaffingStageRefresh', 'getActiveLineStaffingWorkers', 'updateStageDefaultAssignments', 'removeDefaultAssignment', 'cancelTemporaryAssignment', 'createTemporaryAssignment', 'createReplacementAssignment', 'moveCurrentAssignment']);
     masterData.factories.and.returnValue(of([{ id: factoryId, code: 'F1', name: 'المصنع', isActive: true }]));
-    masterData.allProductionLines.and.returnValue(of([{ id: lineId, factoryId, name: 'خط الخياطة', sequenceOrder: 1, isActive: true }]));
+    masterData.departments.and.returnValue(of([{ id: departmentId, factoryId, code: 'SEW', nameAr: 'الخياطة', isActive: true }]));
+    masterData.productionLinesForDepartment.and.returnValue(of([{ id: lineId, factoryId, departmentId, name: 'خط الخياطة', sequenceOrder: 1, isActive: true }]));
     masterData.models.and.returnValue(of([{ id: modelId, code: 'GER', name: 'جرومان', isActive: true }]));
     assignments.getLineStaffingPlan.and.callFake(() => of(plan()));
     assignments.getLineStaffingStageRefresh.and.callFake(() => of(stageRefresh()));
@@ -54,12 +56,13 @@ describe('LineStaffingWorkspacePageComponent', () => {
     document.body.classList.remove('plp-line-staffing-tablet-scroll-lock');
   });
 
-  it('loads all model stages only after Factory → Line → Model and the explicit load action', () => {
+  it('loads model stages only after Factory → Department → Line → Model and the explicit load action', () => {
     component.ngOnInit();
     expect(masterData.factories).toHaveBeenCalledTimes(1);
     expect(assignments.getLineStaffingPlan).not.toHaveBeenCalled();
 
     component.selectFactory(factoryId);
+    component.selectDepartment(departmentId);
     component.selectProductionLine(lineId);
     component.selectProductModel(modelId);
     expect(assignments.getLineStaffingPlan).not.toHaveBeenCalled();
@@ -69,6 +72,53 @@ describe('LineStaffingWorkspacePageComponent', () => {
     expect(assignments.getLineStaffingPlan).toHaveBeenCalledWith(factoryId, lineId, modelId, component.staffingReferenceDate);
     expect(component.plan?.stages.length).toBe(2);
     expect(component.selectedStage?.subStageId).toBe(defaultStageId);
+  });
+
+  it('loads only the selected factory departments and only the selected department lines', () => {
+    component.ngOnInit();
+    component.selectFactory(factoryId);
+
+    expect(masterData.departments).toHaveBeenCalledWith(factoryId, false);
+    expect(component.activeDepartments.map(department => department.id)).toEqual([departmentId]);
+    expect(component.visibleProductionLines).toEqual([]);
+
+    component.selectDepartment(departmentId);
+
+    expect(masterData.productionLinesForDepartment).toHaveBeenCalledWith(departmentId);
+    expect(component.visibleProductionLines.map(line => line.id)).toEqual([lineId]);
+  });
+
+  it('clears dependent context and a loaded journey when a higher context value changes', () => {
+    initialize(component);
+    expect(component.plan).not.toBeNull();
+
+    component.selectDepartment('');
+
+    expect(component.selectedProductionLineId).toBe('');
+    expect(component.selectedProductModelId).toBe('');
+    expect(component.selectedSubStageId).toBe('');
+    expect(component.plan).toBeNull();
+  });
+
+  it('does not include unassigned lines in the staffing choices', () => {
+    masterData.productionLinesForDepartment.and.returnValue(of([
+      { id: lineId, factoryId, departmentId, name: 'خط الخياطة', sequenceOrder: 1, isActive: true },
+      { id: 'legacy-line', factoryId, departmentId: null, name: 'خط قديم', sequenceOrder: 2, isActive: true }
+    ]));
+    component.ngOnInit();
+    component.selectFactory(factoryId);
+    component.selectDepartment(departmentId);
+
+    expect(component.visibleProductionLines.map(line => line.id)).toEqual([lineId]);
+  });
+
+  it('keeps the model journey empty state distinct when the selected model has no configured stages', () => {
+    assignments.getLineStaffingPlan.and.returnValue(of({ ...plan(), stages: [], totalStages: 0, stagesWithWorkers: 0, stagesWithoutWorkers: 0 }));
+    initialize(component);
+
+    expect(component.plan).not.toBeNull();
+    expect(component.hasLoadedModelJourney).toBeFalse();
+    expect(component.selectedStage).toBeNull();
   });
 
   it('keeps the staffing form date-free and exposes time-only assignment controls', () => {
@@ -733,6 +783,7 @@ describe('LineStaffingWorkspacePageComponent', () => {
 function initialize(component: LineStaffingWorkspacePageComponent): void {
   component.ngOnInit();
   component.selectFactory(factoryId);
+  component.selectDepartment(departmentId);
   component.selectProductionLine(lineId);
   component.selectProductModel(modelId);
   component.loadProductStages();

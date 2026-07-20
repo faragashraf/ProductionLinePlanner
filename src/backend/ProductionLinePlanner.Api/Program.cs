@@ -349,7 +349,6 @@ var mainStagesApi = app.MapGroup("/api/main-stages").RequireAuthorization().Requ
 var subStagesApi = app.MapGroup("/api/sub-stages").RequireAuthorization().RequireRateLimiting(ApiRateLimitPolicies.NormalRead);
 var workersApi = app.MapGroup("/api/workers").RequireAuthorization().RequireRateLimiting(ApiRateLimitPolicies.NormalRead);
 var productModelsApi = app.MapGroup("/api/product-models").RequireAuthorization().RequireRateLimiting(ApiRateLimitPolicies.NormalRead);
-var compensationApi = app.MapGroup("/api/compensation").RequireAuthorization().RequireRateLimiting(ApiRateLimitPolicies.NormalRead);
 var workerCompensationApi = app.MapGroup("/api/workers/{workerId:guid}/compensation").RequireAuthorization().RequireRateLimiting(ApiRateLimitPolicies.NormalRead);
 var assignmentsApi = app.MapGroup("/api/assignments").RequireAuthorization().RequireRateLimiting(ApiRateLimitPolicies.CriticalProductionWrite);
 var lineStaffingApi = app.MapGroup("/api/line-staffing").RequireAuthorization().RequireRateLimiting(ApiRateLimitPolicies.NormalRead);
@@ -1280,6 +1279,8 @@ factoriesApi.MapGet("/{factoryId:guid}/production-lines", async (
 productionLinesApi.MapGet("", async (
     AppDbContext dbContext,
     CancellationToken cancellationToken,
+    Guid? factoryId = null,
+    Guid? departmentId = null,
     bool includeInactive = false,
     int page = 1,
     int pageSize = 50) =>
@@ -1290,6 +1291,8 @@ productionLinesApi.MapGet("", async (
     }
 
     var query = dbContext.ProductionLines.AsNoTracking();
+    if (factoryId.HasValue) query = query.Where(x => x.FactoryId == factoryId.Value);
+    if (departmentId.HasValue) query = query.Where(x => x.DepartmentId == departmentId.Value);
     if (!includeInactive) query = query.Where(x => x.IsActive);
     var totalCount = await query.CountAsync(cancellationToken);
     var items = await query.OrderBy(x => x.SequenceOrder).ThenBy(x => x.Name).Skip((page - 1) * pageSize).Take(pageSize).Select(x => new ProductionLineDto
@@ -2721,92 +2724,6 @@ productModelsApi.MapPost("/{modelId:guid}/stages/copy", async (
     .RequirePermission("models.manage")
     .WithTags("ProductModels")
     .WithName("CopyModelStages");
-
-compensationApi.MapGet("/models", async (
-    IProductModelService productModelService,
-    CancellationToken cancellationToken,
-    string? search = null,
-    bool includeInactive = false,
-    int page = 1,
-    int pageSize = 50) =>
-{
-    var result = await productModelService.GetModelsAsync(search, includeInactive ? null : true, page, pageSize, cancellationToken);
-    if (result.IsFailure)
-    {
-        return ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code));
-    }
-
-    return Results.Ok(new
-    {
-        success = true,
-        data = new
-        {
-            items = result.Value ?? Array.Empty<ProductModelDto>(),
-            totalCount = result.TotalCount,
-            pageNumber = result.PageNumber,
-            pageSize = result.PageSize
-        }
-    });
-})
-    .RequirePermission("compensation.view")
-    .WithTags("Compensation")
-    .WithName("GetCompensationProductModels");
-
-compensationApi.MapGet("/models/{modelId:guid}/stages", async (
-    Guid modelId,
-    IProductModelService productModelService,
-    CancellationToken cancellationToken) =>
-{
-    var result = await productModelService.GetModelStagesAsync(modelId, cancellationToken);
-    if (result.IsFailure)
-    {
-        return ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code));
-    }
-
-    return Results.Ok(ApiResponse.Success(result.Value ?? Array.Empty<ProductModelStageDto>()));
-})
-    .RequirePermission("compensation.view")
-    .WithTags("Compensation")
-    .WithName("GetCompensationProductModelStages");
-
-compensationApi.MapPatch("/models/{modelId:guid}/stages/{modelStageId:guid}", async (
-    Guid modelId,
-    Guid modelStageId,
-    UpsertProductModelStageRequest request,
-    IProductModelService productModelService,
-    ICurrentUserService currentUserService,
-    HttpContext httpContext,
-    CancellationToken cancellationToken) =>
-{
-    if (request.InvalidCompensationMode is not null)
-    {
-        return ApiResponse.Failure("ValidationError", request.InvalidCompensationMode, StatusCodes.Status400BadRequest);
-    }
-
-    if (request.SubStageId is not null || request.StageOrder is not null || request.IsRequired is not null || request.IsActive is not null ||
-        request.HasEffectiveFrom || request.EffectiveFrom is not null)
-    {
-        return ApiResponse.Failure("ValidationError", "Only compensation mode, piece price, and standard seconds can be changed from compensation configuration.", StatusCodes.Status400BadRequest);
-    }
-
-    var actorUserId = currentUserService.UserId;
-    if (actorUserId is null)
-    {
-        return ApiResponse.Failure("Unauthorized", "User context is required.");
-    }
-
-    var requestMeta = $"{httpContext.Request.Method} {httpContext.Request.Path}";
-    var result = await productModelService.UpdateModelStageAsync(modelId, modelStageId, request, actorUserId.Value, requestMeta, cancellationToken);
-    if (result.IsFailure)
-    {
-        return ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code));
-    }
-
-    return Results.Ok(ApiResponse.Success(result.Value!));
-})
-    .RequirePermission("compensation.manage")
-    .WithTags("Compensation")
-    .WithName("UpdateCompensationProductModelStage");
 
 workerCompensationApi.MapGet("/current", async (
     Guid workerId,

@@ -57,6 +57,47 @@ public sealed class Structure001HierarchyTests
     }
 
     [Fact]
+    public async Task Operational_stage_uses_one_deterministic_legacy_group_when_the_line_has_multiple_groups()
+    {
+        await using var db = CreateDb();
+        var factory = new Factory(Guid.NewGuid(), "Factory", "FAC");
+        var line = new ProductionLine(Guid.NewGuid(), factory.Id, "Line", 1);
+        var first = new MainStage(Guid.NewGuid(), line.Id, "First", 1);
+        var second = new MainStage(Guid.NewGuid(), line.Id, "Second", 2);
+        db.AddRange(factory, line, second, first);
+        await db.SaveChangesAsync();
+
+        var result = await new ProductionStageCatalogService(db, new AuditEngine(db), new StageDependencyInspector(db))
+            .CreateOperationalStageAsync(line.Id, null, "Operational", 1, 1, true, Guid.NewGuid());
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(first.Id, result.Value!.MainStageId);
+        Assert.Equal(line.Id, result.Value.ProductionLineId);
+    }
+
+    [Fact]
+    public async Task Operational_stage_creates_one_internal_legacy_group_only_when_the_line_has_no_active_group()
+    {
+        await using var db = CreateDb();
+        var factory = new Factory(Guid.NewGuid(), "Factory", "FAC");
+        var line = new ProductionLine(Guid.NewGuid(), factory.Id, "Line", 1);
+        db.AddRange(factory, line);
+        await db.SaveChangesAsync();
+        var service = new ProductionStageCatalogService(db, new AuditEngine(db), new StageDependencyInspector(db));
+
+        var first = await service.CreateOperationalStageAsync(line.Id, null, "First", 1, 1, true, Guid.NewGuid());
+        var second = await service.CreateOperationalStageAsync(line.Id, null, "Second", 2, 1, true, Guid.NewGuid());
+
+        Assert.True(first.IsSuccess);
+        Assert.True(second.IsSuccess);
+        var groups = await db.MainStages.Where(item => item.ProductionLineId == line.Id).ToArrayAsync();
+        Assert.Single(groups);
+        Assert.Equal(groups[0].Id, first.Value!.MainStageId);
+        Assert.Equal(groups[0].Id, second.Value!.MainStageId);
+        Assert.All(await db.SubStages.Where(item => item.ProductionLineId == line.Id).ToArrayAsync(), item => Assert.Equal(line.Id, item.ProductionLineId));
+    }
+
+    [Fact]
     public async Task Stage_dependency_inspector_blocks_disable_for_active_assignments_but_preserves_history_for_delete()
     {
         await using var db = CreateDb();

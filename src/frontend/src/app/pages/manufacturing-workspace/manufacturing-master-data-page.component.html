@@ -1,109 +1,45 @@
 <section class="master-page" [attr.aria-busy]="loading || saving" dir="rtl">
-  <header>
-    <h2>{{ mode === 'stages' ? 'كتالوج مراحل الإنتاج' : 'الموديلات وإعدادات المراحل' }}</h2>
-    <p>{{ mode === 'stages' ? 'السعر والزمن لا ينتميان إلى الكتالوج العام.' : 'إعداد السعر والزمن وطريقة احتساب تكلفة المرحلة خاص بالموديل.' }}</p>
-  </header>
+  <header><h2>{{ mode === 'stages' ? 'مراحل الإنتاج' : 'الموديلات وإعدادات المراحل' }}</h2><p>{{ mode === 'stages' ? 'إدارة كتالوج مراحل الإنتاج حسب المصنع والقسم وخط الإنتاج.' : 'إعداد رحلة الموديل وترتيب مراحلها وسعرها وزمنها.' }}</p></header>
   <p class="master-page__error" *ngIf="error">{{ error }}</p>
 
   <ng-container *ngIf="!loading; else loadingState">
     <ng-container *ngIf="mode === 'stages'; else modelsView">
-      <div class="master-page__grid">
-        <p-card>
-          <plp-expandable-form title="مرحلة رئيسية" summary="أضف مرحلة أو عدّلها دون مغادرة قائمة المراحل." openLabel="إضافة مرحلة رئيسية" [expanded]="mainFormVisible" [saving]="saving" [error]="error" (expandedChange)="onMainFormVisibility($event)">
-          <form [formGroup]="mainForm" (ngSubmit)="saveMain()" class="master-page__form">
-            <label>خط الإنتاج<select formControlName="productionLineId"><option value="">اختر الخط</option><option *ngFor="let line of lines" [value]="line.id">{{ line.name }}</option></select></label>
-            <label>الاسم<input pInputText formControlName="name"></label>
-            <label>الترتيب<input type="number" formControlName="sequenceOrder"></label>
-            <label><input type="checkbox" formControlName="isCritical"> حرجة</label>
-            <button pButton type="submit" [label]="editMainId ? 'تحديث' : 'إضافة'" [disabled]="saving"></button>
-          </form>
-          </plp-expandable-form>
-        </p-card>
-        <p-card>
-          <plp-expandable-form title="مرحلة فرعية" summary="اربط المرحلة الفرعية بالمرحلة الرئيسية المناسبة." openLabel="إضافة مرحلة فرعية" [expanded]="subFormVisible" [saving]="saving" [error]="error" (expandedChange)="onSubFormVisibility($event)">
-          <form [formGroup]="subForm" (ngSubmit)="saveSub()" class="master-page__form">
-            <label>الرئيسية<select formControlName="mainStageId"><option value="">اختر المرحلة</option><option *ngFor="let item of mains" [value]="item.id">{{ item.name }}</option></select></label>
-            <label>الكود<input pInputText formControlName="code"></label>
-            <label>الاسم<input pInputText formControlName="name"></label>
-            <label>الترتيب<input type="number" formControlName="sequenceOrder"></label>
-            <label>عدد تسكين المرحلة<input type="number" formControlName="capacity"></label>
-            <button pButton type="submit" [label]="editSubId ? 'تحديث' : 'إضافة'" [disabled]="saving"></button>
-          </form>
-          </plp-expandable-form>
-        </p-card>
-      </div>
+      <p-card header="فلاتر المراحل">
+        <div class="master-page__form">
+          <label>المصنع<select [value]="stageForm.controls.factoryId.value" (change)="selectFactory($any($event.target).value)"><option value="">اختر المصنع</option><option *ngFor="let factory of factories" [value]="factory.id">{{ factory.code }} — {{ factory.name }}</option></select></label>
+          <label>القسم<select [value]="stageForm.controls.departmentId.value" (change)="selectDepartment($any($event.target).value)" [disabled]="!stageForm.controls.factoryId.value"><option value="">اختر القسم</option><option *ngFor="let department of activeDepartments" [value]="department.id">{{ department.code }} — {{ department.nameAr || department.name }}</option></select></label>
+          <label>خط الإنتاج<select [value]="stageForm.controls.productionLineId.value" (change)="selectLine($any($event.target).value)" [disabled]="!stageForm.controls.departmentId.value"><option value="">اختر خط الإنتاج</option><option *ngFor="let line of activeLines" [value]="line.id">{{ line.lineCode || '—' }} — {{ line.name }}</option></select></label>
+          <label>الحالة<select [value]="stageStatusFilter" (change)="setStageStatusFilter($any($event.target).value)"><option value="all">الكل</option><option value="active">الفعالة</option><option value="inactive">المعطلة</option></select></label>
+        </div>
+      </p-card>
 
-      <div class="master-page__stage-filter" role="group" aria-label="فلترة حالة المراحل">
-        <label>حالة المراحل
-          <select [value]="stageStatusFilter" (change)="setStageStatusFilter($any($event.target).value)">
-            <option value="all">الكل</option>
-            <option value="active">الفعالة</option>
-            <option value="inactive">المعطلة</option>
-          </select>
-        </label>
-        <span>{{ stageResultCount }} نتيجة</span>
-      </div>
-
-      <p-card header="المراحل الرئيسية">
-        <p-table plpResponsiveTable="scroll" plpTablePagination [plpPaginationPageSize]="10" [plpPaginationResetKey]="'mains-' + stageStatusFilter + mains.length" [plpStickyActions]="true" [value]="visibleMains" dataKey="id" responsiveLayout="scroll">
-          <ng-template pTemplate="header"><tr><th>الاسم</th><th>الترتيب</th><th>الحالة</th><th>الإجراءات</th></tr></ng-template>
-          <ng-template pTemplate="body" let-item><tr [class.master-page__inactive-row]="!item.isActive"><td>{{ item.name }}</td><td>{{ formatOrder(item.sequenceOrder) }}</td><td><span class="master-page__stage-status" [class.master-page__stage-status--inactive]="!item.isActive" [title]="item.isActive ? 'تظهر في مسارات التشغيل اليومية.' : 'لا تظهر في مسارات التشغيل اليومية.'">{{ stageStatusLabel(item.isActive) }}</span></td><td><button pButton type="button" icon="pi pi-pencil" class="p-button-text" aria-label="تعديل المرحلة" title="تعديل المرحلة" (click)="editMain(item)"></button><button pButton type="button" [icon]="item.isActive ? 'pi pi-ban' : 'pi pi-check'" [class]="item.isActive ? 'p-button-text p-button-danger' : 'p-button-text p-button-success'" [attr.aria-label]="item.isActive ? 'تعطيل المرحلة' : 'إعادة تفعيل المرحلة'" [title]="item.isActive ? 'تعطيل المرحلة' : 'إعادة تفعيل المرحلة'" [disabled]="saving" (click)="setMainActive(item)"></button></td></tr></ng-template>
-          <ng-template pTemplate="emptymessage"><tr><td colspan="4" class="master-page__empty">لا توجد مراحل رئيسية مطابقة للفلتر المحدد.</td></tr></ng-template>
+      <p-card header="مراحل الإنتاج">
+        <plp-expandable-form title="مرحلة" [summary]="stageForm.controls.productionLineId.value ? stageResultCount + ' مرحلة' : 'اختر خط الإنتاج أولًا'" openLabel="إضافة مرحلة" [canExpand]="!!stageForm.controls.productionLineId.value" [expanded]="stageFormVisible" [saving]="saving" [error]="error" (expandedChange)="$event ? openStageForm() : closeStageForm()">
+          <form [formGroup]="stageForm" (ngSubmit)="saveOperationalStage()" class="master-page__form">
+            <label>المصنع<select formControlName="factoryId" [disabled]="!!editStageId" (change)="selectFactory($any($event.target).value)"><option value="">اختر المصنع</option><option *ngFor="let factory of factories" [value]="factory.id">{{ factory.code }} — {{ factory.name }}</option></select></label>
+            <label>القسم<select formControlName="departmentId" [disabled]="!!editStageId || !stageForm.controls.factoryId.value" (change)="selectDepartment($any($event.target).value)"><option value="">اختر القسم</option><option *ngFor="let department of activeDepartments" [value]="department.id">{{ department.code }} — {{ department.nameAr || department.name }}</option></select></label>
+            <label>خط الإنتاج<select formControlName="productionLineId" [disabled]="!!editStageId || !stageForm.controls.departmentId.value" (change)="selectLine($any($event.target).value)"><option value="">اختر خط الإنتاج</option><option *ngFor="let line of activeLines" [value]="line.id">{{ line.lineCode || '—' }} — {{ line.name }}</option></select></label>
+            <label>اسم المرحلة<input pInputText formControlName="name"></label>
+            <label *ngIf="editStageId">الكود<input pInputText [value]="selectedStage?.code || ''" readonly aria-label="كود المرحلة للقراءة فقط"></label>
+            <label>الترتيب<input type="number" formControlName="defaultOrder"></label><label>السعة<input type="number" formControlName="capacity"></label>
+            <button pButton type="submit" [label]="editStageId ? 'تحديث المرحلة' : 'إضافة مرحلة'" [disabled]="saving"></button>
+          </form>
+        </plp-expandable-form>
+        <p-table plpResponsiveTable="scroll" plpTablePagination [plpPaginationPageSize]="10" [plpPaginationResetKey]="stageForm.controls.productionLineId.value + stageStatusFilter" [plpStickyActions]="true" [value]="operationalStages" dataKey="id" responsiveLayout="scroll">
+          <ng-template pTemplate="header"><tr><th>الكود</th><th>الاسم</th><th>خط الإنتاج</th><th>القسم</th><th>الترتيب</th><th>الحالة</th><th>الإجراءات</th></tr></ng-template>
+          <ng-template pTemplate="body" let-stage><tr [class.master-page__inactive-row]="!stage.isActive"><td>{{ stage.code }}</td><td>{{ stage.name }}</td><td>{{ stage.productionLineName || '—' }}</td><td>{{ stage.departmentNameAr || 'غير مرتبط' }}</td><td>{{ stage.sequenceOrder }}</td><td>{{ stageStatusLabel(stage.isActive) }}</td><td><button pButton type="button" icon="pi pi-pencil" class="p-button-text" aria-label="تعديل المرحلة" title="تعديل المرحلة" (click)="editOperationalStage(stage)"></button><button pButton type="button" [icon]="stage.isActive ? 'pi pi-ban' : 'pi pi-check'" class="p-button-text" [attr.aria-label]="stage.isActive ? 'تعطيل المرحلة' : 'تفعيل المرحلة'" [title]="stage.isActive ? 'تعطيل المرحلة' : 'تفعيل المرحلة'" (click)="setOperationalStageActive(stage)"></button><button pButton type="button" icon="pi pi-trash" class="p-button-text p-button-danger" aria-label="حذف المرحلة" title="حذف المرحلة" (click)="openDependencyDialog(stage, 'delete')"></button></td></tr></ng-template>
+          <ng-template pTemplate="emptymessage"><tr><td colspan="7" class="master-page__empty">اختر خط إنتاج لعرض مراحل الإنتاج، أو لا توجد مراحل مطابقة.</td></tr></ng-template>
         </p-table>
       </p-card>
 
-      <p-card header="المراحل الفرعية">
-        <p-table plpResponsiveTable="scroll" plpTablePagination [plpPaginationPageSize]="10" [plpPaginationResetKey]="'subs-' + stageStatusFilter + subs.length" [plpStickyActions]="true" [value]="visibleSubs" dataKey="id" responsiveLayout="scroll">
-          <ng-template pTemplate="header"><tr><th>الكود</th><th>الاسم</th><th>الرئيسية</th><th>الترتيب</th><th>الحالة</th><th>الإجراءات</th></tr></ng-template>
-          <ng-template pTemplate="body" let-item><tr [class.master-page__inactive-row]="!item.isActive"><td>{{ item.code }}</td><td>{{ item.name }}</td><td>{{ mainName(item.mainStageId) }}</td><td>{{ formatOrder(item.sequenceOrder, 1) }}</td><td><span class="master-page__stage-status" [class.master-page__stage-status--inactive]="!item.isActive" [title]="item.isActive ? 'تظهر في مسارات التشغيل اليومية.' : 'لا تظهر في مسارات التشغيل اليومية.'">{{ stageStatusLabel(item.isActive) }}</span></td><td><button pButton type="button" icon="pi pi-pencil" class="p-button-text" aria-label="تعديل المرحلة الفرعية" title="تعديل المرحلة الفرعية" (click)="editSub(item)"></button><button pButton type="button" [icon]="item.isActive ? 'pi pi-ban' : 'pi pi-check'" [class]="item.isActive ? 'p-button-text p-button-danger' : 'p-button-text p-button-success'" [attr.aria-label]="item.isActive ? 'تعطيل المرحلة الفرعية' : 'إعادة تفعيل المرحلة الفرعية'" [title]="item.isActive ? 'تعطيل المرحلة الفرعية' : 'إعادة تفعيل المرحلة الفرعية'" [disabled]="saving" (click)="setSubActive(item)"></button></td></tr></ng-template>
-          <ng-template pTemplate="emptymessage"><tr><td colspan="6" class="master-page__empty">لا توجد مراحل فرعية مطابقة للفلتر المحدد.</td></tr></ng-template>
-        </p-table>
-      </p-card>
+      <plp-dialog [visible]="dependencyDialogVisible" [title]="pendingStageAction === 'delete' ? 'حذف المرحلة' : 'تعطيل المرحلة'" size="compact" [saving]="saving" [error]="error" [showSave]="canConfirmDependencyAction" [saveDisabled]="saving || !canConfirmDependencyAction" [saveLabel]="pendingStageAction === 'delete' ? 'تأكيد الحذف' : 'تأكيد التعطيل'" (save)="confirmDependencyAction()" (cancel)="closeDependencyDialog()" (visibleChange)="!$event && closeDependencyDialog()"><ng-container *ngIf="stageDependencySummary as summary"><p>{{ pendingStageAction === 'delete' ? summary.deleteMessageAr : summary.disableMessageAr }}</p><ul *ngIf="summary.activeBlockers.length"><li *ngFor="let item of summary.activeBlockers">{{ item.labelAr }} ({{ item.count }})</li></ul><ul *ngIf="pendingStageAction === 'delete' && summary.historicalDependencies.length"><li *ngFor="let item of summary.historicalDependencies">{{ item.labelAr }} ({{ item.count }})</li></ul></ng-container></plp-dialog>
     </ng-container>
 
     <ng-template #modelsView>
-      <div class="master-page__grid">
-        <p-card header="الموديلات">
-          <plp-expandable-form title="موديل المنتج" summary="أضف موديلًا أو عدّل بيانات الموديل المحدد." openLabel="إضافة موديل" [expanded]="modelFormVisible" [saving]="saving" [error]="error" (expandedChange)="onModelFormVisibility($event)">
-          <form [formGroup]="modelForm" (ngSubmit)="saveModel()" class="master-page__form">
-            <label>الكود<input pInputText formControlName="code"></label>
-            <label>الاسم<input pInputText formControlName="name"></label>
-            <label>الوصف<input pInputText formControlName="description"></label>
-            <button pButton type="submit" [label]="editModelId ? 'تحديث' : 'إضافة موديل'" [disabled]="saving"></button>
-          </form>
-          </plp-expandable-form>
-          <p-table plpResponsiveTable="scroll" plpTablePagination [plpPaginationPageSize]="10" [plpPaginationResetKey]="models.length" [plpStickyActions]="true" [value]="models" dataKey="id" responsiveLayout="scroll">
-            <ng-template pTemplate="header"><tr><th>الكود</th><th>الاسم</th><th>الحالة</th><th>الإجراءات</th></tr></ng-template>
-            <ng-template pTemplate="body" let-item><tr [class.master-page__selected]="selected?.id === item.id"><td>{{ item.code }}</td><td>{{ item.name }}</td><td>{{ item.isActive ? 'نشط' : 'معطل' }}</td><td><button pButton type="button" class="p-button-text p-button-sm" label="اختيار" (click)="select(item)"></button><button pButton type="button" icon="pi pi-pencil" class="p-button-text" aria-label="تعديل الموديل" title="تعديل الموديل" [disabled]="saving" (click)="editModel(item)"></button></td></tr></ng-template>
-          </p-table>
-          <div *ngIf="selected" class="master-page__actions"><button pButton type="button" [label]="selected.isActive ? 'تعطيل الموديل' : 'تفعيل الموديل'" [disabled]="saving" (click)="setModelActive(selected)"></button></div>
-        </p-card>
-
-        <p-card header="إعدادات المراحل" *ngIf="selected">
-          <p>السعر القياسي: {{ totalPrice() }} | الزمن: {{ totalSeconds() }} ثانية</p>
-          <plp-expandable-form title="إعداد مرحلة الموديل" [summary]="selected.code + ' — ' + selected.name" openLabel="إضافة مرحلة للموديل" [expanded]="modelStageFormVisible" [saving]="saving" [error]="error" (expandedChange)="onModelStageFormVisibility($event)">
-          <form [formGroup]="stageForm" (ngSubmit)="saveModelStage()" class="master-page__form">
-            <label>البحث عن مرحلة<input pInputText type="search" [value]="modelStageSearch" (input)="onModelStageSearch($any($event.target).value)" placeholder="ابحث بالاسم أو الكود"></label>
-            <label>المرحلة<select formControlName="subStageId"><option value="">اختر المرحلة</option><option *ngFor="let item of modelStageChoices" [value]="item.id" [disabled]="!item.isActive && item.id !== stageForm.getRawValue().subStageId">{{ item.code }} - {{ item.name }}{{ !item.isActive ? ' (معطلة)' : '' }}</option></select><small *ngIf="modelStageSelectorLoading">جارٍ تحميل المراحل…</small><span class="master-page__selector-pager"><button pButton type="button" class="p-button-text p-button-sm" label="السابق" [disabled]="modelStagePage <= 1 || modelStageSelectorLoading" (click)="changeModelStagePage(-1)"></button><span>{{ modelStageTotal }} مرحلة</span><button pButton type="button" class="p-button-text p-button-sm" label="التالي" [disabled]="modelStagePage * modelStagePageSize >= modelStageTotal || modelStageSelectorLoading" (click)="changeModelStagePage(1)"></button></span></label>
-            <label>الترتيب<input type="number" formControlName="stageOrder"></label>
-            <label>سعر القطعة<input type="number" formControlName="piecePrice"></label>
-            <label>الثواني القياسية<input type="number" formControlName="standardSeconds"></label>
-            <label>طريقة احتساب تكلفة المرحلة<select formControlName="compensationMode"><option value="SharedPercentage">توزيع نسبي</option><option value="FullRatePerWorker">سعر كامل</option><option value="FixedAmount">قيمة ثابتة</option></select></label>
-            <label><input type="checkbox" formControlName="isRequired"> مطلوبة</label>
-            <button pButton type="submit" [label]="editModelStageId ? 'تحديث' : 'إضافة مرحلة'" [disabled]="saving"></button>
-          </form>
-          </plp-expandable-form>
-        </p-card>
-      </div>
-
-      <p-card header="مراحل الموديل" *ngIf="selected">
-        <p-table plpResponsiveTable="scroll" plpTablePagination [plpPaginationPageSize]="10" [plpPaginationResetKey]="selected.id" [plpStickyActions]="true" [value]="stages" dataKey="id" responsiveLayout="scroll">
-          <ng-template pTemplate="header"><tr><th>المرحلة</th><th>الترتيب</th><th>السعر</th><th>الزمن</th><th>الطريقة</th><th>الإجراءات</th></tr></ng-template>
-          <ng-template pTemplate="body" let-item><tr><td>{{ subName(item.subStageId) }}</td><td>{{ item.stageOrder }}</td><td>{{ item.piecePrice }}</td><td>{{ item.standardSeconds }}</td><td>{{ item.compensationMode }}</td><td><button pButton type="button" icon="pi pi-pencil" class="p-button-text" aria-label="تعديل إعداد المرحلة" title="تعديل إعداد المرحلة" (click)="editStage(item)"></button><button pButton type="button" icon="pi pi-ban" class="p-button-text p-button-danger" aria-label="تعطيل إعداد المرحلة" title="تعطيل إعداد المرحلة" (click)="disableModelStage(item.id)"></button></td></tr></ng-template>
-        </p-table>
-      </p-card>
+      <div class="master-page__grid"><p-card header="الموديلات"><plp-expandable-form title="موديل المنتج" summary="أضف موديلًا أو عدّل بياناته." openLabel="إضافة موديل" [expanded]="modelFormVisible" [saving]="saving" [error]="error" (expandedChange)="onModelFormVisibility($event)"><form [formGroup]="modelForm" (ngSubmit)="saveModel()" class="master-page__form"><label>الكود<input pInputText formControlName="code"></label><label>الاسم<input pInputText formControlName="name"></label><label>الوصف<input pInputText formControlName="description"></label><button pButton type="submit" [label]="editModelId ? 'تحديث' : 'إضافة موديل'" [disabled]="saving"></button></form></plp-expandable-form><p-table plpResponsiveTable="scroll" plpTablePagination [plpPaginationPageSize]="10" [plpPaginationResetKey]="models.length" [plpStickyActions]="true" [value]="models" dataKey="id" responsiveLayout="scroll"><ng-template pTemplate="header"><tr><th>الكود</th><th>الاسم</th><th>الحالة</th><th>الإجراءات</th></tr></ng-template><ng-template pTemplate="body" let-item><tr [class.master-page__selected]="selected?.id === item.id"><td>{{ item.code }}</td><td>{{ item.name }}</td><td>{{ item.isActive ? 'نشط' : 'معطل' }}</td><td><button pButton type="button" class="p-button-text p-button-sm" label="اختيار" (click)="select(item)"></button><button pButton type="button" icon="pi pi-pencil" class="p-button-text" aria-label="تعديل الموديل" title="تعديل الموديل" (click)="editModel(item)"></button></td></tr></ng-template></p-table></p-card>
+      <p-card header="إعدادات مراحل الموديل" *ngIf="selected"><p>السعر القياسي: {{ totalPrice() }} | الزمن: {{ totalSeconds() }} ثانية</p><plp-expandable-form title="إعداد مرحلة الموديل" [summary]="selected.code + ' — ' + selected.name" openLabel="إضافة مرحلة للموديل" [expanded]="modelStageFormVisible" [saving]="saving" [error]="error" (expandedChange)="onModelStageFormVisibility($event)"><form [formGroup]="modelStageForm" (ngSubmit)="saveModelStage()" class="master-page__form"><label>البحث عن مرحلة<input pInputText type="search" [value]="modelStageSearch" (input)="onModelStageSearch($any($event.target).value)"></label><label>المرحلة<select formControlName="subStageId"><option value="">اختر المرحلة</option><option *ngFor="let item of modelStageChoices" [value]="item.id">{{ item.code }} — {{ item.name }}</option></select></label><label>الترتيب<input type="number" formControlName="stageOrder"></label><label>سعر القطعة<input type="number" formControlName="piecePrice"></label><label>الثواني القياسية<input type="number" formControlName="standardSeconds"></label><label>طريقة احتساب تكلفة المرحلة<select formControlName="compensationMode"><option value="SharedPercentage">توزيع نسبي</option><option value="FullRatePerWorker">سعر كامل</option><option value="FixedAmount">قيمة ثابتة</option></select></label><label><input type="checkbox" formControlName="isRequired"> مطلوبة</label><button pButton type="submit" [label]="editModelStageId ? 'تحديث' : 'إضافة مرحلة'" [disabled]="saving"></button></form></plp-expandable-form></p-card></div>
+      <p-card header="مراحل الموديل" *ngIf="selected"><p-table plpResponsiveTable="scroll" plpTablePagination [plpPaginationPageSize]="10" [plpPaginationResetKey]="selected.id" [plpStickyActions]="true" [value]="stages" dataKey="id" responsiveLayout="scroll"><ng-template pTemplate="header"><tr><th>المرحلة</th><th>الترتيب</th><th>السعر</th><th>الزمن</th><th>الطريقة</th><th>الإجراءات</th></tr></ng-template><ng-template pTemplate="body" let-item><tr><td>{{ subName(item.subStageId) }}</td><td>{{ item.stageOrder }}</td><td>{{ item.piecePrice }}</td><td>{{ item.standardSeconds }}</td><td>{{ item.compensationMode }}</td><td><button pButton type="button" icon="pi pi-pencil" class="p-button-text" aria-label="تعديل إعداد المرحلة" title="تعديل إعداد المرحلة" (click)="editModelStage(item)"></button><button pButton type="button" icon="pi pi-ban" class="p-button-text p-button-danger" aria-label="تعطيل إعداد المرحلة" title="تعطيل إعداد المرحلة" (click)="disableModelStage(item.id)"></button></td></tr></ng-template></p-table></p-card>
     </ng-template>
   </ng-container>
-
   <ng-template #loadingState><plp-loading-skeleton [lines]="6" [cardLike]="true"></plp-loading-skeleton></ng-template>
 </section>

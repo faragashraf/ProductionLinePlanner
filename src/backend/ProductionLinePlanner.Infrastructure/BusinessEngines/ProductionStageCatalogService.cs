@@ -614,6 +614,9 @@ public sealed class ProductionStageCatalogService(
             .Select(x => new SubStageDto
             {
                 Id = x.Id, MainStageId = x.MainStageId, ProductionLineId = x.ProductionLineId,
+                FactoryId = x.ProductionLine!.FactoryId, DepartmentId = x.ProductionLine.DepartmentId,
+                FactoryName = x.ProductionLine.Factory!.Name, DepartmentNameAr = x.ProductionLine.Department == null ? null : x.ProductionLine.Department.NameAr,
+                ProductionLineName = x.ProductionLine.Name,
                 Code = x.Code, Name = x.Name, Capacity = x.Capacity, DefaultOrder = x.DefaultOrder, IsActive = x.IsActive
             }).ToArrayAsync(cancellationToken);
         return PagedResult<SubStageDto>.Success(items, page, pageSize, total);
@@ -642,35 +645,23 @@ public sealed class ProductionStageCatalogService(
             return Result<SubStageDto>.Failure(new Error("NotFound", "Production line was not found or is inactive."));
         }
 
-        var groups = await dbContext.MainStages.Where(x => x.ProductionLineId == productionLineId && x.IsActive)
-            .OrderBy(x => x.SequenceOrder).ThenBy(x => x.Name).ToArrayAsync(cancellationToken);
-        MainStage? selectedGroup;
-        if (mainStageId.HasValue)
-        {
-            selectedGroup = groups.FirstOrDefault(x => x.Id == mainStageId.Value);
-            if (selectedGroup is null) return Result<SubStageDto>.Failure(new Error("ValidationError", "MainStageId must belong to the selected active production line."));
-        }
-        else if (groups.Length == 1)
-        {
-            selectedGroup = groups[0];
-        }
-        else if (groups.Length == 0)
-        {
-            return Result<SubStageDto>.Failure(new Error("Conflict", "لا يمكن إنشاء مرحلة تشغيلية قبل إنشاء مجموعة مراحل نشطة للخط."));
-        }
-        else
-        {
-            return Result<SubStageDto>.Failure(new Error("ValidationError", "MainStageId is required because this production line has multiple active groups."));
-        }
-
-        if (await dbContext.SubStages.AnyAsync(x => x.MainStageId == selectedGroup.Id && x.DefaultOrder == defaultOrder && x.IsActive, cancellationToken))
-        {
-            return Result<SubStageDto>.Failure(new Error("Conflict", "DefaultOrder must be unique within this main stage."));
-        }
-
         for (var attempt = 0; attempt < 3; attempt++)
         {
-            await using var transaction = dbContext.Database.IsRelational() ? await dbContext.Database.BeginTransactionAsync(cancellationToken) : null;
+            await using var transaction = dbContext.Database.IsRelational()
+                ? await dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken)
+                : null;
+            var groupResult = await ResolveLegacyGroupAsync(productionLineId, mainStageId, actorUserId, requestMeta, cancellationToken);
+            if (groupResult.IsFailure)
+            {
+                if (transaction is not null) await transaction.RollbackAsync(cancellationToken);
+                return Result<SubStageDto>.Failure(groupResult.Error!);
+            }
+            var selectedGroup = groupResult.Value!;
+            if (await dbContext.SubStages.AnyAsync(x => x.MainStageId == selectedGroup.Id && x.DefaultOrder == defaultOrder && x.IsActive, cancellationToken))
+            {
+                if (transaction is not null) await transaction.RollbackAsync(cancellationToken);
+                return Result<SubStageDto>.Failure(new Error("Conflict", "DefaultOrder must be unique within the production line's compatibility group."));
+            }
             var code = await AllocateStageCodeAsync(cancellationToken);
             if (await dbContext.SubStages.AnyAsync(x => x.Code == code, cancellationToken))
             {
@@ -738,4 +729,49 @@ public sealed class ProductionStageCatalogService(
         Id = entity.Id, MainStageId = entity.MainStageId, ProductionLineId = entity.ProductionLineId,
         Code = entity.Code, Name = entity.Name, Capacity = entity.Capacity, DefaultOrder = entity.DefaultOrder, IsActive = entity.IsActive
     };
+
+    /// <summary>
+    /// MainStage remains a mandatory legacy parent. New operational-stage flows
+    /// never expose it: an explicit legacy request is honored for compatibility,
+    /// otherwise the first active group is selected deterministically. A single
+    /// internal group is created only when a line has no active group at all.
+    /// </summary>
+    private async Task<Result<MainStage>> ResolveLegacyGroupAsync(
+        Guid productionLineId,
+        Guid? requestedMainStageId,
+        Guid actorUserId,
+        string? requestMeta,
+        CancellationToken cancellationToken)
+    {
+        var activeGroups = await dbContext.MainStages
+            .Where(stage => stage.ProductionLineId == productionLineId && stage.IsActive)
+            .OrderBy(stage => stage.SequenceOrder).ThenBy(stage => stage.Name).ThenBy(stage => stage.Id)
+            .ToArrayAsync(cancellationToken);
+
+        if (requestedMainStageId.HasValue)
+        {
+            var requested = activeGroups.FirstOrDefault(stage => stage.Id == requestedMainStageId.Value);
+            return requested is null
+                ? Result<MainStage>.Failure(new Error("ValidationError", "The legacy stage group must belong to the selected active production line."))
+                : Result<MainStage>.Success(requested);
+        }
+
+        if (activeGroups.Length > 0) return Result<MainStage>.Success(activeGroups[0]);
+
+        var nextSequenceOrder = await dbContext.MainStages
+            .Where(stage => stage.ProductionLineId == productionLineId)
+            .Select(stage => (int?)stage.SequenceOrder)
+            .MaxAsync(cancellationToken) ?? 0;
+        var group = new MainStage(Guid.NewGuid(), productionLineId, "Internal operational stage group", nextSequenceOrder + 1);
+        dbContext.MainStages.Add(group);
+        await auditEngine.RecordAsync(
+            actorUserId,
+            AuditActionType.Create,
+            nameof(MainStage),
+            group.Id.ToString(),
+            after: new { group.Id, group.ProductionLineId, group.SequenceOrder, Purpose = "OperationalStageCompatibility" },
+            requestMeta: requestMeta,
+            cancellationToken: cancellationToken);
+        return Result<MainStage>.Success(group);
+    }
 }
