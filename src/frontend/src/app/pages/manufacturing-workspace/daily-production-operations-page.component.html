@@ -129,7 +129,7 @@
           </div>
 
           <div class="daily-production-operations__stage-warnings plp-workspace-alert-stack">
-            <p class="daily-production-operations__warning plp-inline-feedback plp-inline-feedback--warning" *ngIf="stage.staffingStatus === 'NoStaffing'">لا يوجد عامل فعّال لهذه المرحلة في تاريخ الإنتاج. أضف بديلًا/تجاوزًا مع سبب معتمد قبل الاحتساب.</p>
+            <p class="daily-production-operations__warning plp-inline-feedback plp-inline-feedback--warning" *ngIf="stage.staffingStatus === 'NoStaffing'">لا يوجد عامل فعّال لهذه المرحلة في تاريخ الإنتاج. راجع التسكين الدائم قبل الاحتساب.</p>
             <p class="daily-production-operations__warning plp-inline-feedback plp-inline-feedback--warning" *ngIf="stage.hasAbsentWorkers">يوجد عامل غائب في هذا التاريخ؛ الحضور لا يغيّر حالة العمل أو التسكين، والتجاوز يتطلب سببًا وصلاحية.</p>
             <p class="daily-production-operations__warning plp-inline-feedback plp-inline-feedback--warning" *ngIf="stage.hasNoSourceCheckInWorkers">لا يوجد تسجيل بصمة مصدر لبعض العمال؛ هذه ليست حالة غياب تلقائية.</p>
           </div>
@@ -160,7 +160,7 @@
                 </label>
                 <span plp-entity-actions>
                   <label *ngIf="workerNeedsOverride(stage, worker)">سبب التجاوز المعتمد
-                    <input pInputText [(ngModel)]="worker.manualOverrideReason" maxlength="500" [disabled]="!canOverrideParticipants" placeholder="الغياب أو البديل يحتاج سببًا واضحًا" (ngModelChange)="stageChanged()">
+                    <input pInputText [(ngModel)]="worker.manualOverrideReason" maxlength="500" [disabled]="!canOverrideParticipants" placeholder="الغياب أو التعديل يحتاج سببًا واضحًا" (ngModelChange)="stageChanged()">
                   </label>
                   <button *ngIf="worker.includedInProduction && worker.isProductionReady" pButton type="button" class="p-button-text p-button-danger" label="استبعاد من اليوم" icon="pi pi-times" [disabled]="!canOverrideParticipants" (click)="removeWorker(stage, worker.workerId)"></button>
                   <button *ngIf="!worker.includedInProduction && worker.isProductionReady" pButton type="button" class="p-button-text" label="إعادة إلى تشغيل اليوم" icon="pi pi-replay" [disabled]="!canOverrideParticipants" (click)="restoreWorker(stage, worker)"></button>
@@ -190,13 +190,7 @@
           </div>
           <div class="daily-production-operations__stage-actions plp-action-group">
             <button pButton type="button" class="p-button-outlined" label="استعادة توزيع دقائق العمل" icon="pi pi-percentage" *ngIf="stage.compensationMode === 'SharedPercentage'" [disabled]="!stage.workers.length" (click)="applyEqualDistribution(stage)"></button>
-            <select [(ngModel)]="replacementWorkerId" [disabled]="!canOverrideParticipants">
-              <option value="">اختر بديلًا / عامل تجاوز</option>
-              <option *ngFor="let worker of availableReplacementWorkers; trackBy: trackById" [value]="worker.workerId">{{ worker.workerCode }} — {{ worker.workerName }} · {{ attendanceLabel(worker) }}</option>
-            </select>
-            <button pButton type="button" class="p-button-outlined" label="إضافة بديل / تجاوز" icon="pi pi-user-plus" [disabled]="!replacementWorkerId || !canOverrideParticipants" (click)="addReplacementWorker()"></button>
           </div>
-          <p class="daily-production-operations__permission-note plp-inline-feedback plp-inline-feedback--warning" *ngIf="!canOverrideParticipants">تغيير المشاركين أو تسجيل تجاوز يتطلب صلاحية إدارة التسكين؛ لا يغيّر هذا الإجراء سجلات تشغيل تاريخية.</p>
           </footer>
           </div>
         </p-card>
