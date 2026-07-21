@@ -20,12 +20,13 @@ public sealed record ManufacturingDataChangedMessage(
     Guid? MainStageId,
     Guid? ProductModelId,
     Guid? SubStageId,
-    DateOnly? ProductionDate)
+    DateOnly? ProductionDate,
+    Guid? WorkerId)
 {
     public static ManufacturingDataChangedMessage From(ManufacturingDataChanged change) => new(
         change.EventId,
         change.EntityType.ToString(),
-        change.ChangeType.ToString(),
+        ChangeTypeValue(change.ChangeType),
         change.EntityId,
         change.OccurredAtUtc,
         change.ActorUserId,
@@ -36,5 +37,14 @@ public sealed record ManufacturingDataChangedMessage(
         change.MainStageId,
         change.ProductModelId,
         change.SubStageId,
-        change.ProductionDate);
+        change.ProductionDate,
+        change.WorkerId);
+
+    private static string ChangeTypeValue(ManufacturingChangeType changeType) => changeType switch
+    {
+        ManufacturingChangeType.PermanentAssignmentCreated => "permanent-assignment-created",
+        ManufacturingChangeType.PermanentAssignmentUpdated => "permanent-assignment-updated",
+        ManufacturingChangeType.PermanentAssignmentCancelled => "permanent-assignment-cancelled",
+        _ => changeType.ToString()
+    };
 }

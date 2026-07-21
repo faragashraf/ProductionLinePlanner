@@ -10,7 +10,8 @@ public enum ManufacturingEntityType
     ProductModel,
     ProductModelStage,
     ProductionOrder,
-    Worker
+    Worker,
+    WorkerDefaultAssignment
 }
 
 public enum ManufacturingChangeType
@@ -21,7 +22,10 @@ public enum ManufacturingChangeType
     Activated,
     Deactivated,
     Reordered,
-    RelationshipChanged
+    RelationshipChanged,
+    PermanentAssignmentCreated,
+    PermanentAssignmentUpdated,
+    PermanentAssignmentCancelled
 }
 
 /// <summary>
@@ -42,7 +46,8 @@ public sealed record ManufacturingDataChanged(
     Guid? MainStageId = null,
     Guid? ProductModelId = null,
     Guid? SubStageId = null,
-    DateOnly? ProductionDate = null);
+    DateOnly? ProductionDate = null,
+    Guid? WorkerId = null);
 
 public interface IManufacturingDataChangePublisher
 {

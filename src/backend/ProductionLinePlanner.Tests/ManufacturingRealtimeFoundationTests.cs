@@ -96,6 +96,110 @@ public sealed class ManufacturingRealtimeFoundationTests
     }
 
     [Fact]
+    public async Task Permanent_assignment_create_and_cancellation_publish_one_contextual_event_after_each_successful_save()
+    {
+        var publisher = new RecordingPublisher();
+        var actor = Guid.NewGuid();
+        await using var db = CreateDb(publisher, actor);
+        var factory = new Factory(Guid.NewGuid(), "Factory", "F-001");
+        var line = new ProductionLine(Guid.NewGuid(), factory.Id, "Line", 1, "L-001");
+        var mainStage = new MainStage(Guid.NewGuid(), line.Id, "Main stage", 1);
+        var subStage = new SubStage(Guid.NewGuid(), mainStage.Id, "Sub stage", "S-001", 1, 1, productionLineId: line.Id);
+        var worker = new Worker(Guid.NewGuid(), "W-001", "Worker");
+        db.AddRange(factory, line, mainStage, subStage, worker);
+        await db.SaveChangesAsync();
+        publisher.Changes.Clear();
+        db.ChangeTracker.Clear();
+
+        var assignment = new WorkerDefaultAssignment(Guid.NewGuid(), worker.Id, subStage.Id, actor, DateTime.UtcNow);
+        db.WorkerDefaultAssignments.Add(assignment);
+        await db.SaveChangesAsync();
+
+        var created = Assert.Single(publisher.Changes);
+        Assert.Equal(ManufacturingEntityType.WorkerDefaultAssignment, created.EntityType);
+        Assert.Equal(ManufacturingChangeType.PermanentAssignmentCreated, created.ChangeType);
+        Assert.Equal(assignment.Id, created.EntityId);
+        Assert.Equal(worker.Id, created.WorkerId);
+        Assert.Equal(factory.Id, created.FactoryId);
+        Assert.Equal(line.Id, created.ProductionLineId);
+        Assert.Equal(mainStage.Id, created.MainStageId);
+        Assert.Equal(subStage.Id, created.SubStageId);
+        Assert.Equal(
+            ["manufacturing:line-staffing", "manufacturing:daily-production-operations"],
+            ManufacturingRealtimeGroups.ForChange(created));
+        var browserMessage = ManufacturingDataChangedMessage.From(created);
+        Assert.Equal("WorkerDefaultAssignment", browserMessage.EntityType);
+        Assert.Equal("permanent-assignment-created", browserMessage.ChangeType);
+        Assert.Equal(worker.Id, browserMessage.WorkerId);
+
+        publisher.Changes.Clear();
+        assignment.Deactivate(DateTime.UtcNow);
+        await db.SaveChangesAsync();
+
+        var cancelled = Assert.Single(publisher.Changes);
+        Assert.Equal(ManufacturingChangeType.PermanentAssignmentCancelled, cancelled.ChangeType);
+        Assert.Equal(assignment.Id, cancelled.EntityId);
+        Assert.Equal(worker.Id, cancelled.WorkerId);
+        Assert.Equal(factory.Id, cancelled.FactoryId);
+        Assert.Equal(line.Id, cancelled.ProductionLineId);
+        Assert.Equal(mainStage.Id, cancelled.MainStageId);
+        Assert.Equal(subStage.Id, cancelled.SubStageId);
+    }
+
+    [Fact]
+    public async Task Failed_permanent_assignment_save_publishes_no_event()
+    {
+        var publisher = new RecordingPublisher();
+        var actor = Guid.NewGuid();
+        var coordinator = new ManufacturingDataChangeTransactionCoordinator(publisher, NullLogger<ManufacturingDataChangeTransactionCoordinator>.Instance);
+        var realtimeInterceptor = new ManufacturingDataChangeSaveChangesInterceptor(
+            publisher,
+            new CurrentUserStub(actor),
+            new CorrelationStub(),
+            coordinator,
+            NullLogger<ManufacturingDataChangeSaveChangesInterceptor>.Instance);
+        var options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .AddInterceptors(realtimeInterceptor, new ThrowOnSavingPermanentAssignmentInterceptor())
+            .Options;
+        await using var db = new AppDbContext(options);
+        db.WorkerDefaultAssignments.Add(new WorkerDefaultAssignment(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), actor, DateTime.UtcNow));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => db.SaveChangesAsync());
+
+        Assert.Empty(publisher.Changes);
+    }
+
+    [Fact]
+    public async Task Conflicting_permanent_assignment_save_publishes_no_event()
+    {
+        var publisher = new RecordingPublisher();
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        connection.CreateCollation("SQL_Latin1_General_CP1_CI_AS", (left, right) => string.Compare(left, right, StringComparison.OrdinalIgnoreCase));
+        await connection.OpenAsync();
+        await using var db = CreateRelationalDb(connection, publisher);
+        await db.Database.EnsureCreatedAsync();
+        var actor = Guid.NewGuid();
+        var factory = new Factory(Guid.NewGuid(), "Factory", "F-001");
+        var line = new ProductionLine(Guid.NewGuid(), factory.Id, "Line", 1, "L-001");
+        var mainStage = new MainStage(Guid.NewGuid(), line.Id, "Main stage", 1);
+        var subStage = new SubStage(Guid.NewGuid(), mainStage.Id, "Sub stage", "S-001", 1, 1, productionLineId: line.Id);
+        var worker = new Worker(Guid.NewGuid(), "W-001", "Worker");
+        db.AddRange(factory, line, mainStage, subStage, worker);
+        await db.SaveChangesAsync();
+        publisher.Changes.Clear();
+
+        db.WorkerDefaultAssignments.Add(new WorkerDefaultAssignment(Guid.NewGuid(), worker.Id, subStage.Id, actor, DateTime.UtcNow));
+        await db.SaveChangesAsync();
+        publisher.Changes.Clear();
+
+        db.WorkerDefaultAssignments.Add(new WorkerDefaultAssignment(Guid.NewGuid(), worker.Id, subStage.Id, actor, DateTime.UtcNow));
+        await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync());
+
+        Assert.Empty(publisher.Changes);
+    }
+
+    [Fact]
     public async Task Update_activation_and_relationship_changes_are_classified_without_entity_payloads()
     {
         var publisher = new RecordingPublisher();
@@ -192,6 +296,8 @@ public sealed class ManufacturingRealtimeFoundationTests
         Assert.Equal("workers.view", permission);
         Assert.True(ManufacturingRealtimeGroups.TryGetRequiredPermission("daily-production-operations", out permission));
         Assert.Equal("production.record", permission);
+        Assert.True(ManufacturingRealtimeGroups.TryGetRequiredPermission("line-staffing", out permission));
+        Assert.Equal("assignments.view", permission);
         Assert.False(ManufacturingRealtimeGroups.TryGetRequiredPermission("reports", out _));
     }
 
@@ -254,5 +360,22 @@ public sealed class ManufacturingRealtimeFoundationTests
     {
         public override InterceptionResult TransactionCommitting(System.Data.Common.DbTransaction transaction, TransactionEventData eventData, InterceptionResult result) =>
             throw new InvalidOperationException("Commit failed.");
+    }
+
+    private sealed class ThrowOnSavingPermanentAssignmentInterceptor : SaveChangesInterceptor
+    {
+        public override InterceptionResult<int> SavingChanges(DbContextEventData eventData, InterceptionResult<int> result)
+        {
+            if (eventData.Context?.ChangeTracker.Entries<WorkerDefaultAssignment>().Any(entry => entry.State == EntityState.Added) == true)
+                throw new InvalidOperationException("Simulated permanent-assignment failure.");
+            return result;
+        }
+
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(DbContextEventData eventData, InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            if (eventData.Context?.ChangeTracker.Entries<WorkerDefaultAssignment>().Any(entry => entry.State == EntityState.Added) == true)
+                throw new InvalidOperationException("Simulated permanent-assignment failure.");
+            return ValueTask.FromResult(result);
+        }
     }
 }

@@ -126,6 +126,32 @@ describe('DailyProductionOperationsPageComponent unified preview', () => {
     expect(production.loadDailyOperations).not.toHaveBeenCalled();
   });
 
+  it('reloads current operations only for a permanent-assignment event affecting a displayed stage in the same factory and line', () => {
+    masterData.factories.and.returnValue(of([]));
+    production.loadDailyOperations.and.returnValue(of(component.operations));
+    component.attendanceSyncedForDate = component.productionDate;
+
+    component.ngOnInit();
+    const matching = dailyChange({
+      entityType: 'WorkerDefaultAssignment',
+      changeType: 'permanent-assignment-created',
+      factoryId: component.selectedFactoryId,
+      productionLineId: component.selectedProductionLineId,
+      productModelId: null,
+      productionDate: null,
+      subStageId: component.stages[0].subStageId,
+      mainStageId: 'main-stage-1',
+      workerId: 'worker-2'
+    });
+
+    expect(watchConfig.matches?.(matching)).toBeTrue();
+    watchConfig.refresh();
+    expect(production.loadDailyOperations).toHaveBeenCalledTimes(1);
+    expect(watchConfig.matches?.({ ...matching, subStageId: 'unrelated-stage' })).toBeFalse();
+    expect(watchConfig.matches?.({ ...matching, factoryId: 'other-factory' })).toBeFalse();
+    expect(watchConfig.matches?.({ ...matching, productionLineId: 'other-line' })).toBeFalse();
+  });
+
   it('shows a reload notice instead of overwriting matching local edits', () => {
     masterData.factories.and.returnValue(of([]));
     component.attendanceSyncedForDate = component.productionDate;
@@ -137,6 +163,27 @@ describe('DailyProductionOperationsPageComponent unified preview', () => {
 
     expect(component.hasPendingRemoteUpdate).toBeTrue();
     expect(component.remoteUpdateMessage).toContain('تعديلاتك غير المحفوظة');
+    expect(production.loadDailyOperations).not.toHaveBeenCalled();
+  });
+
+  it('protects unsaved daily edits from a matching permanent-assignment event', () => {
+    masterData.factories.and.returnValue(of([]));
+    component.attendanceSyncedForDate = component.productionDate;
+    component.stageChanged();
+
+    component.ngOnInit();
+    const change = dailyChange({
+      entityType: 'WorkerDefaultAssignment',
+      changeType: 'permanent-assignment-cancelled',
+      productModelId: null,
+      productionDate: null,
+      subStageId: component.stages[0].subStageId,
+      workerId: 'worker-1'
+    });
+    expect(watchConfig.matches?.(change)).toBeTrue();
+    watchConfig.refresh();
+
+    expect(component.hasPendingRemoteUpdate).toBeTrue();
     expect(production.loadDailyOperations).not.toHaveBeenCalled();
   });
 
@@ -210,6 +257,7 @@ describe('DailyProductionOperationsPageComponent unified preview', () => {
       productModelId: component.selectedProductModelId,
       subStageId: null,
       productionDate: component.productionDate,
+      workerId: null,
       ...overrides
     };
   }

@@ -10,6 +10,7 @@ public static class ManufacturingRealtimeGroups
     public const string Stages = "stages";
     public const string Models = "models";
     public const string Employees = "employees";
+    public const string LineStaffing = "line-staffing";
     public const string DailyProductionOperations = "daily-production-operations";
 
     public static string ForScreen(string screen) => $"manufacturing:{screen.Trim().ToLowerInvariant()}";
@@ -23,6 +24,7 @@ public static class ManufacturingRealtimeGroups
             Stages => "stages.view",
             Models => "models.view",
             Employees => "workers.view",
+            LineStaffing => "assignments.view",
             DailyProductionOperations => "production.record",
             _ => string.Empty
         };
@@ -37,6 +39,7 @@ public static class ManufacturingRealtimeGroups
         ManufacturingEntityType.ProductModel or ManufacturingEntityType.ProductModelStage => [ForScreen(Models)],
         ManufacturingEntityType.ProductionOrder => [ForScreen(DailyProductionOperations)],
         ManufacturingEntityType.Worker => [ForScreen(Employees)],
+        ManufacturingEntityType.WorkerDefaultAssignment => [ForScreen(LineStaffing), ForScreen(DailyProductionOperations)],
         _ => []
     };
 }

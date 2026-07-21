@@ -3,17 +3,17 @@ import { Subject, Subscription, auditTime, filter } from 'rxjs';
 import { ManufacturingDataChanged, RealtimeConnectionStatus } from '../models/realtime-notification.models';
 import { RealtimeService } from './realtime.service';
 
-export type ManufacturingRealtimeScreen = 'factory-structure' | 'departments' | 'stages' | 'models' | 'employees' | 'daily-production-operations';
+export type ManufacturingRealtimeScreen = 'factory-structure' | 'departments' | 'stages' | 'models' | 'employees' | 'line-staffing' | 'daily-production-operations';
 
 export interface ManufacturingRealtimeWatch {
   screen: ManufacturingRealtimeScreen;
-  refresh: () => void;
+  refresh: (change?: ManufacturingDataChanged) => void;
   matches?: (change: ManufacturingDataChanged) => boolean;
 }
 
 interface ActiveWatch extends ManufacturingRealtimeWatch {
   id: number;
-  refreshes: Subject<void>;
+  refreshes: Subject<ManufacturingDataChanged | undefined>;
   subscription: Subscription;
 }
 
@@ -39,8 +39,8 @@ export class ManufacturingRealtimeService implements OnDestroy {
 
   watchScreen(watch: ManufacturingRealtimeWatch): () => void {
     const id = this.nextWatchId++;
-    const refreshes = new Subject<void>();
-    const subscription = refreshes.pipe(auditTime(150)).subscribe(() => watch.refresh());
+    const refreshes = new Subject<ManufacturingDataChanged | undefined>();
+    const subscription = refreshes.pipe(auditTime(150)).subscribe(change => watch.refresh(change));
     this.watches.set(id, { ...watch, id, refreshes, subscription });
     if (this.isConnected) void this.joinScreen(watch.screen);
     return () => this.stopWatching(id);
@@ -73,7 +73,7 @@ export class ManufacturingRealtimeService implements OnDestroy {
     const localScreen = change.correlationId ? this.localCorrelations.get(change.correlationId) : undefined;
     for (const watch of this.watches.values()) {
       if (watch.screen === localScreen) continue;
-      if (!watch.matches || watch.matches(change)) watch.refreshes.next();
+      if (!watch.matches || watch.matches(change)) watch.refreshes.next(change);
     }
   }
 
@@ -91,7 +91,7 @@ export class ManufacturingRealtimeService implements OnDestroy {
   private async restoreAfterReconnect(): Promise<void> {
     this.joinedScreens.clear();
     await this.joinActiveScreens();
-    for (const watch of this.watches.values()) watch.refreshes.next();
+    for (const watch of this.watches.values()) watch.refreshes.next(undefined);
   }
 
   private async joinActiveScreens(): Promise<void> {
