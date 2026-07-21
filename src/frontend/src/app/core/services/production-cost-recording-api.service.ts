@@ -1,4 +1,4 @@
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { Injectable } from '@angular/core';
 import { Observable, map, timeout } from 'rxjs';
 import { buildApiUrl } from '../config/api.config';
@@ -33,6 +33,7 @@ export interface DailyProductionPreview { productionDate: string; lineQuantity: 
 export interface DailyProductionDraft { productionOrderId: string; orderNumber: string; productionDate: string; recordedAtUtc: string; lineQuantity: number; wasAlreadySaved: boolean; stages: StageProductionRecord[]; }
 export interface DailyStageApprovalInput { stageProductionRecordId: string; concurrencyToken: string; }
 export interface DailyProductionApproval { productionOrderId: string; orderStatus: string; approvedAtUtc: string; approvedStageCount: number; }
+export interface DailyProductionApprovalCancellation { productionOrderId: string; orderStatus: string; cancelledAtUtc: string; cancelledStageCount: number; }
 
 @Injectable({ providedIn: 'root' })
 export class ProductionCostRecordingApiService {
@@ -44,8 +45,9 @@ export class ProductionCostRecordingApiService {
   getProductReadiness(productModelId: string, productionLineId: string, productionDate: string): Observable<ProductProductionReadiness> { return this.get<ProductProductionReadiness>(`/api/production/readiness?productModelId=${encodeURIComponent(productModelId)}&productionLineId=${encodeURIComponent(productionLineId)}&productionDate=${encodeURIComponent(productionDate)}`); }
   loadDailyOperations(factoryId: string, productionLineId: string, productModelId: string, productionDate: string): Observable<DailyProductionOperations> { const query = new URLSearchParams({ factoryId, productionLineId, productModelId, productionDate }); return this.get<DailyProductionOperations>(`/api/production/daily-operations?${query.toString()}`); }
   previewDailyOperations(value: DailyProductionOperationInput): Observable<DailyProductionPreview> { return this.post('/api/production/daily-operations/preview', value, DAILY_PRODUCTION_OPERATION_TIMEOUT_MS); }
-  saveDailyDraft(value: DailyProductionOperationInput): Observable<DailyProductionDraft> { return this.post('/api/production/daily-operations/drafts', value, DAILY_PRODUCTION_OPERATION_TIMEOUT_MS); }
-  approveDailyOperation(productionOrderId: string, stageApprovals: DailyStageApprovalInput[]): Observable<DailyProductionApproval> { return this.post(`/api/production/daily-operations/${encodeURIComponent(productionOrderId)}/approve`, { stageApprovals }, DAILY_PRODUCTION_OPERATION_TIMEOUT_MS); }
+  saveDailyDraft(value: DailyProductionOperationInput, correlationId?: string): Observable<DailyProductionDraft> { return this.post('/api/production/daily-operations/drafts', value, DAILY_PRODUCTION_OPERATION_TIMEOUT_MS, correlationId); }
+  approveDailyOperation(productionOrderId: string, stageApprovals: DailyStageApprovalInput[], correlationId?: string): Observable<DailyProductionApproval> { return this.post(`/api/production/daily-operations/${encodeURIComponent(productionOrderId)}/approve`, { stageApprovals }, DAILY_PRODUCTION_OPERATION_TIMEOUT_MS, correlationId); }
+  cancelDailyOperationApproval(productionOrderId: string, stageApprovals: DailyStageApprovalInput[], reason: string, correlationId?: string): Observable<DailyProductionApprovalCancellation> { return this.post(`/api/production/daily-operations/${encodeURIComponent(productionOrderId)}/cancel-approval`, { stageApprovals, reason }, DAILY_PRODUCTION_OPERATION_TIMEOUT_MS, correlationId); }
   createOrder(value: unknown): Observable<ProductionOrder> { return this.post('/api/production/orders', value); }
   updateOrder(id: string, value: unknown): Observable<ProductionOrder> { return this.http.put<ApiResponse<ProductionOrder>>(buildApiUrl(`/api/production/orders/${id}`), value).pipe(timeout(STANDARD_API_TIMEOUT_MS), map((response) => this.unwrap(response))); }
   transitionOrder(id: string, action: 'activate' | 'complete' | 'cancel'): Observable<ProductionOrder> { return this.post(`/api/production/orders/${id}/${action}`, {}); }
@@ -65,6 +67,7 @@ export class ProductionCostRecordingApiService {
   approveProductionDay(productionOrderId: string): Observable<ProductionDayReview> { return this.post(`/api/production/intake/days/${productionOrderId}/approve`, {}); }
   private get<T>(path: string): Observable<T> { return this.http.get<ApiResponse<T>>(buildApiUrl(path)).pipe(timeout(STANDARD_API_TIMEOUT_MS), map((response) => this.unwrap(response))); }
   private getItems<T>(path: string): Observable<T[]> { return this.get<{ items: T[] }>(path).pipe(map((page) => page.items ?? [])); }
-  private post<T>(path: string, body: unknown, requestTimeoutMs = STANDARD_API_TIMEOUT_MS): Observable<T> { return this.http.post<ApiResponse<T>>(buildApiUrl(path), body).pipe(timeout(requestTimeoutMs), map((response) => this.unwrap(response))); }
+  private post<T>(path: string, body: unknown, requestTimeoutMs = STANDARD_API_TIMEOUT_MS, correlationId?: string): Observable<T> { return this.http.post<ApiResponse<T>>(buildApiUrl(path), body, { headers: this.correlationHeaders(correlationId) }).pipe(timeout(requestTimeoutMs), map((response) => this.unwrap(response))); }
+  private correlationHeaders(correlationId?: string): HttpHeaders | undefined { return correlationId ? new HttpHeaders({ 'X-Manufacturing-Realtime-Correlation-Id': correlationId }) : undefined; }
   private unwrap<T>(response: ApiResponse<T>): T { if (!response.success || response.data === undefined || response.data === null) { throw new Error(response.error?.message || 'تعذر إتمام العملية.'); } return response.data; }
 }

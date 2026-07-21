@@ -9,9 +9,6 @@ export interface ManufacturingWorkspaceItem extends PermissionRequirementDescrip
   icon: string;
 }
 
-// Recording needs read access for its existing orders/records lookups and record access
-// for draft/preview actions. Keep this shared so the tab, route, and contextual action
-// cannot drift into separate permission rules.
 export const PRODUCTION_RECORDING_ACCESS: PermissionRequirementDescriptor = {
   requireAll: [PERMISSIONS.production.view, PERMISSIONS.production.record]
 };
@@ -106,14 +103,6 @@ export const MANUFACTURING_WORKSPACE_ITEMS: readonly ManufacturingWorkspaceItem[
     route: '/manufacturing/daily-production-operations',
     icon: 'pi-calendar-plus',
     ...DAILY_PRODUCTION_OPERATIONS_ACCESS
-  },
-  {
-    id: 'production-recording',
-    label: 'تسجيل الإنتاج',
-    description: 'تسجيل مرحلة مفردة متوافق مع السجلات السابقة.',
-    route: '/manufacturing/production-recording',
-    icon: 'pi-play-circle',
-    ...PRODUCTION_RECORDING_ACCESS
   },
   {
     id: 'reports',

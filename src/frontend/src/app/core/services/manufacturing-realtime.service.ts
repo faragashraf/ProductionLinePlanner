@@ -3,7 +3,7 @@ import { Subject, Subscription, auditTime, filter } from 'rxjs';
 import { ManufacturingDataChanged, RealtimeConnectionStatus } from '../models/realtime-notification.models';
 import { RealtimeService } from './realtime.service';
 
-export type ManufacturingRealtimeScreen = 'factory-structure' | 'departments' | 'stages' | 'models' | 'employees';
+export type ManufacturingRealtimeScreen = 'factory-structure' | 'departments' | 'stages' | 'models' | 'employees' | 'daily-production-operations';
 
 export interface ManufacturingRealtimeWatch {
   screen: ManufacturingRealtimeScreen;

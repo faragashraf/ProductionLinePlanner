@@ -43,6 +43,10 @@
 
   <p class="daily-production-operations__message plp-inline-feedback plp-inline-feedback--error" *ngIf="error" role="alert">{{ error }}</p>
   <p class="daily-production-operations__message plp-inline-feedback plp-inline-feedback--success" *ngIf="successMessage">{{ successMessage }}</p>
+  <p class="daily-production-operations__message plp-inline-feedback plp-inline-feedback--warning" *ngIf="hasPendingRemoteUpdate" role="alert">
+    {{ remoteUpdateMessage }}
+    <button pButton type="button" class="p-button-text p-button-help" label="تحديث الآن" (click)="reloadFromRemoteUpdate()"></button>
+  </p>
 
   <ng-container *ngIf="operations; else initialState">
     <p-card>
@@ -67,11 +71,15 @@
       </div>
       <p class="daily-production-operations__refresh-note" *ngIf="operationsLoading">جارٍ تحديث حالة الحضور والتسكين في الخلفية؛ تبقى بياناتك الحالية ظاهرة.</p>
       <p class="daily-production-operations__warning plp-inline-feedback plp-inline-feedback--warning" *ngIf="hasExistingDraft && !isDailyOperationApproved">
-        توجد مسودة محفوظة لهذا اليوم وتم تحميل عمالها وتوزيعها. يمكنك مراجعتها هنا، ولن يتم استبدالها بصمت بلقطة تسكين جديدة.
+        توجد مسودة محفوظة لهذا اليوم وتم تحميل عمالها وتوزيعها. يمكنك مراجعتها ثم حفظ تصحيح صريح لها دون إنشاء مسودة ثانية.
       </p>
       <p class="daily-production-operations__approved plp-inline-feedback plp-inline-feedback--success" *ngIf="isDailyOperationApproved">
         <plp-status-badge status="ready" label="معتمد" [compact]="true"></plp-status-badge>
         تم اعتماد تشغيل اليوم وثُبتت بياناته. العرض للقراءة فقط.
+      </p>
+      <p class="daily-production-operations__warning plp-inline-feedback plp-inline-feedback--warning" *ngIf="isDailyApprovalCancelled">
+        <plp-status-badge status="warning" label="تم إلغاء الاعتماد" [compact]="true"></plp-status-badge>
+        احتُفظ بسبب الإلغاء للمراجعة. صحّح المسودة ثم احسب المعاينة واحفظها قبل اعتمادها من جديد.
       </p>
     </p-card>
 
@@ -209,9 +217,10 @@
         </label>
         <div class="daily-production-operations__final-actions plp-sticky-action-bar plp-action-group">
           <span>{{ operations.totalStages }} مرحلة · {{ totalEnteredWorkers }} صف عامل. لا يضاعف أي صف كمية الخط أو المرحلة.</span>
-          <button pButton type="button" class="p-button-outlined" label="حساب معاينة موحّدة" icon="pi pi-calculator" [loading]="previewing" [disabled]="previewing || saving || approving" (click)="calculatePreview()"></button>
-          <button *ngIf="!isDailyOperationApproved" pButton type="button" label="حفظ مسودة اليوم" icon="pi pi-save" [loading]="saving" [disabled]="hasExistingDraft || !isPreviewCurrent || saving || approving" (click)="saveDailyDraft()"></button>
-          <button *ngIf="canApproveDailyOperation" pButton type="button" class="p-button-success" label="اعتماد تشغيل اليوم" icon="pi pi-check" [loading]="approving" [disabled]="saving || previewing || approving" (click)="approveDailyOperation()"></button>
+          <button pButton type="button" class="p-button-outlined" label="حساب معاينة موحّدة" icon="pi pi-calculator" [loading]="previewing" [disabled]="previewing || saving || approving || cancelling" (click)="calculatePreview()"></button>
+          <button *ngIf="!isDailyOperationApproved" pButton type="button" [label]="hasExistingDraft ? 'حفظ تغييرات مسودة اليوم' : 'حفظ مسودة اليوم'" icon="pi pi-save" [loading]="saving" [disabled]="!isPreviewCurrent || saving || approving || cancelling" (click)="saveDailyDraft()"></button>
+          <button *ngIf="canApproveDailyOperation" pButton type="button" class="p-button-success" label="اعتماد تشغيل اليوم" icon="pi pi-check" [loading]="approving" [disabled]="saving || previewing || approving || cancelling" (click)="approveDailyOperation()"></button>
+          <button *ngIf="canCancelDailyOperationApproval" pButton type="button" class="p-button-warning" label="إلغاء اعتماد تشغيل اليوم" icon="pi pi-undo" [loading]="cancelling" [disabled]="saving || previewing || approving || cancelling" (click)="openDailyApprovalCancellationDialog()"></button>
         </div>
       </div>
       <ul class="daily-production-operations__validation plp-inline-feedback plp-inline-feedback--error" *ngIf="validationMessages.length" role="alert"><li *ngFor="let message of validationMessages">{{ message }}</li></ul>
@@ -388,3 +397,22 @@
     <plp-empty-state *ngIf="!firstLoadPending" title="ابدأ تشغيل يوم إنتاج" description="اختر تاريخ الإنتاج، نفّذ مزامنة الحضور اليدوية للتاريخ نفسه، ثم اختر المصنع والخط والموديل واضغط تحميل تشغيل اليوم."></plp-empty-state>
   </ng-template>
 </section>
+
+<plp-dialog
+  [(visible)]="dailyApprovalCancellationDialogVisible"
+  title="إلغاء اعتماد تشغيل اليوم"
+  subtitle="لن تُحذف المسودة. سيُحتفظ بسجل الاعتماد والإلغاء للمراجعة، ثم يصبح التصحيح متاحًا."
+  size="compact"
+  [saving]="cancelling"
+  [saveDisabled]="!dailyApprovalCancellationReason.trim()"
+  saveLabel="تأكيد إلغاء الاعتماد"
+  (save)="confirmDailyApprovalCancellation()"
+  (cancel)="closeDailyApprovalCancellationDialog()"
+>
+  <label>سبب إلغاء اعتماد تشغيل اليوم
+    <input pInputText [(ngModel)]="dailyApprovalCancellationReason" maxlength="500" placeholder="سبب واضح للمراجعة التشغيلية">
+  </label>
+  <p class="daily-production-operations__warning plp-inline-feedback plp-inline-feedback--warning">
+    ستعود المسودة إلى حالة قابلة للتصحيح، دون إنشاء مسودة إضافية لليوم والخط والموديل نفسه.
+  </p>
+</plp-dialog>

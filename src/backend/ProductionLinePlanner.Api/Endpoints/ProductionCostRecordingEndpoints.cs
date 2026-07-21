@@ -123,6 +123,30 @@ public static class ProductionCostRecordingEndpoints
             .RequirePermission("production.approve")
             .RequireRateLimiting(ApiRateLimitPolicies.CriticalProductionWrite)
             .WithName("ApproveDailyProductionOperation");
+        dailyOperations.MapPost("/{productionOrderId:guid}/cancel-approval", async (
+            Guid productionOrderId,
+            DailyProductionApprovalCancellationRequest request,
+            IProductionCostRecordingService service,
+            ICurrentUserService user,
+            CancellationToken ct) =>
+        {
+            if (productionOrderId == Guid.Empty)
+            {
+                return ApiResponse.Failure("ValidationError", "معرّف تشغيل اليوم مطلوب.", StatusCodes.Status400BadRequest);
+            }
+
+            if (string.IsNullOrWhiteSpace(request.Reason) || request.StageApprovals is null || request.StageApprovals.Count == 0 ||
+                request.StageApprovals.Any(stage => stage.StageProductionRecordId == Guid.Empty || stage.ConcurrencyToken == Guid.Empty) ||
+                request.StageApprovals.Select(stage => stage.StageProductionRecordId).Distinct().Count() != request.StageApprovals.Count)
+            {
+                return ApiResponse.Failure("ValidationError", "سبب إلغاء الاعتماد ورموز تزامن جميع مراحل التشغيل مطلوبة.", StatusCodes.Status400BadRequest);
+            }
+
+            return Results.Ok(ApiResponse.Success(await service.CancelDailyOperationApprovalAsync(productionOrderId, request, RequireUser(user), ct)));
+        })
+            .RequirePermission("production.approve")
+            .RequireRateLimiting(ApiRateLimitPolicies.CriticalProductionWrite)
+            .WithName("CancelDailyProductionOperationApproval");
         // The generic workbook workflow is intentionally deferred for the first
         // real-data pilot. Keep the earlier capability dormant unless it is
         // deliberately enabled in a later release.

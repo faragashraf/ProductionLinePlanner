@@ -108,6 +108,12 @@ public class StageProductionRecord
         if (string.IsNullOrWhiteSpace(reason)) throw new ArgumentException("سبب إلغاء اعتماد الإنتاج مطلوب.", nameof(reason));
         Status = StageProductionRecordStatus.Cancelled; CancelledBy = actorId; CancelledAtUtc = atUtc; ApprovalCancellationReason = reason.Trim(); ConcurrencyToken = Guid.NewGuid();
     }
+    public void ReopenDailyDraftAfterApprovalCancellation()
+    {
+        if (Status != StageProductionRecordStatus.Cancelled || string.IsNullOrWhiteSpace(ApprovalCancellationReason))
+            throw new InvalidOperationException("Only cancelled daily records can be reopened for correction.");
+        Status = StageProductionRecordStatus.Draft; ConcurrencyToken = Guid.NewGuid();
+    }
     public void EnsureFinancialConsistency()
     {
         var allocationTotal = WorkerAllocations.Sum(x => x.CalculatedEarning);

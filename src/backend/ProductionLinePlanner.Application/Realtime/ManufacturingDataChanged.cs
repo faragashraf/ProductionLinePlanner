@@ -9,6 +9,7 @@ public enum ManufacturingEntityType
     SubStage,
     ProductModel,
     ProductModelStage,
+    ProductionOrder,
     Worker
 }
 
@@ -40,7 +41,8 @@ public sealed record ManufacturingDataChanged(
     Guid? ProductionLineId = null,
     Guid? MainStageId = null,
     Guid? ProductModelId = null,
-    Guid? SubStageId = null);
+    Guid? SubStageId = null,
+    DateOnly? ProductionDate = null);
 
 public interface IManufacturingDataChangePublisher
 {

@@ -89,10 +89,28 @@ describe('ManufacturingRealtimeService', () => {
     expect(leaveCalls.at(-1)).toEqual(['LeaveManufacturingScreen', 'models']);
   });
 
+  it('uses a dedicated screen group for daily-production invalidations', async () => {
+    const refresh = jasmine.createSpy('refresh');
+    service.watchScreen({ screen: 'daily-production-operations', refresh });
+
+    realtime.status.next('connected');
+    await settle();
+    expect(realtime.invocations).toContain(['JoinManufacturingScreen', 'daily-production-operations']);
+
+    realtime.changes.next({
+      ...change('daily-order', 'line-1', null, 'ProductionOrder'),
+      productionDate: '2026-07-16',
+      productModelId: 'model-1'
+    });
+    await waitForCoalescing();
+
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
   function change(eventId: string, productionLineId: string | null = null, correlationId: string | null = null, entityType: ManufacturingDataChanged['entityType'] = 'ProductModel'): ManufacturingDataChanged {
     return {
       eventId, entityType, changeType: 'Updated', entityId: 'model-1', occurredAtUtc: new Date().toISOString(), actorUserId: null,
-      correlationId, factoryId: null, departmentId: null, productionLineId, mainStageId: null, productModelId: 'model-1', subStageId: null
+      correlationId, factoryId: null, departmentId: null, productionLineId, mainStageId: null, productModelId: 'model-1', subStageId: null, productionDate: null
     };
   }
 

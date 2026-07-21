@@ -89,6 +89,104 @@ public sealed class ProductionCostRecordingHttpIntegrationTests
     }
 
     [Fact]
+    public async Task Daily_approval_cancellation_reopens_the_same_draft_for_correction_without_creating_another_daily_operation()
+    {
+        await using var fixture = await ProductionHttpFixture.CreateAsync();
+        var draft = await CreateDailyDraftAsync(fixture);
+        var orderId = draft.GetProperty("productionOrderId").GetGuid();
+        var draftStage = draft.GetProperty("stages").EnumerateArray().Single();
+        var approvePath = $"/api/production/daily-operations/{orderId}/approve";
+        Assert.Equal(HttpStatusCode.OK, (await fixture.SendAsync(HttpMethod.Post, approvePath, DailyApprovalPayload(draftStage), permissions: ["production.approve"])).StatusCode);
+
+        var approvedRecord = await fixture.SendAsync(HttpMethod.Get, $"/api/production/records/{draftStage.GetProperty("id").GetGuid()}", permissions: ["production.view"]);
+        var approvedStage = await DataAsync(approvedRecord);
+        var cancelPath = $"/api/production/daily-operations/{orderId}/cancel-approval";
+        var cancellation = await fixture.SendAsync(HttpMethod.Post, cancelPath, new
+        {
+            reason = "تصحيح كمية تشغيل اليوم",
+            stageApprovals = new[] { new { stageProductionRecordId = approvedStage.GetProperty("id").GetGuid(), concurrencyToken = approvedStage.GetProperty("concurrencyToken").GetGuid() } }
+        }, permissions: ["production.approve"]);
+
+        Assert.Equal(HttpStatusCode.OK, cancellation.StatusCode);
+        var cancelled = await DataAsync(cancellation);
+        Assert.Equal(orderId, cancelled.GetProperty("productionOrderId").GetGuid());
+        Assert.Equal("Draft", cancelled.GetProperty("orderStatus").GetString());
+        Assert.Equal(1, cancelled.GetProperty("cancelledStageCount").GetInt32());
+        Assert.Equal(HttpStatusCode.Conflict, (await fixture.SendAsync(HttpMethod.Post, cancelPath, new
+        {
+            reason = "إلغاء مكرر",
+            stageApprovals = new[] { new { stageProductionRecordId = approvedStage.GetProperty("id").GetGuid(), concurrencyToken = approvedStage.GetProperty("concurrencyToken").GetGuid() } }
+        }, permissions: ["production.approve"])).StatusCode);
+
+        var cancelledRecord = await fixture.SendAsync(HttpMethod.Get, $"/api/production/records/{approvedStage.GetProperty("id").GetGuid()}", permissions: ["production.view"]);
+        Assert.Equal("Cancelled", (await DataAsync(cancelledRecord)).GetProperty("status").GetString());
+
+        var updateRequestId = Guid.NewGuid();
+        var stageInputs = new[]
+        {
+            new
+            {
+                productModelStageId = fixture.ModelStageId,
+                workers = new[]
+                {
+                    new { workerId = fixture.WorkerAId, percentage = 50m },
+                    new { workerId = fixture.WorkerBId, percentage = 50m }
+                }
+            }
+        };
+        var previewInput = new
+        {
+            factoryId = fixture.FactoryId,
+            productionLineId = fixture.LineId,
+            productModelId = fixture.ModelId,
+            productionDate = "2026-07-16",
+            lineQuantity = 600m,
+            clientRequestId = updateRequestId,
+            stages = stageInputs
+        };
+        var preview = await fixture.SendAsync(HttpMethod.Post, "/api/production/daily-operations/preview", previewInput, permissions: ["production.record"]);
+        var previewToken = (await DataAsync(preview)).GetProperty("previewToken").GetString();
+        var updated = await fixture.SendAsync(HttpMethod.Post, "/api/production/daily-operations/drafts", new
+        {
+            previewInput.factoryId,
+            previewInput.productionLineId,
+            previewInput.productModelId,
+            previewInput.productionDate,
+            previewInput.lineQuantity,
+            previewInput.clientRequestId,
+            previewToken,
+            previewInput.stages
+        }, permissions: ["production.record"]);
+
+        Assert.Equal(HttpStatusCode.Created, updated.StatusCode);
+        var correctedDraft = await DataAsync(updated);
+        Assert.Equal(orderId, correctedDraft.GetProperty("productionOrderId").GetGuid());
+        Assert.Equal(600m, correctedDraft.GetProperty("lineQuantity").GetDecimal());
+        Assert.Equal("Draft", correctedDraft.GetProperty("stages").EnumerateArray().Single().GetProperty("status").GetString());
+        Assert.Equal("تصحيح كمية تشغيل اليوم", correctedDraft.GetProperty("stages").EnumerateArray().Single().GetProperty("approvalCancellationReason").GetString());
+    }
+
+    [Fact]
+    public async Task Daily_approval_cancellation_rejects_a_stale_stage_token_without_changing_the_approved_operation()
+    {
+        await using var fixture = await ProductionHttpFixture.CreateAsync();
+        var draft = await CreateDailyDraftAsync(fixture);
+        var orderId = draft.GetProperty("productionOrderId").GetGuid();
+        var stage = draft.GetProperty("stages").EnumerateArray().Single();
+        Assert.Equal(HttpStatusCode.OK, (await fixture.SendAsync(HttpMethod.Post, $"/api/production/daily-operations/{orderId}/approve", DailyApprovalPayload(stage), permissions: ["production.approve"])).StatusCode);
+
+        var response = await fixture.SendAsync(HttpMethod.Post, $"/api/production/daily-operations/{orderId}/cancel-approval", new
+        {
+            reason = "رمز قديم",
+            stageApprovals = new[] { new { stageProductionRecordId = stage.GetProperty("id").GetGuid(), concurrencyToken = stage.GetProperty("concurrencyToken").GetGuid() } }
+        }, permissions: ["production.approve"]);
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        var record = await fixture.SendAsync(HttpMethod.Get, $"/api/production/records/{stage.GetProperty("id").GetGuid()}", permissions: ["production.view"]);
+        Assert.Equal("Approved", (await DataAsync(record)).GetProperty("status").GetString());
+    }
+
+    [Fact]
     public async Task Individual_approval_rejects_a_stage_belonging_to_daily_operations()
     {
         await using var fixture = await ProductionHttpFixture.CreateAsync();
