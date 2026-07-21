@@ -9,6 +9,7 @@ import { ManufacturingMasterDataPageComponent } from './manufacturing-master-dat
 describe('ManufacturingMasterDataPageComponent', () => {
   let component: ManufacturingMasterDataPageComponent;
   let api: jasmine.SpyObj<ManufacturingMasterDataApiService>;
+  let realtime: jasmine.SpyObj<ManufacturingRealtimeService>;
 
   const factory = { id: 'factory-1', code: 'FAC', name: 'مصنع الملابس', isActive: true };
   const department = { id: 'department-1', factoryId: factory.id, code: 'CUT', nameAr: 'القص', isActive: true };
@@ -43,13 +44,16 @@ describe('ManufacturingMasterDataPageComponent', () => {
     api.addModelStage.and.returnValue(of({ id: 'model-stage-1', subStageId: stage.id, stageOrder: 1, piecePrice: 1, standardSeconds: 20, compensationMode: 'SharedPercentage', isRequired: true, isActive: true }));
     api.updateModelStage.and.returnValue(of({ id: 'model-stage-1', subStageId: stage.id, stageOrder: 1, piecePrice: 1, standardSeconds: 20, compensationMode: 'SharedPercentage', isRequired: true, isActive: true }));
     api.deactivateModelStage.and.returnValue(of(void 0));
+    realtime = jasmine.createSpyObj<ManufacturingRealtimeService>('ManufacturingRealtimeService', ['watchScreen', 'registerLocalOperation']);
+    realtime.watchScreen.and.returnValue(() => undefined);
+    realtime.registerLocalOperation.and.returnValue('local-correlation');
 
     await TestBed.configureTestingModule({
       declarations: [ManufacturingMasterDataPageComponent],
       imports: [FormsModule, ReactiveFormsModule],
       providers: [
         { provide: ManufacturingMasterDataApiService, useValue: api },
-        { provide: ManufacturingRealtimeService, useValue: { watchScreen: () => () => undefined, registerLocalOperation: () => 'local-correlation' } },
+        { provide: ManufacturingRealtimeService, useValue: realtime },
         { provide: ActivatedRoute, useValue: { snapshot: { routeConfig: { path: 'stages' } } } }
       ]
     }).overrideComponent(ManufacturingMasterDataPageComponent, { set: { template: '' } }).compileComponents();
@@ -143,8 +147,19 @@ describe('ManufacturingMasterDataPageComponent', () => {
     component.saveOperationalStage();
 
     expect(api.createOperationalStage).toHaveBeenCalledWith({ productionLineId: line.id, name: 'تشطيب', capacity: 3 }, 'local-correlation');
+    expect(realtime.registerLocalOperation).toHaveBeenCalledWith('stages');
     expect(api.operationalStages).toHaveBeenCalledWith({ productionLineId: line.id, isActive: undefined, includeInactive: true });
     expect(component.operationalStages).toEqual([stage]);
+  });
+
+  it('uses the local correlation for saving a stage linked to a model', () => {
+    component.selected = firstModel;
+    component.modelStageForm.setValue({ subStageId: stage.id, stageOrder: 1, piecePrice: 1, standardSeconds: 20, compensationMode: 'SharedPercentage', isRequired: true, isActive: true });
+
+    component.saveModelStage();
+
+    expect(api.addModelStage).toHaveBeenCalledWith(firstModel.id, component.modelStageForm.getRawValue(), 'local-correlation');
+    expect(realtime.registerLocalOperation).toHaveBeenCalledWith('models');
   });
 
   it('updates the stage row immediately after a successful deactivation without reloading', () => {

@@ -73,6 +73,19 @@ describe('ManufacturingRealtimeService', () => {
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
+  it('registers a UUID v4 local correlation when randomUUID is unavailable in an HTTP/LAN browser', () => {
+    withGlobalCrypto({
+      getRandomValues: (bytes: Uint8Array) => {
+        bytes.fill(0xaa);
+        return bytes;
+      }
+    } as unknown as Crypto, () => {
+      const correlationId = service.registerLocalOperation('models');
+
+      expect(correlationId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+    });
+  });
+
   it('leaves a screen after an in-flight join completes with no remaining watchers', async () => {
     let resolveJoin!: (joined: boolean) => void;
     realtime.nextJoin = new Promise<boolean>(resolve => resolveJoin = resolve);
@@ -116,6 +129,17 @@ describe('ManufacturingRealtimeService', () => {
 
   async function settle(): Promise<void> { await Promise.resolve(); await new Promise<void>(resolve => setTimeout(resolve, 0)); }
   async function waitForCoalescing(): Promise<void> { await new Promise<void>(resolve => setTimeout(resolve, 180)); }
+
+  function withGlobalCrypto(cryptoApi: Crypto, action: () => void): void {
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
+    Object.defineProperty(globalThis, 'crypto', { configurable: true, value: cryptoApi });
+    try {
+      action();
+    } finally {
+      if (descriptor) Object.defineProperty(globalThis, 'crypto', descriptor);
+      else Reflect.deleteProperty(globalThis, 'crypto');
+    }
+  }
 });
 
 class FakeRealtime {

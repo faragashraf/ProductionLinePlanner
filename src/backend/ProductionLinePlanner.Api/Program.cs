@@ -57,7 +57,7 @@ var allowedMethods = builder.Configuration
     .Get<string[]>() ?? ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"];
 var allowedHeaders = builder.Configuration
     .GetSection("Cors:AllowedHeaders")
-    .Get<string[]>() ?? ["Accept", "Content-Type", "Authorization", "X-Requested-With", "X-SignalR-User-Agent"];
+    .Get<string[]>() ?? ["Accept", "Content-Type", "Authorization", "X-Requested-With", "X-SignalR-User-Agent", ManufacturingRealtimeHeaders.CorrelationId];
 var corsAllowCredentials = builder.Configuration.GetValue("Cors:AllowCredentials", false);
 var enableHsts = builder.Configuration.GetValue("Hosting:EnableHsts", !builder.Environment.IsDevelopment());
 var enableHttpsRedirection = builder.Configuration.GetValue("Hosting:EnableHttpsRedirection", true);

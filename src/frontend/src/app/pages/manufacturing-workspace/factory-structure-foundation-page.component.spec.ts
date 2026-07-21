@@ -46,12 +46,15 @@ describe('FactoryStructureFoundationPageComponent', () => {
 
     const hydration = new BehaviorSubject<'ready'>('ready');
     const grantedPermissions = new Set<string>(manage ? [PERMISSIONS.factoryStructure.manage, PERMISSIONS.departments.manage] : []);
+    const realtime = jasmine.createSpyObj<ManufacturingRealtimeService>('ManufacturingRealtimeService', ['watchScreen', 'registerLocalOperation']);
+    realtime.watchScreen.and.returnValue(() => undefined);
+    realtime.registerLocalOperation.and.returnValue('local-correlation');
     TestBed.configureTestingModule({
       declarations: [FactoryStructureFoundationPageComponent],
       imports: [FormsModule, SharedModule, ButtonModule, TableModule, PlpResponsiveTableDirective, PlpTablePaginationDirective, PlpExpandableFormComponent, PlpProductToolbarComponent, NoopAnimationsModule],
       providers: [
         { provide: ManufacturingMasterDataApiService, useValue: masterData },
-        { provide: ManufacturingRealtimeService, useValue: { watchScreen: () => () => undefined, registerLocalOperation: () => 'local-correlation' } },
+        { provide: ManufacturingRealtimeService, useValue: realtime },
         { provide: PermissionService, useValue: {
           permissions$: of([...grantedPermissions]),
           hydrationState$: hydration.asObservable(),
@@ -136,6 +139,19 @@ describe('FactoryStructureFoundationPageComponent', () => {
 
     expect(masterData.createProductionLine).not.toHaveBeenCalled();
     expect(component.errorMessage).toContain('القسم');
+  });
+
+  it('passes a local correlation when saving a factory-structure mutation', () => {
+    const fixture = configure();
+    const component = fixture.componentInstance;
+    const masterData = TestBed.inject(ManufacturingMasterDataApiService) as jasmine.SpyObj<ManufacturingMasterDataApiService>;
+    const realtime = TestBed.inject(ManufacturingRealtimeService) as jasmine.SpyObj<ManufacturingRealtimeService>;
+    component.factoryDraft = { id: '', name: 'مصنع جديد', code: 'NEW', location: 'القاهرة' };
+
+    component.saveFactory();
+
+    expect(masterData.createFactory).toHaveBeenCalledWith({ name: 'مصنع جديد', code: 'NEW', location: 'القاهرة', isActive: true }, 'local-correlation');
+    expect(realtime.registerLocalOperation).toHaveBeenCalledWith('factory-structure');
   });
 
   it('keeps hierarchy management forms permission-gated', () => {
