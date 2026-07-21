@@ -1,0 +1,19 @@
+<section class="manufacturing-filter-card" dir="rtl">
+  <h2>{{ title }}</h2>
+  <div class="manufacturing-filter-card__fields">
+    <div class="manufacturing-filter-card__leading"><ng-content select="[filter-leading]"></ng-content></div>
+    <div class="manufacturing-filter-card__structure"><ng-content select="[filter-structure]"></ng-content></div>
+    <div class="manufacturing-filter-card__extra"><ng-content select="[filter-extra]"></ng-content></div>
+    <label class="manufacturing-filter-card__status" *ngIf="statusOptions.length">
+      <span>{{ statusLabel }}</span>
+      <select [ngModel]="statusValue" (ngModelChange)="statusValueChange.emit($event)">
+        <option *ngFor="let option of statusOptions" [value]="option.value">{{ option.label }}</option>
+      </select>
+    </label>
+    <label class="manufacturing-filter-card__search" *ngIf="showSearch">
+      <span>{{ searchLabel }}</span>
+      <input pInputText type="search" [ngModel]="searchValue" (ngModelChange)="searchValueChange.emit($event)" [placeholder]="searchPlaceholder">
+    </label>
+    <button pButton type="button" class="p-button-outlined p-button-sm manufacturing-filter-card__clear" icon="pi pi-filter-slash" [label]="clearLabel" [disabled]="clearDisabled" (click)="clearFilters.emit()"></button>
+  </div>
+</section>

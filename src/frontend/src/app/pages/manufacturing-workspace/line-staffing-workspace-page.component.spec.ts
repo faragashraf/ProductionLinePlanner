@@ -28,11 +28,12 @@ describe('LineStaffingWorkspacePageComponent', () => {
   let realtimeWatch: { refresh: (change?: any) => void; matches?: (change: any) => boolean };
 
   beforeEach(() => {
-    masterData = jasmine.createSpyObj<ManufacturingMasterDataApiService>('ManufacturingMasterDataApiService', ['factories', 'departments', 'productionLinesForDepartment', 'models']);
+    masterData = jasmine.createSpyObj<ManufacturingMasterDataApiService>('ManufacturingMasterDataApiService', ['factories', 'departments', 'allProductionLines', 'productionLinesForDepartment', 'models']);
     assignments = jasmine.createSpyObj<AssignmentsApiService>('AssignmentsApiService', ['getLineStaffingPlan', 'getLineStaffingStageRefresh', 'getActiveLineStaffingWorkers', 'updateStageDefaultAssignments', 'removeDefaultAssignment']);
     masterData.factories.and.returnValue(of([{ id: factoryId, code: 'F1', name: 'المصنع', isActive: true }]));
     masterData.departments.and.returnValue(of([{ id: departmentId, factoryId, code: 'SEW', nameAr: 'الخياطة', isActive: true }]));
     masterData.productionLinesForDepartment.and.returnValue(of([{ id: lineId, factoryId, departmentId, name: 'خط الخياطة', sequenceOrder: 1, isActive: true }]));
+    masterData.allProductionLines.and.returnValue(of([{ id: lineId, factoryId, departmentId, name: 'خط الخياطة', sequenceOrder: 1, isActive: true }]));
     masterData.models.and.returnValue(of([{ id: modelId, code: 'GER', name: 'جرومان', isActive: true }]));
     assignments.getLineStaffingPlan.and.callFake(() => of(plan()));
     assignments.getLineStaffingStageRefresh.and.callFake(() => of(stageRefresh()));
@@ -117,17 +118,16 @@ describe('LineStaffingWorkspacePageComponent', () => {
     expect(stopRealtime).toHaveBeenCalledTimes(1);
   });
 
-  it('loads only the selected factory departments and only the selected department lines', () => {
+  it('loads the reusable factory tree once and derives the selected factory, department, and line context', () => {
     component.ngOnInit();
-    component.selectFactory(factoryId);
-
-    expect(masterData.departments).toHaveBeenCalledWith(factoryId, false);
+    expect(masterData.departments).toHaveBeenCalledWith(undefined, false);
+    expect(masterData.allProductionLines).toHaveBeenCalledTimes(1);
     expect(component.activeDepartments.map(department => department.id)).toEqual([departmentId]);
-    expect(component.visibleProductionLines).toEqual([]);
-
-    component.selectDepartment(departmentId);
-
-    expect(masterData.productionLinesForDepartment).toHaveBeenCalledWith(departmentId);
+    const lineNode = component.staffingStructureTreeNodes[0].children![0].children![0] as any;
+    component.selectStaffingStructure(lineNode);
+    expect(component.selectedFactoryId).toBe(factoryId);
+    expect(component.selectedDepartmentId).toBe(departmentId);
+    expect(component.selectedProductionLineId).toBe(lineId);
     expect(component.visibleProductionLines.map(line => line.id)).toEqual([lineId]);
   });
 
@@ -144,7 +144,7 @@ describe('LineStaffingWorkspacePageComponent', () => {
   });
 
   it('does not include unassigned lines in the staffing choices', () => {
-    masterData.productionLinesForDepartment.and.returnValue(of([
+    masterData.allProductionLines.and.returnValue(of([
       { id: lineId, factoryId, departmentId, name: 'خط الخياطة', sequenceOrder: 1, isActive: true },
       { id: 'legacy-line', factoryId, departmentId: null, name: 'خط قديم', sequenceOrder: 2, isActive: true }
     ]));

@@ -1,0 +1,34 @@
+<div class="structure-selector" dir="rtl">
+  <span class="structure-selector__label">{{ label }}</span>
+  <div class="structure-selector__control">
+    <button pButton type="button" class="p-button-outlined structure-selector__trigger" [disabled]="disabled" (click)="selectorOverlay.toggle($event)" aria-haspopup="tree">
+      <span class="structure-selector__icon" aria-hidden="true"><i class="pi pi-sitemap"></i></span>
+      <span class="structure-selector__text">
+        <strong [title]="selectedNode?.data?.name || placeholder">{{ selectedNode?.data?.name || placeholder }}</strong>
+        <small [title]="selectedPath">{{ selectedPath }}</small>
+      </span>
+      <span class="structure-selector__chevron" aria-hidden="true"><i class="pi pi-chevron-down"></i></span>
+    </button>
+    <button *ngIf="showClear && selectedNode" pButton type="button" class="p-button-rounded p-button-text p-button-sm structure-selector__clear" icon="pi pi-times" aria-label="مسح اختيار نطاق المصنع" title="مسح النطاق" (click)="clearSelection($event)"></button>
+  </div>
+</div>
+
+<p-overlayPanel #selectorOverlay styleClass="structure-selector__overlay" appendTo="body">
+  <section class="structure-selector__panel" dir="rtl">
+    <label for="structureSelectorSearch">البحث في بنية المصنع
+      <span class="structure-selector__search">
+        <input id="structureSelectorSearch" pInputText type="search" [(ngModel)]="treeSearch" placeholder="ابحث بالاسم أو الكود">
+        <button *ngIf="treeSearch" pButton type="button" class="p-button-rounded p-button-text p-button-sm" icon="pi pi-times" aria-label="مسح بحث الشجرة" (click)="clearSearch()"></button>
+      </span>
+    </label>
+    <app-factory-structure-tree-view
+      [nodes]="visibleNodes"
+      [(selectedNode)]="selectedNode"
+      [selectableTypes]="selectableTypes"
+      [showActions]="false"
+      [loading]="loading"
+      (nodeSelect)="selectNode($event); selectorOverlay.hide()"
+    ></app-factory-structure-tree-view>
+    <p class="structure-selector__empty" *ngIf="!loading && !visibleNodes.length">لا توجد نتائج مطابقة في بنية المصنع.</p>
+  </section>
+</p-overlayPanel>

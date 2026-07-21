@@ -3,6 +3,8 @@
 .factory-structure-tree-view ::ng-deep .p-tree { border: 0; direction: rtl; padding: .1rem; }
 .factory-structure-tree-view ::ng-deep .p-treenode-content { align-items: stretch; border-radius: .45rem; box-sizing: border-box; inline-size: 100%; min-inline-size: 0; padding: .05rem; }
 .factory-structure-tree-view ::ng-deep .p-treenode-content:hover { background: #f8fafc; }
+.factory-structure-tree-view ::ng-deep .p-treenode-content:not(.p-treenode-selectable):hover { background: transparent; }
+.factory-structure-tree-view ::ng-deep .p-treenode-content:not(.p-treenode-selectable) { cursor: default; }
 .factory-structure-tree-view ::ng-deep .p-treenode { padding-block: .05rem; padding-inline: 0; }
 .factory-structure-tree-view ::ng-deep .p-treenode-children { padding: 0; }
 .factory-structure-tree-view ::ng-deep .p-treenode-content:has(.factory-structure-node--department) { padding-inline-start: 1.5rem; }
@@ -21,6 +23,7 @@
 .factory-structure-node--inactive { opacity: .7; }
 .factory-structure-node--not-selectable { cursor: default; }
 .factory-structure-node--not-selectable .factory-structure-node__content { color: #667085; }
+.factory-structure-node--not-selectable .factory-structure-node__type-icon { background: #f2f4f7; color: #667085; }
 
 @media (max-width: 48rem) {
   .factory-structure-tree-view ::ng-deep .p-treenode-content:has(.factory-structure-node--department) { padding-inline-start: 1.15rem; }
