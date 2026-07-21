@@ -19,7 +19,7 @@ import { FactoryItem, ManufacturingMasterDataApiService, ProductModelItem, Produ
 import { PermissionService } from '../../core/services/permission.service';
 import { ManufacturingRealtimeService } from '../../core/services/manufacturing-realtime.service';
 import { ManufacturingDataChanged } from '../../core/models/realtime-notification.models';
-import { createClientRequestId } from '../../core/utils/client-request-id';
+import { generateUuidV4 } from '../../core/utils/uuid-v4';
 import { FormSubmissionValidationService } from '../../shared/forms/form-submission-validation.service';
 import { productionDisplayLabel } from '../../shared/product/production-display-labels';
 
@@ -158,7 +158,7 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
 
   private revision = 0;
   private previewRevision = -1;
-  private clientRequestId = createClientRequestId();
+  private clientRequestId = generateUuidV4();
   private operationsRequestVersion = 0;
   private stopRealtime?: () => void;
   private hasUnsavedChanges = false;
@@ -1242,7 +1242,7 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
     this.lineQuantity = null;
     this.notes = '';
     this.replacementWorkerId = '';
-    this.clientRequestId = createClientRequestId();
+    this.clientRequestId = generateUuidV4();
     this.invalidatePreview();
     this.error = '';
     this.successMessage = '';

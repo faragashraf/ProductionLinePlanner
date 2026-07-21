@@ -14,7 +14,7 @@ import {
   FormSubmissionValidationService,
   RequiredFieldRule,
 } from '../../shared/forms/form-submission-validation.service';
-import { createClientRequestId } from '../../core/utils/client-request-id';
+import { generateUuidV4 } from '../../core/utils/uuid-v4';
 import { PermissionService } from '../../core/services/permission.service';
 import {
   AttendanceApiService,
@@ -2365,7 +2365,7 @@ export class ProductionCostRecordingPageComponent implements OnInit, OnDestroy {
     ];
   }
   private newClientRequestId(): string {
-    return createClientRequestId();
+    return generateUuidV4();
   }
   private realDataIntakeFormData(): FormData {
     const value = this.intakeForm.getRawValue();

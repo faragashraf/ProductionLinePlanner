@@ -1,7 +1,7 @@
 import { Component, OnDestroy, OnInit, Optional } from '@angular/core';
 import { ActivatedRoute } from '@angular/router';
 import { FormBuilder, Validators } from '@angular/forms';
-import { Subject, debounceTime, distinctUntilChanged, finalize, forkJoin, map, Observable, of, switchMap, takeUntil } from 'rxjs';
+import { Subject, debounceTime, distinctUntilChanged, finalize, map, Observable, takeUntil } from 'rxjs';
 import {
   DepartmentItem,
   ManufacturingMasterDataApiService,
@@ -50,13 +50,11 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
   editModelStageId = '';
   linkedStagesSearch = '';
   availableStagesSearch = '';
-  availableStagesPage = 1;
-  availableStagesTotal = 0;
-  readonly availableStagesPageSize = 10;
   availableStagesLoading = false;
   availableStagesError = '';
   private availableStageCatalog: SubStageOption[] = [];
   availableStageOptions: SubStageOption[] = [];
+  stageDropdownPanelStyle: Record<string, string> = {};
   private readonly availableStageOptionCache = new Map<string, SubStageOption>();
 
   readonly stageForm = this.fb.group({
@@ -100,7 +98,6 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
   get stageResultCount(): number { return this.filteredOperationalStages.length; }
   get stageEmptyMessage(): string { return normalizeSearchText(this.stageSearch) ? 'لا توجد مراحل مطابقة للبحث.' : 'اختر خط إنتاج لعرض مراحل الإنتاج، أو لا توجد مراحل مطابقة.'; }
   get modelEmptyMessage(): string { return normalizeSearchText(this.modelSearch) ? 'لا توجد موديلات مطابقة للبحث.' : 'لا توجد موديلات لعرضها.'; }
-  get availableStagesPageCount(): number { return Math.max(1, Math.ceil(this.availableStagesTotal / this.availableStagesPageSize)); }
   get filteredLinkedStages(): ModelStageItem[] {
     return [...this.stages]
       .filter(item => matchesSearchTerm(this.linkedStagesSearch, [this.linkedStageName(item), this.linkedStageCode(item)]))
@@ -239,31 +236,34 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
     this.save(this.api.updateOperationalStage(stage.id, { isActive: true }, this.localCorrelation('stages')), () => this.loadOperationalStages());
   }
 
-  saveModel(): void { if (this.modelForm.valid) { const correlationId = this.localCorrelation('models'); this.save(this.editModelId ? this.api.updateModel(this.editModelId, this.modelForm.getRawValue(), correlationId) : this.api.createModel(this.modelForm.getRawValue(), correlationId), item => { if (this.selected?.id === item.id) this.selected = { ...this.selected, ...item }; this.editModelId = ''; this.modelFormVisible = false; this.modelForm.reset(); this.loadModelPage(this.modelSearch, this.modelPage); }); } }
-  editModel(item: ProductModelItem): void { this.editModelId = item.id; this.modelFormVisible = true; this.modelForm.reset(item); }
+  saveModel(): void { if (this.modelForm.valid) { const correlationId = this.localCorrelation('models'); const value = this.modelForm.getRawValue(); this.save(this.editModelId ? this.api.updateModel(this.editModelId, { name: value.name ?? undefined, description: value.description }, correlationId) : this.api.createModel({ code: value.code!, name: value.name!, description: value.description }, correlationId), item => { if (this.selected?.id === item.id) this.selected = { ...this.selected, ...item }; this.editModelId = ''; this.modelFormVisible = false; this.modelForm.reset(); this.modelForm.controls.code.enable({ emitEvent: false }); this.loadModelPage(this.modelSearch, this.modelPage); }); } }
+  editModel(item: ProductModelItem): void { this.editModelId = item.id; this.modelFormVisible = true; this.modelForm.reset(item); this.modelForm.controls.code.disable({ emitEvent: false }); }
   select(item: ProductModelItem): void {
     this.selected = item;
     this.linkedStagesSearch = '';
     this.api.modelStages(item.id).pipe(takeUntil(this.destroy$)).subscribe({
-      next: stages => { this.stages = [...stages].sort((left, right) => left.stageOrder - right.stageOrder); this.rebuildAvailableStagePage(); },
+      next: stages => { this.stages = [...stages].sort((left, right) => left.stageOrder - right.stageOrder); this.rebuildAvailableStageOptions(); },
       error: error => this.setError(error)
     });
-    if (!this.availableStageCatalog.length && !this.availableStagesLoading) this.loadAvailableStageCatalog();
+    if (!this.availableStageOptions.length && !this.availableStagesLoading) this.loadAvailableStageCatalog();
   }
-  saveModelStage(): void { if (!this.selected || this.modelStageForm.invalid) return; const value = this.modelStageForm.getRawValue(); if (this.stages.some(item => item.subStageId === value.subStageId && item.id !== this.editModelStageId) || this.stages.some(item => item.stageOrder === value.stageOrder && item.id !== this.editModelStageId)) { this.error = 'لا يمكن تكرار المرحلة أو ترتيبها داخل الموديل.'; return; } const correlationId = this.localCorrelation('models'); this.save(this.editModelStageId ? this.api.updateModelStage(this.selected.id, this.editModelStageId, value, correlationId) : this.api.addModelStage(this.selected.id, value, correlationId), item => { this.stages = this.upsert(this.stages, item, 'stageOrder'); this.rebuildAvailableStagePage(); this.editModelStageId = ''; this.modelStageFormVisible = false; }); }
-  editModelStage(item: ModelStageItem): void { this.editModelStageId = item.id; this.modelStageFormVisible = true; this.modelStageForm.reset(item); this.rebuildAvailableStagePage(); }
-  disableModelStage(id: string): void { if (this.selected && confirm('سيتم تعطيل إعداد المرحلة.')) this.save(this.api.deactivateModelStage(this.selected.id, id, this.localCorrelation('models')), () => { this.stages = this.markInactive(this.stages, id); this.rebuildAvailableStagePage(); }); }
+  saveModelStage(): void { if (!this.selected || this.modelStageForm.invalid) return; const value = this.modelStageForm.getRawValue(); if (this.stages.some(item => item.subStageId === value.subStageId && item.id !== this.editModelStageId) || this.stages.some(item => item.stageOrder === value.stageOrder && item.id !== this.editModelStageId)) { this.error = 'لا يمكن تكرار المرحلة أو ترتيبها داخل الموديل.'; return; } const correlationId = this.localCorrelation('models'); this.save(this.editModelStageId ? this.api.updateModelStage(this.selected.id, this.editModelStageId, value, correlationId) : this.api.addModelStage(this.selected.id, value, correlationId), item => { this.stages = this.upsert(this.stages, item, 'stageOrder'); this.rebuildAvailableStageOptions(); this.editModelStageId = ''; this.modelStageFormVisible = false; }); }
+  editModelStage(item: ModelStageItem): void { this.editModelStageId = item.id; this.modelStageFormVisible = true; this.modelStageForm.reset(item); this.rebuildAvailableStageOptions(); }
+  disableModelStage(id: string): void { if (this.selected && confirm('سيتم تعطيل إعداد المرحلة.')) this.save(this.api.deactivateModelStage(this.selected.id, id, this.localCorrelation('models')), () => { this.stages = this.markInactive(this.stages, id); this.rebuildAvailableStageOptions(); }); }
   setModelActive(item: ProductModelItem): void { if (confirm(item.isActive ? 'تعطيل الموديل؟' : 'تفعيل الموديل؟')) this.save(this.api.setModelActivation(item.id, !item.isActive, this.localCorrelation('models')), () => this.models = this.models.map(model => model.id === item.id ? { ...model, isActive: !item.isActive } : model)); }
   onLinkedStagesSearch(value: string): void { this.linkedStagesSearch = value; }
   clearLinkedStagesSearch(): void { this.linkedStagesSearch = ''; }
-  onAvailableStagesSearch(value: string): void { this.availableStagesSearch = value; this.availableStagesPage = 1; this.availableStagesError = ''; this.rebuildAvailableStagePage(); }
-  retryAvailableStages(): void { this.loadAvailableStageCatalog(); }
-  changeAvailableStagesPage(offset: number): void {
-    const page = this.availableStagesPage + offset;
-    if (page >= 1 && page <= this.availableStagesPageCount) { this.availableStagesPage = page; this.rebuildAvailableStagePage(); }
+  onAvailableStagesFilter(value: string): void {
+    this.availableStagesSearch = value.trim();
+    this.loadAvailableStageCatalog();
   }
-  selectAvailableStage(option: SubStageOption): void { this.modelStageForm.patchValue({ subStageId: option.id }); }
-  onModelFormVisibility(visible: boolean): void { this.modelFormVisible = visible; if (!visible) { this.editModelId = ''; this.modelForm.reset(); } }
+  syncStageDropdownPanelWidth(): void {
+    const trigger = document.getElementById('modelStageSubStage')?.closest<HTMLElement>('.p-dropdown');
+    const width = trigger?.getBoundingClientRect().width;
+    this.stageDropdownPanelStyle = width ? { width: `${Math.floor(width)}px`, background: '#fff', opacity: '1' } : {};
+  }
+  retryAvailableStages(): void { this.loadAvailableStageCatalog(); }
+  onModelFormVisibility(visible: boolean): void { this.modelFormVisible = visible; if (!visible) { this.editModelId = ''; this.modelForm.reset(); this.modelForm.controls.code.enable({ emitEvent: false }); } }
   onModelStageFormVisibility(visible: boolean): void { this.modelStageFormVisible = visible; if (!visible) { this.editModelStageId = ''; this.modelStageForm.reset({ stageOrder: 1, piecePrice: 0, compensationMode: 'SharedPercentage', isRequired: true, isActive: true }); } }
   subName(id: string): string { return this.availableStageOptionCache.get(id)?.name ?? this.stages.find(item => item.subStageId === id)?.subStageName ?? '-'; }
   totalPrice(): number { return this.stages.filter(item => item.isActive).reduce((sum, item) => sum + item.piecePrice, 0); }
@@ -285,7 +285,7 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
         if (requestVersion !== this.availableStagesRequestVersion) return;
         options.forEach(option => this.availableStageOptionCache.set(option.id, option));
         this.availableStageCatalog = options;
-        this.rebuildAvailableStagePage();
+        this.rebuildAvailableStageOptions();
       },
       error: error => {
         if (requestVersion === this.availableStagesRequestVersion) {
@@ -295,27 +295,14 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
     });
   }
   private fetchAvailableStageCatalog(): Observable<SubStageOption[]> {
-    return this.api.searchSubStages('', 1, 200).pipe(
-      switchMap(firstPage => {
-        const pageSize = Math.max(1, firstPage.pageSize || 200);
-        const pageCount = Math.ceil(firstPage.totalCount / pageSize);
-        if (pageCount <= 1) return of(firstPage.items ?? []);
-        const remainingPages = Array.from({ length: pageCount - 1 }, (_, index) => this.api.searchSubStages('', index + 2, pageSize));
-        return forkJoin(remainingPages).pipe(map(pages => [firstPage, ...pages].flatMap(page => page.items ?? [])));
-      })
-    );
+    return this.api.searchSubStagesByNameOrCode(this.availableStagesSearch, 1, 200).pipe(map(page => page.items ?? []));
   }
-  private rebuildAvailableStagePage(): void {
+  private rebuildAvailableStageOptions(): void {
     const linkedStageIds = new Set(this.stages.filter(stage => stage.id !== this.editModelStageId).map(stage => stage.subStageId));
     const available = this.availableStageCatalog
       .filter(option => !linkedStageIds.has(option.id))
-      .filter(option => matchesSearchTerm(this.availableStagesSearch, [option.name, option.code]))
       .sort((left, right) => left.sequenceOrder - right.sequenceOrder || left.name.localeCompare(right.name));
-    this.availableStagesTotal = available.length;
-    const maxPage = Math.max(1, Math.ceil(available.length / this.availableStagesPageSize));
-    if (this.availableStagesPage > maxPage) this.availableStagesPage = 1;
-    const start = (this.availableStagesPage - 1) * this.availableStagesPageSize;
-    this.availableStageOptions = available.slice(start, start + this.availableStagesPageSize);
+    this.availableStageOptions = available;
   }
   private toAvailableOption(item: ModelStageItem): SubStageOption {
     return { id: item.subStageId, mainStageId: '', code: item.subStageCode || '—', name: item.subStageName || 'مرحلة مرتبطة', capacity: 0, sequenceOrder: item.stageOrder, isActive: item.isActive };

@@ -1,6 +1,7 @@
 import { Injectable, OnDestroy } from '@angular/core';
 import { Subject, Subscription, auditTime, filter } from 'rxjs';
 import { ManufacturingDataChanged, RealtimeConnectionStatus } from '../models/realtime-notification.models';
+import { generateUuidV4 } from '../utils/uuid-v4';
 import { RealtimeService } from './realtime.service';
 
 export type ManufacturingRealtimeScreen = 'factory-structure' | 'departments' | 'stages' | 'models' | 'employees' | 'line-staffing' | 'daily-production-operations';
@@ -48,7 +49,7 @@ export class ManufacturingRealtimeService implements OnDestroy {
 
   /** Registers a locally-originated mutation so only this browser connection can ignore every echoed event for that operation. */
   registerLocalOperation(screen: ManufacturingRealtimeScreen): string {
-    const correlationId = crypto.randomUUID();
+    const correlationId = generateUuidV4();
     this.localCorrelations.set(correlationId, screen);
     if (this.localCorrelations.size > 256) this.localCorrelations.delete(this.localCorrelations.keys().next().value!);
     return correlationId;

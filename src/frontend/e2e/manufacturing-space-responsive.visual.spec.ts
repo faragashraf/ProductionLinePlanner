@@ -157,6 +157,7 @@ async function preparePage(page: Page): Promise<PageDiagnostics> {
     if (pathname.endsWith('/api/auth/me')) data = { id: 'visual-user', fullName: 'مراجع مساحة التصنيع', email: 'manufacturing.qa@local.test', roles: ['Administrator'], permissions };
     else if (pathname.endsWith('/api/line-staffing/workers')) data = workers;
     else if (pathname.endsWith('/api/line-staffing')) data = staffingPlan;
+    else if (pathname.endsWith('/api/factory-structure/delete-eligibility')) data = { factories: [{ entityId: factory.id, canDelete: false }], departments: [{ entityId: department.id, canDelete: false }], lines: [{ entityId: line.id, canDelete: false }] };
     else if (pathname.endsWith('/api/factories')) data = { items: [factory] };
     else if (pathname.endsWith('/api/departments')) data = { items: [department] };
     else if (pathname.endsWith('/api/production-lines')) data = { items: [line] };
@@ -235,6 +236,23 @@ test('keeps departments and factory structure reusable and safe at primary devic
     const addFactory = page.getByRole('button', { name: 'إضافة مصنع' });
     await addFactory.click();
     await expect(page.getByRole('textbox', { name: 'اسم المصنع', exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'إلغاء', exact: true }).click();
+    await page.locator('.factory-structure-page__tree-shell .p-tree-toggler').first().click();
+    await page.locator('.factory-structure-page__tree-shell .p-tree-toggler').nth(1).click();
+    const treeLayout = await page.locator('.factory-structure-node').evaluateAll(nodes => nodes.map(node => {
+      const nodeBox = node.getBoundingClientRect();
+      const iconBox = node.querySelector<HTMLElement>('.factory-structure-node__type-icon')!.getBoundingClientRect();
+      const menuBox = node.querySelector<HTMLElement>('.factory-structure-node__menu')!.getBoundingClientRect();
+      return { type: Array.from(node.classList).find(className => className.startsWith('factory-structure-node--')) ?? '', nodeLeft: nodeBox.left, nodeRight: nodeBox.right, iconRight: iconBox.right, menuLeft: menuBox.left, menuRight: menuBox.right };
+    }));
+    expect(treeLayout).toHaveLength(3);
+    expect(treeLayout[1].iconRight).toBeLessThan(treeLayout[0].iconRight);
+    expect(treeLayout[2].iconRight).toBeLessThan(treeLayout[1].iconRight);
+    expect(treeLayout[0].menuLeft).toBeCloseTo(treeLayout[1].menuLeft, 0);
+    expect(treeLayout[1].menuLeft).toBeCloseTo(treeLayout[2].menuLeft, 0);
+    expect(treeLayout.every(row => row.menuLeft >= row.nodeLeft && row.menuRight <= row.nodeRight)).toBeTruthy();
+    await page.locator('.factory-structure-node__menu').first().click();
+    await expect(page.getByText('إضافة قسم', { exact: true })).toBeVisible();
     await expectViewportSafe(page);
     await page.screenshot({ path: path.join(visualOutput, `factory-structure-${name}.png`), fullPage: true });
   }

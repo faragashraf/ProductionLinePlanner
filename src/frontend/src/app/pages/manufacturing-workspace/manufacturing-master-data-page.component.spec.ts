@@ -9,6 +9,7 @@ import { ManufacturingMasterDataPageComponent } from './manufacturing-master-dat
 describe('ManufacturingMasterDataPageComponent', () => {
   let component: ManufacturingMasterDataPageComponent;
   let api: jasmine.SpyObj<ManufacturingMasterDataApiService>;
+  let realtime: jasmine.SpyObj<ManufacturingRealtimeService>;
 
   const factory = { id: 'factory-1', code: 'FAC', name: 'مصنع الملابس', isActive: true };
   const department = { id: 'department-1', factoryId: factory.id, code: 'CUT', nameAr: 'القص', isActive: true };
@@ -21,7 +22,7 @@ describe('ManufacturingMasterDataPageComponent', () => {
   beforeEach(async () => {
     api = jasmine.createSpyObj<ManufacturingMasterDataApiService>('ManufacturingMasterDataApiService', [
       'factories', 'departments', 'productionLinesForDepartment', 'operationalStages', 'createOperationalStage', 'updateOperationalStage',
-      'stageDependencies', 'deactivateOperationalStage', 'deleteOperationalStage', 'models', 'modelSearchPage', 'searchSubStages', 'modelStages',
+      'stageDependencies', 'deactivateOperationalStage', 'deleteOperationalStage', 'models', 'modelSearchPage', 'searchSubStages', 'searchSubStagesByNameOrCode', 'modelStages',
       'createModel', 'updateModel', 'setModelActivation', 'addModelStage', 'updateModelStage', 'deactivateModelStage'
     ]);
     api.factories.and.returnValue(of([factory]));
@@ -36,6 +37,7 @@ describe('ManufacturingMasterDataPageComponent', () => {
     api.models.and.returnValue(of([]));
     api.modelSearchPage.and.returnValue(of({ items: [], totalCount: 0, pageNumber: 1, pageSize: 10 }));
     api.searchSubStages.and.returnValue(of({ items: [], totalCount: 0, pageNumber: 1, pageSize: 50 }));
+    api.searchSubStagesByNameOrCode.and.returnValue(of({ items: [], totalCount: 0, pageNumber: 1, pageSize: 50 }));
     api.modelStages.and.returnValue(of([]));
     api.createModel.and.returnValue(of({ id: 'model-1', code: 'MOD', name: 'موديل', isActive: true }));
     api.updateModel.and.returnValue(of({ id: 'model-1', code: 'MOD', name: 'موديل', isActive: true }));
@@ -43,13 +45,16 @@ describe('ManufacturingMasterDataPageComponent', () => {
     api.addModelStage.and.returnValue(of({ id: 'model-stage-1', subStageId: stage.id, stageOrder: 1, piecePrice: 1, standardSeconds: 20, compensationMode: 'SharedPercentage', isRequired: true, isActive: true }));
     api.updateModelStage.and.returnValue(of({ id: 'model-stage-1', subStageId: stage.id, stageOrder: 1, piecePrice: 1, standardSeconds: 20, compensationMode: 'SharedPercentage', isRequired: true, isActive: true }));
     api.deactivateModelStage.and.returnValue(of(void 0));
+    realtime = jasmine.createSpyObj<ManufacturingRealtimeService>('ManufacturingRealtimeService', ['watchScreen', 'registerLocalOperation']);
+    realtime.watchScreen.and.returnValue(() => undefined);
+    realtime.registerLocalOperation.and.returnValue('local-correlation');
 
     await TestBed.configureTestingModule({
       declarations: [ManufacturingMasterDataPageComponent],
       imports: [FormsModule, ReactiveFormsModule],
       providers: [
         { provide: ManufacturingMasterDataApiService, useValue: api },
-        { provide: ManufacturingRealtimeService, useValue: { watchScreen: () => () => undefined, registerLocalOperation: () => 'local-correlation' } },
+        { provide: ManufacturingRealtimeService, useValue: realtime },
         { provide: ActivatedRoute, useValue: { snapshot: { routeConfig: { path: 'stages' } } } }
       ]
     }).overrideComponent(ManufacturingMasterDataPageComponent, { set: { template: '' } }).compileComponents();
@@ -63,6 +68,18 @@ describe('ManufacturingMasterDataPageComponent', () => {
     expect(Object.keys(component.stageForm.controls)).not.toContain('mainStageId');
     expect(Object.keys(component.stageForm.controls)).not.toContain('code');
     expect(Object.keys(component.stageForm.controls)).not.toContain('defaultOrder');
+  });
+
+  it('keeps the product-model code visible but immutable during edit and omits it from the update request', () => {
+    component.editModel(firstModel);
+    expect(component.modelForm.controls.code.disabled).toBeTrue();
+    component.modelForm.controls.code.enable();
+    component.modelForm.patchValue({ code: 'MUTATED-CODE', name: 'اسم محدث' });
+
+    component.saveModel();
+
+    expect(api.updateModel).toHaveBeenCalledWith(firstModel.id, jasmine.objectContaining({ name: 'اسم محدث' }), 'local-correlation');
+    expect((api.updateModel.calls.mostRecent().args[1] as Record<string, unknown>)['code']).toBeUndefined();
   });
 
   it('loads only the selected factory departments and clears dependent context', () => {
@@ -143,8 +160,19 @@ describe('ManufacturingMasterDataPageComponent', () => {
     component.saveOperationalStage();
 
     expect(api.createOperationalStage).toHaveBeenCalledWith({ productionLineId: line.id, name: 'تشطيب', capacity: 3 }, 'local-correlation');
+    expect(realtime.registerLocalOperation).toHaveBeenCalledWith('stages');
     expect(api.operationalStages).toHaveBeenCalledWith({ productionLineId: line.id, isActive: undefined, includeInactive: true });
     expect(component.operationalStages).toEqual([stage]);
+  });
+
+  it('uses the local correlation for saving a stage linked to a model', () => {
+    component.selected = firstModel;
+    component.modelStageForm.setValue({ subStageId: stage.id, stageOrder: 1, piecePrice: 1, standardSeconds: 20, compensationMode: 'SharedPercentage', isRequired: true, isActive: true });
+
+    component.saveModelStage();
+
+    expect(api.addModelStage).toHaveBeenCalledWith(firstModel.id, component.modelStageForm.getRawValue(), 'local-correlation');
+    expect(realtime.registerLocalOperation).toHaveBeenCalledWith('models');
   });
 
   it('updates the stage row immediately after a successful deactivation without reloading', () => {
@@ -249,45 +277,26 @@ describe('ManufacturingMasterDataPageComponent', () => {
     expect(component.modelEmptyMessage).toBe('لا توجد موديلات مطابقة للبحث.');
   });
 
-  it('loads every catalog page before excluding linked stages, so total and visible items stay consistent', () => {
-    const catalog = [stage, englishStage, { ...stage, id: 'stage-3', code: 'PACK-03', name: 'التغليف', sequenceOrder: 3 }];
-    api.searchSubStages.and.callFake((_search: string, page: number) => of(page === 1
-      ? { items: [stage, englishStage], totalCount: 3, pageNumber: 1, pageSize: 2 }
-      : { items: [catalog[2]], totalCount: 3, pageNumber: 2, pageSize: 2 }));
+  it('loads a bounded server-side catalog and excludes already linked stages', () => {
     component.stages = [{ id: 'model-stage-1', subStageId: stage.id, subStageCode: stage.code, subStageName: stage.name, stageOrder: 1, piecePrice: 1, standardSeconds: 20, compensationMode: 'SharedPercentage', isRequired: true, isActive: true }];
+    api.searchSubStagesByNameOrCode.and.returnValue(of({ items: [stage, englishStage], totalCount: 2, pageNumber: 1, pageSize: 200 }));
 
     (component as never as { loadAvailableStageCatalog(): void }).loadAvailableStageCatalog();
 
-    expect(api.searchSubStages).toHaveBeenCalledWith('', 1, 200);
-    expect(api.searchSubStages).toHaveBeenCalledWith('', 2, 2);
-    expect(component.availableStagesTotal).toBe(2);
-    expect(component.availableStageChoices.map(item => item.id)).toEqual([englishStage.id, 'stage-3']);
-    expect(component.availableStagesPageCount).toBe(1);
+    expect(api.searchSubStagesByNameOrCode).toHaveBeenCalledWith('', 1, 200);
+    expect(component.availableStageChoices.map(item => item.id)).toEqual([englishStage.id]);
   });
 
-  it('searches available stages by Arabic name and code without mixing linked stages', () => {
+  it('filters the dropdown by name and code without mixing linked stages', () => {
     (component as never as { availableStageCatalog: typeof stage[] }).availableStageCatalog = [stage, englishStage];
     component.stages = [{ id: 'model-stage-1', subStageId: stage.id, stageOrder: 1, piecePrice: 1, standardSeconds: 20, compensationMode: 'SharedPercentage', isRequired: true, isActive: true }];
+    (component as never as { rebuildAvailableStageOptions(): void }).rebuildAvailableStageOptions();
 
-    component.onAvailableStagesSearch('cutting');
+    component.onAvailableStagesFilter('cutting');
+    expect(api.searchSubStagesByNameOrCode).toHaveBeenCalledWith('cutting', 1, 200);
+    (component as never as { availableStageCatalog: typeof stage[] }).availableStageCatalog = [stage, englishStage];
+    (component as never as { rebuildAvailableStageOptions(): void }).rebuildAvailableStageOptions();
     expect(component.availableStageChoices.map(item => item.id)).toEqual([englishStage.id]);
-    component.onAvailableStagesSearch('CUT-02');
-    expect(component.availableStageChoices.map(item => item.id)).toEqual([englishStage.id]);
-    component.onAvailableStagesSearch('STG001');
-    expect(component.availableStageChoices).toEqual([]);
-  });
-
-  it('resets available-stage pagination on search and keeps an explicit selection across pages', () => {
-    const catalog = Array.from({ length: 12 }, (_, index) => ({ ...stage, id: `stage-${index + 1}`, code: `STG-${index + 1}`, name: `مرحلة ${index + 1}`, sequenceOrder: index + 1 }));
-    (component as never as { availableStageCatalog: typeof catalog }).availableStageCatalog = catalog;
-    component.onAvailableStagesSearch('');
-    component.changeAvailableStagesPage(1);
-    component.selectAvailableStage(catalog[0]);
-    component.onAvailableStagesSearch('مرحلة 1');
-
-    expect(component.availableStagesPage).toBe(1);
-    expect(component.modelStageForm.controls.subStageId.value).toBe(catalog[0].id);
-    expect(component.availableStageChoices[0].id).toBe(catalog[0].id);
   });
 
   it('keeps the current edit stage visible and selected even when it is already linked', () => {
@@ -303,7 +312,7 @@ describe('ManufacturingMasterDataPageComponent', () => {
   it('ignores a stale catalog response after a newer refresh response is applied', () => {
     const stale = new Subject<any>();
     const current = new Subject<any>();
-    api.searchSubStages.and.returnValues(stale, current);
+    api.searchSubStagesByNameOrCode.and.returnValues(stale, current);
 
     (component as never as { loadAvailableStageCatalog(): void }).loadAvailableStageCatalog();
     (component as never as { loadAvailableStageCatalog(): void }).loadAvailableStageCatalog();
@@ -313,19 +322,14 @@ describe('ManufacturingMasterDataPageComponent', () => {
     expect(component.availableStageChoices.map(item => item.id)).toEqual([englishStage.id]);
   });
 
-  it('shows scoped available-stage empty and error states and retries catalog loading', () => {
-    (component as never as { availableStageCatalog: typeof stage[] }).availableStageCatalog = [stage];
-    component.onAvailableStagesSearch('غير موجود');
-    expect(component.availableStageChoices).toEqual([]);
-
-    api.searchSubStages.and.returnValues(
+  it('shows scoped available-stage error state and retries catalog loading', () => {
+    api.searchSubStagesByNameOrCode.and.returnValues(
       throwError(() => new Error('انقطع الاتصال')),
       of({ items: [stage], totalCount: 1, pageNumber: 1, pageSize: 200 })
     );
     (component as never as { loadAvailableStageCatalog(): void }).loadAvailableStageCatalog();
     expect(component.availableStagesError).toBe('انقطع الاتصال');
 
-    component.onAvailableStagesSearch('');
     component.retryAvailableStages();
     expect(component.availableStagesError).toBe('');
     expect(component.availableStageChoices).toEqual([stage]);
@@ -345,7 +349,7 @@ describe('ManufacturingMasterDataPageComponent', () => {
 
   it('keeps the linked-stage search independent from the available-stage search and reports a no-match empty state', () => {
     component.stages = [{ id: 'model-stage-1', subStageId: stage.id, subStageCode: stage.code, subStageName: stage.name, stageOrder: 1, piecePrice: 1, standardSeconds: 20, compensationMode: 'SharedPercentage', isRequired: true, isActive: true }];
-    component.onAvailableStagesSearch('CUT-02');
+    component.onAvailableStagesFilter('CUT-02');
     component.onLinkedStagesSearch('غير موجود');
 
     expect(component.availableStagesSearch).toBe('CUT-02');

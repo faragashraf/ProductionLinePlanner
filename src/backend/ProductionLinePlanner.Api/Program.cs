@@ -57,7 +57,7 @@ var allowedMethods = builder.Configuration
     .Get<string[]>() ?? ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"];
 var allowedHeaders = builder.Configuration
     .GetSection("Cors:AllowedHeaders")
-    .Get<string[]>() ?? ["Accept", "Content-Type", "Authorization", "X-Requested-With", "X-SignalR-User-Agent"];
+    .Get<string[]>() ?? ["Accept", "Content-Type", "Authorization", "X-Requested-With", "X-SignalR-User-Agent", ManufacturingRealtimeHeaders.CorrelationId];
 var corsAllowCredentials = builder.Configuration.GetValue("Cors:AllowCredentials", false);
 var enableHsts = builder.Configuration.GetValue("Hosting:EnableHsts", !builder.Environment.IsDevelopment());
 var enableHttpsRedirection = builder.Configuration.GetValue("Hosting:EnableHttpsRedirection", true);
@@ -1111,15 +1111,29 @@ factoriesApi.MapPatch("/{factoryId:guid}", async (
         return ApiResponse.Failure("Unauthorized", "User context is required.");
     }
 
-    var entity = await dbContext.Factories.FirstOrDefaultAsync(x => x.Id == factoryId && x.IsActive, cancellationToken);
+    var entity = await dbContext.Factories.FirstOrDefaultAsync(x => x.Id == factoryId, cancellationToken);
     if (entity is null)
     {
         return ApiResponse.Failure("NotFound", "Factory not found.", statusCode: 404);
     }
 
-    if (request.Name is null && request.Location is null && request.IsActive is null)
+    if (request.Name is null && request.Location is null && request.IsActive is null && request.Code is null)
     {
         return ApiResponse.Failure("ValidationError", "No updatable fields were provided.");
+    }
+
+    if (request.Code is not null)
+    {
+        var normalizedCode = request.Code.Trim();
+        if (string.IsNullOrWhiteSpace(normalizedCode))
+        {
+            return ApiResponse.Failure("ValidationError", "Code cannot be empty.");
+        }
+
+        if (!string.Equals(entity.Code, normalizedCode, StringComparison.Ordinal))
+        {
+            return ApiResponse.Failure("ValidationError", "لا يمكن تعديل الكود بعد إنشاء السجل.");
+        }
     }
 
     var updatedAt = DateTime.UtcNow;
@@ -1205,18 +1219,23 @@ factoriesApi.MapDelete("/{factoryId:guid}", async (
         return ApiResponse.Failure("NotFound", "Factory not found.", statusCode: 404);
     }
 
+    if (await dbContext.Departments.AnyAsync(x => x.FactoryId == factoryId, cancellationToken)
+        || await dbContext.ProductionLines.AnyAsync(x => x.FactoryId == factoryId, cancellationToken))
+    {
+        return ApiResponse.Failure("Conflict", "لا يمكن حذف المصنع لوجود أقسام أو خطوط إنتاج مرتبطة به.", 409);
+    }
+
     var beforeFactory = new { entity.Id, entity.Name, entity.Code, entity.Location, entity.IsActive };
-    dbContext.Entry(entity).Property(nameof(Factory.IsActive)).CurrentValue = false;
-    dbContext.Entry(entity).Property(nameof(Factory.UpdatedAtUtc)).CurrentValue = DateTime.UtcNow;
     await auditEngine.RecordAsync(
         actorUserId.Value,
         AuditActionType.Delete,
         nameof(Factory),
         entity.Id.ToString(),
         before: beforeFactory,
-        after: new { entity.Id, entity.Name, entity.Code, entity.Location, entity.IsActive },
+        after: null,
         requestMeta: AuditRequestMetadata.From(httpContext),
         cancellationToken: cancellationToken);
+    dbContext.Factories.Remove(entity);
     await dbContext.SaveChangesAsync(cancellationToken);
 
     return Results.NoContent();
@@ -1510,19 +1529,10 @@ productionLinesApi.MapPatch("/{lineId:guid}", async (
             return ApiResponse.Failure("ValidationError", "LineCode cannot be empty.");
         }
 
-        if (entity.LineCode != normalizedLineCode)
+        if (!string.Equals(entity.LineCode, normalizedLineCode, StringComparison.Ordinal))
         {
-            var conflict = await dbContext.ProductionLines.AnyAsync(
-                x => x.Id != lineId && x.FactoryId == entity.FactoryId && x.LineCode == normalizedLineCode,
-                cancellationToken);
-            if (conflict)
-            {
-                return ApiResponse.Failure("Conflict", "LineCode must be unique within the factory.", 409);
-            }
+            return ApiResponse.Failure("ValidationError", "لا يمكن تعديل الكود بعد إنشاء السجل.");
         }
-
-        entry.Property(nameof(ProductionLine.LineCode)).CurrentValue = normalizedLineCode;
-        hasChanges = true;
     }
 
     if (request.SequenceOrder is not null)
@@ -1596,24 +1606,30 @@ productionLinesApi.MapDelete("/{lineId:guid}", async (
         return ApiResponse.Failure("Unauthorized", "User context is required.");
     }
 
-    var entity = await dbContext.ProductionLines.FirstOrDefaultAsync(x => x.Id == lineId && x.IsActive, cancellationToken);
+    var entity = await dbContext.ProductionLines.FirstOrDefaultAsync(x => x.Id == lineId, cancellationToken);
     if (entity is null)
     {
         return ApiResponse.Failure("NotFound", "Production line not found.", 404);
     }
 
+    if (await dbContext.MainStages.AnyAsync(x => x.ProductionLineId == lineId, cancellationToken)
+        || await dbContext.SubStages.AnyAsync(x => x.ProductionLineId == lineId, cancellationToken)
+        || await dbContext.ProductionOrders.AnyAsync(x => x.ProductionLineId == lineId, cancellationToken))
+    {
+        return ApiResponse.Failure("Conflict", "لا يمكن حذف خط الإنتاج لوجود مراحل أو أوامر إنتاج أو علاقات تشغيلية مرتبطة به.", 409);
+    }
+
     var beforeProductionLine = new { entity.Id, entity.FactoryId, entity.Name, entity.LineCode, entity.SequenceOrder, entity.IsActive };
-    dbContext.Entry(entity).Property(nameof(ProductionLine.IsActive)).CurrentValue = false;
-    dbContext.Entry(entity).Property(nameof(ProductionLine.UpdatedAtUtc)).CurrentValue = DateTime.UtcNow;
     await auditEngine.RecordAsync(
         actorUserId.Value,
         AuditActionType.Delete,
         nameof(ProductionLine),
         entity.Id.ToString(),
         before: beforeProductionLine,
-        after: new { entity.Id, entity.FactoryId, entity.Name, entity.LineCode, entity.SequenceOrder, entity.IsActive },
+        after: null,
         requestMeta: AuditRequestMetadata.From(httpContext),
         cancellationToken: cancellationToken);
+    dbContext.ProductionLines.Remove(entity);
     await dbContext.SaveChangesAsync(cancellationToken);
 
     return Results.NoContent();
@@ -3193,6 +3209,53 @@ assignmentsApi.MapGet("/sub-stages/{subStageId:guid}/worker-context", async (
     .RequirePermission("assignments.view")
     .WithTags("Assignments")
     .WithName("GetSubStageWorkerContext");
+
+factoryStructureApi.MapGet("/delete-eligibility", async (
+    AppDbContext dbContext,
+    CancellationToken cancellationToken) =>
+{
+    var factories = await dbContext.Factories.AsNoTracking()
+        .Select(factory => new
+        {
+            entityId = factory.Id,
+            canDelete = !dbContext.Departments.Any(department => department.FactoryId == factory.Id)
+                && !dbContext.ProductionLines.Any(line => line.FactoryId == factory.Id),
+            deleteBlockReason = dbContext.Departments.Any(department => department.FactoryId == factory.Id)
+                || dbContext.ProductionLines.Any(line => line.FactoryId == factory.Id)
+                    ? "المصنع مرتبط بأقسام أو خطوط إنتاج."
+                    : null
+        })
+        .ToArrayAsync(cancellationToken);
+    var departments = await dbContext.Departments.AsNoTracking()
+        .Select(department => new
+        {
+            entityId = department.Id,
+            canDelete = !dbContext.ProductionLines.Any(line => line.DepartmentId == department.Id),
+            deleteBlockReason = dbContext.ProductionLines.Any(line => line.DepartmentId == department.Id)
+                ? "القسم مرتبط بخطوط إنتاج."
+                : null
+        })
+        .ToArrayAsync(cancellationToken);
+    var lines = await dbContext.ProductionLines.AsNoTracking()
+        .Select(line => new
+        {
+            entityId = line.Id,
+            canDelete = !dbContext.MainStages.Any(stage => stage.ProductionLineId == line.Id)
+                && !dbContext.SubStages.Any(stage => stage.ProductionLineId == line.Id)
+                && !dbContext.ProductionOrders.Any(order => order.ProductionLineId == line.Id),
+            deleteBlockReason = dbContext.MainStages.Any(stage => stage.ProductionLineId == line.Id)
+                || dbContext.SubStages.Any(stage => stage.ProductionLineId == line.Id)
+                || dbContext.ProductionOrders.Any(order => order.ProductionLineId == line.Id)
+                    ? "خط الإنتاج مرتبط بمراحل أو أوامر إنتاج أو بيانات تشغيلية."
+                    : null
+        })
+        .ToArrayAsync(cancellationToken);
+
+    return Results.Ok(ApiResponse.Success(new { factories, departments, lines }));
+})
+    .RequirePermission(FactoryStructurePermissions.View)
+    .WithTags("FactoryStructure")
+    .WithName("GetFactoryStructureDeleteEligibility");
 
 factoryStructureApi.MapGet("/sub-stages/{subStageId:guid}/workers", async (
     Guid subStageId,

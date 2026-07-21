@@ -1,12 +1,12 @@
 {
   "/api": {
-    "target": "http://127.0.0.1:5169",
+    "target": "http://localhost:9000",
     "secure": false,
     "changeOrigin": true,
     "logLevel": "debug"
   },
   "/hubs": {
-    "target": "http://127.0.0.1:5169",
+    "target": "http://localhost:9000",
     "secure": false,
     "changeOrigin": true,
     "ws": true,

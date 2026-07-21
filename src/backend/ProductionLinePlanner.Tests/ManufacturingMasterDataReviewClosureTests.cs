@@ -75,6 +75,24 @@ public sealed class ManufacturingMasterDataReviewClosureTests
     }
 
     [Fact]
+    public async Task Updating_a_model_rejects_code_mutation_without_persisting_any_other_change()
+    {
+        await using var fixture = await ProductModelFixture.CreateAsync();
+        var originalName = fixture.Model.Name;
+
+        var result = await fixture.Service.UpdateModelAsync(
+            fixture.Model.Id,
+            new UpdateProductModelRequest { Code = "MUTATED", Name = "Must not persist" },
+            fixture.ActorUserId);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("ValidationError", result.Error!.Code);
+        var persisted = await fixture.DbContext.ProductModels.AsNoTracking().SingleAsync(x => x.Id == fixture.Model.Id);
+        Assert.Equal("MODEL", persisted.Code);
+        Assert.Equal(originalName, persisted.Name);
+    }
+
+    [Fact]
     public void Manufacturing_migration_remediates_existing_sub_stages_before_constraints_and_indexes()
     {
         var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");

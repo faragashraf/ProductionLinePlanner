@@ -1,383 +1,61 @@
-import { Component, OnDestroy, OnInit, Optional } from '@angular/core';
+import { Component, OnDestroy, OnInit, Optional, ViewChild } from '@angular/core';
+import { ContextMenu } from 'primeng/contextmenu';
+import { MenuItem } from 'primeng/api';
 import { Observable, Subject, finalize, forkJoin, takeUntil } from 'rxjs';
 import { PERMISSIONS } from '../../core/config/permission-identifiers';
-import {
-  DepartmentItem,
-  FactoryItem,
-  ManufacturingMasterDataApiService,
-  ProductionLineOption
-} from '../../core/services/manufacturing-master-data-api.service';
+import { DepartmentItem, FactoryItem, FactoryStructureDeleteEligibility, ManufacturingMasterDataApiService, ProductionLineOption } from '../../core/services/manufacturing-master-data-api.service';
 import { PermissionService } from '../../core/services/permission.service';
 import { ManufacturingRealtimeService } from '../../core/services/manufacturing-realtime.service';
+import { buildFactoryStructureTree, collectExpandedIds, FactoryStructureEntityType, FactoryStructureTreeNode, FactoryStructureTreeNodeData, filterFactoryStructureTree, findFactoryStructureNode } from './factory-structure-tree.adapter';
+import { buildFactoryStructureContextMenu, FactoryStructureTreeAction } from './factory-structure-tree-menu.builder';
 
-interface FactoryDraft {
-  id: string;
-  name: string;
-  code: string;
-  location: string;
-}
-
-interface DepartmentDraft {
-  id: string;
-  factoryId: string;
-  code: string;
-  nameAr: string;
-  nameEn: string;
-  sequenceOrder: number;
-}
-
-interface LineDraft {
-  id: string;
-  factoryId: string;
-  departmentId: string;
-  name: string;
-  lineCode: string;
-  sequenceOrder: number;
-}
-
+interface FactoryDraft { id: string; name: string; code: string; location: string; isActive: boolean; }
+interface DepartmentDraft { id: string; factoryId: string; code: string; nameAr: string; nameEn: string; sequenceOrder: number; isActive: boolean; }
+interface LineDraft { id: string; factoryId: string; departmentId: string; name: string; lineCode: string; sequenceOrder: number; isActive: boolean; }
 type FactoryStructureFormId = 'factory' | 'department' | 'line';
 
-/**
- * Administrative view of the physical factory hierarchy only.
- * Stage administration and worker staffing intentionally live in their
- * dedicated workspace screens so this page remains Factory → Department → Line.
- */
-@Component({
-  selector: 'app-factory-structure-foundation-page',
-  templateUrl: './factory-structure-foundation-page.component.html',
-  styleUrls: ['./factory-structure-foundation-page.component.scss']
-})
+@Component({ selector: 'app-factory-structure-foundation-page', templateUrl: './factory-structure-foundation-page.component.html', styleUrls: ['./factory-structure-foundation-page.component.scss'] })
 export class FactoryStructureFoundationPageComponent implements OnInit, OnDestroy {
   readonly permissions = PERMISSIONS;
-
-  factories: FactoryItem[] = [];
-  departments: DepartmentItem[] = [];
-  lines: ProductionLineOption[] = [];
-  selectedFactoryId = '';
-  selectedDepartmentId = '';
-  selectedLineId = '';
-  searchTerm = '';
-  isLoading = false;
-  isSaving = false;
-  hasLoadedOnce = false;
-  hasError = false;
-  errorMessage = 'تعذر تحميل بنية المصنع، يرجى المحاولة مرة أخرى.';
-  successMessage = '';
-  activeForm: FactoryStructureFormId | null = null;
-
-  factoryDraft: FactoryDraft = this.emptyFactoryDraft();
-  departmentDraft: DepartmentDraft = this.emptyDepartmentDraft();
-  lineDraft: LineDraft = this.emptyLineDraft();
-  private readonly destroy$ = new Subject<void>();
-  private stopRealtime?: () => void;
-
-  constructor(
-    private readonly masterDataApi: ManufacturingMasterDataApiService,
-    private readonly permissionService: PermissionService,
-    @Optional() private readonly manufacturingRealtime?: ManufacturingRealtimeService
-  ) {}
-
-  ngOnInit(): void {
-    this.stopRealtime = this.manufacturingRealtime?.watchScreen({ screen: 'factory-structure', refresh: () => this.reload() });
-    this.reload();
-  }
-
-  ngOnDestroy(): void {
-    this.stopRealtime?.();
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  get filteredFactories(): FactoryItem[] {
-    const search = this.normalizedSearch;
-    return this.factories.filter(item =>
-      !search || item.name.toLowerCase().includes(search) || item.code.toLowerCase().includes(search));
-  }
-
-  get visibleDepartments(): DepartmentItem[] {
-    return this.selectedFactoryId
-      ? this.departments.filter(item => item.factoryId === this.selectedFactoryId)
-      : [];
-  }
-
-  get visibleLines(): ProductionLineOption[] {
-    const factoryLines = this.selectedFactoryId
-      ? this.lines.filter(item => item.factoryId === this.selectedFactoryId)
-      : [];
-    if (!this.selectedDepartmentId) return factoryLines;
-    if (this.selectedDepartmentId === 'unassigned') return factoryLines.filter(item => !item.departmentId);
-    return factoryLines.filter(item => item.departmentId === this.selectedDepartmentId);
-  }
-
-  get unassignedLines(): ProductionLineOption[] {
-    return this.selectedFactoryId
-      ? this.lines.filter(item => item.factoryId === this.selectedFactoryId && !item.departmentId)
-      : [];
-  }
-
-  get isEmpty(): boolean {
-    return !this.isLoading && !this.hasError && !this.hasStructureData;
-  }
-
-  get hasStructureData(): boolean {
-    return this.factories.length > 0 || this.departments.length > 0 || this.lines.length > 0;
-  }
-
-  get canManage(): boolean {
-    return this.permissionService.hasPermission(this.permissions.factoryStructure.manage);
-  }
-
-  get canManageDepartments(): boolean {
-    return this.permissionService.hasPermission(this.permissions.departments.manage);
-  }
-
-  onSearchValue(value: string): void {
-    this.searchTerm = value.trim();
-  }
-
-  onClearSearch(): void {
-    this.searchTerm = '';
-  }
-
-  onFormExpandedChange(formId: FactoryStructureFormId, expanded: boolean): void {
-    this.activeForm = expanded ? formId : null;
-  }
-
-  reload(): void {
-    this.isLoading = true;
-    this.hasError = false;
-    this.successMessage = '';
-
-    forkJoin({
-      factories: this.masterDataApi.factories(),
-      lines: this.masterDataApi.allProductionLines(),
-      departments: this.masterDataApi.departments(undefined, true)
-    })
-      .pipe(finalize(() => {
-        this.isLoading = false;
-        this.hasLoadedOnce = true;
-      }), takeUntil(this.destroy$))
-      .subscribe({
-        next: data => {
-          this.factories = data.factories;
-          this.lines = data.lines;
-          this.departments = data.departments;
-          this.resetSelectionsForReload();
-        },
-        error: error => this.setLoadError(error)
-      });
-  }
-
-  selectFactory(id: string): void {
-    this.selectedFactoryId = id;
-    if (this.selectedDepartmentId && !this.departments.some(item => item.id === this.selectedDepartmentId && item.factoryId === this.selectedFactoryId)) {
-      this.selectedDepartmentId = '';
-    }
-    if (this.selectedLineId && !this.lines.some(item => item.id === this.selectedLineId && item.factoryId === this.selectedFactoryId)) {
-      this.selectedLineId = '';
-    }
-    this.lineDraft.factoryId = id;
-    this.lineDraft.departmentId = '';
-    this.departmentDraft.factoryId = id;
-  }
-
-  selectDepartment(id: string): void {
-    this.selectedDepartmentId = id;
-    this.selectedLineId = '';
-    this.lineDraft.factoryId = this.selectedFactoryId;
-    this.lineDraft.departmentId = id === 'unassigned' ? '' : id;
-  }
-
-  selectLine(id: string): void {
-    this.selectedLineId = id;
-  }
-
-  editFactory(item: FactoryItem): void {
-    this.factoryDraft = { id: item.id, name: item.name, code: item.code, location: item.location ?? '' };
-    this.activeForm = 'factory';
-  }
-
-  saveFactory(): void {
-    if (!this.factoryDraft.name.trim() || !this.factoryDraft.code.trim()) {
-      this.setValidationError('اسم المصنع وكوده مطلوبان.');
-      return;
-    }
-    const payload = {
-      name: this.factoryDraft.name.trim(),
-      code: this.factoryDraft.code.trim(),
-      location: this.factoryDraft.location.trim() || null,
-      isActive: true
-    };
-    const correlationId = this.localCorrelation();
-    const request = this.factoryDraft.id
-      ? this.masterDataApi.updateFactory(this.factoryDraft.id, { name: payload.name, location: payload.location, isActive: true }, correlationId)
-      : this.masterDataApi.createFactory(payload, correlationId);
-    this.save(request, () => {
-      this.factoryDraft = this.emptyFactoryDraft();
-      this.activeForm = null;
-    });
-  }
-
-  editDepartment(item: DepartmentItem): void {
-    if (!item.id || !item.factoryId) return;
-    this.departmentDraft = {
-      id: item.id,
-      factoryId: item.factoryId,
-      code: item.code ?? '',
-      nameAr: item.nameAr ?? item.name ?? '',
-      nameEn: item.nameEn ?? '',
-      sequenceOrder: item.sequenceOrder ?? 0
-    };
-    this.activeForm = 'department';
-  }
-
-  saveDepartment(): void {
-    if (!this.departmentDraft.factoryId || !this.departmentDraft.code.trim() || !this.departmentDraft.nameAr.trim()) {
-      this.setValidationError('المصنع وكود القسم واسمه بالعربية مطلوبة.');
-      return;
-    }
-    const payload = {
-      factoryId: this.departmentDraft.factoryId,
-      code: this.departmentDraft.code.trim(),
-      nameAr: this.departmentDraft.nameAr.trim(),
-      nameEn: this.departmentDraft.nameEn.trim() || null,
-      sequenceOrder: Number(this.departmentDraft.sequenceOrder) || 0,
-      isActive: true
-    };
-    const correlationId = this.localCorrelation();
-    const request = this.departmentDraft.id
-      ? this.masterDataApi.updateDepartment(this.departmentDraft.id, {
-        code: payload.code,
-        nameAr: payload.nameAr,
-        nameEn: this.departmentDraft.nameEn.trim(),
-        sequenceOrder: payload.sequenceOrder,
-        isActive: true
-      }, correlationId)
-      : this.masterDataApi.createDepartment(payload, correlationId);
-    this.save(request, () => {
-      this.departmentDraft = this.emptyDepartmentDraft();
-      this.departmentDraft.factoryId = this.selectedFactoryId;
-      this.activeForm = null;
-    });
-  }
-
-  setDepartmentActive(item: DepartmentItem, isActive: boolean): void {
-    if (item.id) this.save(this.masterDataApi.updateDepartment(item.id, { isActive }, this.localCorrelation()));
-  }
-
-  deleteDepartment(item: DepartmentItem): void {
-    if (!item.id || !window.confirm(`حذف القسم ${item.nameAr ?? item.name ?? item.code ?? ''} نهائيًا؟`)) return;
-    this.save(this.masterDataApi.deleteDepartment(item.id, this.localCorrelation()), () => {
-      if (this.selectedDepartmentId === item.id) this.selectDepartment('');
-    });
-  }
-
-  editLine(item: ProductionLineOption): void {
-    this.lineDraft = {
-      id: item.id,
-      factoryId: item.factoryId,
-      departmentId: item.departmentId ?? '',
-      name: item.name,
-      lineCode: item.lineCode ?? '',
-      sequenceOrder: item.sequenceOrder
-    };
-    this.activeForm = 'line';
-  }
-
-  saveLine(): void {
-    if (!this.lineDraft.factoryId || !this.lineDraft.name.trim() || (!this.lineDraft.id && !this.lineDraft.departmentId)) {
-      this.setValidationError('المصنع والقسم واسم الخط مطلوبة عند إنشاء خط جديد.');
-      return;
-    }
-    const payload = {
-      factoryId: this.lineDraft.factoryId,
-      departmentId: this.lineDraft.departmentId || null,
-      name: this.lineDraft.name.trim(),
-      lineCode: this.lineDraft.lineCode.trim() || null,
-      sequenceOrder: Number(this.lineDraft.sequenceOrder) || 0,
-      isActive: true
-    };
-    const correlationId = this.localCorrelation();
-    const request = this.lineDraft.id
-      ? this.masterDataApi.updateProductionLine(this.lineDraft.id, {
-        name: payload.name,
-        ...(payload.departmentId ? { departmentId: payload.departmentId } : {}),
-        lineCode: payload.lineCode,
-        sequenceOrder: payload.sequenceOrder,
-        isActive: true
-      }, correlationId)
-      : this.masterDataApi.createProductionLine(payload, correlationId);
-    this.save(request, () => {
-      this.lineDraft = this.emptyLineDraft();
-      this.lineDraft.factoryId = this.selectedFactoryId;
-      this.lineDraft.departmentId = this.selectedDepartmentId === 'unassigned' ? '' : this.selectedDepartmentId;
-      this.activeForm = null;
-    });
-  }
-
-  setLineActive(item: ProductionLineOption, isActive: boolean): void {
-    this.save(this.masterDataApi.updateProductionLine(item.id, { isActive }, this.localCorrelation()));
-  }
-
-  private get normalizedSearch(): string {
-    return this.searchTerm.trim().toLowerCase();
-  }
-
-  private resetSelectionsForReload(): void {
-    if (!this.selectedFactoryId || !this.factories.some(item => item.id === this.selectedFactoryId)) {
-      this.selectedFactoryId = this.factories[0]?.id ?? '';
-    }
-    if (this.selectedDepartmentId && this.selectedDepartmentId !== 'unassigned' && !this.departments.some(item => item.id === this.selectedDepartmentId && item.factoryId === this.selectedFactoryId)) {
-      this.selectedDepartmentId = '';
-    }
-    if (this.selectedDepartmentId === 'unassigned' && !this.unassignedLines.length) this.selectedDepartmentId = '';
-    if (this.selectedLineId && !this.lines.some(item => item.id === this.selectedLineId && item.factoryId === this.selectedFactoryId)) {
-      this.selectedLineId = '';
-    }
-    this.departmentDraft.factoryId = this.selectedFactoryId;
-    this.lineDraft.factoryId = this.selectedFactoryId;
-    this.lineDraft.departmentId = this.selectedDepartmentId === 'unassigned' ? '' : this.selectedDepartmentId;
-  }
-
-  private localCorrelation(): string | undefined {
-    return this.manufacturingRealtime?.registerLocalOperation('factory-structure');
-  }
-
-  private save(request: Observable<unknown>, success?: () => void): void {
-    this.isSaving = true;
-    this.hasError = false;
-    this.successMessage = '';
-    request.pipe(takeUntil(this.destroy$)).subscribe({
-      next: () => {
-        success?.();
-        this.successMessage = 'تم حفظ التغيير.';
-        this.isSaving = false;
-        this.reload();
-      },
-      error: error => {
-        this.isSaving = false;
-        this.setLoadError(error);
-      }
-    });
-  }
-
-  private setValidationError(message: string): void {
-    this.hasError = true;
-    this.errorMessage = message;
-  }
-
-  private setLoadError(error: unknown): void {
-    this.hasError = true;
-    this.errorMessage = this.extractErrorMessage(error);
-  }
-
-  private emptyFactoryDraft(): FactoryDraft { return { id: '', name: '', code: '', location: '' }; }
-  private emptyDepartmentDraft(): DepartmentDraft { return { id: '', factoryId: '', code: '', nameAr: '', nameEn: '', sequenceOrder: 0 }; }
-  private emptyLineDraft(): LineDraft { return { id: '', factoryId: '', departmentId: '', name: '', lineCode: '', sequenceOrder: 0 }; }
-
-  private extractErrorMessage(error: unknown): string {
-    return error instanceof Error && error.message.length > 0
-      ? error.message
-      : 'حدث خطأ غير متوقع أثناء حفظ أو تحميل بنية المصنع.';
-  }
+  @ViewChild('nodeMenu') private nodeMenu?: ContextMenu;
+  factories: FactoryItem[] = []; departments: DepartmentItem[] = []; lines: ProductionLineOption[] = [];
+  treeNodes: FactoryStructureTreeNode[] = []; selectedNode: FactoryStructureTreeNode | null = null; contextNode: FactoryStructureTreeNode | null = null; contextMenuItems: MenuItem[] = [];
+  searchTerm = ''; isLoading = false; isSaving = false; hasLoadedOnce = false; hasError = false; errorMessage = 'تعذر تحميل بنية المصنع، يرجى المحاولة مرة أخرى.'; actionError = ''; successMessage = ''; realtimeRefreshPending = false; activeForm: FactoryStructureFormId | null = null;
+  factoryDraft = this.emptyFactoryDraft(); departmentDraft = this.emptyDepartmentDraft(); lineDraft = this.emptyLineDraft();
+  private expandedIds = new Set<string>(); private deleteEligibility = new Map<string, { canDelete: boolean; deleteBlockReason?: string | null }>(); private readonly destroy$ = new Subject<void>(); private stopRealtime?: () => void;
+  constructor(private readonly masterDataApi: ManufacturingMasterDataApiService, private readonly permissionService: PermissionService, @Optional() private readonly manufacturingRealtime?: ManufacturingRealtimeService) {}
+  ngOnInit(): void { this.stopRealtime = this.manufacturingRealtime?.watchScreen({ screen: 'factory-structure', matches: change => change.entityType === 'Factory' || change.entityType === 'Department' || change.entityType === 'ProductionLine', refresh: () => this.onRealtimeRefresh() }); this.reload(); }
+  ngOnDestroy(): void { this.stopRealtime?.(); this.destroy$.next(); this.destroy$.complete(); }
+  get visibleTreeNodes(): FactoryStructureTreeNode[] { return filterFactoryStructureTree(this.treeNodes, this.searchTerm); }
+  get isEmpty(): boolean { return !this.isLoading && !this.hasError && this.factories.length === 0; }
+  get hasStructureData(): boolean { return this.factories.length > 0; }
+  get canManageStructure(): boolean { return this.permissionService.hasPermission(this.permissions.factoryStructure.manage); }
+  get canManageDepartments(): boolean { return this.permissionService.hasPermission(this.permissions.departments.manage); }
+  get formTitle(): string { return this.activeForm === 'factory' ? 'بيانات المصنع' : this.activeForm === 'department' ? 'بيانات القسم' : 'بيانات خط الإنتاج'; }
+  get formSubmitLabel(): string { return this.activeForm === 'factory' ? (this.factoryDraft.id ? 'حفظ التعديلات' : 'إضافة مصنع') : this.activeForm === 'department' ? (this.departmentDraft.id ? 'حفظ التعديلات' : 'إضافة قسم') : this.lineDraft.id ? 'حفظ التعديلات' : 'إضافة خط إنتاج'; }
+  nodeIcon(type: FactoryStructureEntityType): string { return type === 'factory' ? 'pi pi-building' : type === 'department' ? 'pi pi-sitemap' : 'pi pi-cog'; }
+  onSearchValue(value: string): void { this.searchTerm = value.trim(); } onClearSearch(): void { this.searchTerm = ''; } expandAll(): void { this.setExpanded(this.treeNodes, true); } collapseAll(): void { this.setExpanded(this.treeNodes, false); }
+  reload(): void { this.expandedIds = collectExpandedIds(this.treeNodes); this.isLoading = true; this.hasError = false; forkJoin({ factories: this.masterDataApi.factories(), lines: this.masterDataApi.allProductionLines(), departments: this.masterDataApi.departments(undefined, true), eligibility: this.masterDataApi.factoryStructureDeleteEligibility() }).pipe(finalize(() => { this.isLoading = false; this.hasLoadedOnce = true; }), takeUntil(this.destroy$)).subscribe({ next: data => { this.factories = data.factories; this.lines = data.lines; this.departments = data.departments; this.applyEligibility(data.eligibility); this.rebuildTree(); }, error: error => this.setLoadError(error) }); }
+  onNodeExpand(event: { node: FactoryStructureTreeNode }): void { const id = event.node.data?.entityId; if (id) this.expandedIds.add(id); } onNodeCollapse(event: { node: FactoryStructureTreeNode }): void { const id = event.node.data?.entityId; if (id) this.expandedIds.delete(id); } onNodeSelect(event: { node: FactoryStructureTreeNode }): void { this.selectedNode = event.node; } onNodeContextMenuSelect(event: { node: FactoryStructureTreeNode }): void { this.setContextNode(event.node); }
+  openNodeMenu(event: MouseEvent, node: FactoryStructureTreeNode): void { event.preventDefault(); event.stopPropagation(); this.setContextNode(node); this.nodeMenu?.show(event); }
+  openAddFactory(): void { this.factoryDraft = this.emptyFactoryDraft(); this.activeForm = 'factory'; } closeForm(): void { this.activeForm = null; if (this.realtimeRefreshPending) { this.realtimeRefreshPending = false; this.reload(); } }
+  submitActiveForm(): void { if (this.activeForm === 'factory') this.saveFactory(); else if (this.activeForm === 'department') this.saveDepartment(); else this.saveLine(); }
+  saveFactory(): void { if (!this.factoryDraft.name.trim() || !this.factoryDraft.code.trim()) return this.setValidationError('اسم المصنع وكوده مطلوبان.'); const value = { name: this.factoryDraft.name.trim(), code: this.factoryDraft.code.trim(), location: this.factoryDraft.location.trim() || null, isActive: this.factoryDraft.isActive }; this.save(this.factoryDraft.id ? this.masterDataApi.updateFactory(this.factoryDraft.id, { name: value.name, location: value.location, isActive: value.isActive }, this.localCorrelation()) : this.masterDataApi.createFactory(value, this.localCorrelation())); }
+  saveDepartment(): void { if (!this.departmentDraft.factoryId || !this.departmentDraft.code.trim() || !this.departmentDraft.nameAr.trim()) return this.setValidationError('المصنع وكود القسم واسمه بالعربية مطلوبة.'); const value = { factoryId: this.departmentDraft.factoryId, code: this.departmentDraft.code.trim(), nameAr: this.departmentDraft.nameAr.trim(), nameEn: this.departmentDraft.nameEn.trim() || null, sequenceOrder: Number(this.departmentDraft.sequenceOrder) || 0, isActive: this.departmentDraft.isActive }; this.save(this.departmentDraft.id ? this.masterDataApi.updateDepartment(this.departmentDraft.id, { nameAr: value.nameAr, nameEn: value.nameEn, sequenceOrder: value.sequenceOrder, isActive: value.isActive }, this.localCorrelation()) : this.masterDataApi.createDepartment(value, this.localCorrelation())); }
+  saveLine(): void { if (!this.lineDraft.factoryId || !this.lineDraft.departmentId || !this.lineDraft.name.trim()) return this.setValidationError('المصنع والقسم واسم الخط مطلوبة.'); const value = { factoryId: this.lineDraft.factoryId, departmentId: this.lineDraft.departmentId, name: this.lineDraft.name.trim(), lineCode: this.lineDraft.lineCode.trim() || null, sequenceOrder: Number(this.lineDraft.sequenceOrder) || 0, isActive: this.lineDraft.isActive }; this.save(this.lineDraft.id ? this.masterDataApi.updateProductionLine(this.lineDraft.id, { departmentId: value.departmentId, name: value.name, sequenceOrder: value.sequenceOrder, isActive: value.isActive }, this.localCorrelation()) : this.masterDataApi.createProductionLine(value, this.localCorrelation())); }
+  private setContextNode(node: FactoryStructureTreeNode): void { this.contextNode = node; this.selectedNode = node; const data = node.data; this.contextMenuItems = data ? buildFactoryStructureContextMenu(data.entityType, data.isActive, data.canDelete, { canManageStructure: this.canManageStructure, canManageDepartments: this.canManageDepartments }, action => this.runNodeAction(action)) : []; }
+  private runNodeAction(action: FactoryStructureTreeAction): void { const node = this.contextNode; const data = node?.data; if (!node || !data) return; if (action === 'add-department') { this.departmentDraft = { ...this.emptyDepartmentDraft(), factoryId: data.entityId }; this.activeForm = 'department'; return; } if (action === 'add-line') { this.lineDraft = { ...this.emptyLineDraft(), factoryId: this.factoryIdForNode(node), departmentId: data.entityId }; this.activeForm = 'line'; return; } if (action === 'edit') { this.editNode(data.entityType, data.source); return; } if (action === 'toggle-active') { this.toggleNode(data.entityType, data.source, !data.isActive); return; } this.deleteNode(data.entityType, data.source, data.entityId); }
+  private editNode(type: FactoryStructureEntityType, source: FactoryStructureTreeNodeData['source']): void { if (type === 'factory') { const item = source as FactoryItem; this.factoryDraft = { id: item.id, name: item.name, code: item.code, location: item.location ?? '', isActive: item.isActive }; this.activeForm = 'factory'; } else if (type === 'department') { const item = source as DepartmentItem; if (!item.id || !item.factoryId) return; this.departmentDraft = { id: item.id, factoryId: item.factoryId, code: item.code ?? '', nameAr: item.nameAr ?? item.name ?? '', nameEn: item.nameEn ?? '', sequenceOrder: item.sequenceOrder ?? 0, isActive: item.isActive !== false }; this.activeForm = 'department'; } else { const item = source as ProductionLineOption; this.lineDraft = { id: item.id, factoryId: item.factoryId, departmentId: item.departmentId ?? '', name: item.name, lineCode: item.lineCode ?? '', sequenceOrder: item.sequenceOrder, isActive: item.isActive }; this.activeForm = 'line'; } }
+  private toggleNode(type: FactoryStructureEntityType, source: FactoryStructureTreeNodeData['source'], isActive: boolean): void { if (!window.confirm(`هل تريد ${isActive ? 'تفعيل' : 'تعطيل'} هذا العنصر؟`)) return; if (type === 'factory') this.save(this.masterDataApi.updateFactory((source as FactoryItem).id, { isActive }, this.localCorrelation())); else if (type === 'department' && (source as DepartmentItem).id) this.save(this.masterDataApi.updateDepartment((source as DepartmentItem).id!, { isActive }, this.localCorrelation())); else this.save(this.masterDataApi.updateProductionLine((source as ProductionLineOption).id, { isActive }, this.localCorrelation())); }
+  private deleteNode(type: FactoryStructureEntityType, source: FactoryStructureTreeNodeData['source'], entityId: string): void { const name = (source as { name?: string; nameAr?: string }).name ?? (source as DepartmentItem).nameAr ?? 'العنصر'; if (!window.confirm(`حذف ${name} نهائيًا؟`)) return; const request = type === 'factory' ? this.masterDataApi.deleteFactory(entityId, this.localCorrelation()) : type === 'department' ? this.masterDataApi.deleteDepartment(entityId, this.localCorrelation()) : this.masterDataApi.deleteProductionLine(entityId, this.localCorrelation()); this.isSaving = true; this.actionError = ''; request.pipe(finalize(() => this.isSaving = false), takeUntil(this.destroy$)).subscribe({ next: () => { this.removeNode(entityId); this.successMessage = 'تم الحذف نهائيًا.'; }, error: error => { this.actionError = this.extractErrorMessage(error); this.masterDataApi.factoryStructureDeleteEligibility().pipe(takeUntil(this.destroy$)).subscribe({ next: eligibility => { this.applyEligibility(eligibility); this.rebuildTree(); } }); } }); }
+  private removeNode(entityId: string): void { const remove = (nodes: FactoryStructureTreeNode[]): FactoryStructureTreeNode[] => nodes.filter(node => node.data?.entityId !== entityId).map(node => ({ ...node, children: remove((node.children as FactoryStructureTreeNode[] | undefined) ?? []) })); this.treeNodes = remove(this.treeNodes); if (this.selectedNode?.data?.entityId === entityId) this.selectedNode = null; this.contextNode = null; this.contextMenuItems = []; }
+  private applyEligibility(value: FactoryStructureDeleteEligibility): void { this.deleteEligibility = new Map([...value.factories, ...value.departments, ...value.lines].map(item => [item.entityId, item])); }
+  private rebuildTree(): void { const selectedId = this.selectedNode?.data?.entityId; this.treeNodes = buildFactoryStructureTree({ factories: this.factories, departments: this.departments, lines: this.lines, eligibility: this.deleteEligibility }, this.expandedIds); this.selectedNode = selectedId ? findFactoryStructureNode(this.treeNodes, selectedId) ?? null : null; }
+  private setExpanded(nodes: FactoryStructureTreeNode[], expanded: boolean): void { nodes.forEach(node => { node.expanded = expanded; if (node.data && !node.leaf) { if (expanded) this.expandedIds.add(node.data.entityId); else this.expandedIds.delete(node.data.entityId); } this.setExpanded((node.children as FactoryStructureTreeNode[] | undefined) ?? [], expanded); }); }
+  private factoryIdForNode(node: FactoryStructureTreeNode): string { let current: FactoryStructureTreeNode | undefined = node; while (current && current.data?.entityType !== 'factory') { current = current.data?.parentId ? findFactoryStructureNode(this.treeNodes, current.data.parentId) : undefined; } return current?.data?.entityId ?? ''; }
+  private onRealtimeRefresh(): void { if (this.activeForm) { this.realtimeRefreshPending = true; this.successMessage = 'تغيرت بنية المصنع. سيُطبق التحديث بعد إغلاق النموذج لحماية تعديلاتك.'; return; } this.reload(); }
+  private localCorrelation(): string | undefined { return this.manufacturingRealtime?.registerLocalOperation('factory-structure'); }
+  private save(request: Observable<unknown>): void { this.isSaving = true; this.hasError = false; request.pipe(finalize(() => this.isSaving = false), takeUntil(this.destroy$)).subscribe({ next: () => { this.activeForm = null; this.successMessage = 'تم حفظ التغيير.'; this.reload(); }, error: error => this.setLoadError(error) }); }
+  private setValidationError(message: string): void { this.hasError = true; this.errorMessage = message; } private setLoadError(error: unknown): void { this.hasError = true; this.errorMessage = this.extractErrorMessage(error); } private extractErrorMessage(error: unknown): string { const response = error as { error?: { error?: { message?: string }; message?: string }; message?: string }; return response?.error?.error?.message || response?.error?.message || response?.message || 'حدث خطأ غير متوقع أثناء حفظ أو تحميل بنية المصنع.'; }
+  private emptyFactoryDraft(): FactoryDraft { return { id: '', name: '', code: '', location: '', isActive: true }; } private emptyDepartmentDraft(): DepartmentDraft { return { id: '', factoryId: '', code: '', nameAr: '', nameEn: '', sequenceOrder: 0, isActive: true }; } private emptyLineDraft(): LineDraft { return { id: '', factoryId: '', departmentId: '', name: '', lineCode: '', sequenceOrder: 0, isActive: true }; }
 }

@@ -6,7 +6,7 @@
     "start": "ng serve --host 0.0.0.0 --port 4200 --proxy-config proxy.conf.json",
     "start:local": "ng serve --host 0.0.0.0 --port 4200 --proxy-config proxy.conf.json --open",
     "start:web": "ng serve --host 0.0.0.0 --port 4200 --proxy-config proxy.conf.json",
-    "start:api": "ASPNETCORE_ENVIRONMENT=Development DOTNET_ENVIRONMENT=Development dotnet run --project ../backend/ProductionLinePlanner.Api/ProductionLinePlanner.Api.csproj --urls http://0.0.0.0:5169",
+    "start:api": "ASPNETCORE_ENVIRONMENT=Development DOTNET_ENVIRONMENT=Development dotnet run --project ../backend/ProductionLinePlanner.Api/ProductionLinePlanner.Api.csproj --urls http://0.0.0.0:9000",
     "start:full": "concurrently -k -n API,WEB \"npm run start:api\" \"npm run start:web\"",
     "build": "ng build",
     "build:prod:frontend": "node ../../scripts/build-iis-production.mjs frontend",

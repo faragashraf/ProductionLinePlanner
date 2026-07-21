@@ -187,15 +187,7 @@ public sealed class ProductModelService(
 
         if (normalizedCode is not null && !string.Equals(entity.Code, normalizedCode, StringComparison.Ordinal))
         {
-            var codeExists = await dbContext.ProductModels.AnyAsync(
-                x => x.Id != modelId && x.Code == normalizedCode,
-                cancellationToken);
-            if (codeExists)
-            {
-                return Result<ProductModelDto>.Failure(new Error("Conflict", "Model code must be unique."));
-            }
-
-            dbContext.Entry(entity).Property(nameof(ProductModel.Code)).CurrentValue = normalizedCode;
+            return Result<ProductModelDto>.Failure(new Error("ValidationError", "لا يمكن تعديل الكود بعد إنشاء السجل."));
         }
 
         if (normalizedName is not null)

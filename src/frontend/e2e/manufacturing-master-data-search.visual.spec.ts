@@ -38,6 +38,7 @@ async function preparePage(page: Page): Promise<void> {
     else if (pathname.endsWith('/api/departments')) data = { items: [department] };
     else if (pathname.endsWith('/api/production-lines')) data = { items: [line] };
     else if (pathname.endsWith('/api/stages')) data = { items: stages, totalCount: stages.length, pageNumber: 1, pageSize: 200 };
+    else if (/\/api\/product-models\/[^/]+\/stages$/.test(pathname)) data = [];
     else if (pathname.endsWith('/api/product-models')) {
       const search = (url.searchParams.get('search') ?? '').trim().toLocaleLowerCase();
       const filtered = search ? models.filter(model => [model.code, model.name].some(value => value.toLocaleLowerCase().includes(search))) : models;
@@ -121,6 +122,45 @@ test('model search is server-paginated and searches only model fields beyond the
     await expect(page.locator('tbody')).toContainText('موديل بنطال');
     await page.screenshot({ path: path.join(visualOutput, `models-${name}.png`), fullPage: true });
     await expectViewportSafe(page);
+  }
+});
+
+test('model-stage selection uses a searchable dropdown without result cards or manual pagination', async ({ page }) => {
+  await preparePage(page);
+  for (const [name, width, height] of [['desktop-1440x900', 1440, 900], ['tablet-landscape-1280x800', 1280, 800], ['tablet-portrait-800x1280', 800, 1280], ['mobile-390x844', 390, 844]] as const) {
+    await page.setViewportSize({ width, height });
+    await page.goto('/manufacturing/models');
+    await page.getByRole('button', { name: 'اختيار' }).first().click();
+    await page.getByRole('button', { name: 'إضافة مرحلة للموديل' }).click();
+    const selector = page.locator('.master-page__stage-dropdown');
+    await expect(selector).toBeVisible();
+    await selector.click();
+    const panel = page.locator('.master-page__stage-dropdown-panel');
+    await expect(panel).toBeVisible();
+    await expect(page.getByText('مرحلة الخياطة', { exact: true })).toBeVisible();
+    await page.locator('.p-dropdown-filter').fill('SEW-02');
+    await expect(page.getByText('مرحلة الخياطة', { exact: true })).toBeVisible();
+    await page.waitForTimeout(250);
+    await expect(panel).toBeHidden();
+    await selector.click();
+    await expect(panel).toBeVisible();
+    await page.waitForTimeout(200);
+    const geometry = await page.evaluate(() => {
+      const selectorBox = document.querySelector<HTMLElement>('.master-page__stage-dropdown')!.getBoundingClientRect();
+      const panelBox = document.querySelector<HTMLElement>('.master-page__stage-dropdown-panel')!.getBoundingClientRect();
+      const pointTarget = document.elementFromPoint(panelBox.left + 8, panelBox.top + 8)?.closest('.master-page__stage-dropdown-panel');
+      return { selectorWidth: selectorBox.width, panelWidth: panelBox.width, left: panelBox.left, right: panelBox.right, top: panelBox.top, bottom: panelBox.bottom, viewportWidth: innerWidth, viewportHeight: innerHeight, panelIsTopLayer: !!pointTarget };
+    });
+    expect(geometry.panelWidth).toBeLessThanOrEqual(geometry.selectorWidth + 1);
+    expect(geometry.left).toBeGreaterThanOrEqual(-1);
+    expect(geometry.right).toBeLessThanOrEqual(geometry.viewportWidth + 1);
+    expect(geometry.top).toBeGreaterThanOrEqual(-1);
+    expect(geometry.bottom).toBeLessThanOrEqual(geometry.viewportHeight + 1);
+    expect(geometry.panelIsTopLayer).toBeTruthy();
+    await expect(page.locator('.master-page__available-stage-list')).toHaveCount(0);
+    await expect(page.locator('.master-page__selector-pagination')).toHaveCount(0);
+    await expectViewportSafe(page);
+    await page.screenshot({ path: path.join(visualOutput, `model-stage-dropdown-${name}.png`), fullPage: true });
   }
 });
 

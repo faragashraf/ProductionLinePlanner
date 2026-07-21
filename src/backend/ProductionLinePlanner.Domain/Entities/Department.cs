@@ -48,13 +48,11 @@ public class Department
 
     public List<ProductionLine> ProductionLines { get; } = [];
 
-    public void Update(string code, string nameAr, string? nameEn, int sequenceOrder, DateTime? atUtc = null)
+    public void Update(string nameAr, string? nameEn, int sequenceOrder, DateTime? atUtc = null)
     {
-        if (string.IsNullOrWhiteSpace(code)) throw new ArgumentException("Department code is required.", nameof(code));
         if (string.IsNullOrWhiteSpace(nameAr)) throw new ArgumentException("Arabic department name is required.", nameof(nameAr));
         if (sequenceOrder < 0) throw new ArgumentOutOfRangeException(nameof(sequenceOrder), "SequenceOrder must be zero or positive.");
 
-        Code = code.Trim();
         NameAr = nameAr.Trim();
         NameEn = string.IsNullOrWhiteSpace(nameEn) ? null : nameEn.Trim();
         SequenceOrder = sequenceOrder;

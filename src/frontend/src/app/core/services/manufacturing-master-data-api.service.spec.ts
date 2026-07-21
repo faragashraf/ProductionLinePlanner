@@ -109,4 +109,17 @@ describe('ManufacturingMasterDataApiService', () => {
     expect(request.request.headers.get('X-Manufacturing-Realtime-Correlation-Id')).toBe('11111111-1111-1111-1111-111111111111');
     request.flush({ success: true, data: { id: 'model-1', code: 'RT-1', name: 'موديل لحظي', isActive: true } });
   });
+
+  it('treats 204 delete responses for factory, department, and line as successful void completions', () => {
+    const completed: string[] = [];
+    service.deleteFactory('factory-1').subscribe(() => completed.push('factory'));
+    service.deleteDepartment('department-1').subscribe(() => completed.push('department'));
+    service.deleteProductionLine('line-1').subscribe(() => completed.push('line'));
+
+    http.expectOne(item => item.method === 'DELETE' && item.url.endsWith('/api/factories/factory-1')).flush(null, { status: 204, statusText: 'No Content' });
+    http.expectOne(item => item.method === 'DELETE' && item.url.endsWith('/api/departments/department-1')).flush(null, { status: 204, statusText: 'No Content' });
+    http.expectOne(item => item.method === 'DELETE' && item.url.endsWith('/api/production-lines/line-1')).flush(null, { status: 204, statusText: 'No Content' });
+
+    expect(completed).toEqual(['factory', 'department', 'line']);
+  });
 });
