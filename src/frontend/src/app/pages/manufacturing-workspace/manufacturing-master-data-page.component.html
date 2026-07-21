@@ -9,14 +9,38 @@
   <ng-container *ngIf="!loading; else loadingState">
     <ng-container *ngIf="mode === 'stages'; else modelsView">
       <p-card header="فلاتر المراحل">
-        <plp-product-toolbar searchInputId="stageCatalogSearch" searchLabel="بحث في مراحل الإنتاج" searchPlaceholder="بحث باسم أو كود المرحلة" [searchValue]="stageSearch" [clearEnabled]="true" (searchValueChange)="onStageSearch($event)">
-        <div plp-toolbar-filters class="master-page__stage-filter">
-          <label>المصنع<select [value]="stageForm.controls.factoryId.value" (change)="selectFactory($any($event.target).value)"><option value="">اختر المصنع</option><option *ngFor="let factory of factories" [value]="factory.id">{{ factory.code }} — {{ factory.name }}</option></select></label>
-          <label>القسم<select [value]="stageForm.controls.departmentId.value" (change)="selectDepartment($any($event.target).value)" [disabled]="!stageForm.controls.factoryId.value"><option value="">اختر القسم</option><option *ngFor="let department of activeDepartments" [value]="department.id">{{ department.code }} — {{ department.nameAr || department.name }}</option></select></label>
-          <label>خط الإنتاج<select [value]="stageForm.controls.productionLineId.value" (change)="selectLine($any($event.target).value)" [disabled]="!stageForm.controls.departmentId.value"><option value="">اختر خط الإنتاج</option><option *ngFor="let line of activeLines" [value]="line.id">{{ line.lineCode || '—' }} — {{ line.name }}</option></select></label>
-          <label>الحالة<select [value]="stageStatusFilter" (change)="setStageStatusFilter($any($event.target).value)"><option value="all">الكل</option><option value="active">الفعالة</option><option value="inactive">المعطلة</option></select></label>
+        <div class="sf" aria-label="فلاتر المراحل">
+          <div class="sf-tree">
+            <span class="sf-l">نطاق بنية المصنع</span>
+            <button pButton type="button" class="p-button-outlined sf-tr" (click)="stageStructureFilterOverlay.toggle($event)" aria-haspopup="tree">
+              <i class="pi pi-sitemap" aria-hidden="true"></i>
+              <span class="sf-tx"><strong>{{ selectedStageFilterNode?.data?.name || 'اختر من شجرة المصنع' }}</strong><small>{{ selectedStageFilterPath }}</small></span>
+            </button>
+            <button pButton type="button" class="p-button-rounded p-button-text p-button-sm sf-x" icon="pi pi-times" aria-label="مسح اختيار النطاق" title="مسح" *ngIf="selectedStageFilterNode" (click)="clearStageTreeFilter()"></button>
+          </div>
+          <label class="sf-st"><span class="sf-l">الحالة</span><select [value]="stageStatusFilter" (change)="setStageStatusFilter($any($event.target).value)"><option value="all">الكل</option><option value="active">الفعالة</option><option value="inactive">المعطلة</option></select></label>
+          <label class="sf-s"><span class="sf-l">البحث باسم أو كود المرحلة</span><input id="stageCatalogSearch" pInputText type="search" [value]="stageSearch" (input)="onStageSearch($any($event.target).value)" placeholder="بحث باسم أو كود المرحلة"></label>
+          <button pButton type="button" class="p-button-outlined p-button-sm sf-clear" label="مسح الفلاتر" icon="pi pi-filter-slash" [disabled]="!selectedStageFilterNode && stageStatusFilter === 'all' && !stageSearch" (click)="clearStageFilters()"></button>
         </div>
-        </plp-product-toolbar>
+        <p-overlayPanel #stageStructureFilterOverlay styleClass="sf-o" appendTo="body">
+          <section class="sf-p" dir="rtl">
+            <label for="stageStructureFilterSearch">بحث في الشجرة
+              <input id="stageStructureFilterSearch" pInputText type="search" [value]="stageTreeSearch" (input)="onStageFilterSearch($any($event.target).value)" placeholder="ابحث باسم أو كود المصنع أو القسم أو الخط">
+            </label>
+            <button pButton type="button" class="p-button-text p-button-sm" label="مسح البحث" *ngIf="stageTreeSearch" (click)="clearStageFilterSearch()"></button>
+            <app-factory-structure-tree-view
+              [nodes]="visibleStageFilterTreeNodes"
+              [(selectedNode)]="selectedStageFilterNode"
+              [selectableTypes]="['line']"
+              [showActions]="false"
+              [loading]="loading"
+              (nodeSelect)="selectStageFilterNode($event); stageStructureFilterOverlay.hide()"
+              (nodeExpand)="onStageFilterNodeExpand($event)"
+              (nodeCollapse)="onStageFilterNodeCollapse($event)"
+            ></app-factory-structure-tree-view>
+            <p class="master-page__empty" *ngIf="!visibleStageFilterTreeNodes.length">لا توجد نتائج مطابقة في بنية المصنع.</p>
+          </section>
+        </p-overlayPanel>
       </p-card>
 
       <p-card header="مراحل الإنتاج">
@@ -31,7 +55,7 @@
             <button pButton type="submit" [label]="editStageId ? 'تحديث المرحلة' : 'إضافة مرحلة'" [disabled]="saving"></button>
           </form>
         </plp-expandable-form>
-        <p-table plpResponsiveTable="scroll" plpTablePagination [plpPaginationPageSize]="10" [plpPaginationResetKey]="stageForm.controls.productionLineId.value + stageStatusFilter + stageSearch" [plpStickyActions]="true" [value]="filteredOperationalStages" dataKey="id" responsiveLayout="scroll">
+        <p-table plpResponsiveTable="scroll" plpTablePagination [plpPaginationPageSize]="10" [plpPaginationResetKey]="stageFilterResetKey" [plpStickyActions]="true" [value]="filteredOperationalStages" dataKey="id" responsiveLayout="scroll">
           <ng-template pTemplate="header"><tr><th>الكود</th><th>الاسم</th><th>خط الإنتاج</th><th>القسم</th><th>الحالة</th><th>الإجراءات</th></tr></ng-template>
           <ng-template pTemplate="body" let-stage><tr [class.master-page__inactive-row]="!stage.isActive"><td><span class="plp-code">{{ stage.code }}</span></td><td>{{ stage.name }}</td><td>{{ stage.productionLineName || '—' }}</td><td>{{ stage.departmentNameAr || 'غير مرتبط' }}</td><td><plp-status-badge [status]="stage.isActive ? 'ready' : 'warning'" [label]="stageStatusLabel(stage.isActive)" [compact]="true"></plp-status-badge></td><td><button pButton type="button" icon="pi pi-pencil" class="p-button-text" aria-label="تعديل المرحلة" title="تعديل المرحلة" (click)="editOperationalStage(stage)"></button><button pButton type="button" [icon]="stage.isActive ? 'pi pi-ban' : 'pi pi-check'" class="p-button-text" [attr.aria-label]="stage.isActive ? 'تعطيل المرحلة' : 'تفعيل المرحلة'" [title]="stage.isActive ? 'تعطيل المرحلة' : 'تفعيل المرحلة'" (click)="setOperationalStageActive(stage)"></button><button pButton type="button" icon="pi pi-trash" class="p-button-text p-button-danger" aria-label="حذف المرحلة" title="حذف المرحلة" (click)="openDependencyDialog(stage, 'delete')"></button></td></tr></ng-template>
           <ng-template pTemplate="emptymessage"><tr><td colspan="6" class="master-page__empty">{{ stageEmptyMessage }}</td></tr></ng-template>
