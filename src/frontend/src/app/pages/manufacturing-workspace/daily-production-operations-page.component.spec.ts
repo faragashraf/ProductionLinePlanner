@@ -8,6 +8,7 @@ import { ProductionCostRecordingApiService } from '../../core/services/productio
 import { ManufacturingMasterDataApiService } from '../../core/services/manufacturing-master-data-api.service';
 import { AttendanceApiService } from '../../core/services/attendance-api.service';
 import { PermissionService } from '../../core/services/permission.service';
+import { PERMISSIONS } from '../../core/config/permission-identifiers';
 import { FormSubmissionValidationService } from '../../shared/forms/form-submission-validation.service';
 import { ManufacturingWorkspaceModule } from './manufacturing-workspace.module';
 
@@ -19,6 +20,7 @@ describe('DailyProductionOperationsPageComponent unified preview', () => {
   let realtime: jasmine.SpyObj<any>;
   let stopRealtime: jasmine.Spy;
   let watchConfig: { refresh: () => void; matches?: (change: any) => boolean };
+  let grantedPermissions: Set<string>;
 
   const preview: DailyProductionPreview = {
     productionDate: '2026-07-16',
@@ -35,6 +37,12 @@ describe('DailyProductionOperationsPageComponent unified preview', () => {
   };
 
   beforeEach(() => {
+    grantedPermissions = new Set([
+      PERMISSIONS.production.view,
+      PERMISSIONS.production.record,
+      PERMISSIONS.production.approve,
+      PERMISSIONS.assignments.manage
+    ]);
     production = jasmine.createSpyObj('ProductionCostRecordingApiService', ['previewDailyOperations', 'loadDailyOperations', 'saveDailyDraft', 'approveDailyOperation', 'cancelDailyOperationApproval']);
     masterData = jasmine.createSpyObj('ManufacturingMasterDataApiService', ['factories', 'allProductionLines', 'models']);
     attendance = jasmine.createSpyObj('AttendanceApiService', ['syncForProductionDate']);
@@ -48,7 +56,7 @@ describe('DailyProductionOperationsPageComponent unified preview', () => {
       masterData,
       attendance,
       production,
-      { hasPermission: () => true } as any,
+      { hasPermission: (permission: string) => grantedPermissions.has(permission) } as any,
       { serverMessage: (error: any, fallback: string) => error?.error?.detail ?? fallback } as any,
       realtime
     );
@@ -408,6 +416,62 @@ describe('DailyProductionOperationsPageComponent unified preview', () => {
 
     expect(production.saveDailyDraft).toHaveBeenCalledTimes(1);
     expect(component.savedDraft?.productionOrderId).toBe('order-1');
+  });
+
+  it('keeps navigation available for a view-only user while blocking data edits', () => {
+    grantedPermissions = new Set([PERMISSIONS.production.view]);
+    component.selectedStageId = '';
+    const worker = component.stages[0].workers[0];
+
+    component.selectStage('stage-1');
+    component.stageSearch = 'S1';
+    component.updateWorkerPercentage(component.stages[0], worker, 50);
+
+    expect(component.canView).toBeTrue();
+    expect(component.isReadOnly).toBeTrue();
+    expect(component.selectedStage?.productModelStageId).toBe('stage-1');
+    expect(component.filteredStages).toHaveSize(1);
+    expect(worker.percentage).toBe(100);
+  });
+
+  it('lets an approver-only user cancel an approved operation without enabling draft edits', () => {
+    grantedPermissions = new Set([PERMISSIONS.production.approve]);
+    component.savedDraft = approvedDailyDraft();
+    const worker = component.stages[0].workers[0];
+
+    component.openDailyApprovalCancellationDialog();
+    component.updateWorkerQuantity(component.stages[0], worker, 250);
+    component.saveDailyDraft();
+
+    expect(component.canView).toBeTrue();
+    expect(component.canEditDraft).toBeFalse();
+    expect(component.canCancelDailyOperationApproval).toBeTrue();
+    expect(component.dailyApprovalCancellationDialogVisible).toBeTrue();
+    expect(worker.quantity).toBe(500);
+    expect(production.saveDailyDraft).not.toHaveBeenCalled();
+  });
+
+  it('allows an editor to change a draft but prevents direct edits after approval', () => {
+    grantedPermissions = new Set([PERMISSIONS.production.view, PERMISSIONS.production.record]);
+    const worker = component.stages[0].workers[0];
+
+    component.updateWorkerPercentage(component.stages[0], worker, 50);
+    expect(component.canEditDraft).toBeTrue();
+    expect(worker.percentage).toBe(50);
+
+    component.savedDraft = approvedDailyDraft();
+    component.updateWorkerPercentage(component.stages[0], worker, 25);
+
+    expect(component.isApproved).toBeTrue();
+    expect(component.isReadOnly).toBeTrue();
+    expect(worker.percentage).toBe(50);
+  });
+
+  it('requires approved-stage concurrency data before exposing cancellation', () => {
+    grantedPermissions = new Set([PERMISSIONS.production.approve]);
+    component.savedDraft = { ...approvedDailyDraft(), stages: [{ id: 'record-1', concurrencyToken: '', status: 'Approved' }] as any };
+
+    expect(component.canCancelDailyOperationApproval).toBeFalse();
   });
 
   it('shows daily approval cancellation only for an approved daily operation and requires a reason', () => {

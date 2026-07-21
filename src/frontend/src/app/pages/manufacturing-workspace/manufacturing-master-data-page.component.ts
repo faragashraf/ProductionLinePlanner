@@ -1,7 +1,7 @@
 import { Component, OnDestroy, OnInit, Optional } from '@angular/core';
 import { ActivatedRoute } from '@angular/router';
 import { FormBuilder, Validators } from '@angular/forms';
-import { EMPTY, Subject, catchError, debounceTime, distinctUntilChanged, finalize, forkJoin, map, Observable, switchMap, takeUntil } from 'rxjs';
+import { Subject, debounceTime, distinctUntilChanged, finalize, forkJoin, map, Observable, of, switchMap, takeUntil } from 'rxjs';
 import {
   DepartmentItem,
   ManufacturingMasterDataApiService,
@@ -48,13 +48,16 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
   modelStageFormVisible = false;
   editModelId = '';
   editModelStageId = '';
-  modelStageOptions: SubStageOption[] = [];
-  modelStageSearch = '';
-  modelStagePage = 1;
-  modelStageTotal = 0;
-  readonly modelStagePageSize = 50;
-  modelStageSelectorLoading = false;
-  private readonly modelStageOptionCache = new Map<string, SubStageOption>();
+  linkedStagesSearch = '';
+  availableStagesSearch = '';
+  availableStagesPage = 1;
+  availableStagesTotal = 0;
+  readonly availableStagesPageSize = 10;
+  availableStagesLoading = false;
+  availableStagesError = '';
+  private availableStageCatalog: SubStageOption[] = [];
+  availableStageOptions: SubStageOption[] = [];
+  private readonly availableStageOptionCache = new Map<string, SubStageOption>();
 
   readonly stageForm = this.fb.group({
     factoryId: ['', Validators.required],
@@ -66,10 +69,10 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
   readonly modelForm = this.fb.group({ code: ['', Validators.required], name: ['', Validators.required], description: [''] });
   readonly modelStageForm = this.fb.group({ subStageId: ['', Validators.required], stageOrder: [1, Validators.required], piecePrice: [0, Validators.required], standardSeconds: [null as number | null], compensationMode: ['SharedPercentage', Validators.required], isRequired: [true], isActive: [true] });
 
-  private readonly modelStageSearch$ = new Subject<string>();
   private readonly modelSearch$ = new Subject<string>();
   private readonly destroy$ = new Subject<void>();
   private modelRequestVersion = 0;
+  private availableStagesRequestVersion = 0;
   private stopRealtime?: () => void;
 
   constructor(private readonly fb: FormBuilder, private readonly api: ManufacturingMasterDataApiService, route: ActivatedRoute, @Optional() private readonly manufacturingRealtime?: ManufacturingRealtimeService) {
@@ -77,7 +80,6 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
   }
 
   ngOnInit(): void {
-    this.modelStageSearch$.pipe(debounceTime(250), distinctUntilChanged(), switchMap(search => this.loadModelStageOptions(search, 1)), takeUntil(this.destroy$)).subscribe();
     this.modelSearch$.pipe(debounceTime(250), distinctUntilChanged(), takeUntil(this.destroy$)).subscribe(search => this.loadModelPage(search, 1));
     this.stopRealtime = this.mode === 'models'
       ? this.manufacturingRealtime?.watchScreen({ screen: 'models', refresh: () => this.refreshModelsFromRealtime() })
@@ -98,7 +100,30 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
   get stageResultCount(): number { return this.filteredOperationalStages.length; }
   get stageEmptyMessage(): string { return normalizeSearchText(this.stageSearch) ? 'لا توجد مراحل مطابقة للبحث.' : 'اختر خط إنتاج لعرض مراحل الإنتاج، أو لا توجد مراحل مطابقة.'; }
   get modelEmptyMessage(): string { return normalizeSearchText(this.modelSearch) ? 'لا توجد موديلات مطابقة للبحث.' : 'لا توجد موديلات لعرضها.'; }
-  get modelStagePageCount(): number { return Math.max(1, Math.ceil(this.modelStageTotal / this.modelStagePageSize)); }
+  get availableStagesPageCount(): number { return Math.max(1, Math.ceil(this.availableStagesTotal / this.availableStagesPageSize)); }
+  get filteredLinkedStages(): ModelStageItem[] {
+    return [...this.stages]
+      .filter(item => matchesSearchTerm(this.linkedStagesSearch, [this.linkedStageName(item), this.linkedStageCode(item)]))
+      .sort((left, right) => left.stageOrder - right.stageOrder);
+  }
+  get linkedStagesEmptyMessage(): string {
+    return normalizeSearchText(this.linkedStagesSearch)
+      ? 'توجد مراحل مرتبطة، لكن لا توجد نتائج مطابقة للبحث.'
+      : 'لا توجد مراحل مرتبطة بهذا الموديل.';
+  }
+  get availableStageChoices(): SubStageOption[] {
+    const selected = this.selectedAvailableStage;
+    return selected && !this.availableStageOptions.some(option => option.id === selected.id)
+      ? [selected, ...this.availableStageOptions]
+      : this.availableStageOptions;
+  }
+  get selectedAvailableStage(): SubStageOption | null {
+    const selectedId = this.modelStageForm.getRawValue().subStageId;
+    if (!selectedId) return null;
+    const linked = this.stages.find(stage => stage.subStageId === selectedId);
+    return this.availableStageOptionCache.get(selectedId)
+      ?? (linked ? this.toAvailableOption(linked) : null);
+  }
   get canConfirmDependencyAction(): boolean {
     return this.pendingStageAction === 'disable' ? !!this.stageDependencySummary?.canDisable : this.pendingStageAction === 'delete' && !!this.stageDependencySummary?.canDelete;
   }
@@ -107,9 +132,9 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
     this.loading = true;
     this.error = '';
     if (this.mode === 'models') {
-      forkJoin({ modelPage: this.api.modelSearchPage('', 1, this.modelPageSize), stagePage: this.api.searchSubStages('', 1, this.modelStagePageSize) })
+      this.api.modelSearchPage('', 1, this.modelPageSize)
         .pipe(finalize(() => this.loading = false), takeUntil(this.destroy$))
-        .subscribe({ next: data => { this.applyModelPage(data.modelPage); this.applyModelStageOptionPage(data.stagePage, ''); }, error: error => this.setError(error) });
+        .subscribe({ next: page => { this.applyModelPage(page); this.loadAvailableStageCatalog(); }, error: error => this.setError(error) });
       return;
     }
     this.api.factories().pipe(finalize(() => this.loading = false), takeUntil(this.destroy$)).subscribe({
@@ -216,17 +241,31 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
 
   saveModel(): void { if (this.modelForm.valid) { const correlationId = this.localCorrelation('models'); this.save(this.editModelId ? this.api.updateModel(this.editModelId, this.modelForm.getRawValue(), correlationId) : this.api.createModel(this.modelForm.getRawValue(), correlationId), item => { if (this.selected?.id === item.id) this.selected = { ...this.selected, ...item }; this.editModelId = ''; this.modelFormVisible = false; this.modelForm.reset(); this.loadModelPage(this.modelSearch, this.modelPage); }); } }
   editModel(item: ProductModelItem): void { this.editModelId = item.id; this.modelFormVisible = true; this.modelForm.reset(item); }
-  select(item: ProductModelItem): void { this.selected = item; this.api.modelStages(item.id).pipe(takeUntil(this.destroy$)).subscribe({ next: stages => this.stages = stages, error: error => this.setError(error) }); }
-  saveModelStage(): void { if (!this.selected || this.modelStageForm.invalid) return; const value = this.modelStageForm.getRawValue(); if (this.stages.some(item => item.subStageId === value.subStageId && item.id !== this.editModelStageId) || this.stages.some(item => item.stageOrder === value.stageOrder && item.id !== this.editModelStageId)) { this.error = 'لا يمكن تكرار المرحلة أو ترتيبها داخل الموديل.'; return; } const correlationId = this.localCorrelation('models'); this.save(this.editModelStageId ? this.api.updateModelStage(this.selected.id, this.editModelStageId, value, correlationId) : this.api.addModelStage(this.selected.id, value, correlationId), item => { this.stages = this.upsert(this.stages, item, 'stageOrder'); this.editModelStageId = ''; this.modelStageFormVisible = false; }); }
-  editModelStage(item: ModelStageItem): void { this.editModelStageId = item.id; this.modelStageFormVisible = true; this.modelStageForm.reset(item); this.ensureSelectedModelStage(item); }
-  disableModelStage(id: string): void { if (this.selected && confirm('سيتم تعطيل إعداد المرحلة.')) this.save(this.api.deactivateModelStage(this.selected.id, id, this.localCorrelation('models')), () => this.stages = this.markInactive(this.stages, id)); }
+  select(item: ProductModelItem): void {
+    this.selected = item;
+    this.linkedStagesSearch = '';
+    this.api.modelStages(item.id).pipe(takeUntil(this.destroy$)).subscribe({
+      next: stages => { this.stages = [...stages].sort((left, right) => left.stageOrder - right.stageOrder); this.rebuildAvailableStagePage(); },
+      error: error => this.setError(error)
+    });
+    if (!this.availableStageCatalog.length && !this.availableStagesLoading) this.loadAvailableStageCatalog();
+  }
+  saveModelStage(): void { if (!this.selected || this.modelStageForm.invalid) return; const value = this.modelStageForm.getRawValue(); if (this.stages.some(item => item.subStageId === value.subStageId && item.id !== this.editModelStageId) || this.stages.some(item => item.stageOrder === value.stageOrder && item.id !== this.editModelStageId)) { this.error = 'لا يمكن تكرار المرحلة أو ترتيبها داخل الموديل.'; return; } const correlationId = this.localCorrelation('models'); this.save(this.editModelStageId ? this.api.updateModelStage(this.selected.id, this.editModelStageId, value, correlationId) : this.api.addModelStage(this.selected.id, value, correlationId), item => { this.stages = this.upsert(this.stages, item, 'stageOrder'); this.rebuildAvailableStagePage(); this.editModelStageId = ''; this.modelStageFormVisible = false; }); }
+  editModelStage(item: ModelStageItem): void { this.editModelStageId = item.id; this.modelStageFormVisible = true; this.modelStageForm.reset(item); this.rebuildAvailableStagePage(); }
+  disableModelStage(id: string): void { if (this.selected && confirm('سيتم تعطيل إعداد المرحلة.')) this.save(this.api.deactivateModelStage(this.selected.id, id, this.localCorrelation('models')), () => { this.stages = this.markInactive(this.stages, id); this.rebuildAvailableStagePage(); }); }
   setModelActive(item: ProductModelItem): void { if (confirm(item.isActive ? 'تعطيل الموديل؟' : 'تفعيل الموديل؟')) this.save(this.api.setModelActivation(item.id, !item.isActive, this.localCorrelation('models')), () => this.models = this.models.map(model => model.id === item.id ? { ...model, isActive: !item.isActive } : model)); }
-  onModelStageSearch(value: string): void { this.modelStageSearch = value; this.modelStageSearch$.next(value.trim()); }
-  changeModelStagePage(offset: number): void { const page = this.modelStagePage + offset; if (page >= 1 && (page - 1) * this.modelStagePageSize < this.modelStageTotal) this.loadModelStageOptions(this.modelStageSearch, page).pipe(takeUntil(this.destroy$)).subscribe(); }
-  get modelStageChoices(): SubStageOption[] { const currentId = this.modelStageForm.getRawValue().subStageId; const existing = this.stages.find(stage => stage.subStageId === currentId); const selected = currentId && !this.modelStageOptions.some(option => option.id === currentId) ? this.modelStageOptionCache.get(currentId) ?? (existing ? { id: existing.subStageId, mainStageId: '', code: existing.subStageCode || '—', name: existing.subStageName || 'مرحلة مرتبطة', capacity: 0, sequenceOrder: 0, isActive: false } : null) : null; return selected ? [selected, ...this.modelStageOptions] : this.modelStageOptions; }
+  onLinkedStagesSearch(value: string): void { this.linkedStagesSearch = value; }
+  clearLinkedStagesSearch(): void { this.linkedStagesSearch = ''; }
+  onAvailableStagesSearch(value: string): void { this.availableStagesSearch = value; this.availableStagesPage = 1; this.availableStagesError = ''; this.rebuildAvailableStagePage(); }
+  retryAvailableStages(): void { this.loadAvailableStageCatalog(); }
+  changeAvailableStagesPage(offset: number): void {
+    const page = this.availableStagesPage + offset;
+    if (page >= 1 && page <= this.availableStagesPageCount) { this.availableStagesPage = page; this.rebuildAvailableStagePage(); }
+  }
+  selectAvailableStage(option: SubStageOption): void { this.modelStageForm.patchValue({ subStageId: option.id }); }
   onModelFormVisibility(visible: boolean): void { this.modelFormVisible = visible; if (!visible) { this.editModelId = ''; this.modelForm.reset(); } }
   onModelStageFormVisibility(visible: boolean): void { this.modelStageFormVisible = visible; if (!visible) { this.editModelStageId = ''; this.modelStageForm.reset({ stageOrder: 1, piecePrice: 0, compensationMode: 'SharedPercentage', isRequired: true, isActive: true }); } }
-  subName(id: string): string { return this.modelStageOptions.find(item => item.id === id)?.name ?? this.stages.find(item => item.subStageId === id)?.subStageName ?? '-'; }
+  subName(id: string): string { return this.availableStageOptionCache.get(id)?.name ?? this.stages.find(item => item.subStageId === id)?.subStageName ?? '-'; }
   totalPrice(): number { return this.stages.filter(item => item.isActive).reduce((sum, item) => sum + item.piecePrice, 0); }
   totalSeconds(): number { return this.stages.filter(item => item.isActive).reduce((sum, item) => sum + (item.standardSeconds ?? 0), 0); }
   stageStatusLabel(isActive: boolean): string { return isActive ? 'فعالة' : 'معطلة'; }
@@ -234,16 +273,62 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
   private save<T>(request: Observable<T>, success?: (result: T) => void): void { this.saving = true; this.error = ''; request.pipe(finalize(() => this.saving = false), takeUntil(this.destroy$)).subscribe({ next: result => success?.(result), error: error => this.setError(error) }); }
   private loadModelPage(search: string, page: number): void { const requestVersion = ++this.modelRequestVersion; this.modelListLoading = true; this.error = ''; this.api.modelSearchPage(search, page, this.modelPageSize).pipe(finalize(() => { if (requestVersion === this.modelRequestVersion) this.modelListLoading = false; }), takeUntil(this.destroy$)).subscribe({ next: result => { if (requestVersion !== this.modelRequestVersion) return; const nearestPage = result.totalCount > 0 ? Math.max(1, Math.ceil(result.totalCount / result.pageSize)) : 1; if (result.items.length === 0 && page > nearestPage) { this.loadModelPage(search, nearestPage); return; } this.applyModelPage(result); }, error: error => { if (requestVersion === this.modelRequestVersion) this.setError(error); } }); }
   private applyModelPage(page: { items: ProductModelItem[]; totalCount: number; pageNumber: number; pageSize: number }): void { this.models = page.items; this.modelTotal = page.totalCount; this.modelPage = page.pageNumber; this.modelPageSize = page.pageSize; }
-  private loadModelStageOptions(search: string, page: number): Observable<void> { this.modelStageSelectorLoading = true; return this.api.searchSubStages(search, page, this.modelStagePageSize).pipe(map(result => this.applyModelStageOptionPage(result, search)), catchError(error => { this.setError(error); return EMPTY; }), finalize(() => this.modelStageSelectorLoading = false)); }
-  private applyModelStageOptionPage(result: { items: SubStageOption[]; totalCount: number; pageNumber: number; pageSize: number }, search: string): void { this.modelStageSearch = search; this.modelStagePage = result.pageNumber; this.modelStageTotal = result.totalCount; this.modelStageOptions = result.items; result.items.forEach(option => this.modelStageOptionCache.set(option.id, option)); }
-  private ensureSelectedModelStage(item: ModelStageItem): void { if (!this.modelStageOptions.some(option => option.id === item.subStageId)) this.modelStageOptions = [{ id: item.subStageId, mainStageId: '', code: item.subStageCode || '—', name: item.subStageName || 'مرحلة مرتبطة', capacity: 0, sequenceOrder: 0, isActive: false }, ...this.modelStageOptions]; }
+  private loadAvailableStageCatalog(): void {
+    const requestVersion = ++this.availableStagesRequestVersion;
+    this.availableStagesLoading = true;
+    this.availableStagesError = '';
+    this.fetchAvailableStageCatalog().pipe(
+      finalize(() => { if (requestVersion === this.availableStagesRequestVersion) this.availableStagesLoading = false; }),
+      takeUntil(this.destroy$)
+    ).subscribe({
+      next: options => {
+        if (requestVersion !== this.availableStagesRequestVersion) return;
+        options.forEach(option => this.availableStageOptionCache.set(option.id, option));
+        this.availableStageCatalog = options;
+        this.rebuildAvailableStagePage();
+      },
+      error: error => {
+        if (requestVersion === this.availableStagesRequestVersion) {
+          this.availableStagesError = error instanceof Error ? error.message : 'تعذر تحميل المراحل المتاحة للربط.';
+        }
+      }
+    });
+  }
+  private fetchAvailableStageCatalog(): Observable<SubStageOption[]> {
+    return this.api.searchSubStages('', 1, 200).pipe(
+      switchMap(firstPage => {
+        const pageSize = Math.max(1, firstPage.pageSize || 200);
+        const pageCount = Math.ceil(firstPage.totalCount / pageSize);
+        if (pageCount <= 1) return of(firstPage.items ?? []);
+        const remainingPages = Array.from({ length: pageCount - 1 }, (_, index) => this.api.searchSubStages('', index + 2, pageSize));
+        return forkJoin(remainingPages).pipe(map(pages => [firstPage, ...pages].flatMap(page => page.items ?? [])));
+      })
+    );
+  }
+  private rebuildAvailableStagePage(): void {
+    const linkedStageIds = new Set(this.stages.filter(stage => stage.id !== this.editModelStageId).map(stage => stage.subStageId));
+    const available = this.availableStageCatalog
+      .filter(option => !linkedStageIds.has(option.id))
+      .filter(option => matchesSearchTerm(this.availableStagesSearch, [option.name, option.code]))
+      .sort((left, right) => left.sequenceOrder - right.sequenceOrder || left.name.localeCompare(right.name));
+    this.availableStagesTotal = available.length;
+    const maxPage = Math.max(1, Math.ceil(available.length / this.availableStagesPageSize));
+    if (this.availableStagesPage > maxPage) this.availableStagesPage = 1;
+    const start = (this.availableStagesPage - 1) * this.availableStagesPageSize;
+    this.availableStageOptions = available.slice(start, start + this.availableStagesPageSize);
+  }
+  private toAvailableOption(item: ModelStageItem): SubStageOption {
+    return { id: item.subStageId, mainStageId: '', code: item.subStageCode || '—', name: item.subStageName || 'مرحلة مرتبطة', capacity: 0, sequenceOrder: item.stageOrder, isActive: item.isActive };
+  }
+  linkedStageName(item: ModelStageItem): string { return item.subStageName || this.availableStageOptionCache.get(item.subStageId)?.name || '-'; }
+  linkedStageCode(item: ModelStageItem): string { return item.subStageCode || this.availableStageOptionCache.get(item.subStageId)?.code || '—'; }
   private upsert<T extends { id: string }>(items: readonly T[], item: T, sortKey?: keyof T): T[] { const next = items.some(candidate => candidate.id === item.id) ? items.map(candidate => candidate.id === item.id ? item : candidate) : [...items, item]; return sortKey ? [...next].sort((left, right) => Number(left[sortKey]) - Number(right[sortKey])) : next; }
   private markInactive<T extends { id: string; isActive: boolean }>(items: readonly T[], id: string): T[] { return items.map(item => item.id === id ? { ...item, isActive: false } : item); }
   private setError(error: unknown): void { this.error = error instanceof Error ? error.message : 'تعذر تحميل أو حفظ البيانات.'; }
   private refreshModelsFromRealtime(): void {
     this.loadModelPage(this.modelSearch, this.modelPage);
     if (this.selected) this.select(this.selected);
-    this.loadModelStageOptions(this.modelStageSearch, this.modelStagePage).pipe(takeUntil(this.destroy$)).subscribe();
+    this.loadAvailableStageCatalog();
   }
   private refreshStagesFromRealtime(): void {
     const factoryId = this.stageForm.controls.factoryId.value;

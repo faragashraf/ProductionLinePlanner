@@ -193,8 +193,30 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
     });
   }
 
+  get canView(): boolean {
+    return this.permissionsService.hasPermission(this.permissions.production.view) ||
+      this.permissionsService.hasPermission(this.permissions.production.record) ||
+      this.permissionsService.hasPermission(this.permissions.production.approve);
+  }
+
+  get isApproved(): boolean {
+    const draft = this.currentDailyDraft;
+    return !!draft && draft.stages.length > 0 && draft.stages.every(stage => stage.status === 'Approved');
+  }
+
+  get canEditDraft(): boolean {
+    return this.permissionsService.hasPermission(this.permissions.production.record) &&
+      !this.isApproved &&
+      !this.operationsLoading &&
+      !this.saving &&
+      !this.approving &&
+      !this.cancelling;
+  }
+
+  get isReadOnly(): boolean { return !this.canEditDraft; }
+
   get canOverrideParticipants(): boolean {
-    return this.permissionsService.hasPermission(this.permissions.assignments.manage);
+    return this.canEditDraft && this.permissionsService.hasPermission(this.permissions.assignments.manage);
   }
 
   get visibleProductionLines(): ProductionLineOption[] {
@@ -251,15 +273,8 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
     return !!this.currentDailyDraft;
   }
 
-  get isDailyOperationApproved(): boolean {
-    const draft = this.currentDailyDraft;
-    return !!draft && draft.stages.length > 0 && draft.stages.every(stage => stage.status === 'Approved');
-  }
-
-  get isDailyOperationReadOnly(): boolean {
-    const draft = this.currentDailyDraft;
-    return !!draft && draft.stages.some(stage => stage.status === 'Approved');
-  }
+  get isDailyOperationApproved(): boolean { return this.isApproved; }
+  get isDailyOperationReadOnly(): boolean { return this.isReadOnly; }
 
   get canApproveDailyOperation(): boolean {
     const draft = this.currentDailyDraft;
@@ -275,11 +290,9 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
 
   get canCancelDailyOperationApproval(): boolean {
     return this.permissionsService.hasPermission(this.permissions.production.approve) &&
-      this.isDailyOperationApproved &&
-      !this.operationsLoading &&
-      !this.saving &&
-      !this.approving &&
-      !this.cancelling;
+      this.isApproved &&
+      !this.cancelling &&
+      this.hasApprovalConcurrencyData;
   }
 
   get isDailyApprovalCancelled(): boolean {
@@ -444,7 +457,7 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
   }
 
   applyEqualDistribution(stage: EditableDailyStage, markChanged = true): void {
-    if (stage.compensationMode !== 'SharedPercentage') return;
+    if (!this.canEditDraft || stage.compensationMode !== 'SharedPercentage') return;
     const participants = stage.workers
       .filter(worker => worker.includedInProduction !== false && worker.isProductionReady && worker.workerMinutes > 0)
       .sort((left, right) => left.workerId.localeCompare(right.workerId));
@@ -471,6 +484,7 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
   }
 
   updateWorkerPercentage(stage: EditableDailyStage, worker: EditableDailyWorker, value: number | null): void {
+    if (!this.canEditDraft) return;
     worker.percentage = this.numericValue(value);
     worker.quantity = this.isValidLineQuantity() && worker.percentage !== null
       ? this.roundQuantity(this.lineQuantity! * worker.percentage / 100)
@@ -480,6 +494,7 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
   }
 
   updateWorkerQuantity(stage: EditableDailyStage, worker: EditableDailyWorker, value: number | null): void {
+    if (!this.canEditDraft) return;
     worker.quantity = this.numericValue(value);
     worker.percentage = this.isValidLineQuantity() && worker.quantity !== null
       ? this.roundPercentage(worker.quantity / this.lineQuantity! * 100)
@@ -489,6 +504,7 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
   }
 
   stageChanged(): void {
+    if (!this.canEditDraft) return;
     this.hasUnsavedChanges = true;
     this.error = '';
     this.validationMessages = [];
@@ -496,11 +512,13 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
   }
 
   lineQuantityChanged(): void {
+    if (!this.canEditDraft) return;
     this.stages.forEach(stage => this.synchronizeStageQuantities(stage));
     this.stageChanged();
   }
 
   calculatePreview(): void {
+    if (!this.canEditDraft) return;
     const validation = this.validateOperation();
     this.validationMessages = validation;
     if (validation.length || this.previewing) return;
@@ -524,7 +542,7 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
   }
 
   saveDailyDraft(): void {
-    if (!this.isPreviewCurrent || !this.preview || this.saving) {
+    if (!this.canEditDraft || !this.isPreviewCurrent || !this.preview || this.saving) {
       this.error = 'احسب معاينة حديثة أولًا؛ أي تغيير في المرحلة أو الكمية يجعل الحفظ غير صالح.';
       return;
     }
@@ -943,6 +961,11 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
 
   private get currentDailyDraft(): DailyProductionDraft | null {
     return this.savedDraft ?? this.operations?.existingDraft ?? null;
+  }
+
+  private get hasApprovalConcurrencyData(): boolean {
+    const draft = this.currentDailyDraft;
+    return !!draft && draft.stages.length > 0 && draft.stages.every(stage => !!stage.id && !!stage.concurrencyToken);
   }
 
   private allocationParticipants(stage: EditableDailyStage): EditableDailyWorker[] {
