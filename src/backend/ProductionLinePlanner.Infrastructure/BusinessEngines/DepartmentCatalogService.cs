@@ -80,13 +80,13 @@ public sealed class DepartmentCatalogService(
         if (normalizedCode is not null && string.IsNullOrWhiteSpace(normalizedCode)) return Result<DepartmentDto>.Failure(new Error("ValidationError", "Code cannot be empty."));
         if (normalizedName is not null && string.IsNullOrWhiteSpace(normalizedName)) return Result<DepartmentDto>.Failure(new Error("ValidationError", "NameAr cannot be empty."));
         if (sequenceOrder is < 0) return Result<DepartmentDto>.Failure(new Error("ValidationError", "SequenceOrder must be zero or greater."));
-        if (normalizedCode is not null && !string.Equals(normalizedCode, entity.Code, StringComparison.OrdinalIgnoreCase) && await HasCodeConflictAsync(entity.FactoryId, normalizedCode, entity.Id, cancellationToken)) return Result<DepartmentDto>.Failure(new Error("Conflict", "Department code must be unique within the factory."));
+        if (normalizedCode is not null && !string.Equals(normalizedCode, entity.Code, StringComparison.Ordinal)) return Result<DepartmentDto>.Failure(new Error("ValidationError", "لا يمكن تعديل الكود بعد إنشاء السجل."));
         if (isActive is false && entity.IsActive && await dbContext.ProductionLines.AnyAsync(x => x.DepartmentId == entity.Id && x.IsActive, cancellationToken)) return Result<DepartmentDto>.Failure(new Error("Conflict", "لا يمكن تعطيل القسم لوجود خطوط إنتاج نشطة مرتبطة به."));
 
         var before = DepartmentAudit(entity);
         if (normalizedCode is not null || normalizedName is not null || nameEn is not null || sequenceOrder is not null)
         {
-            entity.Update(normalizedCode ?? entity.Code, normalizedName ?? entity.NameAr, nameEn ?? entity.NameEn, sequenceOrder ?? entity.SequenceOrder);
+            entity.Update(normalizedName ?? entity.NameAr, nameEn ?? entity.NameEn, sequenceOrder ?? entity.SequenceOrder);
         }
         if (isActive is not null && isActive.Value != entity.IsActive)
         {

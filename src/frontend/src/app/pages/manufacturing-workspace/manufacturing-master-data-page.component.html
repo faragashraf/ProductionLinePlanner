@@ -48,22 +48,45 @@
         <plp-expandable-form title="إعداد مرحلة الموديل" [summary]="selected.code + ' — ' + selected.name" openLabel="إضافة مرحلة للموديل" [expanded]="modelStageFormVisible" [saving]="saving" [error]="error" (expandedChange)="onModelStageFormVisibility($event)">
           <form [formGroup]="modelStageForm" (ngSubmit)="saveModelStage()" class="master-page__form">
             <div class="master-page__model-stage-selector">
-              <label for="availableStagesSearch">المراحل المتاحة للربط
-                <input id="availableStagesSearch" pInputText type="search" [value]="availableStagesSearch" (input)="onAvailableStagesSearch($any($event.target).value)" placeholder="ابحث باسم أو كود المرحلة">
-              </label>
+              <label for="modelStageSubStage">المراحل المتاحة للربط</label>
+              <p-dropdown
+                #modelStageDropdown
+                inputId="modelStageSubStage"
+                formControlName="subStageId"
+                [options]="availableStageChoices"
+                optionLabel="name"
+                optionValue="id"
+                [filter]="true"
+                filterBy="name,code"
+                [showClear]="true"
+                [loading]="availableStagesLoading"
+                [disabled]="saving || availableStagesLoading"
+                [resetFilterOnHide]="true"
+                [emptyMessage]="'لا توجد مراحل متاحة للربط'"
+                [emptyFilterMessage]="'لا توجد مراحل مطابقة للبحث'"
+                placeholder="اختر المرحلة"
+                appendTo="body"
+                styleClass="master-page__stage-dropdown"
+                panelStyleClass="master-page__stage-dropdown-panel"
+                [panelStyle]="stageDropdownPanelStyle"
+                scrollHeight="10rem"
+                [baseZIndex]="2000"
+                (onShow)="syncStageDropdownPanelWidth()"
+                (onFilter)="onAvailableStagesFilter($event.filter)"
+              >
+                <ng-template pTemplate="selectedItem" let-stage>
+                  <span class="master-page__stage-selected" *ngIf="stage"><span class="master-page__stage-selected-name">{{ stage.name }}</span><span class="plp-code">{{ stage.code }}</span></span>
+                </ng-template>
+                <ng-template pTemplate="item" let-stage>
+                  <div class="master-page__stage-option">
+                    <strong>{{ stage.name }}</strong>
+                    <span class="plp-code">{{ stage.code }}</span>
+                    <small *ngIf="stage.departmentNameAr || stage.productionLineName">{{ stage.departmentNameAr }}<ng-container *ngIf="stage.departmentNameAr && stage.productionLineName"> · </ng-container>{{ stage.productionLineName }}</small>
+                  </div>
+                </ng-template>
+              </p-dropdown>
               <p class="master-page__loading" *ngIf="availableStagesLoading">جارٍ تحميل المراحل المتاحة.</p>
-              <p class="master-page__selector-error" *ngIf="availableStagesError">{{ availableStagesError }} <button pButton type="button" class="p-button-text p-button-sm" label="إعادة المحاولة" (click)="retryAvailableStages()"></button></p>
-              <div class="master-page__available-stage-list" role="listbox" aria-label="نتائج المراحل المتاحة" *ngIf="!availableStagesLoading && !availableStagesError && availableStageChoices.length">
-                <button type="button" class="master-page__available-stage" *ngFor="let item of availableStageChoices" [class.master-page__available-stage--selected]="modelStageForm.controls.subStageId.value === item.id" [attr.aria-selected]="modelStageForm.controls.subStageId.value === item.id" (click)="selectAvailableStage(item)">
-                  <span class="plp-code">{{ item.code }}</span><strong>{{ item.name }}</strong><small *ngIf="item.productionLineName">{{ item.productionLineName }}</small>
-                </button>
-              </div>
-              <p class="master-page__empty" *ngIf="!availableStagesLoading && !availableStagesError && !availableStageChoices.length">لا توجد مراحل متاحة مطابقة للبحث.</p>
-              <div class="master-page__selector-pagination plp-action-group" *ngIf="availableStagesTotal > availableStagesPageSize">
-                <button pButton type="button" class="p-button-text" label="السابق" icon="pi pi-chevron-right" [disabled]="availableStagesLoading || availableStagesPage <= 1" (click)="changeAvailableStagesPage(-1)"></button>
-                <span>صفحة {{ availableStagesPage }} من {{ availableStagesPageCount }}</span>
-                <button pButton type="button" class="p-button-text" label="التالي" icon="pi pi-chevron-left" [disabled]="availableStagesLoading || availableStagesPage >= availableStagesPageCount" (click)="changeAvailableStagesPage(1)"></button>
-              </div>
+              <p class="master-page__selector-error" *ngIf="availableStagesError">{{ availableStagesError }} <button pButton type="button" class="p-button-text p-button-sm" label="إعادة المحاولة" [disabled]="saving" (click)="retryAvailableStages()"></button></p>
             </div>
             <p class="master-page__selected-stage" *ngIf="selectedAvailableStage as selectedStage">المرحلة المختارة: <span class="plp-code">{{ selectedStage.code }}</span> — {{ selectedStage.name }}</p>
             <label>الترتيب<input type="number" formControlName="stageOrder"></label>

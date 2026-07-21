@@ -38,6 +38,35 @@ public sealed class Structure001HierarchyTests
     }
 
     [Fact]
+    public async Task Department_and_sub_stage_reject_code_mutation_without_partially_updating_the_entity()
+    {
+        await using var db = CreateDb();
+        var factory = new Factory(Guid.NewGuid(), "Factory", "FAC");
+        var department = new Department(Guid.NewGuid(), factory.Id, "CUT", "القص", null, 1);
+        var line = new ProductionLine(Guid.NewGuid(), factory.Id, "Line", 1, departmentId: department.Id);
+        var mainStage = new MainStage(Guid.NewGuid(), line.Id, "Main", 1);
+        var subStage = new SubStage(Guid.NewGuid(), mainStage.Id, "Sew", "SEW", 1, 1, productionLineId: line.Id);
+        db.AddRange(factory, department, line, mainStage, subStage);
+        await db.SaveChangesAsync();
+        var actor = Guid.NewGuid();
+
+        var departmentCatalog = new DepartmentCatalogService(db, new AuditEngine(db));
+        var departmentUpdate = await departmentCatalog.UpdateAsync(department.Id, "cut", "اسم لا يجب حفظه", null, null, null, actor);
+        var stageCatalog = new ProductionStageCatalogService(db, new AuditEngine(db), new StageDependencyInspector(db));
+        var stageUpdate = await stageCatalog.UpdateSubStageAsync(subStage.Id, " sew", "اسم لا يجب حفظه", null, null, null, actor);
+
+        Assert.True(departmentUpdate.IsFailure);
+        Assert.True(stageUpdate.IsFailure);
+        db.ChangeTracker.Clear();
+        var persistedDepartment = await db.Departments.SingleAsync(x => x.Id == department.Id);
+        var persistedStage = await db.SubStages.SingleAsync(x => x.Id == subStage.Id);
+        Assert.Equal("CUT", persistedDepartment.Code);
+        Assert.Equal("القص", persistedDepartment.NameAr);
+        Assert.Equal("SEW", persistedStage.Code);
+        Assert.Equal("Sew", persistedStage.Name);
+    }
+
+    [Fact]
     public async Task Operational_stage_uses_line_group_and_next_legacy_stage_code()
     {
         await using var db = CreateDb();

@@ -52,14 +52,6 @@ public class Factory
         UpdatedAtUtc = atUtc ?? DateTime.UtcNow;
     }
 
-    public void SetCode(string code, DateTime? atUtc = null)
-    {
-        if (string.IsNullOrWhiteSpace(code))
-            throw new ArgumentException("Factory code is required.", nameof(code));
-        Code = code.Trim();
-        UpdatedAtUtc = atUtc ?? DateTime.UtcNow;
-    }
-
     public void SetLocation(string? location, DateTime? atUtc = null)
     {
         Location = location?.Trim();

@@ -7,6 +7,8 @@ import { TableModule } from 'primeng/table';
 import { DialogModule } from 'primeng/dialog';
 import { CalendarModule } from 'primeng/calendar';
 import { DropdownModule } from 'primeng/dropdown';
+import { TreeModule } from 'primeng/tree';
+import { ContextMenuModule } from 'primeng/contextmenu';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { SharedModule } from '../../shared/shared.module';
 import { ManufacturingWorkspaceLayoutComponent } from './manufacturing-workspace-layout.component';
@@ -57,6 +59,8 @@ import { ReportsResultsToolbarComponent } from '../reports-workspace/reports-res
     DialogModule,
     CalendarModule,
     DropdownModule,
+    TreeModule,
+    ContextMenuModule,
     FormsModule,
     ReactiveFormsModule,
     PlpResponsiveTableDirective,
