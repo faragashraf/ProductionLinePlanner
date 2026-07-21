@@ -31,18 +31,18 @@
 .master-page__model-stage-selector{display:grid;gap:.5rem;min-inline-size:0}
 .master-page__model-stage-selector label{display:grid;gap:.25rem}
 .master-page__stage-dropdown{inline-size:100%}
-.master-page__stage-selected{align-items:center;display:flex;gap:.4rem;min-inline-size:0;overflow:hidden}
+.master-page__stage-selected{display:grid;line-height:1.15;min-inline-size:0;overflow:hidden;row-gap:.12rem;text-align:start}
+.master-page__stage-selected-heading,.master-page__stage-option-heading{align-items:center;display:flex;gap:.4rem;min-inline-size:0;overflow:hidden}
 .master-page__stage-selected-name{min-inline-size:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .master-page__stage-selected .plp-code{flex:0 0 auto}
+.master-page__stage-selected small{color:#667085;font-size:.7rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .master-page__stage-option{display:grid;gap:.1rem;min-inline-size:0;padding-block:.05rem}
 .master-page__stage-option strong,.master-page__stage-option .plp-code,.master-page__stage-option small{min-inline-size:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.master-page__stage-option strong{flex:1 1 auto}
 .master-page__stage-option strong{font-size:.9rem;line-height:1.25}
-.master-page__stage-option .plp-code{color:#475467;font-size:.78rem}
+.master-page__stage-option .plp-code{color:#475467;flex:0 0 auto;font-size:.78rem}
 .master-page__stage-option small{color:#667085;font-size:.72rem;line-height:1.25}
-:host::ng-deep .master-page__stage-dropdown-panel{direction:rtl;max-block-size:min(13rem,calc(100vh - 6rem));max-inline-size:calc(100vw - 2rem);overflow:hidden}
-:host::ng-deep .master-page__stage-dropdown-panel .p-dropdown-header{padding:.45rem .55rem}
-:host::ng-deep .master-page__stage-dropdown-panel .p-dropdown-filter-container{inline-size:100%}
-:host::ng-deep .master-page__stage-dropdown-panel .p-dropdown-filter{inline-size:100%;min-block-size:2.25rem;padding-inline:2rem .65rem}
+:host::ng-deep .master-page__stage-dropdown-panel{direction:rtl;max-block-size:min(19rem,calc(100vh - 2rem));max-inline-size:calc(100vw - 1rem);overflow:hidden}
 :host::ng-deep .master-page__stage-dropdown-panel .p-dropdown-items-wrapper{max-block-size:min(10rem,calc(100vh - 10rem)) !important;overflow-y:auto}
 :host::ng-deep .master-page__stage-dropdown-panel .p-dropdown-item{min-inline-size:0;padding:.42rem .65rem}
 .master-page__selected-stage{margin:0}

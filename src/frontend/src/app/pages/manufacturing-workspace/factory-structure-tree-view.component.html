@@ -1,6 +1,6 @@
 <section class="factory-structure-tree-view" dir="rtl">
   <p-tree
-    [value]="nodes"
+    [value]="selectableNodes(nodes)"
     selectionMode="single"
     [(selection)]="selectedNode"
     [loading]="loading"
@@ -11,7 +11,7 @@
     (onNodeSelect)="onNodeSelect($event)"
   >
     <ng-template pTemplate="default" let-node>
-      <div class="factory-structure-node" [class.factory-structure-node--no-actions]="!showActions" [class.factory-structure-node--not-selectable]="!isSelectable(node)" [class.factory-structure-node--inactive]="!node.data.isActive" [class.factory-structure-node--department]="node.data.entityType === 'department'" [class.factory-structure-node--line]="node.data.entityType === 'line'" [attr.aria-disabled]="!isSelectable(node)">
+      <div class="factory-structure-node" [class.factory-structure-node--no-actions]="!showActions" [class.factory-structure-node--not-selectable]="!isSelectable(node)" [class.factory-structure-node--inactive]="!node.data.isActive" [class.factory-structure-node--department]="node.data.entityType === 'department'" [class.factory-structure-node--line]="node.data.entityType === 'line'" [attr.aria-disabled]="!isSelectable(node)" [attr.data-selectable]="isSelectable(node)">
         <span class="factory-structure-node__type-icon" [class.factory-structure-node__type-icon--factory]="node.data.entityType === 'factory'"><i [class]="nodeIcon(node.data.entityType)" aria-hidden="true"></i></span>
         <span class="factory-structure-node__content">
           <strong>{{ node.data.name }}</strong>

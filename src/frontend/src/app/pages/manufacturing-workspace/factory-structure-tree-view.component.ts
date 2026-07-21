@@ -25,11 +25,7 @@ export class FactoryStructureTreeViewComponent {
   }
 
   onNodeSelect(event: { node: FactoryStructureTreeNode }): void {
-    if (!this.isSelectable(event.node)) {
-      this.selectedNode = null;
-      this.selectedNodeChange.emit(null);
-      return;
-    }
+    if (!this.isSelectable(event.node)) return;
     this.selectedNode = event.node;
     this.selectedNodeChange.emit(event.node);
     this.nodeSelect.emit(event.node);
@@ -52,5 +48,13 @@ export class FactoryStructureTreeViewComponent {
   isSelectable(node: FactoryStructureTreeNode): boolean {
     const type = node.data?.entityType;
     return !!type && this.selectableTypes.includes(type);
+  }
+
+  selectableNodes(nodes: readonly FactoryStructureTreeNode[]): FactoryStructureTreeNode[] {
+    nodes.forEach(node => {
+      node.selectable = this.isSelectable(node);
+      if (node.children?.length) this.selectableNodes(node.children as FactoryStructureTreeNode[]);
+    });
+    return nodes as FactoryStructureTreeNode[];
   }
 }

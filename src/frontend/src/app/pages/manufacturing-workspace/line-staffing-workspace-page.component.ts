@@ -8,7 +8,7 @@ import {
 } from '@angular/core';
 import { FormBuilder, Validators } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
-import { Subject, finalize, takeUntil } from 'rxjs';
+import { Subject, finalize, forkJoin, takeUntil } from 'rxjs';
 import { PERMISSIONS } from '../../core/config/permission-identifiers';
 import { STAGE_COST_TERMINOLOGY } from '../../core/config/stage-cost-terminology';
 import {
@@ -32,6 +32,7 @@ import {
   FormSubmissionValidationService,
   RequiredFieldRule,
 } from '../../shared/forms/form-submission-validation.service';
+import { buildFactoryStructureTree, FactoryStructureTreeNode, findFactoryStructureNode } from './factory-structure-tree.adapter';
 
 type StageFilter = 'all' | 'without-workers' | 'default' | 'review';
 type AssignmentDialogMode = 'default' | 'remove-default';
@@ -74,6 +75,8 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
   departments: DepartmentItem[] = [];
   productionLines: ProductionLineOption[] = [];
   productModels: ProductModelItem[] = [];
+  staffingStructureTreeNodes: FactoryStructureTreeNode[] = [];
+  selectedStaffingStructureNode: FactoryStructureTreeNode | null = null;
   plan: LineStaffingPlan | null = null;
 
   selectedFactoryId = '';
@@ -214,6 +217,10 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
       this.selectedProductionLineId &&
       this.selectedProductModelId,
     );
+  }
+
+  get staffingFiltersActive(): boolean {
+    return !!this.selectedStaffingStructureNode || !!this.selectedProductModelId || this.stageFilter !== 'all' || !!this.stageSearch.trim();
   }
 
   get staffingReferenceDate(): string {
@@ -380,16 +387,12 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
     this.selectedDepartmentId = '';
     this.selectedProductionLineId = '';
     this.selectedProductModelId = '';
-    this.departments = [];
-    this.productionLines = [];
     this.productModels = [];
     this.departmentRequestVersion++;
     this.productionLineRequestVersion++;
     this.productModelRequestVersion++;
     this.clearPlan();
-    if (!factoryId) return;
-
-    this.loadDepartments();
+    if (!factoryId) this.selectedStaffingStructureNode = null;
   }
 
   selectDepartment(departmentId: string): void {
@@ -397,13 +400,11 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
     this.selectedDepartmentId = departmentId;
     this.selectedProductionLineId = '';
     this.selectedProductModelId = '';
-    this.productionLines = [];
     this.productModels = [];
     this.productionLineRequestVersion++;
     this.productModelRequestVersion++;
     this.clearPlan();
     if (!departmentId) return;
-    this.loadProductionLines();
   }
 
   selectProductionLine(lineId: string): void {
@@ -421,6 +422,29 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
   selectProductModel(modelId: string): void {
     this.selectedProductModelId = modelId;
     this.clearPlan();
+  }
+
+  selectStaffingStructure(node: FactoryStructureTreeNode): void {
+    const data = node.data;
+    if (!data) return;
+    this.selectedStaffingStructureNode = node;
+    if (data.entityType === 'factory') { this.selectFactory(data.entityId); return; }
+    if (data.entityType === 'department') {
+      if (data.parentId !== this.selectedFactoryId) this.selectFactory(data.parentId ?? '');
+      this.selectDepartment(data.entityId);
+      return;
+    }
+    const line = data.source as ProductionLineOption;
+    if (line.factoryId !== this.selectedFactoryId) this.selectFactory(line.factoryId);
+    if ((line.departmentId ?? '') !== this.selectedDepartmentId) this.selectDepartment(line.departmentId ?? '');
+    this.selectProductionLine(line.id);
+  }
+
+  clearStaffingFilters(): void {
+    this.selectedStaffingStructureNode = null;
+    this.stageFilter = 'all';
+    this.stageSearch = '';
+    this.selectFactory('');
   }
 
   loadProductStages(
@@ -942,15 +966,22 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
 
   private loadFactories(): void {
     this.factoriesLoading = true;
-    this.masterData
-      .factories()
+    this.departmentsLoading = true;
+    this.linesLoading = true;
+    forkJoin({ factories: this.masterData.factories(), departments: this.masterData.departments(undefined, false), lines: this.masterData.allProductionLines() })
       .pipe(
-        finalize(() => (this.factoriesLoading = false)),
+        finalize(() => { this.factoriesLoading = false; this.departmentsLoading = false; this.linesLoading = false; }),
         takeUntil(this.destroy$),
       )
       .subscribe({
-        next: (factories) =>
-          (this.factories = factories.filter((factory) => factory.isActive)),
+        next: data => {
+          this.factories = data.factories.filter(factory => factory.isActive);
+          this.departments = data.departments.filter(department => department.isActive !== false);
+          this.productionLines = data.lines.filter(line => line.isActive);
+          this.staffingStructureTreeNodes = buildFactoryStructureTree({ factories: this.factories, departments: this.departments, lines: this.productionLines, eligibility: new Map() });
+          const selectedId = this.selectedStaffingStructureNode?.data?.entityId;
+          this.selectedStaffingStructureNode = selectedId ? findFactoryStructureNode(this.staffingStructureTreeNodes, selectedId) ?? null : null;
+        },
         error: (error) =>
           (this.planError = this.formValidation.serverMessage(
             error,

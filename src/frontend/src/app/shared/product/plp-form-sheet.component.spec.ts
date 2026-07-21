@@ -90,6 +90,26 @@ describe('PlpFormSheetComponent', () => {
     expect(visibleChange).not.toHaveBeenCalled();
   });
 
+  it('keeps the PrimeNG dialog close button functional with the shared close contract', () => {
+    setViewportMode(false);
+    fixture = TestBed.createComponent(PlpFormSheetComponent);
+    fixture.componentRef.setInput('visible', true);
+    fixture.detectChanges();
+    const visibleChange = jasmine.createSpy('visibleChange');
+    fixture.componentInstance.visibleChange.subscribe(visibleChange);
+
+    const closeButton = document.body.querySelector('.p-dialog .p-dialog-header-close') as HTMLButtonElement;
+    const closeIcon = closeButton.querySelector('.p-dialog-header-close-icon') as HTMLElement;
+    expect(closeButton).not.toBeNull();
+    expect(closeButton.getAttribute('aria-label')).toBe('إغلاق النافذة');
+    expect(closeIcon).not.toBeNull();
+    expect(closeIcon.classList).toContain('p-dialog-header-close-icon');
+
+    fixture.componentInstance.handleVisibleChange(false);
+
+    expect(visibleChange).toHaveBeenCalledWith(false);
+  });
+
   it('shows one success toast only after a requested save closes successfully', () => {
     setViewportMode(true);
     fixture = TestBed.createComponent(PlpFormSheetComponent);

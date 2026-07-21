@@ -5,41 +5,68 @@
     [compact]="true"
   ></plp-page-header>
 
-  <p-card>
-    <div class="daily-production-operations__context plp-aligned-control-grid">
-      <label class="daily-production-operations__context-field daily-production-operations__context-field--date plp-aligned-control-grid__field"><span class="daily-production-operations__field-label plp-aligned-control-grid__label">تاريخ الإنتاج</span>
-        <input type="date" [ngModel]="productionDate" (ngModelChange)="changeProductionDate($event)" [disabled]="attendanceSyncing || operationsLoading">
+  <app-manufacturing-filter-card
+    title="فلاتر تشغيل الإنتاج اليومي"
+    searchLabel="البحث في المراحل"
+    searchPlaceholder="ابحث باسم أو كود المرحلة"
+    [searchValue]="stageSearch"
+    statusLabel="حالة المرحلة"
+    [statusOptions]="dailyStageFilterOptions"
+    [statusValue]="stageFilter"
+    [clearDisabled]="!dailyFiltersActive"
+    (searchValueChange)="stageSearch = $event"
+    (statusValueChange)="stageFilter = $any($event)"
+    (clearFilters)="clearDailyFilters()"
+  >
+    <label filter-leading>تاريخ الإنتاج<input type="date" [ngModel]="productionDate" (ngModelChange)="changeProductionDate($event)" [disabled]="attendanceSyncing || operationsLoading"></label>
+    <app-factory-structure-tree-selector filter-structure [nodes]="dailyStructureTreeNodes" [(selectedNode)]="selectedDailyStructureNode" [loading]="factoriesLoading || linesLoading" (nodeSelect)="selectDailyStructure($event)" (selectedNodeChange)="!$event && clearDailyFilters()"></app-factory-structure-tree-selector>
+    <div filter-extra>
+      <label>الموديل<select [ngModel]="selectedProductModelId" (ngModelChange)="selectProductModel($event)" [disabled]="!selectedProductionLineId || modelsLoading || operationsLoading"><option value="">اختر الموديل</option><option *ngFor="let model of activeProductModels; trackBy: trackById" [value]="model.id">{{ model.code }} — {{ model.name }}</option></select></label>
+      <label>
+        <span>المرحلة</span>
+        <p-dropdown
+          [options]="dailyStageOptions"
+          [ngModel]="selectedStageFilterId"
+          (ngModelChange)="selectDailyStageFilter($event)"
+          optionLabel="stageName"
+          optionValue="productModelStageId"
+          filterBy="stageName,stageCode,mainStageName"
+          filterPlaceholder="ابحث باسم أو كود المرحلة"
+          placeholder="جميع المراحل"
+          emptyMessage="لا توجد مراحل متاحة"
+          emptyFilterMessage="لا توجد مراحل مطابقة"
+          [filter]="true"
+          [showClear]="true"
+          [disabled]="!operations || operationsLoading || !dailyStageOptions.length"
+          appendTo="body"
+          styleClass="app-full-width-select app-searchable-select daily-production-operations__stage-filter"
+          panelStyleClass="app-searchable-select-panel daily-production-operations__stage-filter-panel"
+          ariaLabel="فلتر المرحلة"
+        >
+          <ng-template pTemplate="selectedItem" let-stage>
+            <span class="app-select-value daily-production-operations__stage-filter-value" *ngIf="stage">
+              <strong>{{ stage.stageName }}</strong>
+              <small>{{ stage.stageCode }} · ترتيب {{ stage.stageOrder }}</small>
+            </span>
+          </ng-template>
+          <ng-template pTemplate="item" let-stage>
+            <span class="app-select-option daily-production-operations__stage-filter-option">
+              <span><strong>{{ stage.stageName }}</strong><code>{{ stage.stageCode }}</code></span>
+              <small>{{ stage.mainStageName }} · ترتيب {{ stage.stageOrder }}</small>
+            </span>
+          </ng-template>
+        </p-dropdown>
+        <small>فلتر عرض فقط؛ لا يغيّر المسودة أو نتيجة المعاينة.</small>
       </label>
-      <div class="daily-production-operations__attendance-action daily-production-operations__context-field daily-production-operations__context-field--attendance plp-aligned-control-grid__field">
-        <span class="daily-production-operations__field-label plp-aligned-control-grid__label">الحضور لتاريخ الإنتاج</span>
-        <button pButton type="button" class="p-button-outlined" [label]="attendanceSyncing ? 'جارٍ مزامنة الحضور…' : 'مزامنة حضور التاريخ'" icon="pi pi-refresh" [loading]="attendanceSyncing" [disabled]="attendanceSyncing || !productionDate" (click)="synchronizeAttendance()"></button>
-        <small [class.is-confirmed]="attendanceSyncedForDate === productionDate">{{ attendanceSyncedForDate === productionDate ? 'تمت المزامنة لهذا التاريخ' : 'المزامنة اليدوية مطلوبة قبل التحميل' }}</small>
-      </div>
-      <label class="daily-production-operations__context-field daily-production-operations__context-field--factory plp-aligned-control-grid__field"><span class="daily-production-operations__field-label plp-aligned-control-grid__label">المصنع</span>
-        <select [ngModel]="selectedFactoryId" (ngModelChange)="selectFactory($event)" [disabled]="factoriesLoading || operationsLoading">
-          <option value="">اختر المصنع</option>
-          <option *ngFor="let factory of factories; trackBy: trackById" [value]="factory.id">{{ factory.code }} — {{ factory.name }}</option>
-        </select>
-      </label>
-      <label class="daily-production-operations__context-field daily-production-operations__context-field--line plp-aligned-control-grid__field"><span class="daily-production-operations__field-label plp-aligned-control-grid__label">خط الإنتاج</span>
-        <select [ngModel]="selectedProductionLineId" (ngModelChange)="selectProductionLine($event)" [disabled]="!selectedFactoryId || linesLoading || operationsLoading">
-          <option value="">اختر الخط</option>
-          <option *ngFor="let line of visibleProductionLines; trackBy: trackById" [value]="line.id">{{ line.lineCode || '—' }} — {{ line.name }}</option>
-        </select>
-      </label>
-      <label class="daily-production-operations__context-field daily-production-operations__context-field--model plp-aligned-control-grid__field"><span class="daily-production-operations__field-label plp-aligned-control-grid__label">المنتج / الموديل</span>
-        <select [ngModel]="selectedProductModelId" (ngModelChange)="selectProductModel($event)" [disabled]="!selectedProductionLineId || modelsLoading || operationsLoading">
-          <option value="">اختر الموديل</option>
-          <option *ngFor="let model of activeProductModels; trackBy: trackById" [value]="model.id">{{ model.code }} — {{ model.name }}</option>
-        </select>
-      </label>
-      <div class="daily-production-operations__load-action daily-production-operations__context-field daily-production-operations__context-field--load plp-aligned-control-grid__field">
-        <span class="daily-production-operations__field-label plp-aligned-control-grid__label">خطوة التشغيل</span>
-        <button pButton type="button" label="تحميل تشغيل اليوم" icon="pi pi-play" [disabled]="!canLoadOperations" [loading]="operationsLoading" (click)="loadTodayOperations()"></button>
-        <small>لا يعيد تحميل الصفحة ويحافظ على الفلاتر والكمية أثناء التحديث.</small>
-      </div>
     </div>
-  </p-card>
+  </app-manufacturing-filter-card>
+  <div class="daily-production-operations__context-actions">
+    <div class="daily-production-operations__attendance-action">
+      <button pButton type="button" class="p-button-outlined" [label]="attendanceSyncing ? 'جارٍ مزامنة الحضور…' : 'مزامنة حضور التاريخ'" icon="pi pi-refresh" [loading]="attendanceSyncing" [disabled]="attendanceSyncing || !productionDate" (click)="synchronizeAttendance()"></button>
+      <small [class.is-confirmed]="attendanceSyncedForDate === productionDate">{{ attendanceSyncedForDate === productionDate ? 'تمت المزامنة لهذا التاريخ' : 'المزامنة اليدوية مطلوبة قبل التحميل' }}</small>
+    </div>
+    <button pButton type="button" label="تحميل تشغيل اليوم" icon="pi pi-play" [disabled]="!canLoadOperations" [loading]="operationsLoading" (click)="loadTodayOperations()"></button>
+  </div>
 
   <p class="daily-production-operations__message plp-inline-feedback plp-inline-feedback--error" *ngIf="error" role="alert">{{ error }}</p>
   <p class="daily-production-operations__message plp-inline-feedback plp-inline-feedback--success" *ngIf="successMessage">{{ successMessage }}</p>
@@ -85,17 +112,6 @@
 
     <section class="daily-production-operations__workspace plp-bounded-workspace" data-workspace-layout="stage-master-detail" data-tablet-priority="workers">
       <p-card class="daily-production-operations__stage-panel plp-workspace-detail-panel plp-bounded-workspace__panel" header="كل مراحل الموديل">
-        <div class="daily-production-operations__filters">
-          <input pInputText type="search" [(ngModel)]="stageSearch" placeholder="ابحث باسم أو كود المرحلة">
-          <select [(ngModel)]="stageFilter" aria-label="فلتر حالة المرحلة">
-            <option value="all">كل الحالات</option>
-            <option value="ready">جاهزة</option>
-            <option value="absent">عامل غائب</option>
-            <option value="no-check-in">دون بصمة مصدر</option>
-            <option value="no-staffing">دون تسكين</option>
-            <option value="cost-review">مراجعة تكلفة</option>
-          </select>
-        </div>
         <div class="daily-production-operations__stage-list plp-bounded-workspace__scroll-region plp-structured-list plp-structured-list--spacious plp-contained-scroll-list" aria-live="polite">
           <button type="button" *ngFor="let stage of filteredStages; trackBy: trackById" class="daily-production-operations__stage daily-production-operations__stage--compact plp-compact-entity plp-structured-card plp-structured-card--content-sized" [class.is-selected]="stage.productModelStageId === selectedStageId" (click)="selectStage(stage.productModelStageId)">
             <plp-responsive-entity-row [title]="stage.stageName" [code]="stage.stageCode" icon="pi pi-sitemap">
@@ -218,6 +234,7 @@
           <span>{{ operations.totalStages }} مرحلة · {{ totalEnteredWorkers }} صف عامل. لا يضاعف أي صف كمية الخط أو المرحلة.</span>
           <button pButton type="button" class="p-button-outlined" label="حساب معاينة موحّدة" icon="pi pi-calculator" [loading]="previewing" [disabled]="!canEditDraft || previewing" (click)="calculatePreview()"></button>
           <button *ngIf="!isApproved" pButton type="button" [label]="hasExistingDraft ? 'حفظ تغييرات مسودة اليوم' : 'حفظ مسودة اليوم'" icon="pi pi-save" [loading]="saving" [disabled]="!canEditDraft || !isPreviewCurrent" (click)="saveDailyDraft()"></button>
+          <button *ngIf="canExportExcel" pButton type="button" class="p-button-outlined daily-production-operations__excel-export" label="تصدير Excel" icon="pi pi-download" [loading]="exportingExcel" [disabled]="exportingExcel" (click)="exportDailyProductionExcel()"></button>
           <button *ngIf="canApproveDailyOperation" pButton type="button" class="p-button-success" label="اعتماد تشغيل اليوم" icon="pi pi-check" [loading]="approving" [disabled]="saving || previewing || approving || cancelling" (click)="approveDailyOperation()"></button>
           <button *ngIf="canCancelDailyOperationApproval" pButton type="button" class="p-button-warning" label="إلغاء اعتماد تشغيل اليوم" icon="pi pi-undo" [loading]="cancelling" [disabled]="cancelling" (click)="openDailyApprovalCancellationDialog()"></button>
         </div>
@@ -226,11 +243,25 @@
       <section class="daily-production-operations__preview plp-structured-list plp-structured-list--spacious" *ngIf="preview as calculatedPreview">
         <div class="daily-production-operations__preview-summary plp-summary-stat-grid">
           <plp-statistic-card title="إجمالي المستحقات" [value]="(calculatedPreview.totalWorkerEntitlements | number:'1.2-2') || '—'" icon="pi pi-wallet"></plp-statistic-card>
-          <plp-statistic-card title="حالة المعاينة" [value]="isPreviewCurrent ? 'صالحة للحفظ' : 'قديمة — أعد الحساب'" icon="pi pi-check-circle"></plp-statistic-card>
+          <plp-statistic-card title="حالة المعاينة" [value]="previewStatusLabel" icon="pi pi-check-circle"></plp-statistic-card>
           <plp-statistic-card title="تحذيرات تشغيلية" [value]="calculatedPreview.warnings.length ? calculatedPreview.warnings.length.toString() : 'لا يوجد'" icon="pi pi-exclamation-triangle"></plp-statistic-card>
         </div>
 
-        <section class="daily-production-operations__preview-stages" aria-label="المرحلة إلى العمال">
+        <section class="daily-production-operations__preview-overview" aria-label="ملخص المعاينة الموحدة">
+          <article *ngFor="let stage of stageAllocationRows; trackBy: trackById" class="daily-production-operations__preview-overview-row">
+            <span><strong>{{ stage.stageName }}</strong><small class="plp-entity-code" dir="ltr">{{ stage.stageCode }}</small></span>
+            <dl aria-label="ملخص المرحلة">
+              <div><dt>الكمية</dt><dd>{{ stage.stageQuantity | number:'1.0-3' }}</dd></div>
+              <div><dt>العمال</dt><dd>{{ stage.participantCount }}</dd></div>
+              <div><dt>القيمة</dt><dd>{{ stage.stageValue | number:'1.2-4' }}</dd></div>
+            </dl>
+            <plp-status-badge [status]="stage.statusTone" [label]="stage.status" [compact]="true"></plp-status-badge>
+          </article>
+        </section>
+
+        <!-- الجداول التفصيلية مؤجلة لحين اعتماد العرض النهائي؛ تبقى بياناتها ومنطقها متاحين دون إنشاء DOM حاليًا. -->
+        <ng-container *ngIf="renderLegacyDailyProductionTables">
+        <section class="daily-production-operations__preview-stages daily-production-operations__legacy-table" aria-label="المرحلة إلى العمال">
           <plp-product-section-header title="المرحلة ← العمال" description="وسّع أي مرحلة لرؤية العمال المحتسبين والمسكنين غير الجاهزين."></plp-product-section-header>
           <p-table plpResponsiveTable="stack" [value]="stageAllocationRows" dataKey="stageId" [expandedRowKeys]="expandedStageRows" responsiveLayout="stack" breakpoint="1100px" styleClass="daily-production-operations__allocation-table">
             <ng-template pTemplate="body" let-stage let-expanded="expanded">
@@ -310,7 +341,7 @@
           </p-table>
         </section>
 
-        <section class="daily-production-operations__worker-totals plp-structured-surface" *ngIf="workerAllocationRows.length" aria-labelledby="daily-worker-totals-title">
+        <section class="daily-production-operations__worker-totals daily-production-operations__legacy-table plp-structured-surface" *ngIf="workerAllocationRows.length" aria-labelledby="daily-worker-totals-title">
           <plp-product-section-header id="daily-worker-totals-title" title="العامل ← المراحل" description="وسّع العامل لمراجعة مساهمته واستحقاقه في كل مرحلة."></plp-product-section-header>
           <p-table
             plpResponsiveTable="stack"
@@ -382,6 +413,7 @@
             </ng-template>
           </p-table>
         </section>
+        </ng-container>
       </section>
       <section class="daily-production-operations__saved plp-inline-feedback plp-inline-feedback--success plp-action-group" *ngIf="savedDraft">
         <strong>{{ savedDraftTitle }}</strong>

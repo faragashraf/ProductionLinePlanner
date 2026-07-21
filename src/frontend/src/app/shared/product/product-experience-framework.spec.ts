@@ -1,9 +1,11 @@
 import { Component, NgZone, Type } from '@angular/core';
-import { ComponentFixture, TestBed, fakeAsync, flushMicrotasks } from '@angular/core/testing';
+import { ComponentFixture, TestBed, fakeAsync, flushMicrotasks, tick } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { NoopAnimationsModule } from '@angular/platform-browser/animations';
 import { HttpClientTestingModule } from '@angular/common/http/testing';
+import { FormsModule } from '@angular/forms';
 import { ConfirmationService, PrimeNGConfig } from 'primeng/api';
+import { MultiSelectModule } from 'primeng/multiselect';
 import { Table, TableModule } from 'primeng/table';
 import { PlpActionButtonComponent } from './plp-action-button.component';
 import { PlpConfirmationService } from './plp-confirmation.service';
@@ -132,6 +134,45 @@ class BusinessHierarchyHostComponent {}
 })
 class MetadataHierarchyHostComponent {}
 
+@Component({
+  standalone: true,
+  imports: [FormsModule, MultiSelectModule],
+  template: `
+    <div dir="rtl" style="inline-size: 20rem;">
+      <p-multiSelect
+        [options]="options"
+        optionLabel="label"
+        optionValue="value"
+        [(ngModel)]="selected"
+        [showClear]="showClear"
+        [disabled]="disabled"
+        styleClass="app-full-width-select"
+        (onPanelShow)="onOpened()"
+        (onClear)="onCleared()"
+      ></p-multiSelect>
+    </div>
+  `
+})
+class ClearableMultiSelectHostComponent {
+  readonly options = [
+    { label: 'صلاحية تشغيلية باسم طويل لاختبار المساحة المتاحة داخل الحقل', value: 'operations' },
+    { label: 'إدارة', value: 'admin' }
+  ];
+  selected = ['operations'];
+  showClear = true;
+  disabled = false;
+  opens = 0;
+  clears = 0;
+
+  onOpened(): void {
+    this.opens += 1;
+  }
+
+  onCleared(): void {
+    this.clears += 1;
+  }
+}
+
 describe('Product Experience Framework', () => {
   beforeEach(() => {
     TestBed.configureTestingModule({ imports: [HttpClientTestingModule, NoopAnimationsModule] });
@@ -165,6 +206,39 @@ describe('Product Experience Framework', () => {
     expect(icon.classList.contains('pi')).toBeTrue();
     expect(icon.classList.contains('pi-save')).toBeTrue();
   });
+
+  it('keeps the multiselect clear action separate from its label and trigger', fakeAsync(() => {
+    const fixture = createComponent(ClearableMultiSelectHostComponent);
+    tick();
+    fixture.detectChanges();
+    const control = fixture.nativeElement.querySelector('.p-multiselect') as HTMLElement;
+    const labelContainer = control.querySelector('.p-multiselect-label-container') as HTMLElement;
+    const clear = control.querySelector('.p-multiselect-clear-icon') as HTMLElement;
+    const trigger = control.querySelector('.p-multiselect-trigger') as HTMLElement;
+
+    expect(clear).not.toBeNull();
+    expect(trigger).not.toBeNull();
+    expect(getComputedStyle(labelContainer).minWidth).toBe('0px');
+    expect(getComputedStyle(labelContainer).position).toBe('relative');
+
+    clear.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    fixture.detectChanges();
+
+    expect(fixture.componentInstance.selected).toBeNull();
+    expect(fixture.componentInstance.clears).toBe(1);
+    expect(fixture.componentInstance.opens).toBe(0);
+    expect(control.querySelector('.p-multiselect-clear-icon')).toBeNull();
+
+    fixture.componentInstance.selected = ['admin'];
+    fixture.componentInstance.showClear = false;
+    fixture.detectChanges();
+    expect(control.querySelector('.p-multiselect-clear-icon')).toBeNull();
+
+    fixture.componentInstance.showClear = true;
+    fixture.componentInstance.disabled = true;
+    fixture.detectChanges();
+    expect(control.querySelector('.p-multiselect-clear-icon')).toBeNull();
+  }));
 
   it('uses token-aligned phone and Android-tablet dialog gutters', () => {
     expect(PLP_RESPONSIVE_CONTRACT.dialogGutter.phone).toBe('var(--plp-space-16)');

@@ -58,86 +58,30 @@
     </p>
 
     <div #staffingChoices class="line-staffing-page__section-target">
-      <p-card header="سياق التسكين">
-        <div class="line-staffing-page__context">
-          <label
-            >1. المصنع
-            <select
-              [ngModel]="selectedFactoryId"
-              (ngModelChange)="selectFactory($event)"
-              [ngModelOptions]="{ standalone: true }"
-              [disabled]="factoriesLoading"
-            >
-              <option value="">
-                {{ factoriesLoading ? "جارٍ تحميل المصانع…" : "اختر المصنع" }}
-              </option>
-              <option
-                *ngFor="let factory of factories; trackBy: trackById"
-                [value]="factory.id"
-              >
-                {{ factory.code }} — {{ factory.name }}
-              </option>
-            </select>
-          </label>
-          <label
-            >2. القسم
-            <select
-              [ngModel]="selectedDepartmentId"
-              (ngModelChange)="selectDepartment($event)"
-              [ngModelOptions]="{ standalone: true }"
-              [disabled]="!selectedFactoryId || departmentsLoading"
-            >
-              <option value="">
-                {{ departmentsLoading ? "جارٍ تحميل الأقسام…" : "اختر القسم" }}
-              </option>
-              <option
-                *ngFor="let department of activeDepartments; trackBy: trackById"
-                [value]="department.id"
-              >
-                {{ department.code }} —
-                {{ department.nameAr || department.name }}
-              </option>
-            </select>
-          </label>
-          <label
-            >3. خط الإنتاج
-            <select
-              [ngModel]="selectedProductionLineId"
-              (ngModelChange)="selectProductionLine($event)"
-              [ngModelOptions]="{ standalone: true }"
-              [disabled]="!selectedDepartmentId || linesLoading"
-            >
-              <option value="">
-                {{ linesLoading ? "جارٍ تحميل الخطوط…" : "اختر خط الإنتاج" }}
-              </option>
-              <option
-                *ngFor="let line of visibleProductionLines; trackBy: trackById"
-                [value]="line.id"
-              >
-                {{ line.lineCode || "—" }} — {{ line.name }}
-              </option>
-            </select>
-          </label>
-          <label
-            >4. المنتج / الموديل
-            <select
-              [ngModel]="selectedProductModelId"
-              (ngModelChange)="selectProductModel($event)"
-              [ngModelOptions]="{ standalone: true }"
-              [disabled]="!selectedProductionLineId || modelsLoading"
-            >
-              <option value="">
-                {{ modelsLoading ? "جارٍ تحميل الموديلات…" : "اختر الموديل" }}
-              </option>
-              <option
-                *ngFor="let model of activeProductModels; trackBy: trackById"
-                [value]="model.id"
-              >
-                {{ model.code }} — {{ model.name }}
-              </option>
+      <app-manufacturing-filter-card
+        title="فلاتر تسكين الخط"
+        searchLabel="البحث في مراحل الموديل"
+        searchPlaceholder="ابحث باسم أو كود المرحلة"
+        [searchValue]="stageSearch"
+        statusLabel="حالة التسكين"
+        [statusOptions]="[{ label: 'الكل', value: 'all' }, { label: 'دون عمال', value: 'without-workers' }, { label: 'تسكين دائم', value: 'default' }, { label: 'يحتاج مراجعة', value: 'review' }]"
+        [statusValue]="stageFilter"
+        [clearDisabled]="!staffingFiltersActive"
+        (searchValueChange)="stageSearch = $event"
+        (statusValueChange)="stageFilter = $any($event)"
+        (clearFilters)="clearStaffingFilters()"
+      >
+        <app-factory-structure-tree-selector filter-structure [nodes]="staffingStructureTreeNodes" [(selectedNode)]="selectedStaffingStructureNode" [loading]="factoriesLoading || departmentsLoading || linesLoading" (nodeSelect)="selectStaffingStructure($event)" (selectedNodeChange)="!$event && clearStaffingFilters()"></app-factory-structure-tree-selector>
+        <div filter-extra>
+          <label>الموديل
+            <select [ngModel]="selectedProductModelId" (ngModelChange)="selectProductModel($event)" [disabled]="!selectedProductionLineId || modelsLoading">
+              <option value="">{{ modelsLoading ? 'جارٍ التحميل…' : 'اختر الموديل' }}</option>
+              <option *ngFor="let model of activeProductModels; trackBy: trackById" [value]="model.id">{{ model.code }} — {{ model.name }}</option>
             </select>
           </label>
         </div>
+      </app-manufacturing-filter-card>
+      <div class="line-staffing-page__context-actions">
         <p class="line-staffing-page__note" *ngIf="!selectedFactoryId">
           ابدأ باختيار المصنع. لا يتم تحميل أي بيانات تابعة قبل اكتمال المسار
           السابق.
@@ -169,7 +113,7 @@
           [disabled]="!hasCompleteContext || planLoading"
           (click)="loadProductStages()"
         ></button>
-      </p-card>
+      </div>
     </div>
 
     <plp-loading-skeleton
@@ -254,23 +198,6 @@
           >
             <p-card header="مراحل الموديل">
               <div class="line-staffing-page__filters">
-                <input
-                  pInputText
-                  type="search"
-                  [(ngModel)]="stageSearch"
-                  [ngModelOptions]="{ standalone: true }"
-                  placeholder="بحث بالكود أو اسم المرحلة"
-                />
-                <select
-                  [(ngModel)]="stageFilter"
-                  [ngModelOptions]="{ standalone: true }"
-                  aria-label="تصفية مراحل التسكين"
-                >
-                  <option value="all">كل المراحل</option>
-                  <option value="without-workers">بدون عمال</option>
-                  <option value="default">بها تسكين دائم</option>
-                  <option value="review">تحتاج مراجعة</option>
-                </select>
                 <div
                   class="line-staffing-page__stage-navigation"
                   aria-label="التنقل بين المراحل"

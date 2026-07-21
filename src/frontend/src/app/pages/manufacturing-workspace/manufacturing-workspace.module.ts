@@ -19,6 +19,8 @@ import { ManufacturingMasterDataPageComponent } from './manufacturing-master-dat
 import { ManufacturingDepartmentsPageComponent } from './manufacturing-departments-page.component';
 import { FactoryStructureFoundationPageComponent } from './factory-structure-foundation-page.component';
 import { FactoryStructureTreeViewComponent } from './factory-structure-tree-view.component';
+import { FactoryStructureTreeSelectorComponent } from './factory-structure-tree-selector.component';
+import { ManufacturingFilterCardComponent } from './manufacturing-filter-card.component';
 import { LineStaffingWorkspacePageComponent } from './line-staffing-workspace-page.component';
 import { DailyProductionOperationsPageComponent } from './daily-production-operations-page.component';
 import { ManufacturingWorkspaceRoutingModule } from './manufacturing-workspace-routing.module';
@@ -45,6 +47,8 @@ import { ReportsResultsToolbarComponent } from '../reports-workspace/reports-res
     ManufacturingDepartmentsPageComponent,
     FactoryStructureFoundationPageComponent,
     FactoryStructureTreeViewComponent,
+    FactoryStructureTreeSelectorComponent,
+    ManufacturingFilterCardComponent,
     LineStaffingWorkspacePageComponent,
     DailyProductionOperationsPageComponent,
     ReportsWorkspacePageComponent,

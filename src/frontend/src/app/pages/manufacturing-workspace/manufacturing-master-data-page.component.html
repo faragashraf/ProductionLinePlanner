@@ -44,11 +44,11 @@
       </p-card>
 
       <p-card header="مراحل الإنتاج">
-        <plp-expandable-form title="مرحلة" [summary]="stageForm.controls.productionLineId.value ? stageResultCount + ' مرحلة' : 'اختر خط الإنتاج أولًا'" openLabel="إضافة مرحلة" [canExpand]="!!stageForm.controls.productionLineId.value" [expanded]="stageFormVisible" [saving]="saving" [error]="error" (expandedChange)="$event ? openStageForm() : closeStageForm()">
-          <form [formGroup]="stageForm" (ngSubmit)="saveOperationalStage()" class="master-page__form">
-            <label>المصنع<select formControlName="factoryId" [disabled]="!!editStageId" (change)="selectFactory($any($event.target).value)"><option value="">اختر المصنع</option><option *ngFor="let factory of factories" [value]="factory.id">{{ factory.code }} — {{ factory.name }}</option></select></label>
-            <label>القسم<select formControlName="departmentId" [disabled]="!!editStageId || !stageForm.controls.factoryId.value" (change)="selectDepartment($any($event.target).value)"><option value="">اختر القسم</option><option *ngFor="let department of activeDepartments" [value]="department.id">{{ department.code }} — {{ department.nameAr || department.name }}</option></select></label>
-            <label>خط الإنتاج<select formControlName="productionLineId" [disabled]="!!editStageId || !stageForm.controls.departmentId.value" (change)="selectLine($any($event.target).value)"><option value="">اختر خط الإنتاج</option><option *ngFor="let line of activeLines" [value]="line.id">{{ line.lineCode || '—' }} — {{ line.name }}</option></select></label>
+        <plp-expandable-form title="مرحلة" [summary]="stageFiltersForm.controls.productionLineId.value ? stageResultCount + ' مرحلة' : 'اختر خط الإنتاج أولًا'" openLabel="إضافة مرحلة" [canExpand]="!!stageFiltersForm.controls.productionLineId.value" [expanded]="stageFormVisible" [saving]="saving" [error]="error" (expandedChange)="$event ? openStageForm() : closeStageForm()">
+          <form [formGroup]="stageEditForm" (ngSubmit)="saveOperationalStage()" class="master-page__form">
+            <label>المصنع<select formControlName="factoryId" [disabled]="!!editStageId" (change)="selectStageEditFactory($any($event.target).value)"><option value="">اختر المصنع</option><option *ngFor="let factory of factories" [value]="factory.id">{{ factory.code }} — {{ factory.name }}</option></select></label>
+            <label>القسم<select formControlName="departmentId" [disabled]="!!editStageId || !stageEditForm.controls.factoryId.value" (change)="selectStageEditDepartment($any($event.target).value)"><option value="">اختر القسم</option><option *ngFor="let department of activeStageEditDepartments" [value]="department.id">{{ department.code }} — {{ department.nameAr || department.name }}</option></select></label>
+            <label>خط الإنتاج<select formControlName="productionLineId" [disabled]="!!editStageId || !stageEditForm.controls.departmentId.value" (change)="selectStageEditLine($any($event.target).value)"><option value="">اختر خط الإنتاج</option><option *ngFor="let line of activeStageEditLines" [value]="line.id">{{ line.lineCode || '—' }} — {{ line.name }}</option></select></label>
             <label>اسم المرحلة<input pInputText formControlName="name"></label>
             <label *ngIf="editStageId">الكود<input pInputText [value]="selectedStage?.code || ''" readonly aria-label="كود المرحلة للقراءة فقط"></label>
             <label>السعة<input type="number" formControlName="capacity"></label>
@@ -66,7 +66,22 @@
     </ng-container>
 
     <ng-template #modelsView>
-      <div class="master-page__grid"><p-card header="الموديلات"><plp-expandable-form title="موديل المنتج" summary="أضف موديلًا أو عدّل بياناته." openLabel="إضافة موديل" [expanded]="modelFormVisible" [saving]="saving" [error]="error" (expandedChange)="onModelFormVisibility($event)"><form [formGroup]="modelForm" (ngSubmit)="saveModel()" class="master-page__form"><label>الكود<input pInputText formControlName="code"></label><label>الاسم<input pInputText formControlName="name"></label><label>الوصف<input pInputText formControlName="description"></label><button pButton type="submit" [label]="editModelId ? 'تحديث' : 'إضافة موديل'" [disabled]="saving"></button></form></plp-expandable-form><plp-product-toolbar searchInputId="productModelSearch" searchLabel="بحث في جدول الموديلات" searchPlaceholder="بحث باسم أو كود الموديل" [searchValue]="modelSearch" [clearEnabled]="true" (searchValueChange)="onModelSearch($event)"></plp-product-toolbar><p-table plpResponsiveTable="scroll" plpTablePagination [plpPaginationPageSize]="modelPageSize" [plpPaginationResetKey]="modelSearch" [plpStickyActions]="true" [value]="models" [lazy]="true" [loading]="modelListLoading" [totalRecords]="modelTotal" [rows]="modelPageSize" [first]="(modelPage - 1) * modelPageSize" (onLazyLoad)="onModelLazyLoad($event)" dataKey="id" responsiveLayout="scroll"><ng-template pTemplate="header"><tr><th>الكود</th><th>الاسم</th><th>الحالة</th><th>الإجراءات</th></tr></ng-template><ng-template pTemplate="body" let-item><tr [class.master-page__selected]="selected?.id === item.id"><td><span class="plp-code">{{ item.code }}</span></td><td>{{ item.name }}</td><td><plp-status-badge [status]="item.isActive ? 'ready' : 'warning'" [label]="item.isActive ? 'نشط' : 'معطل'" [compact]="true"></plp-status-badge></td><td><button pButton type="button" class="p-button-text p-button-sm" label="اختيار" (click)="select(item)"></button><button pButton type="button" icon="pi pi-pencil" class="p-button-text" aria-label="تعديل الموديل" title="تعديل الموديل" (click)="editModel(item)"></button></td></tr></ng-template><ng-template pTemplate="emptymessage"><tr><td colspan="4" class="master-page__empty">{{ modelEmptyMessage }}</td></tr></ng-template></p-table></p-card>
+      <app-manufacturing-filter-card
+        title="فلاتر الموديلات"
+        searchLabel="البحث باسم أو كود الموديل"
+        searchPlaceholder="ابحث في الموديلات"
+        [searchValue]="modelListSearch"
+        [statusOptions]="statusFilterOptions"
+        [statusValue]="modelStatusFilter"
+        [clearDisabled]="!modelFiltersActive"
+        (searchValueChange)="onModelSearch($event)"
+        (statusValueChange)="setModelStatusFilter($event)"
+        (clearFilters)="clearModelFilters()"
+      >
+        <app-factory-structure-tree-selector filter-structure [nodes]="modelFilterTreeNodes" [(selectedNode)]="selectedModelFilterNode" [loading]="loading" (nodeSelect)="selectModelFilterNode($event)" (selectedNodeChange)="!$event && (selectedModelFilterNode = null)"></app-factory-structure-tree-selector>
+      </app-manufacturing-filter-card>
+
+      <div class="master-page__grid"><p-card header="الموديلات"><plp-expandable-form title="موديل المنتج" summary="أضف موديلًا أو عدّل بياناته." openLabel="إضافة موديل" [expanded]="modelFormVisible" [saving]="saving" [error]="error" (expandedChange)="onModelFormVisibility($event)"><form [formGroup]="modelForm" (ngSubmit)="saveModel()" class="master-page__form"><label>الكود<input pInputText formControlName="code"></label><label>الاسم<input pInputText formControlName="name"></label><label>الوصف<input pInputText formControlName="description"></label><button pButton type="submit" [label]="editModelId ? 'تحديث' : 'إضافة موديل'" [disabled]="saving"></button></form></plp-expandable-form><p-table plpResponsiveTable="scroll" plpTablePagination [plpPaginationPageSize]="modelPageSize" [plpPaginationResetKey]="modelListSearch + modelStatusFilter + (selectedModelFilterNode?.key || '')" [plpStickyActions]="true" [value]="filteredModels" [lazy]="true" [loading]="modelListLoading || modelScopeLoading" [totalRecords]="modelResultTotal" [rows]="modelPageSize" [first]="(modelPage - 1) * modelPageSize" (onLazyLoad)="onModelLazyLoad($event)" dataKey="id" responsiveLayout="scroll"><ng-template pTemplate="header"><tr><th>الكود</th><th>الاسم</th><th>الحالة</th><th>الإجراءات</th></tr></ng-template><ng-template pTemplate="body" let-item><tr [class.master-page__selected]="selected?.id === item.id"><td><span class="plp-code">{{ item.code }}</span></td><td>{{ item.name }}</td><td><plp-status-badge [status]="item.isActive ? 'ready' : 'warning'" [label]="item.isActive ? 'نشط' : 'معطل'" [compact]="true"></plp-status-badge></td><td><button pButton type="button" class="p-button-text p-button-sm" label="اختيار" (click)="select(item)"></button><button pButton type="button" icon="pi pi-pencil" class="p-button-text" aria-label="تعديل الموديل" title="تعديل الموديل" (click)="editModel(item)"></button></td></tr></ng-template><ng-template pTemplate="emptymessage"><tr><td colspan="4" class="master-page__empty">{{ modelEmptyMessage }}</td></tr></ng-template></p-table></p-card>
       <p-card header="إعدادات مراحل الموديل" *ngIf="selected">
         <p>السعر القياسي: {{ totalPrice() }} | الزمن: {{ totalSeconds() }} ثانية</p>
         <plp-expandable-form title="إعداد مرحلة الموديل" [summary]="selected.code + ' — ' + selected.name" openLabel="إضافة مرحلة للموديل" [expanded]="modelStageFormVisible" [saving]="saving" [error]="error" (expandedChange)="onModelStageFormVisibility($event)">
@@ -82,6 +97,7 @@
                 optionValue="id"
                 [filter]="true"
                 filterBy="name,code"
+                filterPlaceholder="ابحث باسم أو كود المرحلة"
                 [showClear]="true"
                 [loading]="availableStagesLoading"
                 [disabled]="saving || availableStagesLoading"
@@ -90,8 +106,8 @@
                 [emptyFilterMessage]="'لا توجد مراحل مطابقة للبحث'"
                 placeholder="اختر المرحلة"
                 appendTo="body"
-                styleClass="master-page__stage-dropdown"
-                panelStyleClass="master-page__stage-dropdown-panel"
+                styleClass="app-full-width-select app-searchable-select master-page__stage-dropdown"
+                panelStyleClass="app-searchable-select-panel master-page__stage-dropdown-panel"
                 [panelStyle]="stageDropdownPanelStyle"
                 scrollHeight="10rem"
                 [baseZIndex]="2000"
@@ -99,13 +115,15 @@
                 (onFilter)="onAvailableStagesFilter($event.filter)"
               >
                 <ng-template pTemplate="selectedItem" let-stage>
-                  <span class="master-page__stage-selected" *ngIf="stage"><span class="master-page__stage-selected-name">{{ stage.name }}</span><span class="plp-code">{{ stage.code }}</span></span>
+                  <span class="master-page__stage-selected" *ngIf="stage">
+                    <span class="master-page__stage-selected-heading"><span class="master-page__stage-selected-name">{{ stage.name }}</span><span class="plp-code">{{ stage.code }}</span></span>
+                    <small [title]="stageStructurePath(stage)">{{ stageStructurePath(stage) }}</small>
+                  </span>
                 </ng-template>
                 <ng-template pTemplate="item" let-stage>
                   <div class="master-page__stage-option">
-                    <strong>{{ stage.name }}</strong>
-                    <span class="plp-code">{{ stage.code }}</span>
-                    <small *ngIf="stage.departmentNameAr || stage.productionLineName">{{ stage.departmentNameAr }}<ng-container *ngIf="stage.departmentNameAr && stage.productionLineName"> · </ng-container>{{ stage.productionLineName }}</small>
+                    <span class="master-page__stage-option-heading"><strong [title]="stage.name">{{ stage.name }}</strong><span class="plp-code">{{ stage.code }}</span></span>
+                    <small *ngIf="stageStructurePath(stage)" [title]="stageStructurePath(stage)">{{ stageStructurePath(stage) }}</small>
                   </div>
                 </ng-template>
               </p-dropdown>
@@ -122,16 +140,31 @@
           </form>
         </plp-expandable-form>
       </p-card></div>
-      <p-card header="مراحل الموديل" *ngIf="selected">
-        <div class="master-page__linked-stages-search">
-          <label for="linkedStagesSearch">بحث في المراحل المرتبطة بالموديل<input id="linkedStagesSearch" pInputText type="search" [value]="linkedStagesSearch" (input)="onLinkedStagesSearch($any($event.target).value)" placeholder="ابحث باسم أو كود المرحلة"></label>
-          <button pButton type="button" class="p-button-text p-button-sm" label="مسح البحث" *ngIf="linkedStagesSearch" (click)="clearLinkedStagesSearch()"></button>
-        </div>
-        <p-table plpResponsiveTable="scroll" plpTablePagination [plpPaginationPageSize]="10" [plpPaginationResetKey]="selected.id + linkedStagesSearch" [plpStickyActions]="true" [value]="filteredLinkedStages" dataKey="id" responsiveLayout="scroll">
-          <ng-template pTemplate="header"><tr><th>المرحلة</th><th>الترتيب</th><th>السعر</th><th>الزمن</th><th>الطريقة</th><th>الإجراءات</th></tr></ng-template>
-          <ng-template pTemplate="body" let-item><tr><td><span class="plp-code">{{ linkedStageCode(item) }}</span> — {{ linkedStageName(item) }}</td><td>{{ item.stageOrder }}</td><td>{{ item.piecePrice }}</td><td>{{ item.standardSeconds }}</td><td>{{ item.compensationMode }}</td><td><button pButton type="button" icon="pi pi-pencil" class="p-button-text" aria-label="تعديل إعداد المرحلة" title="تعديل إعداد المرحلة" (click)="editModelStage(item)"></button><button pButton type="button" icon="pi pi-ban" class="p-button-text p-button-danger" aria-label="تعطيل إعداد المرحلة" title="تعطيل إعداد المرحلة" (click)="disableModelStage(item.id)"></button></td></tr></ng-template>
-          <ng-template pTemplate="emptymessage"><tr><td colspan="6" class="master-page__empty">{{ linkedStagesEmptyMessage }}</td></tr></ng-template>
-        </p-table>
+      <p-card *ngIf="selected">
+        <header class="master-page__model-journey-toolbar">
+          <div><h2>مراحل الموديل</h2><small>{{ stages.length }} مرحلة مرتبطة · مجمعة حسب خط الإنتاج</small></div>
+          <div class="master-page__linked-stages-search">
+            <label for="modelStageSearch">بحث في مراحل الموديل<input id="modelStageSearch" pInputText type="search" [value]="modelStageSearch" (input)="onModelStageSearch($any($event.target).value)" placeholder="ابحث باسم أو كود المرحلة"></label>
+            <button pButton type="button" class="p-button-text p-button-sm" label="مسح البحث" *ngIf="modelStageSearch" (click)="clearModelStageSearch()"></button>
+          </div>
+        </header>
+        <section class="model-journey" *ngIf="modelJourneyGroups.length; else emptyModelJourney" aria-label="مراحل الموديل مجمعة حسب خط الإنتاج">
+          <article class="model-journey__line" *ngFor="let group of modelJourneyGroups">
+            <header class="model-journey__line-header">
+              <span class="model-journey__line-icon"><i class="pi pi-cog" aria-hidden="true"></i></span>
+              <span class="model-journey__line-title"><strong>{{ group.lineName }}</strong><small>{{ group.structurePath }}</small></span>
+              <span class="plp-code">{{ group.lineCode }}</span>
+              <plp-status-badge status="info" [label]="group.stages.length + ' مرحلة'" [compact]="true"></plp-status-badge>
+            </header>
+            <div class="model-journey__table-wrap">
+              <table class="model-journey__table">
+                <thead><tr><th>المرحلة</th><th>الترتيب</th><th>السعر</th><th>الزمن</th><th>الحالة</th><th>الإجراءات</th></tr></thead>
+                <tbody><tr *ngFor="let item of group.stages"><td data-label="المرحلة"><strong>{{ linkedStageName(item) }}</strong> <span class="plp-code">{{ linkedStageCode(item) }}</span></td><td data-label="الترتيب">{{ item.stageOrder }}</td><td data-label="السعر">{{ item.piecePrice | number:'1.2-4' }}</td><td data-label="الزمن">{{ item.standardSeconds || '—' }} ث</td><td data-label="الحالة"><plp-status-badge [status]="item.isActive ? 'ready' : 'warning'" [label]="item.isActive ? 'فعالة' : 'معطلة'" [compact]="true"></plp-status-badge></td><td data-label="الإجراءات"><button pButton type="button" icon="pi pi-pencil" class="p-button-text" aria-label="تعديل إعداد المرحلة" (click)="editModelStage(item)"></button><button pButton type="button" icon="pi pi-ban" class="p-button-text p-button-danger" aria-label="تعطيل إعداد المرحلة" (click)="disableModelStage(item.id)"></button></td></tr></tbody>
+              </table>
+            </div>
+          </article>
+        </section>
+        <ng-template #emptyModelJourney><p class="master-page__empty">{{ linkedStagesEmptyMessage }}</p></ng-template>
       </p-card>
     </ng-template>
   </ng-container>
