@@ -52,6 +52,10 @@
     <p class="line-staffing-page__success" *ngIf="successMessage" role="status">
       {{ successMessage }}
     </p>
+    <p class="line-staffing-page__warning" *ngIf="hasPendingRemoteUpdate" role="alert">
+      {{ remoteUpdateMessage }}
+      <button pButton type="button" class="p-button-sm p-button-text" label="تحديث الآن" (click)="reloadFromRemoteUpdate()"></button>
+    </p>
 
     <div #staffingChoices class="line-staffing-page__section-target">
       <p-card header="سياق التسكين">

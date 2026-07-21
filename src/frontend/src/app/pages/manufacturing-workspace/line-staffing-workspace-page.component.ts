@@ -3,6 +3,7 @@ import {
   ElementRef,
   OnDestroy,
   OnInit,
+  Optional,
   ViewChild,
 } from '@angular/core';
 import { FormBuilder, Validators } from '@angular/forms';
@@ -26,6 +27,7 @@ import {
   ProductionLineOption,
 } from '../../core/services/manufacturing-master-data-api.service';
 import { PermissionService } from '../../core/services/permission.service';
+import { ManufacturingRealtimeService } from '../../core/services/manufacturing-realtime.service';
 import {
   FormSubmissionValidationService,
   RequiredFieldRule,
@@ -92,6 +94,8 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
   planLoading = false;
   planError = '';
   successMessage = '';
+  hasPendingRemoteUpdate = false;
+  remoteUpdateMessage = '';
 
   assignmentDialogVisible = false;
   assignmentDialogMode: AssignmentDialogMode = 'default';
@@ -105,6 +109,9 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
   pendingParticipation: LineStaffingParticipation | null = null;
   private selectedDefaultWorkerIds = new Set<string>();
   private planRequestVersion = 0;
+  private stopRealtime?: () => void;
+  private realtimeRefreshQueued = false;
+  private queuedRealtimeSubStageId = '';
   private departmentRequestVersion = 0;
   private productionLineRequestVersion = 0;
   private productModelRequestVersion = 0;
@@ -158,15 +165,18 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
     private readonly formValidation: FormSubmissionValidationService,
     private readonly route: ActivatedRoute,
     private readonly router: Router,
+    @Optional() private readonly manufacturingRealtime?: ManufacturingRealtimeService,
   ) {}
 
   ngOnInit(): void {
     this.bindTabletWorkspaceMediaQuery();
     this.observeWorkspaceSectionFragment();
+    this.subscribeToLineStaffingRealtime();
     this.loadFactories();
   }
 
   ngOnDestroy(): void {
+    this.stopRealtime?.();
     this.unbindTabletWorkspaceMediaQuery();
     this.disconnectSectionVisibilityObserver();
     this.releaseTabletWorkspaceScrollLock();
@@ -437,8 +447,10 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
       )
       .pipe(
         finalize(() => {
-          if (requestVersion === this.planRequestVersion)
+          if (requestVersion === this.planRequestVersion) {
             this.planLoading = false;
+            this.flushQueuedRealtimeRefresh();
+          }
         }),
         takeUntil(this.destroy$),
       )
@@ -682,12 +694,21 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
     this.assignmentDialogError = '';
     this.assignmentValidationSummary = '';
     const reason = (this.assignmentForm.controls.reason.value ?? '').trim();
-    this.assignments
-      .removeDefaultAssignment(
-        worker.workerId,
-        this.pendingParticipation!.subStageId,
-        reason,
-      )
+    const subStageId = this.pendingParticipation!.subStageId;
+    const correlationId = this.manufacturingRealtime?.registerLocalOperation('line-staffing');
+    const removeRequest = correlationId
+      ? this.assignments.removeDefaultAssignment(
+          worker.workerId,
+          subStageId,
+          reason,
+          correlationId,
+        )
+      : this.assignments.removeDefaultAssignment(
+          worker.workerId,
+          subStageId,
+          reason,
+        );
+    removeRequest
       .pipe(
         finalize(() => (this.assignmentSaving = false)),
         takeUntil(this.destroy$),
@@ -697,7 +718,7 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
           this.successMessage =
             'تم حفظ تغيير التسكين مع الاحتفاظ بسجل التسكينات.';
           this.closeAssignmentDialog(true);
-          this.refreshSelectedStageAfterAssignment();
+          this.refreshStageAfterAssignment(subStageId);
         },
         error: (error) =>
           (this.assignmentDialogError = this.formValidation.serverMessage(
@@ -714,10 +735,18 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
     this.assignmentSaving = true;
     this.assignmentDialogError = '';
     this.assignmentValidationSummary = '';
-    this.assignments
-      .updateStageDefaultAssignments(stage.subStageId, [
-        ...this.selectedDefaultWorkerIds,
-      ])
+    const correlationId = this.manufacturingRealtime?.registerLocalOperation('line-staffing');
+    const updateRequest = correlationId
+      ? this.assignments.updateStageDefaultAssignments(
+          stage.subStageId,
+          [...this.selectedDefaultWorkerIds],
+          correlationId,
+        )
+      : this.assignments.updateStageDefaultAssignments(
+          stage.subStageId,
+          [...this.selectedDefaultWorkerIds],
+        );
+    updateRequest
       .pipe(
         finalize(() => (this.assignmentSaving = false)),
         takeUntil(this.destroy$),
@@ -727,7 +756,7 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
           const message = `تم تحديث عمال المرحلة: إضافة ${result.addedWorkersCount} وإزالة ${result.removedWorkersCount} من هذه المرحلة فقط.`;
           this.successMessage = message;
           this.closeAssignmentDialog(true);
-          this.refreshSelectedStageAfterAssignment();
+          this.refreshStageAfterAssignment(stage.subStageId);
         },
         error: (error) =>
           (this.assignmentDialogError = this.formValidation.serverMessage(
@@ -744,10 +773,15 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
    * and DOM regions mounted; merge only the selected stage, its participating
    * workers, and the plan-level summary returned by the authoritative refresh.
    */
-  private refreshSelectedStageAfterAssignment(): void {
+  reloadFromRemoteUpdate(): void {
+    const subStageId = this.selectedSubStageId;
+    this.clearRemoteUpdateNotice();
+    if (subStageId) this.refreshStageAfterAssignment(subStageId);
+  }
+
+  private refreshStageAfterAssignment(subStageId: string): void {
     const currentPlan = this.plan;
-    const selectedStageId = this.selectedSubStageId;
-    if (!currentPlan || !selectedStageId || !this.hasCompleteContext) return;
+    if (!currentPlan || !subStageId || !this.hasCompleteContext || this.planLoading) return;
 
     const requestVersion = ++this.planRequestVersion;
     this.assignments
@@ -755,7 +789,7 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
         this.selectedFactoryId,
         this.selectedProductionLineId,
         this.selectedProductModelId,
-        selectedStageId,
+        subStageId,
         this.staffingReferenceDate,
       )
       .pipe(takeUntil(this.destroy$))
@@ -784,6 +818,7 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
             stages: refreshedStage.stages,
             workers: refreshedStage.workers,
           };
+          this.clearRemoteUpdateNotice();
         },
         error: (error) => {
           if (
@@ -797,6 +832,63 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
           );
         },
       });
+  }
+
+  private subscribeToLineStaffingRealtime(): void {
+    this.stopRealtime = this.manufacturingRealtime?.watchScreen({
+      screen: 'line-staffing',
+      matches: change =>
+        change.entityType === 'WorkerDefaultAssignment' &&
+        !!this.selectedFactoryId &&
+        !!this.selectedProductionLineId &&
+        change.factoryId === this.selectedFactoryId &&
+        change.productionLineId === this.selectedProductionLineId,
+      refresh: change => this.handleLineStaffingRealtimeChange(change?.subStageId ?? ''),
+    });
+  }
+
+  private handleLineStaffingRealtimeChange(subStageId: string): void {
+    if (this.hasUnsavedStaffingChanges()) {
+      this.hasPendingRemoteUpdate = true;
+      this.remoteUpdateMessage = 'تغير تسكين دائم في هذا الخط بواسطة مستخدم آخر. احتفظنا بالتعديلات غير المحفوظة؛ راجعها ثم اضغط تحديث الآن.';
+      return;
+    }
+
+    if (this.planLoading) {
+      this.realtimeRefreshQueued = true;
+      this.queuedRealtimeSubStageId = subStageId;
+      return;
+    }
+
+    const stageToRefresh = subStageId || this.selectedSubStageId;
+    if (stageToRefresh) this.refreshStageAfterAssignment(stageToRefresh);
+  }
+
+  private hasUnsavedStaffingChanges(): boolean {
+    if (!this.assignmentDialogVisible) return false;
+    if (this.assignmentDialogMode === 'remove-default')
+      return !!this.assignmentForm.controls.reason.value?.trim();
+
+    const selectedStageWorkers = new Set(
+      this.selectedStageWorkers
+        .filter(worker => this.participationForStage(worker)?.assignmentType === 'Default')
+        .map(worker => worker.workerId),
+    );
+    return selectedStageWorkers.size !== this.selectedDefaultWorkerIds.size ||
+      [...selectedStageWorkers].some(workerId => !this.selectedDefaultWorkerIds.has(workerId));
+  }
+
+  private flushQueuedRealtimeRefresh(): void {
+    if (!this.realtimeRefreshQueued) return;
+    this.realtimeRefreshQueued = false;
+    const subStageId = this.queuedRealtimeSubStageId;
+    this.queuedRealtimeSubStageId = '';
+    this.handleLineStaffingRealtimeChange(subStageId);
+  }
+
+  private clearRemoteUpdateNotice(): void {
+    this.hasPendingRemoteUpdate = false;
+    this.remoteUpdateMessage = '';
   }
 
   workerAssignmentLabel(worker: LineStaffingWorker): string {

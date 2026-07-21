@@ -5,6 +5,7 @@ import { BehaviorSubject, Subject, of, throwError } from 'rxjs';
 import { AssignmentsApiService, LineStaffingPlan } from '../../core/services/assignments-api.service';
 import { ManufacturingMasterDataApiService } from '../../core/services/manufacturing-master-data-api.service';
 import { PermissionService } from '../../core/services/permission.service';
+import { ManufacturingRealtimeService } from '../../core/services/manufacturing-realtime.service';
 import { FormSubmissionValidationService } from '../../shared/forms/form-submission-validation.service';
 import { LineStaffingWorkspacePageComponent } from './line-staffing-workspace-page.component';
 
@@ -22,6 +23,9 @@ describe('LineStaffingWorkspacePageComponent', () => {
   let route: ActivatedRoute;
   let routeFragments: BehaviorSubject<string | null>;
   let component: LineStaffingWorkspacePageComponent;
+  let realtime: jasmine.SpyObj<ManufacturingRealtimeService>;
+  let stopRealtime: jasmine.Spy;
+  let realtimeWatch: { refresh: (change?: any) => void; matches?: (change: any) => boolean };
 
   beforeEach(() => {
     masterData = jasmine.createSpyObj<ManufacturingMasterDataApiService>('ManufacturingMasterDataApiService', ['factories', 'departments', 'productionLinesForDepartment', 'models']);
@@ -39,6 +43,12 @@ describe('LineStaffingWorkspacePageComponent', () => {
     route = { fragment: routeFragments.asObservable() } as ActivatedRoute;
     router = jasmine.createSpyObj<Router>('Router', ['navigate']);
     router.navigate.and.returnValue(Promise.resolve(true));
+    stopRealtime = jasmine.createSpy('stopRealtime');
+    realtime = jasmine.createSpyObj<ManufacturingRealtimeService>('ManufacturingRealtimeService', ['watchScreen', 'registerLocalOperation']);
+    realtime.watchScreen.and.callFake((watch: any) => {
+      realtimeWatch = watch;
+      return stopRealtime;
+    });
     component = new LineStaffingWorkspacePageComponent(
       masterData,
       assignments,
@@ -46,7 +56,8 @@ describe('LineStaffingWorkspacePageComponent', () => {
       new FormBuilder(),
       new FormSubmissionValidationService(),
       route,
-      router
+      router,
+      realtime,
     );
   });
 
@@ -71,6 +82,39 @@ describe('LineStaffingWorkspacePageComponent', () => {
     expect(assignments.getLineStaffingPlan).toHaveBeenCalledWith(factoryId, lineId, modelId, component.staffingReferenceDate);
     expect(component.plan?.stages.length).toBe(2);
     expect(component.selectedStage?.subStageId).toBe(defaultStageId);
+  });
+
+  it('refreshes only the changed permanent-assignment stage for the same factory and production line', () => {
+    initialize(component);
+    const matching = permanentAssignmentChange({ subStageId: temporaryStageId });
+
+    expect(realtimeWatch.matches?.(matching)).toBeTrue();
+    realtimeWatch.refresh(matching);
+
+    expect(assignments.getLineStaffingStageRefresh).toHaveBeenCalledWith(factoryId, lineId, modelId, temporaryStageId, component.staffingReferenceDate);
+    expect(realtimeWatch.matches?.(permanentAssignmentChange({ productionLineId: 'other-line' }))).toBeFalse();
+    expect(realtimeWatch.matches?.(permanentAssignmentChange({ factoryId: 'other-factory' }))).toBeFalse();
+  });
+
+  it('keeps unsaved staffing dialog selections and shows a refresh notice for a matching remote event', () => {
+    initialize(component);
+    component.openDefaultAssignment();
+    component.toggleDefaultWorker(component.availableWorkers[1], true);
+    const matching = permanentAssignmentChange();
+
+    expect(realtimeWatch.matches?.(matching)).toBeTrue();
+    realtimeWatch.refresh(matching);
+
+    expect(component.assignmentDialogVisible).toBeTrue();
+    expect(component.hasPendingRemoteUpdate).toBeTrue();
+    expect(assignments.getLineStaffingStageRefresh).not.toHaveBeenCalled();
+  });
+
+  it('releases the line-staffing realtime watcher on destroy', () => {
+    component.ngOnInit();
+    component.ngOnDestroy();
+
+    expect(stopRealtime).toHaveBeenCalledTimes(1);
   });
 
   it('loads only the selected factory departments and only the selected department lines', () => {
@@ -736,6 +780,27 @@ function initialize(component: LineStaffingWorkspacePageComponent): void {
   component.selectProductionLine(lineId);
   component.selectProductModel(modelId);
   component.loadProductStages();
+}
+
+function permanentAssignmentChange(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    eventId: 'permanent-assignment-event',
+    entityType: 'WorkerDefaultAssignment',
+    changeType: 'permanent-assignment-created',
+    entityId: 'assignment-1',
+    occurredAtUtc: new Date().toISOString(),
+    actorUserId: 'actor-1',
+    correlationId: null,
+    factoryId,
+    departmentId,
+    productionLineId: lineId,
+    mainStageId: 'main-stage-1',
+    productModelId: null,
+    subStageId: defaultStageId,
+    productionDate: null,
+    workerId: 'worker-1',
+    ...overrides,
+  };
 }
 
 function selectionEvent(checked: boolean): Event {

@@ -138,8 +138,27 @@ public sealed class ManufacturingDataChangeSaveChangesInterceptor(
                 productModelId: entity.ProductModelId,
                 productionDate: entity.ProductionDate),
             Worker entity => Create(entry, ManufacturingEntityType.Worker, entity.Id, actorUserId),
+            WorkerDefaultAssignment entity => CreateDefaultAssignmentChange(entry, entity, actorUserId),
             _ => null
         };
+    }
+
+    private ManufacturingDataChanged CreateDefaultAssignmentChange(
+        Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry entry,
+        WorkerDefaultAssignment entity,
+        Guid? actorUserId)
+    {
+        var location = ResolveDefaultAssignmentLocation(entry.Context, entity.SubStageId);
+        return Create(
+            entry,
+            ManufacturingEntityType.WorkerDefaultAssignment,
+            entity.Id,
+            actorUserId,
+            factoryId: location.FactoryId,
+            productionLineId: location.ProductionLineId,
+            mainStageId: location.MainStageId,
+            subStageId: entity.SubStageId,
+            workerId: entity.WorkerId);
     }
 
     private ManufacturingDataChanged Create(
@@ -153,7 +172,8 @@ public sealed class ManufacturingDataChangeSaveChangesInterceptor(
         Guid? mainStageId = null,
         Guid? productModelId = null,
         Guid? subStageId = null,
-        DateOnly? productionDate = null) =>
+        DateOnly? productionDate = null,
+        Guid? workerId = null) =>
         new(
             Guid.NewGuid(),
             entityType,
@@ -168,7 +188,46 @@ public sealed class ManufacturingDataChangeSaveChangesInterceptor(
             mainStageId,
             productModelId,
             subStageId,
-            productionDate);
+            productionDate,
+            workerId);
+
+    private static DefaultAssignmentLocation ResolveDefaultAssignmentLocation(DbContext? context, Guid subStageId)
+    {
+        if (context is null) return new DefaultAssignmentLocation(null, null, null);
+
+        var trackedStage = context.ChangeTracker.Entries<SubStage>()
+            .Where(entry => entry.State != EntityState.Deleted && entry.Entity.Id == subStageId)
+            .Select(entry => entry.Entity)
+            .FirstOrDefault();
+        var productionLineId = trackedStage?.ProductionLineId;
+        var mainStageId = trackedStage?.MainStageId;
+
+        if (!productionLineId.HasValue || productionLineId == Guid.Empty || !mainStageId.HasValue || mainStageId == Guid.Empty)
+        {
+            var persistedStage = context.Set<SubStage>()
+                .AsNoTracking()
+                .Where(stage => stage.Id == subStageId)
+                .Select(stage => new { stage.ProductionLineId, stage.MainStageId })
+                .SingleOrDefault();
+            productionLineId = persistedStage?.ProductionLineId;
+            mainStageId = persistedStage?.MainStageId;
+        }
+
+        if (!productionLineId.HasValue || productionLineId == Guid.Empty)
+            return new DefaultAssignmentLocation(null, null, mainStageId);
+
+        var factoryId = context.ChangeTracker.Entries<ProductionLine>()
+            .Where(entry => entry.State != EntityState.Deleted && entry.Entity.Id == productionLineId.Value)
+            .Select(entry => (Guid?)entry.Entity.FactoryId)
+            .FirstOrDefault()
+            ?? context.Set<ProductionLine>()
+                .AsNoTracking()
+                .Where(line => line.Id == productionLineId.Value)
+                .Select(line => (Guid?)line.FactoryId)
+                .SingleOrDefault();
+
+        return new DefaultAssignmentLocation(factoryId, productionLineId, mainStageId);
+    }
 
     private static Guid? ResolveFactoryId(DbContext? context, Guid? productionLineId)
     {
@@ -186,6 +245,18 @@ public sealed class ManufacturingDataChangeSaveChangesInterceptor(
 
     private static ManufacturingChangeType ResolveChangeType(Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry entry, ManufacturingEntityType entityType)
     {
+        if (entityType == ManufacturingEntityType.WorkerDefaultAssignment)
+        {
+            if (entry.State == EntityState.Added) return ManufacturingChangeType.PermanentAssignmentCreated;
+            if (entry.State == EntityState.Deleted) return ManufacturingChangeType.PermanentAssignmentCancelled;
+
+            var assignmentActive = entry.Properties.FirstOrDefault(property => property.Metadata.Name == "IsActive");
+            if (assignmentActive?.IsModified == true && assignmentActive.OriginalValue is bool assignmentWasActive && assignmentActive.CurrentValue is bool assignmentIsActive && assignmentWasActive && !assignmentIsActive)
+                return ManufacturingChangeType.PermanentAssignmentCancelled;
+
+            return ManufacturingChangeType.PermanentAssignmentUpdated;
+        }
+
         if (entry.State == EntityState.Added) return ManufacturingChangeType.Created;
         if (entry.State == EntityState.Deleted) return ManufacturingChangeType.Deleted;
 
@@ -207,6 +278,8 @@ public sealed class ManufacturingDataChangeSaveChangesInterceptor(
     }
 
     private string? CorrelationId() => correlationContext.CorrelationId;
+
+    private sealed record DefaultAssignmentLocation(Guid? FactoryId, Guid? ProductionLineId, Guid? MainStageId);
 
     private sealed record PendingChanges(IReadOnlyList<ManufacturingDataChanged> Changes, DbTransaction? Transaction);
 }

@@ -1,7 +1,7 @@
 export type RealtimeConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'reconnecting';
 
-export type ManufacturingEntityType = 'Factory' | 'Department' | 'ProductionLine' | 'MainStage' | 'SubStage' | 'ProductModel' | 'ProductModelStage' | 'ProductionOrder' | 'Worker';
-export type ManufacturingChangeType = 'Created' | 'Updated' | 'Deleted' | 'Activated' | 'Deactivated' | 'Reordered' | 'RelationshipChanged';
+export type ManufacturingEntityType = 'Factory' | 'Department' | 'ProductionLine' | 'MainStage' | 'SubStage' | 'ProductModel' | 'ProductModelStage' | 'ProductionOrder' | 'Worker' | 'WorkerDefaultAssignment';
+export type ManufacturingChangeType = 'Created' | 'Updated' | 'Deleted' | 'Activated' | 'Deactivated' | 'Reordered' | 'RelationshipChanged' | 'permanent-assignment-created' | 'permanent-assignment-updated' | 'permanent-assignment-cancelled';
 
 /** A small invalidation hint; screens refetch API data rather than accepting a pushed entity. */
 export interface ManufacturingDataChanged {
@@ -19,6 +19,7 @@ export interface ManufacturingDataChanged {
   productModelId: string | null;
   subStageId: string | null;
   productionDate: string | null;
+  workerId: string | null;
 }
 
 export interface NotificationSummary {

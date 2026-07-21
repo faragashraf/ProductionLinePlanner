@@ -110,7 +110,7 @@ describe('ManufacturingRealtimeService', () => {
   function change(eventId: string, productionLineId: string | null = null, correlationId: string | null = null, entityType: ManufacturingDataChanged['entityType'] = 'ProductModel'): ManufacturingDataChanged {
     return {
       eventId, entityType, changeType: 'Updated', entityId: 'model-1', occurredAtUtc: new Date().toISOString(), actorUserId: null,
-      correlationId, factoryId: null, departmentId: null, productionLineId, mainStageId: null, productModelId: 'model-1', subStageId: null, productionDate: null
+      correlationId, factoryId: null, departmentId: null, productionLineId, mainStageId: null, productModelId: 'model-1', subStageId: null, productionDate: null, workerId: null
     };
   }
 

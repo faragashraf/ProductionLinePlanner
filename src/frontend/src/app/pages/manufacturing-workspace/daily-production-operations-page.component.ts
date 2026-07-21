@@ -18,6 +18,7 @@ import {
 import { FactoryItem, ManufacturingMasterDataApiService, ProductModelItem, ProductionLineOption } from '../../core/services/manufacturing-master-data-api.service';
 import { PermissionService } from '../../core/services/permission.service';
 import { ManufacturingRealtimeService } from '../../core/services/manufacturing-realtime.service';
+import { ManufacturingDataChanged } from '../../core/models/realtime-notification.models';
 import { createClientRequestId } from '../../core/utils/client-request-id';
 import { FormSubmissionValidationService } from '../../shared/forms/form-submission-validation.service';
 import { productionDisplayLabel } from '../../shared/product/production-display-labels';
@@ -1179,17 +1180,28 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
   private subscribeToDailyOperationsRealtime(): void {
     this.stopRealtime = this.manufacturingRealtime?.watchScreen({
       screen: 'daily-production-operations',
-      matches: change =>
-        change.entityType === 'ProductionOrder' &&
-        !!this.selectedFactoryId &&
-        !!this.selectedProductionLineId &&
-        !!this.selectedProductModelId &&
-        change.productionDate === this.productionDate &&
-        change.productionLineId === this.selectedProductionLineId &&
-        change.productModelId === this.selectedProductModelId &&
-        (!change.factoryId || change.factoryId === this.selectedFactoryId),
+      matches: change => this.matchesCurrentDailyOperationsContext(change),
       refresh: () => this.handleDailyOperationsRealtimeChange()
     });
+  }
+
+  private matchesCurrentDailyOperationsContext(change: ManufacturingDataChanged): boolean {
+    if (!this.selectedFactoryId || !this.selectedProductionLineId || !this.selectedProductModelId)
+      return false;
+
+    if (change.entityType === 'ProductionOrder') {
+      return change.productionDate === this.productionDate &&
+        change.factoryId === this.selectedFactoryId &&
+        change.productionLineId === this.selectedProductionLineId &&
+        change.productModelId === this.selectedProductModelId;
+    }
+
+    if (change.entityType !== 'WorkerDefaultAssignment' || !change.subStageId)
+      return false;
+
+    return change.factoryId === this.selectedFactoryId &&
+      change.productionLineId === this.selectedProductionLineId &&
+      this.stages.some(stage => stage.subStageId === change.subStageId);
   }
 
   private handleDailyOperationsRealtimeChange(): void {
