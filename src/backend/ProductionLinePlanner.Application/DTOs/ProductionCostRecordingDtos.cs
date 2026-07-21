@@ -109,3 +109,9 @@ public sealed record DailyProductionApprovalDto(
     string OrderStatus,
     DateTime ApprovedAtUtc,
     int ApprovedStageCount);
+
+public sealed record DailyProductionApprovalCancellationDto(
+    Guid ProductionOrderId,
+    string OrderStatus,
+    DateTime CancelledAtUtc,
+    int CancelledStageCount);

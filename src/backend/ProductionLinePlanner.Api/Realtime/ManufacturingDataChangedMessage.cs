@@ -19,7 +19,8 @@ public sealed record ManufacturingDataChangedMessage(
     Guid? ProductionLineId,
     Guid? MainStageId,
     Guid? ProductModelId,
-    Guid? SubStageId)
+    Guid? SubStageId,
+    DateOnly? ProductionDate)
 {
     public static ManufacturingDataChangedMessage From(ManufacturingDataChanged change) => new(
         change.EventId,
@@ -34,5 +35,6 @@ public sealed record ManufacturingDataChangedMessage(
         change.ProductionLineId,
         change.MainStageId,
         change.ProductModelId,
-        change.SubStageId);
+        change.SubStageId,
+        change.ProductionDate);
 }

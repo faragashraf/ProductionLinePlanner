@@ -128,6 +128,15 @@ public sealed class ManufacturingDataChangeSaveChangesInterceptor(
             SubStage entity => Create(entry, ManufacturingEntityType.SubStage, entity.Id, actorUserId, productionLineId: entity.ProductionLineId, mainStageId: entity.MainStageId, subStageId: entity.Id),
             ProductModel entity => Create(entry, ManufacturingEntityType.ProductModel, entity.Id, actorUserId, productModelId: entity.Id),
             ProductModelStage entity => Create(entry, ManufacturingEntityType.ProductModelStage, entity.Id, actorUserId, productModelId: entity.ProductModelId, subStageId: entity.SubStageId),
+            ProductionOrder entity => Create(
+                entry,
+                ManufacturingEntityType.ProductionOrder,
+                entity.Id,
+                actorUserId,
+                factoryId: entity.ProductionLine?.FactoryId ?? ResolveFactoryId(entry.Context, entity.ProductionLineId),
+                productionLineId: entity.ProductionLineId,
+                productModelId: entity.ProductModelId,
+                productionDate: entity.ProductionDate),
             Worker entity => Create(entry, ManufacturingEntityType.Worker, entity.Id, actorUserId),
             _ => null
         };
@@ -143,7 +152,8 @@ public sealed class ManufacturingDataChangeSaveChangesInterceptor(
         Guid? productionLineId = null,
         Guid? mainStageId = null,
         Guid? productModelId = null,
-        Guid? subStageId = null) =>
+        Guid? subStageId = null,
+        DateOnly? productionDate = null) =>
         new(
             Guid.NewGuid(),
             entityType,
@@ -157,7 +167,22 @@ public sealed class ManufacturingDataChangeSaveChangesInterceptor(
             productionLineId,
             mainStageId,
             productModelId,
-            subStageId);
+            subStageId,
+            productionDate);
+
+    private static Guid? ResolveFactoryId(DbContext? context, Guid? productionLineId)
+    {
+        if (context is null || productionLineId is null)
+        {
+            return null;
+        }
+
+        return context.ChangeTracker.Entries<ProductionLine>()
+            .Where(entry => entry.Entity.Id == productionLineId)
+            .Select(entry => (Guid?)entry.Entity.FactoryId)
+            .FirstOrDefault()
+            ?? context.Set<ProductionLine>().Local.FirstOrDefault(line => line.Id == productionLineId)?.FactoryId;
+    }
 
     private static ManufacturingChangeType ResolveChangeType(Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry entry, ManufacturingEntityType entityType)
     {

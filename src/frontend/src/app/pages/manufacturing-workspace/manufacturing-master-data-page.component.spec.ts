@@ -248,4 +248,19 @@ describe('ManufacturingMasterDataPageComponent', () => {
 
     expect(component.modelEmptyMessage).toBe('لا توجد موديلات مطابقة للبحث.');
   });
+
+  it('keeps the selected available stage while a separate stage search moves to another result page', () => {
+    (component as never as { applyModelStageOptionPage(page: unknown, search: string): void }).applyModelStageOptionPage({
+      items: [stage], totalCount: 51, pageNumber: 1, pageSize: 50
+    }, '');
+    component.modelStageForm.patchValue({ subStageId: stage.id });
+    component.modelStageSearch = 'cut';
+    api.searchSubStages.and.returnValue(of({ items: [englishStage], totalCount: 51, pageNumber: 2, pageSize: 50 }));
+
+    component.changeModelStagePage(1);
+
+    expect(api.searchSubStages).toHaveBeenCalledWith('cut', 2, 50);
+    expect(component.modelStageChoices.map(item => item.id)).toEqual([stage.id, englishStage.id]);
+    expect(component.modelStagePageCount).toBe(2);
+  });
 });

@@ -54,7 +54,7 @@ describe('ProductionCostRecordingApiService', () => {
 
     service.loadDailyOperations('factory-1', 'line-1', 'model-1', '2026-07-16').subscribe(() => loaded = true);
     service.previewDailyOperations(payload).subscribe(() => previewed = true);
-    service.saveDailyDraft(payload).subscribe(() => saved = true);
+    service.saveDailyDraft(payload, 'daily-operation-correlation').subscribe(() => saved = true);
 
     const load = http.expectOne(request => request.method === 'GET' && request.url.includes('/api/production/daily-operations'));
     expect(load.request.method).toBe('GET');
@@ -69,11 +69,30 @@ describe('ProductionCostRecordingApiService', () => {
     const save = http.expectOne(request => request.url.endsWith('/api/production/daily-operations/drafts'));
     expect(save.request.method).toBe('POST');
     expect(save.request.body).toEqual(payload);
+    expect(save.request.headers.get('X-Manufacturing-Realtime-Correlation-Id')).toBe('daily-operation-correlation');
     save.flush({ success: true, data: { productionOrderId: 'day-1', stages: [] } });
 
     expect(loaded).toBeTrue();
     expect(previewed).toBeTrue();
     expect(saved).toBeTrue();
+  });
+
+  it('sends a daily approval cancellation with every stage concurrency token and the realtime correlation id', () => {
+    let cancelled = false;
+
+    service.cancelDailyOperationApproval('day-1', [{ stageProductionRecordId: 'record-1', concurrencyToken: 'token-1' }], 'تصحيح تشغيل اليوم', 'cancel-correlation')
+      .subscribe(() => cancelled = true);
+
+    const request = http.expectOne(item => item.url.endsWith('/api/production/daily-operations/day-1/cancel-approval'));
+    expect(request.request.method).toBe('POST');
+    expect(request.request.body).toEqual({
+      stageApprovals: [{ stageProductionRecordId: 'record-1', concurrencyToken: 'token-1' }],
+      reason: 'تصحيح تشغيل اليوم'
+    });
+    expect(request.request.headers.get('X-Manufacturing-Realtime-Correlation-Id')).toBe('cancel-correlation');
+    request.flush({ success: true, data: { productionOrderId: 'day-1', orderStatus: 'Draft', cancelledStageCount: 1 } });
+
+    expect(cancelled).toBeTrue();
   });
 
   it('keeps a full-day unified preview alive past the normal API timeout', fakeAsync(() => {

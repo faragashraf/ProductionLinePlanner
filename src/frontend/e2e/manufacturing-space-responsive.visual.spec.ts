@@ -273,21 +273,17 @@ test('loads the permanent staffing workspace and keeps its dialog within tablet 
   expectCleanDiagnostics(diagnostics);
 });
 
-test('keeps production recording safe at every required and intermediate viewport without reload on rotation', async ({ page }) => {
+test('redirects the legacy production-recording route safely to daily operations', async ({ page }) => {
   const diagnostics = await preparePage(page);
   await page.goto('/manufacturing/production-recording');
-  await expect(page.getByRole('heading', { name: 'تشغيل وتسجيل الإنتاج' })).toBeVisible();
+  await expect(page).toHaveURL(/\/manufacturing\/daily-production-operations$/);
+  await expect(page.getByText('تشغيل الإنتاج اليومي', { exact: true })).toBeVisible();
 
   for (const [name, width, height] of exactViewports) {
     await page.setViewportSize({ width, height });
-    await expect(page.getByRole('heading', { name: 'تشغيل وتسجيل الإنتاج' })).toBeVisible();
+    await expect(page.getByText('تشغيل الإنتاج اليومي', { exact: true })).toBeVisible();
     await expectViewportSafe(page);
-    const hierarchy = page.locator('.production-page__hierarchy');
-    const columnCount = await hierarchy.evaluate(element => getComputedStyle(element).gridTemplateColumns.split(' ').length);
-    expect(columnCount).toBe(width < 600 ? 1 : width < 1024 ? 2 : 4);
-    const minimumControlHeight = await hierarchy.locator('select').first().evaluate(element => element.getBoundingClientRect().height);
-    expect(minimumControlHeight).toBeGreaterThanOrEqual(43);
-    await page.screenshot({ path: path.join(visualOutput, `production-recording-${name}.png`), fullPage: true });
+    await page.screenshot({ path: path.join(visualOutput, `daily-production-redirect-${name}.png`), fullPage: true });
   }
   expectCleanDiagnostics(diagnostics);
 });

@@ -6,7 +6,6 @@ import { ManufacturingDepartmentsPageComponent } from './manufacturing-departmen
 import { LineStaffingWorkspacePageComponent } from './line-staffing-workspace-page.component';
 import { DailyProductionOperationsPageComponent } from './daily-production-operations-page.component';
 import { ManufacturingPlaceholderPageComponent } from './manufacturing-placeholder-page.component';
-import { ProductionCostRecordingPageComponent } from './production-cost-recording-page.component';
 import { ReportsWorkspacePageComponent } from '../reports-workspace/reports-workspace-page.component';
 import { MANUFACTURING_WORKSPACE_ROUTES } from './manufacturing-workspace-routing.module';
 
@@ -49,13 +48,14 @@ describe('ManufacturingWorkspaceRoutingModule', () => {
     expect(route?.component).toBeUndefined();
   });
 
-  it('requires production view and recording permission for the Production Recording route', () => {
-    const route = childRoutes.find(item => item.path === 'production-recording');
+  it('redirects legacy production-recording and orders links to daily production operations', () => {
+    for (const path of ['production-recording', 'orders']) {
+      const route = childRoutes.find(item => item.path === path);
 
-    expect(route?.component).toBe(ProductionCostRecordingPageComponent);
-    expect(route?.canMatch).toContain(PermissionCanMatchGuard);
-    expect(route?.canActivate).toContain(PermissionCanActivateGuard);
-    expect(route?.data?.['requireAll']).toEqual([PERMISSIONS.production.view, PERMISSIONS.production.record]);
+      expect(route?.redirectTo).toBe('daily-production-operations');
+      expect(route?.pathMatch).toBe('full');
+      expect(route?.component).toBeUndefined();
+    }
   });
 
   it('routes line staffing to its dedicated attendance-free workspace with the required planning permissions', () => {

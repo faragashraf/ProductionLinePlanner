@@ -34,6 +34,68 @@ public sealed class ManufacturingRealtimeFoundationTests
     }
 
     [Fact]
+    public async Task Daily_production_order_save_publishes_one_contextual_event_after_successful_save()
+    {
+        var publisher = new RecordingPublisher();
+        var actor = Guid.NewGuid();
+        await using var db = CreateDb(publisher, actor);
+        var factory = new Factory(Guid.NewGuid(), "Factory", "F-001");
+        var line = new ProductionLine(Guid.NewGuid(), factory.Id, "Line", 1, "L-001");
+        var model = new ProductModel(Guid.NewGuid(), "M-001", "Model");
+        db.AddRange(factory, line, model);
+        await db.SaveChangesAsync();
+        publisher.Changes.Clear();
+
+        var date = new DateOnly(2026, 7, 21);
+        var order = new ProductionOrder(Guid.NewGuid(), "DLY-001", model.Id, line.Id, date, 10m, null, actor, DateTime.UtcNow);
+        order.MarkDailyOperation("DailyProductionOperations/test", DateTime.UtcNow);
+        db.Add(order);
+        await db.SaveChangesAsync();
+
+        var change = Assert.Single(publisher.Changes);
+        Assert.Equal(ManufacturingEntityType.ProductionOrder, change.EntityType);
+        Assert.Equal(ManufacturingChangeType.Created, change.ChangeType);
+        Assert.Equal(order.Id, change.EntityId);
+        Assert.Equal(factory.Id, change.FactoryId);
+        Assert.Equal(line.Id, change.ProductionLineId);
+        Assert.Equal(model.Id, change.ProductModelId);
+        Assert.Equal(date, change.ProductionDate);
+        Assert.Equal(["manufacturing:daily-production-operations"], ManufacturingRealtimeGroups.ForChange(change));
+    }
+
+    [Fact]
+    public async Task Daily_production_approval_cancellation_publishes_one_updated_contextual_event()
+    {
+        var publisher = new RecordingPublisher();
+        var actor = Guid.NewGuid();
+        await using var db = CreateDb(publisher, actor);
+        var factory = new Factory(Guid.NewGuid(), "Factory", "F-001");
+        var line = new ProductionLine(Guid.NewGuid(), factory.Id, "Line", 1, "L-001");
+        var model = new ProductModel(Guid.NewGuid(), "M-001", "Model");
+        var date = new DateOnly(2026, 7, 21);
+        var order = new ProductionOrder(Guid.NewGuid(), "DLY-001", model.Id, line.Id, date, 10m, null, actor, DateTime.UtcNow);
+        order.MarkDailyOperation("DailyProductionOperations/test", DateTime.UtcNow);
+        db.AddRange(factory, line, model, order);
+        await db.SaveChangesAsync();
+        publisher.Changes.Clear();
+
+        order.ApproveDay(actor, DateTime.UtcNow);
+        await db.SaveChangesAsync();
+        publisher.Changes.Clear();
+
+        order.ReopenDailyOperationAfterApprovalCancellation(actor, DateTime.UtcNow);
+        await db.SaveChangesAsync();
+
+        var change = Assert.Single(publisher.Changes);
+        Assert.Equal(ManufacturingEntityType.ProductionOrder, change.EntityType);
+        Assert.Equal(ManufacturingChangeType.Updated, change.ChangeType);
+        Assert.Equal(factory.Id, change.FactoryId);
+        Assert.Equal(line.Id, change.ProductionLineId);
+        Assert.Equal(model.Id, change.ProductModelId);
+        Assert.Equal(date, change.ProductionDate);
+    }
+
+    [Fact]
     public async Task Update_activation_and_relationship_changes_are_classified_without_entity_payloads()
     {
         var publisher = new RecordingPublisher();
@@ -116,14 +178,20 @@ public sealed class ManufacturingRealtimeFoundationTests
             Guid.NewGuid(), ManufacturingEntityType.Department, ManufacturingChangeType.Updated, Guid.NewGuid(), DateTime.UtcNow, null, null));
         var workerGroups = ManufacturingRealtimeGroups.ForChange(new ManufacturingDataChanged(
             Guid.NewGuid(), ManufacturingEntityType.Worker, ManufacturingChangeType.Updated, Guid.NewGuid(), DateTime.UtcNow, null, null));
+        var dailyGroups = ManufacturingRealtimeGroups.ForChange(new ManufacturingDataChanged(
+            Guid.NewGuid(), ManufacturingEntityType.ProductionOrder, ManufacturingChangeType.Updated, Guid.NewGuid(), DateTime.UtcNow, null, null,
+            ProductionLineId: Guid.NewGuid(), ProductModelId: Guid.NewGuid(), ProductionDate: new DateOnly(2026, 7, 21)));
 
         Assert.Equal(["manufacturing:models"], modelGroups);
         Assert.Equal(["manufacturing:factory-structure", "manufacturing:departments", "manufacturing:stages"], departmentGroups);
         Assert.Equal(["manufacturing:employees"], workerGroups);
+        Assert.Equal(["manufacturing:daily-production-operations"], dailyGroups);
         Assert.True(ManufacturingRealtimeGroups.TryGetRequiredPermission("models", out var permission));
         Assert.Equal("models.view", permission);
         Assert.True(ManufacturingRealtimeGroups.TryGetRequiredPermission("employees", out permission));
         Assert.Equal("workers.view", permission);
+        Assert.True(ManufacturingRealtimeGroups.TryGetRequiredPermission("daily-production-operations", out permission));
+        Assert.Equal("production.record", permission);
         Assert.False(ManufacturingRealtimeGroups.TryGetRequiredPermission("reports", out _));
     }
 

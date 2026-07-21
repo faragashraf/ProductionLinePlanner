@@ -54,6 +54,7 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
   modelStageTotal = 0;
   readonly modelStagePageSize = 50;
   modelStageSelectorLoading = false;
+  private readonly modelStageOptionCache = new Map<string, SubStageOption>();
 
   readonly stageForm = this.fb.group({
     factoryId: ['', Validators.required],
@@ -97,6 +98,7 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
   get stageResultCount(): number { return this.filteredOperationalStages.length; }
   get stageEmptyMessage(): string { return normalizeSearchText(this.stageSearch) ? 'لا توجد مراحل مطابقة للبحث.' : 'اختر خط إنتاج لعرض مراحل الإنتاج، أو لا توجد مراحل مطابقة.'; }
   get modelEmptyMessage(): string { return normalizeSearchText(this.modelSearch) ? 'لا توجد موديلات مطابقة للبحث.' : 'لا توجد موديلات لعرضها.'; }
+  get modelStagePageCount(): number { return Math.max(1, Math.ceil(this.modelStageTotal / this.modelStagePageSize)); }
   get canConfirmDependencyAction(): boolean {
     return this.pendingStageAction === 'disable' ? !!this.stageDependencySummary?.canDisable : this.pendingStageAction === 'delete' && !!this.stageDependencySummary?.canDelete;
   }
@@ -107,7 +109,7 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
     if (this.mode === 'models') {
       forkJoin({ modelPage: this.api.modelSearchPage('', 1, this.modelPageSize), stagePage: this.api.searchSubStages('', 1, this.modelStagePageSize) })
         .pipe(finalize(() => this.loading = false), takeUntil(this.destroy$))
-        .subscribe({ next: data => { this.applyModelPage(data.modelPage); this.modelStageOptions = data.stagePage.items; this.modelStageTotal = data.stagePage.totalCount; }, error: error => this.setError(error) });
+        .subscribe({ next: data => { this.applyModelPage(data.modelPage); this.applyModelStageOptionPage(data.stagePage, ''); }, error: error => this.setError(error) });
       return;
     }
     this.api.factories().pipe(finalize(() => this.loading = false), takeUntil(this.destroy$)).subscribe({
@@ -221,7 +223,7 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
   setModelActive(item: ProductModelItem): void { if (confirm(item.isActive ? 'تعطيل الموديل؟' : 'تفعيل الموديل؟')) this.save(this.api.setModelActivation(item.id, !item.isActive, this.localCorrelation('models')), () => this.models = this.models.map(model => model.id === item.id ? { ...model, isActive: !item.isActive } : model)); }
   onModelStageSearch(value: string): void { this.modelStageSearch = value; this.modelStageSearch$.next(value.trim()); }
   changeModelStagePage(offset: number): void { const page = this.modelStagePage + offset; if (page >= 1 && (page - 1) * this.modelStagePageSize < this.modelStageTotal) this.loadModelStageOptions(this.modelStageSearch, page).pipe(takeUntil(this.destroy$)).subscribe(); }
-  get modelStageChoices(): SubStageOption[] { const currentId = this.modelStageForm.getRawValue().subStageId; const existing = this.stages.find(stage => stage.subStageId === currentId); const selected = existing && !this.modelStageOptions.some(option => option.id === existing.subStageId) ? { id: existing.subStageId, mainStageId: '', code: existing.subStageCode || '—', name: existing.subStageName || 'مرحلة مرتبطة', capacity: 0, sequenceOrder: 0, isActive: false } : null; return selected ? [selected, ...this.modelStageOptions] : this.modelStageOptions; }
+  get modelStageChoices(): SubStageOption[] { const currentId = this.modelStageForm.getRawValue().subStageId; const existing = this.stages.find(stage => stage.subStageId === currentId); const selected = currentId && !this.modelStageOptions.some(option => option.id === currentId) ? this.modelStageOptionCache.get(currentId) ?? (existing ? { id: existing.subStageId, mainStageId: '', code: existing.subStageCode || '—', name: existing.subStageName || 'مرحلة مرتبطة', capacity: 0, sequenceOrder: 0, isActive: false } : null) : null; return selected ? [selected, ...this.modelStageOptions] : this.modelStageOptions; }
   onModelFormVisibility(visible: boolean): void { this.modelFormVisible = visible; if (!visible) { this.editModelId = ''; this.modelForm.reset(); } }
   onModelStageFormVisibility(visible: boolean): void { this.modelStageFormVisible = visible; if (!visible) { this.editModelStageId = ''; this.modelStageForm.reset({ stageOrder: 1, piecePrice: 0, compensationMode: 'SharedPercentage', isRequired: true, isActive: true }); } }
   subName(id: string): string { return this.modelStageOptions.find(item => item.id === id)?.name ?? this.stages.find(item => item.subStageId === id)?.subStageName ?? '-'; }
@@ -232,7 +234,8 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
   private save<T>(request: Observable<T>, success?: (result: T) => void): void { this.saving = true; this.error = ''; request.pipe(finalize(() => this.saving = false), takeUntil(this.destroy$)).subscribe({ next: result => success?.(result), error: error => this.setError(error) }); }
   private loadModelPage(search: string, page: number): void { const requestVersion = ++this.modelRequestVersion; this.modelListLoading = true; this.error = ''; this.api.modelSearchPage(search, page, this.modelPageSize).pipe(finalize(() => { if (requestVersion === this.modelRequestVersion) this.modelListLoading = false; }), takeUntil(this.destroy$)).subscribe({ next: result => { if (requestVersion !== this.modelRequestVersion) return; const nearestPage = result.totalCount > 0 ? Math.max(1, Math.ceil(result.totalCount / result.pageSize)) : 1; if (result.items.length === 0 && page > nearestPage) { this.loadModelPage(search, nearestPage); return; } this.applyModelPage(result); }, error: error => { if (requestVersion === this.modelRequestVersion) this.setError(error); } }); }
   private applyModelPage(page: { items: ProductModelItem[]; totalCount: number; pageNumber: number; pageSize: number }): void { this.models = page.items; this.modelTotal = page.totalCount; this.modelPage = page.pageNumber; this.modelPageSize = page.pageSize; }
-  private loadModelStageOptions(search: string, page: number): Observable<void> { this.modelStageSelectorLoading = true; return this.api.searchSubStages(search, page, this.modelStagePageSize).pipe(map(result => { this.modelStageSearch = search; this.modelStagePage = result.pageNumber; this.modelStageTotal = result.totalCount; this.modelStageOptions = result.items; }), catchError(error => { this.setError(error); return EMPTY; }), finalize(() => this.modelStageSelectorLoading = false)); }
+  private loadModelStageOptions(search: string, page: number): Observable<void> { this.modelStageSelectorLoading = true; return this.api.searchSubStages(search, page, this.modelStagePageSize).pipe(map(result => this.applyModelStageOptionPage(result, search)), catchError(error => { this.setError(error); return EMPTY; }), finalize(() => this.modelStageSelectorLoading = false)); }
+  private applyModelStageOptionPage(result: { items: SubStageOption[]; totalCount: number; pageNumber: number; pageSize: number }, search: string): void { this.modelStageSearch = search; this.modelStagePage = result.pageNumber; this.modelStageTotal = result.totalCount; this.modelStageOptions = result.items; result.items.forEach(option => this.modelStageOptionCache.set(option.id, option)); }
   private ensureSelectedModelStage(item: ModelStageItem): void { if (!this.modelStageOptions.some(option => option.id === item.subStageId)) this.modelStageOptions = [{ id: item.subStageId, mainStageId: '', code: item.subStageCode || '—', name: item.subStageName || 'مرحلة مرتبطة', capacity: 0, sequenceOrder: 0, isActive: false }, ...this.modelStageOptions]; }
   private upsert<T extends { id: string }>(items: readonly T[], item: T, sortKey?: keyof T): T[] { const next = items.some(candidate => candidate.id === item.id) ? items.map(candidate => candidate.id === item.id ? item : candidate) : [...items, item]; return sortKey ? [...next].sort((left, right) => Number(left[sortKey]) - Number(right[sortKey])) : next; }
   private markInactive<T extends { id: string; isActive: boolean }>(items: readonly T[], id: string): T[] { return items.map(item => item.id === id ? { ...item, isActive: false } : item); }

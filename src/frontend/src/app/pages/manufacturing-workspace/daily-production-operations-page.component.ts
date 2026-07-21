@@ -1,4 +1,4 @@
-import { Component, OnDestroy, OnInit } from '@angular/core';
+import { Component, OnDestroy, OnInit, Optional } from '@angular/core';
 import { Subject, TimeoutError, finalize, takeUntil } from 'rxjs';
 import { PERMISSIONS } from '../../core/config/permission-identifiers';
 import { AttendanceApiService, AttendanceSyncResult } from '../../core/services/attendance-api.service';
@@ -17,6 +17,7 @@ import {
 } from '../../core/services/production-cost-recording-api.service';
 import { FactoryItem, ManufacturingMasterDataApiService, ProductModelItem, ProductionLineOption } from '../../core/services/manufacturing-master-data-api.service';
 import { PermissionService } from '../../core/services/permission.service';
+import { ManufacturingRealtimeService } from '../../core/services/manufacturing-realtime.service';
 import { createClientRequestId } from '../../core/utils/client-request-id';
 import { FormSubmissionValidationService } from '../../shared/forms/form-submission-validation.service';
 import { productionDisplayLabel } from '../../shared/product/production-display-labels';
@@ -110,6 +111,9 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
   stages: EditableDailyStage[] = [];
   savedDraft: DailyProductionDraft | null = null;
   approving = false;
+  cancelling = false;
+  dailyApprovalCancellationDialogVisible = false;
+  dailyApprovalCancellationReason = '';
   stageAllocationRows: StageAllocationProjection[] = [];
   workerAllocationRows: WorkerAllocationProjection[] = [];
   expandedStageRows: Record<string, boolean> = {};
@@ -148,11 +152,16 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
   error = '';
   successMessage = '';
   validationMessages: string[] = [];
+  hasPendingRemoteUpdate = false;
+  remoteUpdateMessage = '';
 
   private revision = 0;
   private previewRevision = -1;
   private clientRequestId = createClientRequestId();
   private operationsRequestVersion = 0;
+  private stopRealtime?: () => void;
+  private hasUnsavedChanges = false;
+  private realtimeRefreshQueued = false;
   private readonly destroy$ = new Subject<void>();
 
   constructor(
@@ -160,16 +169,28 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
     private readonly attendance: AttendanceApiService,
     private readonly production: ProductionCostRecordingApiService,
     private readonly permissionsService: PermissionService,
-    private readonly formValidation: FormSubmissionValidationService
+    private readonly formValidation: FormSubmissionValidationService,
+    @Optional() private readonly manufacturingRealtime?: ManufacturingRealtimeService
   ) {}
 
   ngOnInit(): void {
+    this.subscribeToDailyOperationsRealtime();
     this.loadFactories();
   }
 
   ngOnDestroy(): void {
+    this.stopRealtime?.();
     this.destroy$.next();
     this.destroy$.complete();
+  }
+
+  reloadFromRemoteUpdate(): void {
+    this.hasUnsavedChanges = false;
+    this.clearRemoteUpdateNotice();
+    this.loadTodayOperations({
+      kind: 'success',
+      message: 'تمت إعادة تحميل تشغيل اليوم بأحدث تغييرات المستخدمين الآخرين.'
+    });
   }
 
   get canOverrideParticipants(): boolean {
@@ -237,7 +258,7 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
 
   get isDailyOperationReadOnly(): boolean {
     const draft = this.currentDailyDraft;
-    return !!draft && draft.stages.some(stage => stage.status !== 'Draft');
+    return !!draft && draft.stages.some(stage => stage.status === 'Approved');
   }
 
   get canApproveDailyOperation(): boolean {
@@ -248,7 +269,22 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
       draft.stages.every(stage => stage.status === 'Draft') &&
       !this.operationsLoading &&
       !this.saving &&
-      !this.approving;
+      !this.approving &&
+      !this.cancelling;
+  }
+
+  get canCancelDailyOperationApproval(): boolean {
+    return this.permissionsService.hasPermission(this.permissions.production.approve) &&
+      this.isDailyOperationApproved &&
+      !this.operationsLoading &&
+      !this.saving &&
+      !this.approving &&
+      !this.cancelling;
+  }
+
+  get isDailyApprovalCancelled(): boolean {
+    const draft = this.currentDailyDraft;
+    return !!draft && draft.stages.some(stage => stage.status === 'Cancelled');
   }
 
   get totalEnteredWorkers(): number {
@@ -341,7 +377,10 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
       this.productionDate
     )
       .pipe(finalize(() => {
-        if (version === this.operationsRequestVersion) this.operationsLoading = false;
+        if (version === this.operationsRequestVersion) {
+          this.operationsLoading = false;
+          this.flushQueuedRealtimeRefresh();
+        }
       }), takeUntil(this.destroy$))
       .subscribe({
         next: operations => {
@@ -353,6 +392,8 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
             : this.stages[0]?.productModelStageId ?? '';
           this.replacementWorkerId = '';
           this.invalidatePreview(false);
+          this.hasUnsavedChanges = false;
+          this.clearRemoteUpdateNotice();
           if (operations.existingDraft) {
             this.applyExistingDraft(operations.existingDraft);
             this.successMessage = feedback?.kind === 'success'
@@ -448,6 +489,7 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
   }
 
   stageChanged(): void {
+    this.hasUnsavedChanges = true;
     this.error = '';
     this.validationMessages = [];
     this.invalidatePreview();
@@ -482,10 +524,6 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
   }
 
   saveDailyDraft(): void {
-    if (this.hasExistingDraft) {
-      this.error = 'توجد مسودة محفوظة بالفعل لهذا اليوم. تم تحميلها كما هي ولن تُكتب فوقها بصمت.';
-      return;
-    }
     if (!this.isPreviewCurrent || !this.preview || this.saving) {
       this.error = 'احسب معاينة حديثة أولًا؛ أي تغيير في المرحلة أو الكمية يجعل الحفظ غير صالح.';
       return;
@@ -496,11 +534,13 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
 
     this.saving = true;
     this.error = '';
-    this.production.saveDailyDraft(this.operationRequest(this.preview.previewToken))
+    const correlationId = this.manufacturingRealtime?.registerLocalOperation('daily-production-operations');
+    this.production.saveDailyDraft(this.operationRequest(this.preview.previewToken), correlationId)
       .pipe(finalize(() => this.saving = false), takeUntil(this.destroy$))
       .subscribe({
         next: draft => {
           this.savedDraft = draft;
+          this.hasUnsavedChanges = false;
           this.successMessage = draft.wasAlreadySaved
             ? 'هذه المسودة حُفظت مسبقًا بنفس طلب الحفظ؛ تم عرض النتيجة المحفوظة دون تكرار المراحل.'
             : 'تم حفظ مسودة تشغيل اليوم كاملة في معاملة واحدة؛ بقي تاريخ الإنتاج منفصلًا عن وقت التسجيل.';
@@ -529,7 +569,8 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
     this.approving = true;
     this.error = '';
     this.successMessage = '';
-    this.production.approveDailyOperation(draft.productionOrderId, stageApprovals)
+    const correlationId = this.manufacturingRealtime?.registerLocalOperation('daily-production-operations');
+    this.production.approveDailyOperation(draft.productionOrderId, stageApprovals, correlationId)
       .pipe(finalize(() => this.approving = false), takeUntil(this.destroy$))
       .subscribe({
         next: () => this.loadTodayOperations({
@@ -547,6 +588,61 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
           this.error = error?.status === 403
             ? 'لا تملك صلاحية اعتماد تشغيل اليوم.'
             : this.formValidation.serverMessage(error, 'تعذر اعتماد تشغيل اليوم.');
+        }
+      });
+  }
+
+  openDailyApprovalCancellationDialog(): void {
+    if (!this.canCancelDailyOperationApproval) return;
+    this.dailyApprovalCancellationReason = '';
+    this.dailyApprovalCancellationDialogVisible = true;
+  }
+
+  closeDailyApprovalCancellationDialog(): void {
+    if (this.cancelling) return;
+    this.dailyApprovalCancellationDialogVisible = false;
+    this.dailyApprovalCancellationReason = '';
+  }
+
+  confirmDailyApprovalCancellation(): void {
+    const draft = this.currentDailyDraft;
+    const reason = this.dailyApprovalCancellationReason.trim();
+    if (!draft || !this.canCancelDailyOperationApproval || !reason) {
+      this.error = !reason
+        ? 'سبب إلغاء اعتماد تشغيل اليوم مطلوب.'
+        : 'لا يمكن إلغاء اعتماد تشغيل اليوم في حالته الحالية.';
+      return;
+    }
+
+    const stageApprovals: DailyStageApprovalInput[] = draft.stages.map(stage => ({
+      stageProductionRecordId: stage.id,
+      concurrencyToken: stage.concurrencyToken
+    }));
+    this.cancelling = true;
+    this.error = '';
+    const correlationId = this.manufacturingRealtime?.registerLocalOperation('daily-production-operations');
+    this.production.cancelDailyOperationApproval(draft.productionOrderId, stageApprovals, reason, correlationId)
+      .pipe(finalize(() => this.cancelling = false), takeUntil(this.destroy$))
+      .subscribe({
+        next: () => {
+          this.dailyApprovalCancellationDialogVisible = false;
+          this.dailyApprovalCancellationReason = '';
+          this.loadTodayOperations({
+            kind: 'success',
+            message: 'تم إلغاء اعتماد تشغيل اليوم. يمكنك الآن تصحيح المسودة ثم اعتمادها من جديد.'
+          });
+        },
+        error: error => {
+          if (error?.status === 409) {
+            this.loadTodayOperations({
+              kind: 'error',
+              message: 'تغيرت حالة تشغيل اليوم أثناء إلغاء الاعتماد. تم تحديث بيانات التشغيل.'
+            });
+            return;
+          }
+          this.error = error?.status === 403
+            ? 'لا تملك صلاحية إلغاء اعتماد تشغيل اليوم.'
+            : this.formValidation.serverMessage(error, 'تعذر إلغاء اعتماد تشغيل اليوم.');
         }
       });
   }
@@ -1057,6 +1153,52 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
     this.savedDraft = this.operations?.existingDraft ?? null;
   }
 
+  private subscribeToDailyOperationsRealtime(): void {
+    this.stopRealtime = this.manufacturingRealtime?.watchScreen({
+      screen: 'daily-production-operations',
+      matches: change =>
+        change.entityType === 'ProductionOrder' &&
+        !!this.selectedFactoryId &&
+        !!this.selectedProductionLineId &&
+        !!this.selectedProductModelId &&
+        change.productionDate === this.productionDate &&
+        change.productionLineId === this.selectedProductionLineId &&
+        change.productModelId === this.selectedProductModelId &&
+        (!change.factoryId || change.factoryId === this.selectedFactoryId),
+      refresh: () => this.handleDailyOperationsRealtimeChange()
+    });
+  }
+
+  private handleDailyOperationsRealtimeChange(): void {
+    if (this.hasUnsavedChanges) {
+      this.hasPendingRemoteUpdate = true;
+      this.remoteUpdateMessage = 'تم تعديل تشغيل اليوم بواسطة مستخدم آخر. احتفظنا بتعديلاتك غير المحفوظة؛ اضغط تحديث الآن لإعادة التحميل.';
+      return;
+    }
+
+    if (this.operationsLoading) {
+      this.realtimeRefreshQueued = true;
+      return;
+    }
+
+    if (!this.canLoadOperations) return;
+    this.loadTodayOperations({
+      kind: 'success',
+      message: 'تم تحديث تشغيل اليوم تلقائيًا بعد تغير من مستخدم آخر.'
+    });
+  }
+
+  private flushQueuedRealtimeRefresh(): void {
+    if (!this.realtimeRefreshQueued) return;
+    this.realtimeRefreshQueued = false;
+    this.handleDailyOperationsRealtimeChange();
+  }
+
+  private clearRemoteUpdateNotice(): void {
+    this.hasPendingRemoteUpdate = false;
+    this.remoteUpdateMessage = '';
+  }
+
   private resetOperations(): void {
     ++this.operationsRequestVersion;
     this.operations = null;
@@ -1070,6 +1212,9 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
     this.error = '';
     this.successMessage = '';
     this.validationMessages = [];
+    this.realtimeRefreshQueued = false;
+    this.hasUnsavedChanges = false;
+    this.clearRemoteUpdateNotice();
   }
 
   private egyptToday(): string {

@@ -38,26 +38,19 @@ describe('ManufacturingWorkspaceLayoutComponent', () => {
 
   afterEach(() => TestBed.resetTestingModule());
 
-  it('renders the Production Recording workspace tab for a user who can view and record production', () => {
+  it('does not render the legacy Production Recording workspace tab for a user who can record production', () => {
     const fixture = configure([PERMISSIONS.production.view, PERMISSIONS.production.record]);
-
-    const tab = fixture.nativeElement.querySelector('[data-workspace-route="/manufacturing/production-recording"]') as HTMLAnchorElement | null;
-    expect(tab?.textContent).toContain('تسجيل الإنتاج');
-  });
-
-  it('hides the Production Recording workspace tab when recording permission is absent', () => {
-    const fixture = configure([PERMISSIONS.production.view]);
 
     expect(fixture.nativeElement.querySelector('[data-workspace-route="/manufacturing/production-recording"]')).toBeNull();
   });
 
-  it('keeps the Production Recording tab active when stage context is present in the route query', () => {
+  it('keeps the daily production operations workspace tab available to a user who can record production', () => {
     const fixture = configure(
       [PERMISSIONS.production.view, PERMISSIONS.production.record],
-      '/manufacturing/production-recording?factoryId=factory-1&productionLineId=line-1&mainStageId=main-1&subStageId=sub-1'
+      '/manufacturing/daily-production-operations'
     );
 
-    const tab = fixture.nativeElement.querySelector('[data-workspace-route="/manufacturing/production-recording"]') as HTMLAnchorElement | null;
+    const tab = fixture.nativeElement.querySelector('[data-workspace-route="/manufacturing/daily-production-operations"]') as HTMLAnchorElement | null;
     expect(tab?.classList.contains('manufacturing-workspace__nav-item--active')).toBeTrue();
     expect(tab?.getAttribute('aria-current')).toBe('page');
   });

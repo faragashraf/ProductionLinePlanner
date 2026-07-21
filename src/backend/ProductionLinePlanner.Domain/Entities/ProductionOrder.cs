@@ -86,6 +86,11 @@ public class ProductionOrder
         if (Status != ProductionOrderStatus.Draft) throw new InvalidOperationException("Only draft production days can be approved.");
         Status = ProductionOrderStatus.Completed; ApprovedBy = actorId; ApprovedAtUtc = atUtc; Touch(actorId, atUtc);
     }
+    public void ReopenDailyOperationAfterApprovalCancellation(Guid actorId, DateTime atUtc)
+    {
+        if (Status != ProductionOrderStatus.Completed) throw new InvalidOperationException("Only approved production days can be reopened.");
+        Status = ProductionOrderStatus.Draft; Touch(actorId, atUtc);
+    }
     public void Cancel(Guid actorId, DateTime atUtc)
     {
         if (Status is not (ProductionOrderStatus.Draft or ProductionOrderStatus.Active)) throw new InvalidOperationException("Only draft or active production orders can be cancelled.");

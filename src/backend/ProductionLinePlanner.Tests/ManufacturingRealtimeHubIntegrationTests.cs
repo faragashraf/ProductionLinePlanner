@@ -76,6 +76,38 @@ public sealed class ManufacturingRealtimeHubIntegrationTests
     }
 
     [Fact]
+    public async Task Daily_production_order_change_reaches_only_the_authorized_daily_operations_screen_with_context()
+    {
+        await using var fixture = await HubFixture.CreateAsync();
+        var userId = Guid.NewGuid();
+        fixture.Permissions.Set(userId, ["production.record", "models.view"]);
+        await using var dailyTab = fixture.CreateConnection(userId);
+        await using var modelsTab = fixture.CreateConnection(userId);
+        var dailyDelivery = DeliverySource();
+        var modelDelivery = DeliverySource();
+        dailyTab.On<ManufacturingDataChangedMessage>("ManufacturingDataChanged", change => dailyDelivery.TrySetResult(change));
+        modelsTab.On<ManufacturingDataChangedMessage>("ManufacturingDataChanged", change => modelDelivery.TrySetResult(change));
+
+        await dailyTab.StartAsync();
+        await modelsTab.StartAsync();
+        await dailyTab.InvokeAsync("JoinManufacturingScreen", "daily-production-operations");
+        await modelsTab.InvokeAsync("JoinManufacturingScreen", "models");
+
+        var date = new DateOnly(2026, 7, 21);
+        var change = new ManufacturingDataChanged(
+            Guid.NewGuid(), ManufacturingEntityType.ProductionOrder, ManufacturingChangeType.Updated,
+            Guid.NewGuid(), DateTime.UtcNow, Guid.NewGuid(), "daily-correlation",
+            FactoryId: Guid.NewGuid(), ProductionLineId: Guid.NewGuid(), ProductModelId: Guid.NewGuid(), ProductionDate: date);
+        await fixture.Publisher.PublishAsync(change);
+
+        var delivered = await dailyDelivery.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal("ProductionOrder", delivered.EntityType);
+        Assert.Equal("Updated", delivered.ChangeType);
+        Assert.Equal(date, delivered.ProductionDate);
+        Assert.False(modelDelivery.Task.IsCompleted);
+    }
+
+    [Fact]
     public async Task Browser_wire_contract_uses_stable_string_entity_and_change_values_for_factory_and_worker()
     {
         await using var fixture = await HubFixture.CreateAsync();

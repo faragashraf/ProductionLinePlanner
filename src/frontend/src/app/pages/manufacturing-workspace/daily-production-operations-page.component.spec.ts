@@ -16,6 +16,9 @@ describe('DailyProductionOperationsPageComponent unified preview', () => {
   let production: jasmine.SpyObj<any>;
   let masterData: jasmine.SpyObj<any>;
   let attendance: jasmine.SpyObj<any>;
+  let realtime: jasmine.SpyObj<any>;
+  let stopRealtime: jasmine.Spy;
+  let watchConfig: { refresh: () => void; matches?: (change: any) => boolean };
 
   const preview: DailyProductionPreview = {
     productionDate: '2026-07-16',
@@ -32,15 +35,22 @@ describe('DailyProductionOperationsPageComponent unified preview', () => {
   };
 
   beforeEach(() => {
-    production = jasmine.createSpyObj('ProductionCostRecordingApiService', ['previewDailyOperations', 'loadDailyOperations', 'saveDailyDraft']);
+    production = jasmine.createSpyObj('ProductionCostRecordingApiService', ['previewDailyOperations', 'loadDailyOperations', 'saveDailyDraft', 'approveDailyOperation', 'cancelDailyOperationApproval']);
     masterData = jasmine.createSpyObj('ManufacturingMasterDataApiService', ['factories', 'allProductionLines', 'models']);
     attendance = jasmine.createSpyObj('AttendanceApiService', ['syncForProductionDate']);
+    stopRealtime = jasmine.createSpy('stopRealtime');
+    realtime = jasmine.createSpyObj('ManufacturingRealtimeService', ['watchScreen', 'registerLocalOperation']);
+    realtime.watchScreen.and.callFake((config: any) => {
+      watchConfig = config;
+      return stopRealtime;
+    });
     component = new DailyProductionOperationsPageComponent(
       masterData,
       attendance,
       production,
       { hasPermission: () => true } as any,
-      { serverMessage: (error: any, fallback: string) => error?.error?.detail ?? fallback } as any
+      { serverMessage: (error: any, fallback: string) => error?.error?.detail ?? fallback } as any,
+      realtime
     );
     component.operations = {
       factoryId: 'factory-1', factoryName: 'Factory', productionLineId: 'line-1', productionLineName: 'Line',
@@ -82,6 +92,53 @@ describe('DailyProductionOperationsPageComponent unified preview', () => {
     expect(component.attendanceSyncing).toBeTrue();
     pending.complete();
     expect(component.attendanceSyncing).toBeFalse();
+  });
+
+  it('reloads current operations for a matching daily-production realtime event without local edits', () => {
+    masterData.factories.and.returnValue(of([]));
+    production.loadDailyOperations.and.returnValue(of(component.operations));
+    component.attendanceSyncedForDate = component.productionDate;
+
+    component.ngOnInit();
+    expect(watchConfig.matches?.(dailyChange())).toBeTrue();
+    watchConfig.refresh();
+
+    expect(production.loadDailyOperations).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not reload current operations for a different daily-production context', () => {
+    masterData.factories.and.returnValue(of([]));
+    production.loadDailyOperations.and.returnValue(of(component.operations));
+    component.attendanceSyncedForDate = component.productionDate;
+
+    component.ngOnInit();
+    expect(watchConfig.matches?.(dailyChange({ productionLineId: 'another-line' }))).toBeFalse();
+    expect(watchConfig.matches?.(dailyChange({ productionDate: '2000-01-01' }))).toBeFalse();
+
+    expect(production.loadDailyOperations).not.toHaveBeenCalled();
+  });
+
+  it('shows a reload notice instead of overwriting matching local edits', () => {
+    masterData.factories.and.returnValue(of([]));
+    component.attendanceSyncedForDate = component.productionDate;
+    component.stageChanged();
+
+    component.ngOnInit();
+    expect(watchConfig.matches?.(dailyChange())).toBeTrue();
+    watchConfig.refresh();
+
+    expect(component.hasPendingRemoteUpdate).toBeTrue();
+    expect(component.remoteUpdateMessage).toContain('تعديلاتك غير المحفوظة');
+    expect(production.loadDailyOperations).not.toHaveBeenCalled();
+  });
+
+  it('releases the daily-production realtime watcher on destroy', () => {
+    masterData.factories.and.returnValue(of([]));
+
+    component.ngOnInit();
+    component.ngOnDestroy();
+
+    expect(stopRealtime).toHaveBeenCalledTimes(1);
   });
 
   it('sends exactly one request for repeated clicks while preview is active and renders its response without a page reload', () => {
@@ -128,6 +185,26 @@ describe('DailyProductionOperationsPageComponent unified preview', () => {
     expect(firstRequest.clientRequestId).toBe(retryRequest.clientRequestId);
     expect(component.preview).toEqual(preview);
   });
+
+  function dailyChange(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      eventId: 'event-1',
+      entityType: 'ProductionOrder',
+      changeType: 'Updated',
+      entityId: 'order-1',
+      occurredAtUtc: new Date().toISOString(),
+      actorUserId: null,
+      correlationId: null,
+      factoryId: component.selectedFactoryId,
+      departmentId: null,
+      productionLineId: component.selectedProductionLineId,
+      mainStageId: null,
+      productModelId: component.selectedProductModelId,
+      subStageId: null,
+      productionDate: component.productionDate,
+      ...overrides
+    };
+  }
 
   it('updates the minute-weighted quantity preview immediately when line quantity changes', () => {
     const stage = component.stages[0];
@@ -317,17 +394,62 @@ describe('DailyProductionOperationsPageComponent unified preview', () => {
     expect(component.savedDraftDetail).toContain('تم حفظ 2 مرحلة');
   });
 
-  it('loads an existing draft and refuses to overwrite it silently', () => {
+  it('allows an explicit correction of the existing daily draft without creating a second draft', () => {
     component.operations!.existingDraft = {
       productionOrderId: 'order-1', orderNumber: 'DLY-1', productionDate: component.productionDate,
-      recordedAtUtc: '2026-07-16T13:00:00Z', lineQuantity: 500, wasAlreadySaved: true, stages: []
+      recordedAtUtc: '2026-07-16T13:00:00Z', lineQuantity: 500, wasAlreadySaved: true,
+      stages: [{ id: 'record-1', concurrencyToken: 'token-1', status: 'Draft' }] as any
     };
+    component.preview = preview;
+    (component as any).previewRevision = (component as any).revision;
+    production.saveDailyDraft.and.returnValue(of({ ...component.operations!.existingDraft, wasAlreadySaved: false }));
 
     component.saveDailyDraft();
 
-    expect(production.saveDailyDraft).not.toHaveBeenCalled();
-    expect(component.error).toContain('لن تُكتب فوقها بصمت');
+    expect(production.saveDailyDraft).toHaveBeenCalledTimes(1);
+    expect(component.savedDraft?.productionOrderId).toBe('order-1');
   });
+
+  it('shows daily approval cancellation only for an approved daily operation and requires a reason', () => {
+    component.savedDraft = approvedDailyDraft();
+
+    expect(component.canCancelDailyOperationApproval).toBeTrue();
+    component.openDailyApprovalCancellationDialog();
+    component.confirmDailyApprovalCancellation();
+
+    expect(component.dailyApprovalCancellationDialogVisible).toBeTrue();
+    expect(component.error).toContain('سبب إلغاء اعتماد تشغيل اليوم مطلوب');
+    expect(production.cancelDailyOperationApproval).not.toHaveBeenCalled();
+  });
+
+  it('cancels all approved daily stages once and reloads the corrected daily context', () => {
+    component.savedDraft = approvedDailyDraft();
+    component.attendanceSyncedForDate = component.productionDate;
+    production.cancelDailyOperationApproval.and.returnValue(of({ productionOrderId: 'order-1', orderStatus: 'Draft', cancelledAtUtc: '2026-07-16T14:00:00Z', cancelledStageCount: 1 }));
+    production.loadDailyOperations.and.returnValue(of(component.operations));
+
+    component.openDailyApprovalCancellationDialog();
+    component.dailyApprovalCancellationReason = 'تصحيح كمية التشغيل';
+    component.confirmDailyApprovalCancellation();
+    component.confirmDailyApprovalCancellation();
+
+    expect(production.cancelDailyOperationApproval).toHaveBeenCalledTimes(1);
+    expect(production.cancelDailyOperationApproval).toHaveBeenCalledWith(
+      'order-1',
+      [{ stageProductionRecordId: 'record-1', concurrencyToken: 'approved-token' }],
+      'تصحيح كمية التشغيل',
+      undefined
+    );
+    expect(production.loadDailyOperations).toHaveBeenCalledTimes(1);
+  });
+
+  function approvedDailyDraft() {
+    return {
+      productionOrderId: 'order-1', orderNumber: 'DLY-1', productionDate: '2026-07-16',
+      recordedAtUtc: '2026-07-16T13:00:00Z', lineQuantity: 500, wasAlreadySaved: false,
+      stages: [{ id: 'record-1', concurrencyToken: 'approved-token', status: 'Approved' }] as any
+    };
+  }
 });
 
 describe('DailyProductionOperationsPageComponent visual hierarchy', () => {
