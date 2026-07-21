@@ -1,7 +1,7 @@
 import { Component, OnDestroy, OnInit, Optional } from '@angular/core';
 import { ActivatedRoute } from '@angular/router';
 import { FormBuilder, Validators } from '@angular/forms';
-import { Subject, debounceTime, distinctUntilChanged, finalize, map, Observable, takeUntil } from 'rxjs';
+import { Subject, debounceTime, distinctUntilChanged, finalize, forkJoin, map, Observable, takeUntil } from 'rxjs';
 import {
   DepartmentItem,
   ManufacturingMasterDataApiService,
@@ -13,6 +13,7 @@ import {
 } from '../../core/services/manufacturing-master-data-api.service';
 import { matchesSearchTerm, normalizeSearchText } from '../../shared/utils/text-search.utils';
 import { ManufacturingRealtimeService } from '../../core/services/manufacturing-realtime.service';
+import { buildFactoryStructureTree, collectExpandedIds, FactoryStructureTreeNode, filterFactoryStructureTree, findFactoryStructureNode } from './factory-structure-tree.adapter';
 
 type StageStatusFilter = 'all' | 'active' | 'inactive';
 
@@ -26,6 +27,9 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
   factories: { id: string; code: string; name: string; isActive: boolean }[] = [];
   departments: DepartmentItem[] = [];
   lines: ProductionLineOption[] = [];
+  stageFilterTreeNodes: FactoryStructureTreeNode[] = [];
+  selectedStageFilterNode: FactoryStructureTreeNode | null = null;
+  stageTreeSearch = '';
   operationalStages: SubStageOption[] = [];
   stageStatusFilter: StageStatusFilter = 'all';
   stageSearch = '';
@@ -71,6 +75,7 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
   private readonly destroy$ = new Subject<void>();
   private modelRequestVersion = 0;
   private availableStagesRequestVersion = 0;
+  private stageFilterExpandedIds = new Set<string>();
   private stopRealtime?: () => void;
 
   constructor(private readonly fb: FormBuilder, private readonly api: ManufacturingMasterDataApiService, route: ActivatedRoute, @Optional() private readonly manufacturingRealtime?: ManufacturingRealtimeService) {
@@ -91,12 +96,21 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
 
   ngOnDestroy(): void { this.stopRealtime?.(); this.destroy$.next(); this.destroy$.complete(); }
 
-  get activeDepartments(): DepartmentItem[] { return this.departments.filter(item => item.isActive); }
-  get activeLines(): ProductionLineOption[] { return this.lines.filter(item => item.isActive); }
+  get activeDepartments(): DepartmentItem[] {
+    const factoryId = this.stageForm.controls.factoryId.value;
+    return this.departments.filter(item => item.isActive !== false && (!factoryId || item.factoryId === factoryId));
+  }
+  get activeLines(): ProductionLineOption[] {
+    const departmentId = this.stageForm.controls.departmentId.value;
+    return this.lines.filter(item => item.isActive && (!departmentId || item.departmentId === departmentId));
+  }
   get selectedStage(): SubStageOption | null { return this.operationalStages.find(stage => stage.id === this.editStageId) ?? null; }
+  get visibleStageFilterTreeNodes(): FactoryStructureTreeNode[] { return filterFactoryStructureTree(this.stageFilterTreeNodes, this.stageTreeSearch); }
+  get selectedStageFilterPath(): string { return this.selectedStageFilterNode ? this.stageFilterPath(this.selectedStageFilterNode).join(' / ') : 'كل المصانع'; }
+  get stageFilterResetKey(): string { return `${this.selectedStageFilterNode?.data?.entityType ?? 'all'}:${this.selectedStageFilterNode?.data?.entityId ?? 'all'}:${this.stageStatusFilter}:${this.stageSearch}`; }
   get filteredOperationalStages(): SubStageOption[] { return this.operationalStages.filter(stage => matchesSearchTerm(this.stageSearch, [stage.name, stage.code])); }
   get stageResultCount(): number { return this.filteredOperationalStages.length; }
-  get stageEmptyMessage(): string { return normalizeSearchText(this.stageSearch) ? 'لا توجد مراحل مطابقة للبحث.' : 'اختر خط إنتاج لعرض مراحل الإنتاج، أو لا توجد مراحل مطابقة.'; }
+  get stageEmptyMessage(): string { return normalizeSearchText(this.stageSearch) ? 'لا توجد مراحل مطابقة للبحث.' : 'اختر مصنعًا أو قسمًا أو خط إنتاج لعرض مراحل الإنتاج، أو لا توجد مراحل مطابقة.'; }
   get modelEmptyMessage(): string { return normalizeSearchText(this.modelSearch) ? 'لا توجد موديلات مطابقة للبحث.' : 'لا توجد موديلات لعرضها.'; }
   get filteredLinkedStages(): ModelStageItem[] {
     return [...this.stages]
@@ -134,10 +148,50 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
         .subscribe({ next: page => { this.applyModelPage(page); this.loadAvailableStageCatalog(); }, error: error => this.setError(error) });
       return;
     }
-    this.api.factories().pipe(finalize(() => this.loading = false), takeUntil(this.destroy$)).subscribe({
-      next: factories => this.factories = factories.filter(factory => factory.isActive),
+    forkJoin({
+      factories: this.api.factories(),
+      departments: this.api.departments(undefined, false),
+      lines: this.api.allProductionLines()
+    }).pipe(finalize(() => this.loading = false), takeUntil(this.destroy$)).subscribe({
+      next: data => {
+        this.applyStageStructureData(data);
+        this.rebuildStageFilterTree();
+      },
       error: error => this.setError(error)
     });
+  }
+
+  onStageFilterSearch(value: string): void { this.stageTreeSearch = value.trim(); }
+
+  clearStageFilterSearch(): void { this.stageTreeSearch = ''; }
+
+  selectStageFilterNode(node: FactoryStructureTreeNode): void {
+    if (node.data?.entityType !== 'line') return;
+    this.selectedStageFilterNode = node;
+    this.applyStageFilterSelection(node);
+    this.loadOperationalStages();
+  }
+
+  clearStageTreeFilter(): void {
+    this.selectedStageFilterNode = null;
+    this.stageForm.patchValue({ factoryId: '', departmentId: '', productionLineId: '' });
+    this.operationalStages = [];
+  }
+
+  clearStageFilters(): void {
+    this.clearStageTreeFilter();
+    this.stageStatusFilter = 'all';
+    this.stageSearch = '';
+  }
+
+  onStageFilterNodeExpand(node: FactoryStructureTreeNode): void {
+    const id = node.data?.entityId;
+    if (id) this.stageFilterExpandedIds.add(id);
+  }
+
+  onStageFilterNodeCollapse(node: FactoryStructureTreeNode): void {
+    const id = node.data?.entityId;
+    if (id) this.stageFilterExpandedIds.delete(id);
   }
 
   selectFactory(factoryId: string): void {
@@ -165,7 +219,7 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
 
   setStageStatusFilter(value: string): void {
     this.stageStatusFilter = value === 'active' || value === 'inactive' ? value : 'all';
-    if (this.stageForm.controls.productionLineId.value) this.loadOperationalStages();
+    if (this.selectedStageFilterNode) this.loadOperationalStages();
   }
 
   onStageSearch(value: string): void { this.stageSearch = value; }
@@ -173,10 +227,10 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
   onModelLazyLoad(event: { first?: number | null; rows?: number | null }): void { const page = Math.floor((event.first ?? 0) / (event.rows ?? this.modelPageSize)) + 1; if (page !== this.modelPage) this.loadModelPage(this.modelSearch, page); }
 
   loadOperationalStages(): void {
-    const productionLineId = this.stageForm.controls.productionLineId.value;
-    if (!productionLineId) return;
+    const filters = this.stageHierarchyFilters();
+    if (!filters) return;
     const isActive = this.stageStatusFilter === 'all' ? undefined : this.stageStatusFilter === 'active';
-    this.api.operationalStages({ productionLineId, isActive, includeInactive: this.stageStatusFilter === 'all' }).pipe(takeUntil(this.destroy$)).subscribe({ next: stages => this.operationalStages = stages, error: error => this.setError(error) });
+    this.api.operationalStages({ ...filters, isActive, includeInactive: this.stageStatusFilter === 'all' }).pipe(takeUntil(this.destroy$)).subscribe({ next: stages => this.operationalStages = stages, error: error => this.setError(error) });
   }
 
   openStageForm(): void {
@@ -318,47 +372,22 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
     this.loadAvailableStageCatalog();
   }
   private refreshStagesFromRealtime(): void {
-    const factoryId = this.stageForm.controls.factoryId.value;
-    const departmentId = this.stageForm.controls.departmentId.value;
-    const productionLineId = this.stageForm.controls.productionLineId.value;
-    if (!factoryId) return;
-    this.api.factories().pipe(takeUntil(this.destroy$)).subscribe({
-      next: factories => {
-        this.factories = factories.filter(factory => factory.isActive);
-        if (!this.factories.some(factory => factory.id === factoryId)) {
-          this.clearStageContext('factory');
-          return;
+    const selectedId = this.selectedStageFilterNode?.data?.entityId;
+    forkJoin({
+      factories: this.api.factories(),
+      departments: this.api.departments(undefined, false),
+      lines: this.api.allProductionLines()
+    }).pipe(takeUntil(this.destroy$)).subscribe({
+      next: data => {
+        this.applyStageStructureData(data);
+        this.rebuildStageFilterTree();
+        this.selectedStageFilterNode = selectedId ? findFactoryStructureNode(this.stageFilterTreeNodes, selectedId) ?? null : null;
+        if (this.selectedStageFilterNode) {
+          this.applyStageFilterSelection(this.selectedStageFilterNode);
+          this.loadOperationalStages();
+        } else {
+          this.validateStageFormContextAfterStructureRefresh();
         }
-        this.api.departments(factoryId, false).pipe(takeUntil(this.destroy$)).subscribe({
-          next: departments => {
-            this.departments = departments.filter(item => item.factoryId === factoryId && item.isActive);
-            if (departmentId && !this.departments.some(department => department.id === departmentId)) {
-              this.clearStageContext('department');
-              return;
-            }
-            if (!departmentId) {
-              this.lines = [];
-              this.operationalStages = [];
-              return;
-            }
-            this.api.productionLinesForDepartment(departmentId).pipe(takeUntil(this.destroy$)).subscribe({
-              next: lines => {
-                this.lines = lines.filter(line => line.departmentId === departmentId && line.isActive);
-                if (productionLineId && !this.lines.some(line => line.id === productionLineId)) {
-                  this.clearStageContext('line');
-                  return;
-                }
-                if (!productionLineId) {
-                  this.operationalStages = [];
-                  return;
-                }
-                this.loadOperationalStages();
-              },
-              error: error => this.setError(error)
-            });
-          },
-          error: error => this.setError(error)
-        });
       },
       error: error => this.setError(error)
     });
@@ -376,6 +405,87 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
       this.stageForm.patchValue({ productionLineId: '' });
     }
     this.operationalStages = [];
+  }
+
+  private applyStageStructureData(data: { factories: readonly { id: string; code: string; name: string; isActive: boolean }[]; departments: readonly DepartmentItem[]; lines: readonly ProductionLineOption[] }): void {
+    this.factories = data.factories.filter(factory => factory.isActive);
+    const factoryIds = new Set(this.factories.map(factory => factory.id));
+    this.departments = data.departments.filter(item => item.isActive !== false && !!item.factoryId && factoryIds.has(item.factoryId));
+    const departmentIds = new Set(this.departments.map(item => item.id).filter(Boolean));
+    this.lines = data.lines.filter(line => line.isActive && factoryIds.has(line.factoryId) && (!line.departmentId || departmentIds.has(line.departmentId)));
+  }
+
+  private validateStageFormContextAfterStructureRefresh(): void {
+    const factoryId = this.stageForm.controls.factoryId.value;
+    const departmentId = this.stageForm.controls.departmentId.value;
+    const productionLineId = this.stageForm.controls.productionLineId.value;
+    if (factoryId && !this.factories.some(factory => factory.id === factoryId)) {
+      this.stageForm.patchValue({ factoryId: '', departmentId: '', productionLineId: '' });
+      this.operationalStages = [];
+      return;
+    }
+    if (departmentId && !this.departments.some(department => department.id === departmentId)) {
+      this.stageForm.patchValue({ departmentId: '', productionLineId: '' });
+      this.operationalStages = [];
+      return;
+    }
+    if (productionLineId && !this.lines.some(line => line.id === productionLineId)) {
+      this.stageForm.patchValue({ productionLineId: '' });
+      this.operationalStages = [];
+      return;
+    }
+    if (productionLineId) this.loadOperationalStages();
+    else this.operationalStages = [];
+  }
+
+  private rebuildStageFilterTree(): void {
+    this.stageFilterExpandedIds = collectExpandedIds(this.stageFilterTreeNodes).size ? collectExpandedIds(this.stageFilterTreeNodes) : this.stageFilterExpandedIds;
+    this.stageFilterTreeNodes = buildFactoryStructureTree({
+      factories: this.factories,
+      departments: this.departments,
+      lines: this.lines,
+      eligibility: new Map()
+    }, this.stageFilterExpandedIds);
+    const selectedId = this.selectedStageFilterNode?.data?.entityId;
+    this.selectedStageFilterNode = selectedId ? findFactoryStructureNode(this.stageFilterTreeNodes, selectedId) ?? null : null;
+  }
+
+  private applyStageFilterSelection(node: FactoryStructureTreeNode): void {
+    const data = node.data;
+    if (!data) return;
+    if (data.entityType === 'factory') {
+      this.stageForm.patchValue({ factoryId: data.entityId, departmentId: '', productionLineId: '' });
+      return;
+    }
+    if (data.entityType === 'department') {
+      this.stageForm.patchValue({ factoryId: data.parentId ?? '', departmentId: data.entityId, productionLineId: '' });
+      return;
+    }
+    const line = data.source as ProductionLineOption;
+    this.stageForm.patchValue({ factoryId: line.factoryId, departmentId: line.departmentId ?? '', productionLineId: data.entityId });
+  }
+
+  private stageHierarchyFilters(): { factoryId?: string; departmentId?: string; productionLineId?: string } | null {
+    const data = this.selectedStageFilterNode?.data;
+    if (!data) {
+      const productionLineId = this.stageForm.controls.productionLineId.value;
+      return productionLineId ? { productionLineId } : null;
+    }
+    if (data.entityType === 'factory') return { factoryId: data.entityId };
+    if (data.entityType === 'department') return { departmentId: data.entityId };
+    return { productionLineId: data.entityId };
+  }
+
+  private stageFilterPath(node: FactoryStructureTreeNode): string[] {
+    const path = [node.data?.name ?? ''];
+    let parentId = node.data?.parentId;
+    while (parentId) {
+      const parent = findFactoryStructureNode(this.stageFilterTreeNodes, parentId);
+      if (!parent?.data) break;
+      path.unshift(parent.data.name);
+      parentId = parent.data.parentId;
+    }
+    return path.filter(Boolean);
   }
 
   private localCorrelation(screen: 'models' | 'stages'): string | undefined {

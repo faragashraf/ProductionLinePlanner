@@ -1,4 +1,6 @@
 import { ComponentFixture, TestBed, fakeAsync, tick } from '@angular/core/testing';
+import { CommonModule } from '@angular/common';
+import { NO_ERRORS_SCHEMA } from '@angular/core';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
 import { Subject, of, throwError } from 'rxjs';
@@ -7,6 +9,7 @@ import { ManufacturingRealtimeService } from '../../core/services/manufacturing-
 import { ManufacturingMasterDataPageComponent } from './manufacturing-master-data-page.component';
 
 describe('ManufacturingMasterDataPageComponent', () => {
+  let fixture: ComponentFixture<ManufacturingMasterDataPageComponent>;
   let component: ManufacturingMasterDataPageComponent;
   let api: jasmine.SpyObj<ManufacturingMasterDataApiService>;
   let realtime: jasmine.SpyObj<ManufacturingRealtimeService>;
@@ -21,12 +24,13 @@ describe('ManufacturingMasterDataPageComponent', () => {
 
   beforeEach(async () => {
     api = jasmine.createSpyObj<ManufacturingMasterDataApiService>('ManufacturingMasterDataApiService', [
-      'factories', 'departments', 'productionLinesForDepartment', 'operationalStages', 'createOperationalStage', 'updateOperationalStage',
+      'factories', 'departments', 'allProductionLines', 'productionLinesForDepartment', 'operationalStages', 'createOperationalStage', 'updateOperationalStage',
       'stageDependencies', 'deactivateOperationalStage', 'deleteOperationalStage', 'models', 'modelSearchPage', 'searchSubStages', 'searchSubStagesByNameOrCode', 'modelStages',
       'createModel', 'updateModel', 'setModelActivation', 'addModelStage', 'updateModelStage', 'deactivateModelStage'
     ]);
     api.factories.and.returnValue(of([factory]));
     api.departments.and.returnValue(of([department]));
+    api.allProductionLines.and.returnValue(of([line]));
     api.productionLinesForDepartment.and.returnValue(of([line]));
     api.operationalStages.and.returnValue(of([stage]));
     api.createOperationalStage.and.returnValue(of(stage));
@@ -51,14 +55,15 @@ describe('ManufacturingMasterDataPageComponent', () => {
 
     await TestBed.configureTestingModule({
       declarations: [ManufacturingMasterDataPageComponent],
-      imports: [FormsModule, ReactiveFormsModule],
+      imports: [CommonModule, FormsModule, ReactiveFormsModule],
       providers: [
         { provide: ManufacturingMasterDataApiService, useValue: api },
         { provide: ManufacturingRealtimeService, useValue: realtime },
         { provide: ActivatedRoute, useValue: { snapshot: { routeConfig: { path: 'stages' } } } }
-      ]
-    }).overrideComponent(ManufacturingMasterDataPageComponent, { set: { template: '' } }).compileComponents();
-    const fixture: ComponentFixture<ManufacturingMasterDataPageComponent> = TestBed.createComponent(ManufacturingMasterDataPageComponent);
+      ],
+      schemas: [NO_ERRORS_SCHEMA]
+    }).compileComponents();
+    fixture = TestBed.createComponent(ManufacturingMasterDataPageComponent);
     component = fixture.componentInstance;
   });
 
@@ -115,6 +120,132 @@ describe('ManufacturingMasterDataPageComponent', () => {
     expect(component.operationalStages).toEqual([stage]);
   });
 
+  it('builds the stage filter tree from factories, departments, and lines without loading stages', () => {
+    component.reload();
+
+    expect(api.factories).toHaveBeenCalled();
+    expect(api.departments).toHaveBeenCalledWith(undefined, false);
+    expect(api.allProductionLines).toHaveBeenCalled();
+    expect(api.operationalStages).not.toHaveBeenCalled();
+    expect(component.stageFilterTreeNodes[0].data?.entityType).toBe('factory');
+    expect(component.stageFilterTreeNodes[0].children?.[0].data?.entityType).toBe('department');
+    expect(component.stageFilterTreeNodes[0].children?.[0].children?.[0].data?.entityType).toBe('line');
+  });
+
+  it('does not filter operational stages when selecting a factory node', () => {
+    component.reload();
+    const factoryNode = component.stageFilterTreeNodes[0];
+
+    component.selectStageFilterNode(factoryNode);
+
+    expect(component.selectedStageFilterNode).toBeNull();
+    expect(component.stageForm.getRawValue()).toEqual(jasmine.objectContaining({ factoryId: '', departmentId: '', productionLineId: '' }));
+    expect(api.operationalStages).not.toHaveBeenCalled();
+    expect(component.stageFilterResetKey).toContain('all:all');
+  });
+
+  it('does not filter operational stages when selecting a department node', () => {
+    component.reload();
+    const departmentNode = component.stageFilterTreeNodes[0].children![0];
+
+    component.selectStageFilterNode(departmentNode as any);
+
+    expect(component.selectedStageFilterNode).toBeNull();
+    expect(component.stageForm.getRawValue()).toEqual(jasmine.objectContaining({ factoryId: '', departmentId: '', productionLineId: '' }));
+    expect(api.operationalStages).not.toHaveBeenCalled();
+  });
+
+  it('filters operational stages by the selected line node and keeps add-stage context', () => {
+    component.reload();
+    const lineNode = component.stageFilterTreeNodes[0].children![0].children![0];
+
+    component.selectStageFilterNode(lineNode as any);
+
+    expect(component.stageForm.getRawValue()).toEqual(jasmine.objectContaining({ factoryId: factory.id, departmentId: department.id, productionLineId: line.id }));
+    expect(api.operationalStages).toHaveBeenCalledWith({ productionLineId: line.id, isActive: undefined, includeInactive: true });
+    expect(component.selectedStageFilterPath).toBe('مصنع الملابس / القص / خط القص');
+  });
+
+  it('clears the stage tree filter without changing the stage search box', () => {
+    component.reload();
+    component.stageSearch = 'STG001';
+    component.selectStageFilterNode(component.stageFilterTreeNodes[0]);
+
+    component.clearStageTreeFilter();
+
+    expect(component.selectedStageFilterNode).toBeNull();
+    expect(component.stageForm.getRawValue()).toEqual(jasmine.objectContaining({ factoryId: '', departmentId: '', productionLineId: '' }));
+    expect(component.operationalStages).toEqual([]);
+    expect(component.stageSearch).toBe('STG001');
+    expect(component.stageFilterResetKey).toContain('all:all');
+  });
+
+  it('searches the stage filter tree by name and code while preserving ancestor paths', () => {
+    component.reload();
+
+    component.onStageFilterSearch('L1');
+    expect(component.visibleStageFilterTreeNodes[0].expanded).toBeTrue();
+    expect(component.visibleStageFilterTreeNodes[0].children![0].expanded).toBeTrue();
+    expect(component.visibleStageFilterTreeNodes[0].children![0].children![0].data?.entityId).toBe(line.id);
+
+    component.onStageFilterSearch('القص');
+    expect(component.visibleStageFilterTreeNodes[0].children![0].data?.entityId).toBe(department.id);
+  });
+
+  it('renders the stage filters as one compact grid with the search field as the wide column', () => {
+    component.loading = false;
+    component.reload();
+    component.selectStageFilterNode(component.stageFilterTreeNodes[0].children![0].children![0] as any);
+    fixture.detectChanges();
+
+    const filterRow = fixture.nativeElement.querySelector('.sf') as HTMLElement;
+    const treeFilter = filterRow.querySelector('.sf-tree') as HTMLElement;
+    const statusFilter = filterRow.querySelector('.sf-st') as HTMLElement;
+    const searchFilter = filterRow.querySelector('.sf-s') as HTMLElement;
+    const clearButton = filterRow.querySelector('.sf-clear') as HTMLElement;
+
+    expect(filterRow.children[0]).toBe(treeFilter);
+    expect(filterRow.children[1]).toBe(statusFilter);
+    expect(filterRow.children[2]).toBe(searchFilter);
+    expect(filterRow.children[3]).toBe(clearButton);
+    expect(getComputedStyle(filterRow).display).toBe('grid');
+    expect(getComputedStyle(searchFilter).minWidth).toBe('0px');
+  });
+
+  it('shows the selected hierarchy path under the selected node name and keeps clear controls secondary', () => {
+    component.loading = false;
+    component.reload();
+    component.selectStageFilterNode(component.stageFilterTreeNodes[0].children![0].children![0] as any);
+    fixture.detectChanges();
+
+    const trigger = fixture.nativeElement.querySelector('.sf-tr') as HTMLElement;
+    const selectedName = trigger.querySelector('strong') as HTMLElement;
+    const selectedPath = trigger.querySelector('small') as HTMLElement;
+    const scopedClear = fixture.nativeElement.querySelector('.sf-x') as HTMLElement;
+    const allClear = fixture.nativeElement.querySelector('.sf-clear') as HTMLElement;
+
+    expect(selectedName.textContent?.trim()).toBe(line.name);
+    expect(selectedPath.textContent?.trim()).toBe('مصنع الملابس / القص / خط القص');
+    expect(scopedClear.classList).toContain('p-button-sm');
+    expect(scopedClear.classList).toContain('p-button-text');
+    expect(allClear.classList).toContain('p-button-sm');
+    expect(allClear.classList).toContain('p-button-outlined');
+  });
+
+  it('clears all visible stage filters from the compact filter row', () => {
+    component.reload();
+    component.selectStageFilterNode(component.stageFilterTreeNodes[0]);
+    component.stageStatusFilter = 'inactive';
+    component.stageSearch = 'STG';
+
+    component.clearStageFilters();
+
+    expect(component.selectedStageFilterNode).toBeNull();
+    expect(component.stageStatusFilter).toBe('all');
+    expect(component.stageSearch).toBe('');
+    expect(component.operationalStages).toEqual([]);
+  });
+
   it('clears the complete stage context when its selected factory no longer exists after a realtime refresh', () => {
     component.stageForm.setValue({ factoryId: factory.id, departmentId: department.id, productionLineId: line.id, name: '', capacity: 0 });
     component.departments = [department];
@@ -146,7 +277,7 @@ describe('ManufacturingMasterDataPageComponent', () => {
   it('clears the selected line and its stages when that line no longer exists after a realtime refresh', () => {
     component.stageForm.setValue({ factoryId: factory.id, departmentId: department.id, productionLineId: line.id, name: '', capacity: 0 });
     component.operationalStages = [stage];
-    api.productionLinesForDepartment.and.returnValue(of([]));
+    api.allProductionLines.and.returnValue(of([]));
 
     (component as never as { refreshStagesFromRealtime(): void }).refreshStagesFromRealtime();
 
