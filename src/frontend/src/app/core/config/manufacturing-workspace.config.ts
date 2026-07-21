@@ -14,7 +14,11 @@ export const PRODUCTION_RECORDING_ACCESS: PermissionRequirementDescriptor = {
 };
 
 export const DAILY_PRODUCTION_OPERATIONS_ACCESS: PermissionRequirementDescriptor = {
-  requireAll: [PERMISSIONS.production.view, PERMISSIONS.production.record]
+  requireAny: [
+    PERMISSIONS.production.view,
+    PERMISSIONS.production.record,
+    PERMISSIONS.production.approve
+  ]
 };
 
 export const REPORTS_WORKSPACE_ACCESS: PermissionRequirementDescriptor = {

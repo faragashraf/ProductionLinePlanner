@@ -83,7 +83,6 @@
       </p>
     </p-card>
 
-    <div [attr.inert]="isDailyOperationReadOnly ? '' : null" [attr.aria-readonly]="isDailyOperationReadOnly">
     <section class="daily-production-operations__workspace plp-bounded-workspace" data-workspace-layout="stage-master-detail" data-tablet-priority="workers">
       <p-card class="daily-production-operations__stage-panel plp-workspace-detail-panel plp-bounded-workspace__panel" header="كل مراحل الموديل">
         <div class="daily-production-operations__filters">
@@ -156,16 +155,16 @@
                 <plp-status-badge plp-entity-status class="daily-production-operations__staffing-badge" [status]="dailyStaffingTone(worker)" [label]="dailyStaffingLabel(worker)" [compact]="true"></plp-status-badge>
                 <div plp-entity-value class="daily-production-operations__allocation-editor plp-editable-allocation" *ngIf="stage.compensationMode === 'SharedPercentage' && worker.includedInProduction && worker.isProductionReady">
                   <label><span>النسبة</span>
-                    <span class="daily-production-operations__input-suffix plp-editable-allocation__suffix"><input type="number" min="0.0001" max="100" step="0.0001" [ngModel]="worker.percentage" (ngModelChange)="updateWorkerPercentage(stage, worker, $event)" [attr.aria-label]="'نسبة ' + worker.workerName"><span>٪</span></span>
+                    <span class="daily-production-operations__input-suffix plp-editable-allocation__suffix"><input type="number" min="0.0001" max="100" step="0.0001" [ngModel]="worker.percentage" (ngModelChange)="updateWorkerPercentage(stage, worker, $event)" [disabled]="!canEditDraft" [attr.aria-label]="'نسبة ' + worker.workerName"><span>٪</span></span>
                   </label>
                   <span class="daily-production-operations__allocation-link plp-editable-allocation__link" aria-hidden="true"><i class="pi pi-arrows-h"></i></span>
                   <label><span>العدد</span>
-                    <input type="number" min="0.001" [max]="lineQuantity || null" step="0.001" [ngModel]="worker.quantity" (ngModelChange)="updateWorkerQuantity(stage, worker, $event)" [disabled]="!lineQuantity" [attr.aria-label]="'كمية ' + worker.workerName">
+                    <input type="number" min="0.001" [max]="lineQuantity || null" step="0.001" [ngModel]="worker.quantity" (ngModelChange)="updateWorkerQuantity(stage, worker, $event)" [disabled]="!canEditDraft || !lineQuantity" [attr.aria-label]="'كمية ' + worker.workerName">
                   </label>
                   <small class="daily-production-operations__allocation-error plp-editable-allocation__error" *ngIf="workerAllocationError(stage, worker) as allocationError">{{ allocationError }}</small>
                 </div>
                 <label plp-entity-value *ngIf="stage.compensationMode === 'FixedAmount' && worker.includedInProduction && worker.isProductionReady">قيمة ثابتة
-                  <input type="number" min="0" step="0.0001" [(ngModel)]="worker.fixedAmount" (ngModelChange)="stageChanged()">
+                  <input type="number" min="0" step="0.0001" [(ngModel)]="worker.fixedAmount" (ngModelChange)="stageChanged()" [disabled]="!canEditDraft">
                 </label>
                 <span plp-entity-actions>
                   <label *ngIf="workerNeedsOverride(stage, worker)">سبب التجاوز المعتمد
@@ -198,7 +197,7 @@
             <span>الكميات: <strong>{{ stageAllocationQuantity(stage) | number:'1.0-3' }} / {{ (lineQuantity | number:'1.0-3') || '—' }}</strong></span>
           </div>
           <div class="daily-production-operations__stage-actions plp-action-group">
-            <button pButton type="button" class="p-button-outlined" label="استعادة توزيع دقائق العمل" icon="pi pi-percentage" *ngIf="stage.compensationMode === 'SharedPercentage'" [disabled]="!stage.workers.length" (click)="applyEqualDistribution(stage)"></button>
+            <button pButton type="button" class="p-button-outlined" label="استعادة توزيع دقائق العمل" icon="pi pi-percentage" *ngIf="stage.compensationMode === 'SharedPercentage'" [disabled]="!canEditDraft || !stage.workers.length" (click)="applyEqualDistribution(stage)"></button>
           </div>
           </footer>
           </div>
@@ -210,17 +209,17 @@
     <p-card header="كمية الخط والمعاينة الموحّدة">
       <div class="daily-production-operations__final-entry">
         <label>كمية تشغيل الخط (تطبق مرة واحدة على كل مرحلة)
-          <input type="number" min="0.001" step="0.001" [(ngModel)]="lineQuantity" (ngModelChange)="lineQuantityChanged()" placeholder="مثال: 500">
+          <input type="number" min="0.001" step="0.001" [(ngModel)]="lineQuantity" (ngModelChange)="lineQuantityChanged()" [disabled]="!canEditDraft" placeholder="مثال: 500">
         </label>
         <label>ملاحظات المسودة
-          <input pInputText [(ngModel)]="notes" maxlength="1000" (ngModelChange)="stageChanged()" placeholder="اختياري">
+          <input pInputText [(ngModel)]="notes" maxlength="1000" (ngModelChange)="stageChanged()" [disabled]="!canEditDraft" placeholder="اختياري">
         </label>
         <div class="daily-production-operations__final-actions plp-sticky-action-bar plp-action-group">
           <span>{{ operations.totalStages }} مرحلة · {{ totalEnteredWorkers }} صف عامل. لا يضاعف أي صف كمية الخط أو المرحلة.</span>
-          <button pButton type="button" class="p-button-outlined" label="حساب معاينة موحّدة" icon="pi pi-calculator" [loading]="previewing" [disabled]="previewing || saving || approving || cancelling" (click)="calculatePreview()"></button>
-          <button *ngIf="!isDailyOperationApproved" pButton type="button" [label]="hasExistingDraft ? 'حفظ تغييرات مسودة اليوم' : 'حفظ مسودة اليوم'" icon="pi pi-save" [loading]="saving" [disabled]="!isPreviewCurrent || saving || approving || cancelling" (click)="saveDailyDraft()"></button>
+          <button pButton type="button" class="p-button-outlined" label="حساب معاينة موحّدة" icon="pi pi-calculator" [loading]="previewing" [disabled]="!canEditDraft || previewing" (click)="calculatePreview()"></button>
+          <button *ngIf="!isApproved" pButton type="button" [label]="hasExistingDraft ? 'حفظ تغييرات مسودة اليوم' : 'حفظ مسودة اليوم'" icon="pi pi-save" [loading]="saving" [disabled]="!canEditDraft || !isPreviewCurrent" (click)="saveDailyDraft()"></button>
           <button *ngIf="canApproveDailyOperation" pButton type="button" class="p-button-success" label="اعتماد تشغيل اليوم" icon="pi pi-check" [loading]="approving" [disabled]="saving || previewing || approving || cancelling" (click)="approveDailyOperation()"></button>
-          <button *ngIf="canCancelDailyOperationApproval" pButton type="button" class="p-button-warning" label="إلغاء اعتماد تشغيل اليوم" icon="pi pi-undo" [loading]="cancelling" [disabled]="saving || previewing || approving || cancelling" (click)="openDailyApprovalCancellationDialog()"></button>
+          <button *ngIf="canCancelDailyOperationApproval" pButton type="button" class="p-button-warning" label="إلغاء اعتماد تشغيل اليوم" icon="pi pi-undo" [loading]="cancelling" [disabled]="cancelling" (click)="openDailyApprovalCancellationDialog()"></button>
         </div>
       </div>
       <ul class="daily-production-operations__validation plp-inline-feedback plp-inline-feedback--error" *ngIf="validationMessages.length" role="alert"><li *ngFor="let message of validationMessages">{{ message }}</li></ul>
@@ -389,7 +388,6 @@
         <span>{{ savedDraftDetail }}</span>
       </section>
     </p-card>
-    </div>
   </ng-container>
 
   <ng-template #initialState>

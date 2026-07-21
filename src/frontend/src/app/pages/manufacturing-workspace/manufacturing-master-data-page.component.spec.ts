@@ -1,7 +1,7 @@
 import { ComponentFixture, TestBed, fakeAsync, tick } from '@angular/core/testing';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
-import { of } from 'rxjs';
+import { Subject, of, throwError } from 'rxjs';
 import { ManufacturingMasterDataApiService } from '../../core/services/manufacturing-master-data-api.service';
 import { ManufacturingRealtimeService } from '../../core/services/manufacturing-realtime.service';
 import { ManufacturingMasterDataPageComponent } from './manufacturing-master-data-page.component';
@@ -249,18 +249,107 @@ describe('ManufacturingMasterDataPageComponent', () => {
     expect(component.modelEmptyMessage).toBe('لا توجد موديلات مطابقة للبحث.');
   });
 
-  it('keeps the selected available stage while a separate stage search moves to another result page', () => {
-    (component as never as { applyModelStageOptionPage(page: unknown, search: string): void }).applyModelStageOptionPage({
-      items: [stage], totalCount: 51, pageNumber: 1, pageSize: 50
-    }, '');
-    component.modelStageForm.patchValue({ subStageId: stage.id });
-    component.modelStageSearch = 'cut';
-    api.searchSubStages.and.returnValue(of({ items: [englishStage], totalCount: 51, pageNumber: 2, pageSize: 50 }));
+  it('loads every catalog page before excluding linked stages, so total and visible items stay consistent', () => {
+    const catalog = [stage, englishStage, { ...stage, id: 'stage-3', code: 'PACK-03', name: 'التغليف', sequenceOrder: 3 }];
+    api.searchSubStages.and.callFake((_search: string, page: number) => of(page === 1
+      ? { items: [stage, englishStage], totalCount: 3, pageNumber: 1, pageSize: 2 }
+      : { items: [catalog[2]], totalCount: 3, pageNumber: 2, pageSize: 2 }));
+    component.stages = [{ id: 'model-stage-1', subStageId: stage.id, subStageCode: stage.code, subStageName: stage.name, stageOrder: 1, piecePrice: 1, standardSeconds: 20, compensationMode: 'SharedPercentage', isRequired: true, isActive: true }];
 
-    component.changeModelStagePage(1);
+    (component as never as { loadAvailableStageCatalog(): void }).loadAvailableStageCatalog();
 
-    expect(api.searchSubStages).toHaveBeenCalledWith('cut', 2, 50);
-    expect(component.modelStageChoices.map(item => item.id)).toEqual([stage.id, englishStage.id]);
-    expect(component.modelStagePageCount).toBe(2);
+    expect(api.searchSubStages).toHaveBeenCalledWith('', 1, 200);
+    expect(api.searchSubStages).toHaveBeenCalledWith('', 2, 2);
+    expect(component.availableStagesTotal).toBe(2);
+    expect(component.availableStageChoices.map(item => item.id)).toEqual([englishStage.id, 'stage-3']);
+    expect(component.availableStagesPageCount).toBe(1);
+  });
+
+  it('searches available stages by Arabic name and code without mixing linked stages', () => {
+    (component as never as { availableStageCatalog: typeof stage[] }).availableStageCatalog = [stage, englishStage];
+    component.stages = [{ id: 'model-stage-1', subStageId: stage.id, stageOrder: 1, piecePrice: 1, standardSeconds: 20, compensationMode: 'SharedPercentage', isRequired: true, isActive: true }];
+
+    component.onAvailableStagesSearch('cutting');
+    expect(component.availableStageChoices.map(item => item.id)).toEqual([englishStage.id]);
+    component.onAvailableStagesSearch('CUT-02');
+    expect(component.availableStageChoices.map(item => item.id)).toEqual([englishStage.id]);
+    component.onAvailableStagesSearch('STG001');
+    expect(component.availableStageChoices).toEqual([]);
+  });
+
+  it('resets available-stage pagination on search and keeps an explicit selection across pages', () => {
+    const catalog = Array.from({ length: 12 }, (_, index) => ({ ...stage, id: `stage-${index + 1}`, code: `STG-${index + 1}`, name: `مرحلة ${index + 1}`, sequenceOrder: index + 1 }));
+    (component as never as { availableStageCatalog: typeof catalog }).availableStageCatalog = catalog;
+    component.onAvailableStagesSearch('');
+    component.changeAvailableStagesPage(1);
+    component.selectAvailableStage(catalog[0]);
+    component.onAvailableStagesSearch('مرحلة 1');
+
+    expect(component.availableStagesPage).toBe(1);
+    expect(component.modelStageForm.controls.subStageId.value).toBe(catalog[0].id);
+    expect(component.availableStageChoices[0].id).toBe(catalog[0].id);
+  });
+
+  it('keeps the current edit stage visible and selected even when it is already linked', () => {
+    const linked = { id: 'model-stage-1', subStageId: stage.id, subStageCode: stage.code, subStageName: stage.name, stageOrder: 1, piecePrice: 1, standardSeconds: 20, compensationMode: 'SharedPercentage' as const, isRequired: true, isActive: true };
+    component.stages = [linked];
+    (component as never as { availableStageCatalog: typeof stage[] }).availableStageCatalog = [stage, englishStage];
+    component.editModelStage(linked);
+
+    expect(component.modelStageForm.controls.subStageId.value).toBe(stage.id);
+    expect(component.availableStageChoices.map(item => item.id)).toContain(stage.id);
+  });
+
+  it('ignores a stale catalog response after a newer refresh response is applied', () => {
+    const stale = new Subject<any>();
+    const current = new Subject<any>();
+    api.searchSubStages.and.returnValues(stale, current);
+
+    (component as never as { loadAvailableStageCatalog(): void }).loadAvailableStageCatalog();
+    (component as never as { loadAvailableStageCatalog(): void }).loadAvailableStageCatalog();
+    current.next({ items: [englishStage], totalCount: 1, pageNumber: 1, pageSize: 200 });
+    stale.next({ items: [stage], totalCount: 1, pageNumber: 1, pageSize: 200 });
+
+    expect(component.availableStageChoices.map(item => item.id)).toEqual([englishStage.id]);
+  });
+
+  it('shows scoped available-stage empty and error states and retries catalog loading', () => {
+    (component as never as { availableStageCatalog: typeof stage[] }).availableStageCatalog = [stage];
+    component.onAvailableStagesSearch('غير موجود');
+    expect(component.availableStageChoices).toEqual([]);
+
+    api.searchSubStages.and.returnValues(
+      throwError(() => new Error('انقطع الاتصال')),
+      of({ items: [stage], totalCount: 1, pageNumber: 1, pageSize: 200 })
+    );
+    (component as never as { loadAvailableStageCatalog(): void }).loadAvailableStageCatalog();
+    expect(component.availableStagesError).toBe('انقطع الاتصال');
+
+    component.onAvailableStagesSearch('');
+    component.retryAvailableStages();
+    expect(component.availableStagesError).toBe('');
+    expect(component.availableStageChoices).toEqual([stage]);
+  });
+
+  it('searches linked model stages by name and code, resets the table key, and keeps StageOrder', () => {
+    const later = { id: 'model-stage-2', subStageId: englishStage.id, subStageCode: englishStage.code, subStageName: englishStage.name, stageOrder: 2, piecePrice: 1, standardSeconds: 20, compensationMode: 'SharedPercentage' as const, isRequired: true, isActive: true };
+    const first = { id: 'model-stage-1', subStageId: stage.id, subStageCode: stage.code, subStageName: stage.name, stageOrder: 1, piecePrice: 1, standardSeconds: 20, compensationMode: 'SharedPercentage' as const, isRequired: true, isActive: true };
+    component.stages = [later, first];
+    component.onLinkedStagesSearch('CUT-02');
+    expect(component.filteredLinkedStages.map(item => item.id)).toEqual([later.id]);
+    component.onLinkedStagesSearch('');
+    expect(component.filteredLinkedStages.map(item => item.id)).toEqual([first.id, later.id]);
+    component.clearLinkedStagesSearch();
+    expect(component.linkedStagesSearch).toBe('');
+  });
+
+  it('keeps the linked-stage search independent from the available-stage search and reports a no-match empty state', () => {
+    component.stages = [{ id: 'model-stage-1', subStageId: stage.id, subStageCode: stage.code, subStageName: stage.name, stageOrder: 1, piecePrice: 1, standardSeconds: 20, compensationMode: 'SharedPercentage', isRequired: true, isActive: true }];
+    component.onAvailableStagesSearch('CUT-02');
+    component.onLinkedStagesSearch('غير موجود');
+
+    expect(component.availableStagesSearch).toBe('CUT-02');
+    expect(component.filteredLinkedStages).toEqual([]);
+    expect(component.linkedStagesEmptyMessage).toBe('توجد مراحل مرتبطة، لكن لا توجد نتائج مطابقة للبحث.');
   });
 });
