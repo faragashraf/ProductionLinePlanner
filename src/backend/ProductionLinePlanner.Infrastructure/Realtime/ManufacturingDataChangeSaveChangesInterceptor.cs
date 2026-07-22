@@ -137,6 +137,18 @@ public sealed class ManufacturingDataChangeSaveChangesInterceptor(
                 productionLineId: entity.ProductionLineId,
                 productModelId: entity.ProductModelId,
                 productionDate: entity.ProductionDate),
+            StageProductionRecord entity => Create(
+                entry,
+                ManufacturingEntityType.StageProductionRecord,
+                entity.Id,
+                actorUserId,
+                productionDate: entity.ProductionDate),
+            AttendanceRecord entity => Create(
+                entry,
+                ManufacturingEntityType.AttendanceRecord,
+                entity.Id,
+                actorUserId,
+                workerId: entity.WorkerId),
             Worker entity => Create(entry, ManufacturingEntityType.Worker, entity.Id, actorUserId),
             WorkerDefaultAssignment entity => CreateDefaultAssignmentChange(entry, entity, actorUserId),
             _ => null

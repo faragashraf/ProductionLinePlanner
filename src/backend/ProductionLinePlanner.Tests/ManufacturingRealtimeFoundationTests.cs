@@ -60,7 +60,7 @@ public sealed class ManufacturingRealtimeFoundationTests
         Assert.Equal(line.Id, change.ProductionLineId);
         Assert.Equal(model.Id, change.ProductModelId);
         Assert.Equal(date, change.ProductionDate);
-        Assert.Equal(["manufacturing:daily-production-operations"], ManufacturingRealtimeGroups.ForChange(change));
+        Assert.Equal(["manufacturing:daily-production-operations", "manufacturing:manufacturing-command-center"], ManufacturingRealtimeGroups.ForChange(change));
     }
 
     [Fact]
@@ -125,7 +125,7 @@ public sealed class ManufacturingRealtimeFoundationTests
         Assert.Equal(mainStage.Id, created.MainStageId);
         Assert.Equal(subStage.Id, created.SubStageId);
         Assert.Equal(
-            ["manufacturing:line-staffing", "manufacturing:daily-production-operations"],
+            ["manufacturing:line-staffing", "manufacturing:daily-production-operations", "manufacturing:manufacturing-command-center"],
             ManufacturingRealtimeGroups.ForChange(created));
         var browserMessage = ManufacturingDataChangedMessage.From(created);
         Assert.Equal("WorkerDefaultAssignment", browserMessage.EntityType);
@@ -285,11 +285,17 @@ public sealed class ManufacturingRealtimeFoundationTests
         var dailyGroups = ManufacturingRealtimeGroups.ForChange(new ManufacturingDataChanged(
             Guid.NewGuid(), ManufacturingEntityType.ProductionOrder, ManufacturingChangeType.Updated, Guid.NewGuid(), DateTime.UtcNow, null, null,
             ProductionLineId: Guid.NewGuid(), ProductModelId: Guid.NewGuid(), ProductionDate: new DateOnly(2026, 7, 21)));
+        var attendanceGroups = ManufacturingRealtimeGroups.ForChange(new ManufacturingDataChanged(
+            Guid.NewGuid(), ManufacturingEntityType.AttendanceRecord, ManufacturingChangeType.Updated, Guid.NewGuid(), DateTime.UtcNow, null, null));
+        var stageRecordGroups = ManufacturingRealtimeGroups.ForChange(new ManufacturingDataChanged(
+            Guid.NewGuid(), ManufacturingEntityType.StageProductionRecord, ManufacturingChangeType.Updated, Guid.NewGuid(), DateTime.UtcNow, null, null));
 
-        Assert.Equal(["manufacturing:models"], modelGroups);
-        Assert.Equal(["manufacturing:factory-structure", "manufacturing:departments", "manufacturing:stages"], departmentGroups);
-        Assert.Equal(["manufacturing:employees"], workerGroups);
-        Assert.Equal(["manufacturing:daily-production-operations"], dailyGroups);
+        Assert.Equal(["manufacturing:models", "manufacturing:manufacturing-command-center"], modelGroups);
+        Assert.Equal(["manufacturing:factory-structure", "manufacturing:departments", "manufacturing:stages", "manufacturing:manufacturing-command-center"], departmentGroups);
+        Assert.Equal(["manufacturing:employees", "manufacturing:manufacturing-command-center"], workerGroups);
+        Assert.Equal(["manufacturing:daily-production-operations", "manufacturing:manufacturing-command-center"], dailyGroups);
+        Assert.Equal(["manufacturing:daily-production-operations", "manufacturing:manufacturing-command-center"], attendanceGroups);
+        Assert.Equal(["manufacturing:daily-production-operations", "manufacturing:manufacturing-command-center"], stageRecordGroups);
         Assert.True(ManufacturingRealtimeGroups.TryGetRequiredPermission("models", out var permission));
         Assert.Equal("models.view", permission);
         Assert.True(ManufacturingRealtimeGroups.TryGetRequiredPermission("employees", out permission));
@@ -298,6 +304,8 @@ public sealed class ManufacturingRealtimeFoundationTests
         Assert.Equal("production.record", permission);
         Assert.True(ManufacturingRealtimeGroups.TryGetRequiredPermission("line-staffing", out permission));
         Assert.Equal("assignments.view", permission);
+        Assert.True(ManufacturingRealtimeGroups.TryGetRequiredPermission("manufacturing-command-center", out permission));
+        Assert.Equal("production.view", permission);
         Assert.False(ManufacturingRealtimeGroups.TryGetRequiredPermission("reports", out _));
     }
 

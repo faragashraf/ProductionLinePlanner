@@ -1,0 +1,42 @@
+<section class="command-filters" aria-label="فلاتر مركز قيادة التصنيع" dir="rtl">
+  <label class="command-filters__field">
+    <span>تاريخ التشغيل</span>
+    <input type="date" [ngModel]="filters.operationDate" (ngModelChange)="onDateChange($event)" [disabled]="loading">
+  </label>
+
+  <label class="command-filters__field">
+    <span>المصنع</span>
+    <select [ngModel]="filters.factoryId" (ngModelChange)="onFactoryChange($event)" [disabled]="loading || !catalog">
+      <option [ngValue]="null">كل المصانع</option>
+      <option *ngFor="let factory of catalog?.factories ?? []" [ngValue]="factory.id">{{ factory.name }} · {{ factory.code }}</option>
+    </select>
+  </label>
+
+  <label class="command-filters__field">
+    <span>القسم</span>
+    <select [ngModel]="filters.departmentId" (ngModelChange)="onDepartmentChange($event)" [disabled]="loading || !catalog">
+      <option [ngValue]="null">كل الأقسام</option>
+      <option *ngFor="let department of catalog?.departments ?? []" [hidden]="filters.factoryId && department.factoryId !== filters.factoryId" [ngValue]="department.id">{{ department.name }} · {{ department.code }}</option>
+    </select>
+  </label>
+
+  <label class="command-filters__field">
+    <span>خط الإنتاج</span>
+    <select [ngModel]="filters.productionLineId" (ngModelChange)="onLineChange($event)" [disabled]="loading || !catalog">
+      <option [ngValue]="null">كل الخطوط</option>
+      <option *ngFor="let line of catalog?.lines ?? []" [hidden]="(filters.factoryId && line.factoryId !== filters.factoryId) || (filters.departmentId && line.departmentId !== filters.departmentId)" [ngValue]="line.id">{{ line.name }}{{ line.code ? ' · ' + line.code : '' }}</option>
+    </select>
+  </label>
+
+  <label class="command-filters__field command-filters__field--status">
+    <span>حالة التشغيل</span>
+    <select [ngModel]="filters.operationStatus" (ngModelChange)="onStatusChange($event)" [disabled]="loading">
+      <option *ngFor="let status of operationStatuses" [ngValue]="status.value">{{ status.label }}</option>
+    </select>
+  </label>
+
+  <button type="button" class="command-filters__reset" (click)="reset()" [disabled]="loading">
+    <i class="pi pi-filter-slash" aria-hidden="true"></i>
+    إعادة الضبط
+  </button>
+</section>
