@@ -1,96 +1,92 @@
-import { of, throwError } from 'rxjs';
-import { PermissionService } from '../../core/services/permission.service';
-import { DashboardApiService } from '../../core/services/dashboard-api.service';
-import { AttendanceApiService } from '../../core/services/attendance-api.service';
+import { Subject, of, throwError } from 'rxjs';
+import { ManufacturingCommandCenterApiService } from '../../core/services/manufacturing-command-center-api.service';
+import { ManufacturingRealtimeService } from '../../core/services/manufacturing-realtime.service';
+import { ManufacturingCommandCenter } from '../../shared/models/manufacturing-command-center.model';
 import { DashboardPageComponent } from './dashboard-page.component';
 
 describe('DashboardPageComponent', () => {
-  function permissions(canViewAttendance: boolean, canSyncAttendance = false): jasmine.SpyObj<PermissionService> {
-    const service = jasmine.createSpyObj<PermissionService>('PermissionService', ['ensureHydrated', 'hasPermission']);
-    service.ensureHydrated.and.returnValue(of([]));
-    service.hasPermission.and.callFake((permission) => permission === 'attendance.view' ? canViewAttendance : permission === 'attendance.sync' ? canSyncAttendance : false);
-    return service;
-  }
-
-  function attendanceApi(): jasmine.SpyObj<AttendanceApiService> {
-    return jasmine.createSpyObj<AttendanceApiService>('AttendanceApiService', ['syncToday']);
-  }
-
-  it('renders API data without a MockDataService fallback', () => {
-    const api = jasmine.createSpyObj<DashboardApiService>('DashboardApiService', ['loadDashboardData']);
-    api.loadDashboardData.and.returnValue(of({ cards: [], lineReadinessSummary: { overallReadiness: 75, totalLines: 1, healthyLines: 0, warningLines: 1, criticalLines: 0, activeWorkers: 2, totalWorkers: 3, attendanceRate: 67 }, attendanceIndicators: [], previewLines: [], criticalReadinessAlerts: [], assignmentCoveragePercent: 100, attendanceDataStatus: 'Complete', readinessState: 'available', attendanceState: 'available', notificationsState: 'available', hasLoadError: false }));
-    const component = new DashboardPageComponent(api, permissions(true), attendanceApi());
+  it('keeps one filter scope for every metric and exposes matching drill-down items', () => {
+    const api = jasmine.createSpyObj<ManufacturingCommandCenterApiService>('api', ['load']);
+    const realtime = jasmine.createSpyObj<ManufacturingRealtimeService>('realtime', ['watchScreen']);
+    realtime.watchScreen.and.returnValue(() => undefined);
+    api.load.and.returnValue(of(sampleData()));
+    const component = new DashboardPageComponent(api, realtime);
 
     component.ngOnInit();
+    component.selectDetail('present-unassigned');
 
-    expect(component.hasLoadError).toBeFalse();
-    expect(component.lineReadinessSummary.overallReadiness).toBe(75);
+    expect(api.load).toHaveBeenCalledWith(component.filters);
+    expect(component.data?.workforce.assignmentCoverage.percentage).toBeNull();
+    expect(component.ratioText(null)).toBe('لا توجد بيانات');
+    expect(component.detailWorkers.map(worker => worker.workerId)).toEqual(['w2']);
   });
 
-  it('shows an error state rather than fabricated data when the API fails', () => {
-    const api = jasmine.createSpyObj<DashboardApiService>('DashboardApiService', ['loadDashboardData']);
-    api.loadDashboardData.and.returnValue(throwError(() => new Error('offline')));
-    const component = new DashboardPageComponent(api, permissions(true), attendanceApi());
-
+  it('preserves the previous response when realtime refresh fails', () => {
+    const api = jasmine.createSpyObj<ManufacturingCommandCenterApiService>('api', ['load']);
+    const realtime = jasmine.createSpyObj<ManufacturingRealtimeService>('realtime', ['watchScreen']);
+    let refresh: (() => void) | undefined;
+    realtime.watchScreen.and.callFake(watch => { refresh = watch.refresh; return () => undefined; });
+    api.load.and.returnValues(of(sampleData()), throwError(() => new Error('offline')));
+    const component = new DashboardPageComponent(api, realtime);
     component.ngOnInit();
 
+    refresh?.();
+
+    expect(component.data?.scope.productionDate).toBe('2026-07-22');
     expect(component.hasLoadError).toBeTrue();
-    expect(component.cards).toEqual([]);
+    expect(api.load).toHaveBeenCalledTimes(2);
   });
 
-  it('loads the permitted sources without attendance when attendance.view is absent', () => {
-    const api = jasmine.createSpyObj<DashboardApiService>('DashboardApiService', ['loadDashboardData']);
-    api.loadDashboardData.and.returnValue(of({ cards: [], lineReadinessSummary: { overallReadiness: 75, totalLines: 1, healthyLines: 0, warningLines: 1, criticalLines: 0, activeWorkers: 2, totalWorkers: 3, attendanceRate: 0 }, attendanceIndicators: [], previewLines: [], criticalReadinessAlerts: [], assignmentCoveragePercent: 100, attendanceDataStatus: 'Complete', readinessState: 'available', attendanceState: 'not-authorized', notificationsState: 'available', hasLoadError: false }));
-    const component = new DashboardPageComponent(api, permissions(false), attendanceApi());
+  it('shows an explicit initial API error instead of fallback figures', () => {
+    const api = jasmine.createSpyObj<ManufacturingCommandCenterApiService>('api', ['load']);
+    const realtime = jasmine.createSpyObj<ManufacturingRealtimeService>('realtime', ['watchScreen']);
+    realtime.watchScreen.and.returnValue(() => undefined);
+    api.load.and.returnValue(throwError(() => new Error('offline')));
+    const component = new DashboardPageComponent(api, realtime);
 
     component.ngOnInit();
 
-    expect(api.loadDashboardData).toHaveBeenCalledWith({ includeAttendance: false });
-    expect(component.attendanceUnavailableByPermission).toBeTrue();
+    expect(component.data).toBeNull();
+    expect(component.hasLoadError).toBeTrue();
+    expect(component.isLoading).toBeFalse();
+  });
+
+  it('cancels a stale scope request so it cannot overwrite the newest dashboard response', () => {
+    const api = jasmine.createSpyObj<ManufacturingCommandCenterApiService>('api', ['load']);
+    const realtime = jasmine.createSpyObj<ManufacturingRealtimeService>('realtime', ['watchScreen']);
+    const first = new Subject<ManufacturingCommandCenter>();
+    const second = new Subject<ManufacturingCommandCenter>();
+    realtime.watchScreen.and.returnValue(() => undefined);
+    api.load.and.returnValues(first, second);
+    const component = new DashboardPageComponent(api, realtime);
+    component.ngOnInit();
+
+    const selectedFilters = { ...component.filters, factoryId: 'factory-new' };
+    component.onFiltersChange(selectedFilters);
+    first.error(new Error('stale request failed'));
+    second.next({ ...sampleData(), scope: { ...sampleData().scope, factoryId: 'factory-new', description: 'new scope' } });
+    second.complete();
+
+    expect(component.filters).toEqual(selectedFilters);
+    expect(component.data?.scope.factoryId).toBe('factory-new');
     expect(component.hasLoadError).toBeFalse();
-  });
-
-  it('does not treat unavailable attendance data as confirmed operational readiness', () => {
-    const api = jasmine.createSpyObj<DashboardApiService>('DashboardApiService', ['loadDashboardData']);
-    api.loadDashboardData.and.returnValue(of({ cards: [], lineReadinessSummary: { overallReadiness: 0, totalLines: 1, healthyLines: 0, warningLines: 0, criticalLines: 1, activeWorkers: 0, totalWorkers: 2, attendanceRate: 0 }, attendanceIndicators: [], previewLines: [], criticalReadinessAlerts: [], assignmentCoveragePercent: 100, attendanceDataStatus: 'Unavailable', readinessState: 'available', attendanceState: 'available', notificationsState: 'available', hasLoadError: false }));
-    const component = new DashboardPageComponent(api, permissions(true), attendanceApi());
-
-    component.ngOnInit();
-
-    expect(component.hasReadinessData).toBeFalse();
-    expect(component.readinessUnavailableMessage).toContain('مزامنة حضور اليوم');
-  });
-
-  it('manually syncs today only for attendance.sync and refreshes the dashboard data', () => {
-    const api = jasmine.createSpyObj<DashboardApiService>('DashboardApiService', ['loadDashboardData']);
-    const initial = { cards: [], lineReadinessSummary: { overallReadiness: 0, totalLines: 1, healthyLines: 0, warningLines: 0, criticalLines: 1, activeWorkers: 0, totalWorkers: 2, attendanceRate: 0 }, attendanceIndicators: [], previewLines: [], criticalReadinessAlerts: [], assignmentCoveragePercent: 100, attendanceDataStatus: 'Unavailable', readinessState: 'available' as const, attendanceState: 'available' as const, notificationsState: 'available' as const, hasLoadError: false };
-    const refreshed = { ...initial, lineReadinessSummary: { ...initial.lineReadinessSummary, overallReadiness: 100, activeWorkers: 2, attendanceRate: 100 }, attendanceDataStatus: 'Complete' };
-    api.loadDashboardData.and.returnValues(of(initial), of(refreshed));
-    const attendance = attendanceApi();
-    attendance.syncToday.and.returnValue(of({ syncDateUtc: '2026-07-19T00:00:00Z', sourceUsersCount: 2, sourceCheckInsCount: 2, matchedWorkersCount: 2, unmatchedSourceUsersCount: 0, workersWithoutAttendanceCount: 0, insertedRecords: 2, updatedRecords: 0, skippedRecords: 0 }));
-    const component = new DashboardPageComponent(api, permissions(true, true), attendance);
-
-    component.ngOnInit();
-    component.synchronizeAttendanceToday();
-
-    expect(attendance.syncToday).toHaveBeenCalledTimes(1);
-    expect(api.loadDashboardData).toHaveBeenCalledTimes(2);
-    expect(component.lineReadinessSummary.overallReadiness).toBe(100);
-    expect(component.attendanceSyncMessage).toContain('تمت مزامنة حضور اليوم');
-  });
-
-  it('keeps the displayed dashboard data when manual synchronization fails', () => {
-    const api = jasmine.createSpyObj<DashboardApiService>('DashboardApiService', ['loadDashboardData']);
-    api.loadDashboardData.and.returnValue(of({ cards: [], lineReadinessSummary: { overallReadiness: 75, totalLines: 1, healthyLines: 0, warningLines: 1, criticalLines: 0, activeWorkers: 2, totalWorkers: 3, attendanceRate: 67 }, attendanceIndicators: [], previewLines: [], criticalReadinessAlerts: [], assignmentCoveragePercent: 100, attendanceDataStatus: 'Complete', readinessState: 'available', attendanceState: 'available', notificationsState: 'available', hasLoadError: false }));
-    const attendance = attendanceApi();
-    attendance.syncToday.and.returnValue(throwError(() => new Error('source offline')));
-    const component = new DashboardPageComponent(api, permissions(true, true), attendance);
-
-    component.ngOnInit();
-    component.synchronizeAttendanceToday();
-
-    expect(component.lineReadinessSummary.overallReadiness).toBe(75);
-    expect(component.attendanceSyncFailed).toBeTrue();
-    expect(component.attendanceSyncMessage).toContain('لم يتم تغيير المؤشرات');
+    expect(component.ratioText(0)).toBe('0%');
   });
 });
+
+function sampleData(): ManufacturingCommandCenter {
+  return {
+    scope: { productionDate: '2026-07-22', factoryId: null, departmentId: null, productionLineId: null, operationStatus: 'All', description: 'scope' },
+    filterCatalog: { factories: [], departments: [], lines: [] },
+    workforce: {
+      activeWorkers: 3, presentWorkers: 1, presentPermanentlyAssignedWorkers: 0, presentUnassignedWorkers: 1, permanentlyAssignedNotPresentWorkers: 0,
+      assignmentCoverage: { numerator: 0, denominator: 0, percentage: null, scope: 'scope', date: '2026-07-22', zeroBehavior: 'NoData' },
+      attendanceEvidenceComplete: true, attributionNote: 'note', presentAssignedDetails: [],
+      presentUnassignedDetails: [{ workerId: 'w2', workerCode: '2', workerName: 'عامل', attendanceStatus: 'Present', permanentAssignments: [] }], assignedNotPresentDetails: []
+    },
+    lineSummary: { activeLines: 1, readyLines: 0, staffingShortageLines: 0, journeyNotConfiguredLines: 0, dataIncompleteLines: 0, problemLines: 1, stagesWithoutPresentWorker: 0 },
+    operations: { linesWithOperation: 0, linesWithoutOperation: 1, draftOperations: 0, approvedOperations: 0, approvalCancelledOperations: 0, cancelledOperations: 0, approvedRecordedValue: 0, items: [] },
+    dataQuality: { modelStagesWithoutPrice: 0, modelStagesWithoutStandardTime: 0, activeJourneyStagesWithoutPresentWorker: 0, activeModelsWithoutJourney: 0, issues: [], modelsWithoutJourneyScopeNote: '' },
+    factories: [], calculatedAtUtc: '2026-07-22T08:00:00Z'
+  };
+}

@@ -1,156 +1,132 @@
-<section class="page-frame">
-  <header class="page-header">
-    <h1>لوحة العرض التجريبي</h1>
-    <p>مرشد سريع لمسار الوردية: جاهزية المصنع → نقاط العجز → التوصية.</p>
+<main class="command-page" dir="rtl">
+  <header class="command-page__header">
+    <div>
+      <span class="command-page__eyebrow">غرفة تشغيل المصنع</span>
+      <h1>لوحة تحكم التصنيع</h1>
+      <p>أرقام مسجلة وقابلة للتتبع للحضور، والتسكين الدائم، ورحلات الموديلات، وتشغيل اليوم.</p>
+    </div>
+    <div class="command-page__updated" *ngIf="data">
+      <span [class.command-page__live]="isRefreshing"></span>
+      آخر احتساب موثوق: {{ data.calculatedAtUtc | date:'yyyy/MM/dd، HH:mm' }}
+    </div>
   </header>
 
-  <p class="plp-inline-state plp-inline-state--loading" *ngIf="isLoading">
-    <i class="pi pi-spin pi-spinner" aria-hidden="true"></i>
-    جارٍ تحميل مؤشرات لوحة التحكم…
-  </p>
+  <app-manufacturing-command-center-filters
+    [catalog]="data?.filterCatalog ?? null"
+    [filters]="filters"
+    [loading]="isLoading"
+    (filtersChange)="onFiltersChange($event)"
+  ></app-manufacturing-command-center-filters>
 
-  <p class="plp-inline-state plp-inline-state--warning" *ngIf="hasLoadError && !isLoading">
-    تعذر تحميل بعض مؤشرات لوحة التحكم من الخادم.
-    <button type="button" class="p-button p-button-sm p-button-text" (click)="retry()">إعادة المحاولة</button>
-  </p>
+  <section class="command-page__scope" *ngIf="data">
+    <i class="pi pi-calendar" aria-hidden="true"></i>
+    <strong>{{ data.scope.productionDate }}</strong>
+    <span>{{ data.scope.description }}</span>
+  </section>
 
-  <div *ngIf="!isLoading">
-    <section class="dashboard-page__hero" aria-label="ملخص تشغيل المصنع">
-      <div class="hero-copy">
-        <span class="hero-eyebrow">ملخص الوردية الآن</span>
-        <strong *ngIf="hasReadinessData; else readinessUnavailable">الجاهزية التشغيلية للمصنع {{ lineReadinessSummary.overallReadiness }}%</strong>
-        <ng-template #readinessUnavailable><strong>{{ readinessUnavailableMessage }}</strong></ng-template>
-        <span *ngIf="hasReadinessEndpointData">اكتمال التسكين {{ assignmentCoveragePercent }}%.</span>
-        <span *ngIf="hasAttendanceData">الحضور الفعلي {{ lineReadinessSummary.attendanceRate }}% مع عجز تشغيلي {{ totalOperationalDeficit }} عامل يحتاج متابعة.</span>
-        <span *ngIf="attendanceUnavailableByPermission">بيانات الحضور غير متاحة بصلاحياتك الحالية.</span>
-        <span *ngIf="attendanceState === 'error'">تعذر تحميل بيانات الحضور حالياً.</span>
-      </div>
+  <section class="command-page__skeletons" *ngIf="isLoading && !data" aria-label="جار تحميل المؤشرات">
+    <div *ngFor="let item of skeletons" class="command-page__skeleton"></div>
+  </section>
 
-      <section class="demo-callout-strip" aria-label="شريط حالة التشغيل">
-        <plp-status-badge *ngIf="hasAttendanceData" [status]="attendanceToneStatus" [label]="'حضور فعلي: ' + lineReadinessSummary.attendanceRate + '%'"></plp-status-badge>
-        <plp-status-badge *ngIf="hasReadinessData" [status]="shortageToneStatus" [label]="'عجز تشغيلي: ' + totalOperationalDeficit + ' عامل'"></plp-status-badge>
-        <plp-status-badge [status]="recommendationAvailabilityTone" [label]="'توصية متاحة'"></plp-status-badge>
-        <plp-status-badge *ngIf="hasReadinessData" [status]="readinessShortageToneStatus" [label]="'جاهزية الخط التشغيلية: ' + lineReadinessSummary.overallReadiness + '%'"></plp-status-badge>
+  <section class="command-page__error" *ngIf="hasLoadError && !data" role="alert">
+    <i class="pi pi-exclamation-triangle" aria-hidden="true"></i>
+    <div><strong>تعذر تحميل بيانات التشغيل</strong><span>لم تُستبدل الاستجابة بأصفار أو بيانات تجريبية.</span></div>
+    <button type="button" (click)="retry()">إعادة المحاولة</button>
+  </section>
+
+  <ng-container *ngIf="data as current">
+    <section class="command-page__notice" *ngIf="hasLoadError && data" role="status">
+      فشل آخر تحديث لحظي؛ البيانات السابقة باقية دون تغيير.
+      <button type="button" (click)="retry()">حاول الآن</button>
+    </section>
+
+    <section class="command-page__empty" *ngIf="!isLoading && current.lineSummary.activeLines === 0">
+      <i class="pi pi-inbox" aria-hidden="true"></i>
+      <h2>لا توجد خطوط ضمن النطاق الحالي</h2>
+      <p>غيّر نطاق شجرة المصنع أو حالة التشغيل. لا توجد أرقام بديلة مخفية.</p>
+    </section>
+
+    <ng-container *ngIf="current.lineSummary.activeLines > 0">
+      <section class="command-section" aria-labelledby="workforce-title">
+        <header><div><span>01</span><h2 id="workforce-title">الحضور والقوى العاملة</h2></div><p>{{ current.workforce.attributionNote }}</p></header>
+        <div class="metric-grid">
+          <article class="metric metric--ink">
+            <span>العمال النشطون</span><strong>{{ current.workforce.activeWorkers === null ? 'غير متاح' : current.workforce.activeWorkers }}</strong><small>عمال بسجل نشط وخدمة عمل نشطة؛ لا يُنسب للنطاق الجزئي دون علاقة مصدر موثوقة.</small>
+          </article>
+          <button class="metric metric--ink" type="button" (click)="selectDetail('present')">
+            <span>الحاضرون في النطاق</span><strong>{{ current.workforce.presentWorkers }}</strong><small>عمال مميزون بحالة حاضر أو متأخر في يوم القاهرة.</small>
+          </button>
+          <button class="metric metric--ready" type="button" (click)="selectDetail('present-assigned')">
+            <span>حاضرون ومسكنون دائمًا</span><strong>{{ current.workforce.presentPermanentlyAssignedWorkers }}</strong><small>تقاطع الحضور مع التسكين الدائم النشط فقط.</small>
+          </button>
+          <button class="metric metric--warning" type="button" (click)="selectDetail('present-unassigned')" [disabled]="current.workforce.presentUnassignedWorkers === null">
+            <span>حاضرون غير مسكنين</span><strong>{{ current.workforce.presentUnassignedWorkers === null ? 'غير متاح' : current.workforce.presentUnassignedWorkers }}</strong><small>لا يُنسب لقسم أو خط دون علاقة مصدر موثوقة.</small>
+          </button>
+          <button class="metric metric--danger" type="button" (click)="selectDetail('not-present')">
+            <span>مسكنون دائمًا غير حاضرين</span><strong>{{ current.workforce.permanentlyAssignedNotPresentWorkers }}</strong><small>يشمل الغياب الصريح أو غياب سجل اليوم مع إظهار الحالة بالتفاصيل.</small>
+          </button>
+          <article class="metric metric--ratio">
+            <span>تغطية تسكين الحاضرين</span><strong>{{ ratioText(current.workforce.assignmentCoverage.percentage) }}</strong>
+            <small>{{ current.workforce.assignmentCoverage.numerator }} ÷ {{ current.workforce.assignmentCoverage.denominator }} · {{ current.scope.productionDate }}</small>
+          </article>
+        </div>
       </section>
 
-      <section class="journey-actions" aria-label="روابط سريعة للعرض التجريبي">
-        <span>إجراءات العرض التجريبي</span>
-        <div class="journey-actions__buttons">
-          <button
-            *ngIf="canSynchronizeAttendance"
-            pButton
-            pRipple
-            type="button"
-            class="p-button-sm p-button-outlined"
-            icon="pi pi-refresh"
-            [label]="attendanceSyncing ? 'جارٍ مزامنة الحضور…' : 'مزامنة حضور اليوم'"
-            [loading]="attendanceSyncing"
-            [disabled]="attendanceSyncing"
-            (click)="synchronizeAttendanceToday()"
-          ></button>
-          <a pButton pRipple type="button" class="p-button-sm p-button-secondary" routerLink="/factory-map" icon="pi pi-sitemap" label="الدخول إلى خريطة المصنع"></a>
-          <a pButton pRipple type="button" class="p-button-sm p-button-help" routerLink="/manufacturing/line-staffing" icon="pi pi-users" label="الدخول إلى تسكين الخط"></a>
+      <section class="command-section" aria-labelledby="operations-title">
+        <header><div><span>02</span><h2 id="operations-title">تشغيل اليوم</h2></div><p>العدادات عمليات مسجلة؛ Preview غير محفوظة لا تدخل هنا.</p></header>
+        <div class="metric-grid metric-grid--compact">
+          <article class="metric"><span>خطوط لديها تشغيل</span><strong>{{ current.operations.linesWithOperation }}</strong><small>عدد خطوط مميز، لا عدد سجلات المراحل.</small></article>
+          <article class="metric metric--muted"><span>لا يوجد تشغيل</span><strong>{{ current.operations.linesWithoutOperation }}</strong><small>خطوط نشطة بلا أمر يوم مسجل.</small></article>
+          <button class="metric metric--warning" type="button" (click)="selectDetail('drafts')"><span>مسودات تحتاج إجراء</span><strong>{{ current.operations.draftOperations + current.operations.approvalCancelledOperations }}</strong><small>Draft + ملغي الاعتماد.</small></button>
+          <button class="metric metric--ready" type="button" (click)="selectDetail('approved')"><span>عمليات معتمدة</span><strong>{{ current.operations.approvedOperations }}</strong><small>ProductionOrder بحالة Completed.</small></button>
+          <article class="metric metric--ink"><span>قيمة سجلات معتمدة</span><strong>{{ current.operations.approvedRecordedValue | number:'1.2-2' }}</strong><small>مجموع TotalWorkerEarnings، وليس مجموع كميات المراحل.</small></article>
         </div>
       </section>
-      <p class="plp-inline-state" [class.plp-inline-state--warning]="attendanceSyncFailed" *ngIf="attendanceSyncMessage">
-        {{ attendanceSyncMessage }}
-      </p>
-    </section>
 
-    <section class="readiness-summary" *ngIf="hasReadinessData">
-      <p-card styleClass="summary-card">
-        <div class="summary-label">الجاهزية التشغيلية للمصنع</div>
-        <div class="summary-value" [ngClass]="getReadinessTone()">{{ lineReadinessSummary.overallReadiness }}%</div>
-        <div class="summary-rows">
-          <span>إجمالي الخطوط: {{ lineReadinessSummary.totalLines }}</span>
-          <span>العاملون الجاهزون: {{ lineReadinessSummary.activeWorkers }} / {{ lineReadinessSummary.totalWorkers }}</span>
-          <span>اكتمال التسكين: {{ assignmentCoveragePercent }}%</span>
-        </div>
-      </p-card>
-
-      <p-card styleClass="summary-card">
-        <div class="summary-label">صحة الخطوط</div>
-        <div class="status-strip">
-          <div><span class="status-dot green"></span> ممتازة {{ lineReadinessSummary.healthyLines }}</div>
-          <div><span class="status-dot yellow"></span> متوسطة {{ lineReadinessSummary.warningLines }}</div>
-          <div><span class="status-dot red"></span> تحتاج متابعة {{ lineReadinessSummary.criticalLines }}</div>
-        </div>
-      </p-card>
-
-      <p-card *ngIf="hasAttendanceData" styleClass="summary-card">
-        <div class="summary-label">مؤشر الحضور</div>
-        <div class="summary-value" [ngClass]="getAttendanceTone()">{{ lineReadinessSummary.attendanceRate }}%</div>
-        <div class="summary-note">نسبة الحضور العامة على كل المراحل.</div>
-      </p-card>
-
-      <p-card *ngIf="criticalReadinessAlerts.length" styleClass="summary-card summary-card--alert">
-        <div class="summary-alert-head">
-          <div>
-            <div class="summary-label">تنبيه مرحلة حرجة</div>
-            <p class="summary-note summary-note--alert">{{ criticalAlertsText }}</p>
+      <section class="command-grid">
+        <article class="command-panel">
+          <header><div><span>03</span><h2>جاهزية الخطوط</h2></div><a routerLink="/factory-map">فتح الخريطة</a></header>
+          <div class="line-rollup">
+            <div><strong>{{ current.lineSummary.activeLines }}</strong><span>خط نشط</span></div>
+            <div class="state-ready"><strong>{{ current.lineSummary.readyLines }}</strong><span>جاهز</span></div>
+            <div class="state-staffing-shortage"><strong>{{ current.lineSummary.staffingShortageLines }}</strong><span>نقص عمالة</span></div>
+            <div class="state-journey-not-configured"><strong>{{ current.lineSummary.journeyNotConfiguredLines }}</strong><span>بلا رحلة</span></div>
           </div>
-          <strong>{{ criticalReadinessAlerts.length }}</strong>
+          <ul class="problem-lines">
+            <ng-container *ngFor="let factory of current.factories">
+              <ng-container *ngFor="let department of factory.departments">
+                <li *ngFor="let line of department.lines">
+                  <span><strong>{{ line.name }}</strong><small>{{ department.name }} · {{ line.presentPermanentlyAssignedWorkers }}/{{ line.requiredWorkers }} حاضر/مطلوب</small></span>
+                  <em [class]="statusClass(line.readinessStatus)">{{ readinessLabel(line.readinessStatus) }}</em>
+                </li>
+              </ng-container>
+            </ng-container>
+          </ul>
+        </article>
+
+        <article class="command-panel command-panel--quality">
+          <header><div><span>04</span><h2>اكتمال البيانات</h2></div><button type="button" (click)="selectDetail('quality')">كل التفاصيل</button></header>
+          <button type="button" (click)="selectDetail('quality')"><strong>{{ current.dataQuality.modelStagesWithoutPrice }}</strong><span>مرحلة موديل بلا سعر</span><i class="pi pi-chevron-left"></i></button>
+          <button type="button" (click)="selectDetail('quality')"><strong>{{ current.dataQuality.modelStagesWithoutStandardTime }}</strong><span>مرحلة بلا زمن معياري</span><i class="pi pi-chevron-left"></i></button>
+          <button type="button" (click)="selectDetail('stage-shortage')"><strong>{{ current.dataQuality.activeJourneyStagesWithoutPresentWorker }}</strong><span>مرحلة تشغيل بلا عامل حاضر</span><i class="pi pi-chevron-left"></i></button>
+          <button type="button" (click)="selectDetail('quality')" [disabled]="current.dataQuality.activeModelsWithoutJourney === null"><strong>{{ current.dataQuality.activeModelsWithoutJourney === null ? '—' : current.dataQuality.activeModelsWithoutJourney }}</strong><span>موديل نشط بلا رحلة</span><i class="pi pi-chevron-left"></i></button>
+          <p>{{ current.dataQuality.modelsWithoutJourneyScopeNote }}</p>
+        </article>
+      </section>
+
+      <aside class="detail-panel" *ngIf="selectedDetail" aria-live="polite">
+        <header><div><span>تفاصيل الرقم</span><h2>{{ detailTitle }}</h2></div><button type="button" (click)="selectDetail(null)" aria-label="إغلاق التفاصيل"><i class="pi pi-times"></i></button></header>
+        <div class="detail-list" *ngIf="detailWorkers.length">
+          <article *ngFor="let worker of detailWorkers"><strong>{{ worker.workerName }}</strong><span>{{ worker.workerCode }} · {{ worker.attendanceStatus }}</span><small>{{ worker.permanentAssignments.join('، ') || 'بلا تسكين دائم' }}</small></article>
         </div>
-        <ul class="summary-critical-list">
-          <li *ngFor="let alert of criticalReadinessAlerts">
-            <span>
-              <strong>{{ alert.lineName }} - {{ alert.stageName }}</strong>
-              <em>{{ alert.workersCurrent }}/{{ alert.workersRequired }} عامل</em>
-            </span>
-            <plp-status-badge
-              [status]="lineReadinessSummary.overallReadiness > 70 ? 'warning' : 'critical'"
-              [label]="'عجز تشغيلي ' + alert.shortageWorkers"
-              [compact]="true"
-            ></plp-status-badge>
-          </li>
-        </ul>
-      </p-card>
-
-      <p-card *ngIf="!criticalReadinessAlerts.length" styleClass="summary-card summary-card--success">
-        <div class="summary-label">حالة خريطة المراحل</div>
-        <p class="summary-note">لا توجد مرحلة متأخرة جدًا على مستوى الخطوط المتوفرة الآن.</p>
-      </p-card>
-    </section>
-
-    <div class="kpi-grid">
-      <p-card *ngFor="let card of cards" [styleClass]="'metric-card ' + getTrendClass(card.trend)">
-        <ng-template pTemplate="title">
-          <div class="metric-title">{{ card.title }}</div>
-        </ng-template>
-        <ng-template pTemplate="subtitle">
-          <div class="metric-value">{{ card.value }}</div>
-        </ng-template>
-        <div class="metric-footer">
-          <i [class]="getTrendIcon(card.trend)"></i>
-          <span>{{ getTrendLabel(card.trend) }}: {{ card.trendLabel }}</span>
+        <div class="detail-list" *ngIf="detailOperations.length">
+          <article *ngFor="let operation of detailOperations"><strong>{{ operation.productModelCode }} - {{ operation.productModelName }}</strong><span>{{ operationLabel(operation.status) }} · كمية تشغيل محفوظة {{ operation.finalLineQuantity }}</span><small>قيمة مدخلة في الأمر، وليست إنتاجًا فعليًا مقاسًا · تسجيل المراحل {{ operation.registeredStages }}/{{ operation.journeyStages }} · قيمة السجلات {{ operation.recordedStageValue | number:'1.2-2' }}</small></article>
         </div>
-      </p-card>
-    </div>
-
-    <section class="attendance-row" *ngIf="hasAttendanceData">
-      <p-card class="attendance-card">
-        <div class="attendance-title">
-          <span>مؤشرات حضور مختصرة</span>
-          <strong>{{ lineReadinessSummary.activeWorkers }} / {{ lineReadinessSummary.totalWorkers }}</strong>
+        <div class="detail-list" *ngIf="detailIssues.length">
+          <article *ngFor="let issue of detailIssues"><strong>{{ issue.title }}</strong><span>{{ issue.detail }}</span></article>
         </div>
-        <div class="attendance-items">
-          <div *ngFor="let item of attendanceIndicators" [class]="getIndicatorClass(item.tone)">
-            <i [class]="item.icon"></i>
-            <span>{{ item.label }}</span>
-            <strong>{{ item.value }}</strong>
-          </div>
-        </div>
-      </p-card>
-    </section>
-
-    <p-card class="production-line-note">
-      <div class="insight-title">بطاقات خط الإنتاج</div>
-      <p>تم تحسين تصميم خطوط الإنتاج ضمن صفحة Factory Map ليعرض حالة كل مرحلة وتدرّج جاهزية واضح.</p>
-    </p-card>
-
-    <p-card class="insight-card">
-      <div class="insight-title">الخطوات التالية</div>
-      <p>الواجهة الآن متصلة بالـ Backend مع الاحتفاظ بالبيانات التجريبية في حالة انقطاع الاتصال.</p>
-    </p-card>
-  </div>
-</section>
+        <p class="detail-panel__empty" *ngIf="!detailWorkers.length && !detailOperations.length && !detailIssues.length">لا توجد عناصر تكوّن هذا الرقم في النطاق الحالي.</p>
+      </aside>
+    </ng-container>
+  </ng-container>
+</main>

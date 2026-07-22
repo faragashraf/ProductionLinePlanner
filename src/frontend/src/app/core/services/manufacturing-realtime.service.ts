@@ -4,7 +4,7 @@ import { ManufacturingDataChanged, RealtimeConnectionStatus } from '../models/re
 import { generateUuidV4 } from '../utils/uuid-v4';
 import { RealtimeService } from './realtime.service';
 
-export type ManufacturingRealtimeScreen = 'factory-structure' | 'departments' | 'stages' | 'models' | 'employees' | 'line-staffing' | 'daily-production-operations';
+export type ManufacturingRealtimeScreen = 'factory-structure' | 'departments' | 'stages' | 'models' | 'employees' | 'line-staffing' | 'daily-production-operations' | 'manufacturing-command-center';
 
 export interface ManufacturingRealtimeWatch {
   screen: ManufacturingRealtimeScreen;

@@ -12,6 +12,17 @@
 @import './app/shared/design-system/primeng/primeng-theme-bridge.scss';
 @import './app/shared/design-system/manufacturing/operational-workspaces.scss';
 @import './app/shared/product/product-experience.scss';
+// The dashboard and factory map share the application shell rather than a
+// component shadow boundary. Keep their responsive operational styles here so
+// the component-style budget measures component-local styles consistently.
+@import './app/pages/dashboard-page/dashboard-page.component.scss';
+@import './app/pages/factory-map-page/factory-map-page.component.scss';
+
+app-dashboard-page,
+app-factory-map-page {
+  display: block;
+  min-width: 0;
+}
 
 .plp-inline-state {
   display: inline-flex;
