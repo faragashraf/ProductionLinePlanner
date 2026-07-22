@@ -888,8 +888,8 @@ authApi.MapPost("/refresh", async (
         AuditActionType.Update,
         nameof(RefreshToken),
         storedToken.Id.ToString(),
-        before: storedToken,
-        after: new { eventType = "AuthRefresh", storedToken.Id, replacedBy = newRefreshTokenHash[..8] },
+        before: new { storedToken.Id, storedToken.ExpiresAtUtc, storedToken.IsRevoked },
+        after: new { EventType = "AuthRefresh", PreviousTokenId = storedToken.Id, RefreshTokenRotated = true },
         requestMeta: AuditRequestMetadata.From(httpContext),
         cancellationToken: cancellationToken);
 
@@ -949,7 +949,7 @@ authApi.MapPost("/logout", async (
             AuditActionType.Revoke,
             nameof(RefreshToken),
             storedToken.Id.ToString(),
-            before: storedToken,
+            before: new { storedToken.Id, storedToken.ExpiresAtUtc, storedToken.IsRevoked },
             after: new { eventType = "AuthLogout" },
             requestMeta: AuditRequestMetadata.From(httpContext),
             cancellationToken: cancellationToken);
