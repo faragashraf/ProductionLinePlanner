@@ -55,5 +55,62 @@ describe('AuthService', () => {
     });
 
     expect(localStorage.getItem(AUTH_STORAGE_KEYS.accessToken)).toBe('access-token');
+    expect(localStorage.getItem(AUTH_STORAGE_KEYS.refreshToken)).toBe('refresh-token');
+  });
+
+  it('stores a rotated token pair and preserves the current user permissions from the refresh response', () => {
+    service.login('operator@example.com', 'correct-horse').subscribe();
+    http.expectOne('/api/auth/login').flush({
+      success: true,
+      data: {
+        accessToken: 'expired-access-token', refreshToken: 'refresh-token', userId: 'user-1',
+        expiresAt: '2026-07-16T12:00:00Z', roles: ['Viewer'], permissions: ['old.permission']
+      }
+    });
+    http.expectOne('/api/auth/me').flush({
+      success: true,
+      data: {
+        id: 'user-1', fullName: 'Operator', email: 'operator@example.com', roles: ['Viewer'], permissions: ['old.permission']
+      }
+    });
+
+    service.refreshAccessToken().subscribe();
+
+    const refresh = http.expectOne('/api/auth/refresh');
+    expect(refresh.request.method).toBe('POST');
+    expect(refresh.request.body).toEqual({ refreshToken: 'refresh-token' });
+    refresh.flush({
+      success: true,
+      data: {
+        accessToken: 'new-access-token',
+        refreshToken: 'new-refresh-token',
+        userId: 'user-1',
+        expiresAt: '2026-07-16T12:00:00Z',
+        roles: ['Admin'],
+        permissions: ['models.manage']
+      }
+    });
+
+    expect(localStorage.getItem(AUTH_STORAGE_KEYS.accessToken)).toBe('new-access-token');
+    expect(localStorage.getItem(AUTH_STORAGE_KEYS.refreshToken)).toBe('new-refresh-token');
+    expect(JSON.parse(localStorage.getItem(AUTH_STORAGE_KEYS.currentUser) ?? '{}')).toEqual(jasmine.objectContaining({
+      fullName: 'Operator', email: 'operator@example.com', roles: ['Admin'], permissions: ['models.manage']
+    }));
+  });
+
+  it('requests server revocation and clears the local session when logging out', () => {
+    localStorage.setItem(AUTH_STORAGE_KEYS.accessToken, 'access-token');
+    localStorage.setItem(AUTH_STORAGE_KEYS.refreshToken, 'refresh-token');
+    localStorage.setItem(AUTH_STORAGE_KEYS.currentUser, JSON.stringify({ id: 'user-1' }));
+
+    service.logout();
+
+    const logout = http.expectOne('/api/auth/logout');
+    expect(logout.request.method).toBe('POST');
+    expect(logout.request.body).toEqual({ refreshToken: 'refresh-token' });
+    logout.flush({ success: true, data: { revoked: true } });
+    expect(localStorage.getItem(AUTH_STORAGE_KEYS.accessToken)).toBeNull();
+    expect(localStorage.getItem(AUTH_STORAGE_KEYS.refreshToken)).toBeNull();
+    expect(localStorage.getItem(AUTH_STORAGE_KEYS.currentUser)).toBeNull();
   });
 });

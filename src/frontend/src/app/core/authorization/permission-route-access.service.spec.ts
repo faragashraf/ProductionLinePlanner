@@ -42,7 +42,7 @@ describe('PermissionRouteAccessService', () => {
 
     const auth = {
       isAuthenticated: () => authenticated,
-      logout: jasmine.createSpy('logout')
+      expireSession: jasmine.createSpy('expireSession')
     };
 
     const permission = {
@@ -136,7 +136,7 @@ describe('PermissionRouteAccessService', () => {
     const { service, auth } = create({ error: { status: 401 } });
     const result = await resolveEvaluation(service.evaluate({ permission: 'users.view' }));
 
-    expect(auth.logout).toHaveBeenCalled();
+    expect(auth.expireSession).toHaveBeenCalled();
     expect(
       router.serializeUrl(
         assertUrlTree(result)
@@ -173,7 +173,7 @@ describe('PermissionRouteAccessService', () => {
     const secondResult = await resolveEvaluation(service.evaluate({ permission: 'users.view' }));
     expect(hydrationSpy).toHaveBeenCalledTimes(1);
     expect(secondResult).toBeTrue();
-    expect(auth.logout).not.toHaveBeenCalled();
+    expect(auth.expireSession).not.toHaveBeenCalled();
   });
 
   it('allows users.view for users-only and denies roles/permissions screens', async () => {

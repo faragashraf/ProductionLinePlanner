@@ -1,4 +1,5 @@
 import { Component, OnDestroy, OnInit, Optional } from '@angular/core';
+import { HttpErrorResponse } from '@angular/common/http';
 import { ActivatedRoute } from '@angular/router';
 import { FormBuilder, Validators } from '@angular/forms';
 import { EMPTY, Subject, debounceTime, distinctUntilChanged, finalize, forkJoin, map, Observable, switchMap, takeUntil } from 'rxjs';
@@ -71,6 +72,7 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
   availableStagesSearch = '';
   availableStagesLoading = false;
   availableStagesError = '';
+  readonly modelStageSavingIds = new Set<string>();
   private availableStageCatalog: SubStageOption[] = [];
   availableStageOptions: SubStageOption[] = [];
   stageDropdownPanelStyle: Record<string, string> = {};
@@ -443,7 +445,30 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
   }
   saveModelStage(): void { if (!this.selected || this.modelStageForm.invalid) return; const value = this.modelStageForm.getRawValue(); if (this.stages.some(item => item.subStageId === value.subStageId && item.id !== this.editModelStageId) || this.stages.some(item => item.stageOrder === value.stageOrder && item.id !== this.editModelStageId)) { this.error = 'لا يمكن تكرار المرحلة أو ترتيبها داخل الموديل.'; return; } const correlationId = this.localCorrelation('models'); this.save(this.editModelStageId ? this.api.updateModelStage(this.selected.id, this.editModelStageId, value, correlationId) : this.api.addModelStage(this.selected.id, value, correlationId), item => { this.stages = this.upsert(this.stages, item, 'stageOrder'); this.rebuildAvailableStageOptions(); this.editModelStageId = ''; this.modelStageFormVisible = false; }); }
   editModelStage(item: ModelStageItem): void { this.editModelStageId = item.id; this.modelStageFormVisible = true; this.modelStageForm.reset(item); this.rebuildAvailableStageOptions(); }
-  disableModelStage(id: string): void { if (this.selected && confirm('سيتم تعطيل إعداد المرحلة.')) this.save(this.api.deactivateModelStage(this.selected.id, id, this.localCorrelation('models')), () => { this.stages = this.markInactive(this.stages, id); this.rebuildAvailableStageOptions(); }); }
+  isModelStageSaving(id: string): boolean { return this.modelStageSavingIds.has(id); }
+  toggleModelStage(item: ModelStageItem): void {
+    const selectedModel = this.selected;
+    if (!selectedModel || this.isModelStageSaving(item.id)) return;
+
+    this.error = '';
+    this.modelStageSavingIds.add(item.id);
+    this.api.updateModelStage(
+      selectedModel.id,
+      item.id,
+      { isActive: !item.isActive },
+      this.localCorrelation('models')
+    ).pipe(
+      finalize(() => this.modelStageSavingIds.delete(item.id)),
+      takeUntil(this.destroy$)
+    ).subscribe({
+      next: updated => {
+        if (this.selected?.id !== selectedModel.id) return;
+        this.stages = this.upsert(this.stages, updated, 'stageOrder');
+        this.rebuildAvailableStageOptions();
+      },
+      error: error => this.setError(error)
+    });
+  }
   setModelActive(item: ProductModelItem): void { if (confirm(item.isActive ? 'تعطيل الموديل؟' : 'تفعيل الموديل؟')) this.save(this.api.setModelActivation(item.id, !item.isActive, this.localCorrelation('models')), () => this.models = this.models.map(model => model.id === item.id ? { ...model, isActive: !item.isActive } : model)); }
   onModelStageSearch(value: string): void { this.modelStageSearch = value; }
   clearModelStageSearch(): void { this.modelStageSearch = ''; }
@@ -530,8 +555,29 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
   linkedStageName(item: ModelStageItem): string { return item.subStageName || this.availableStageOptionCache.get(item.subStageId)?.name || '-'; }
   linkedStageCode(item: ModelStageItem): string { return item.subStageCode || this.availableStageOptionCache.get(item.subStageId)?.code || '—'; }
   private upsert<T extends { id: string }>(items: readonly T[], item: T, sortKey?: keyof T): T[] { const next = items.some(candidate => candidate.id === item.id) ? items.map(candidate => candidate.id === item.id ? item : candidate) : [...items, item]; return sortKey ? [...next].sort((left, right) => Number(left[sortKey]) - Number(right[sortKey])) : next; }
-  private markInactive<T extends { id: string; isActive: boolean }>(items: readonly T[], id: string): T[] { return items.map(item => item.id === id ? { ...item, isActive: false } : item); }
-  private setError(error: unknown): void { this.error = error instanceof Error ? error.message : 'تعذر تحميل أو حفظ البيانات.'; }
+  trackByModelStageId(_index: number, item: ModelStageItem): string { return item.id; }
+  private setError(error: unknown): void {
+    if (error instanceof HttpErrorResponse) {
+      const message = error.error?.error?.message ?? error.error?.message;
+      if (typeof message === 'string' && message.trim()) {
+        this.error = message;
+        return;
+      }
+      if (error.status === 404) {
+        this.error = 'تعذر تحديث مرحلة الموديل لأن العلاقة لم تعد موجودة. حدّث البيانات ثم حاول مرة أخرى.';
+        return;
+      }
+      if (error.status === 409) {
+        this.error = 'تعذر تحديث مرحلة الموديل بسبب تعارض مع تعديل متزامن. حدّث البيانات ثم حاول مرة أخرى.';
+        return;
+      }
+      if (error.status === 0) {
+        this.error = 'تعذر الاتصال بالخادم أثناء تحديث مرحلة الموديل. لم تتغير الحالة المعروضة.';
+        return;
+      }
+    }
+    this.error = error instanceof Error ? error.message : 'تعذر تحميل أو حفظ البيانات.';
+  }
   private refreshModelsFromRealtime(): void {
     this.loadModelPage(this.modelListSearch, this.modelPage);
     if (this.selected) this.select(this.selected);

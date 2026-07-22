@@ -33,7 +33,7 @@ export class PermissionRouteAccessService {
       map(() => this.permissionService.hasAccess(parsed.requirement) || this.router.parseUrl('/403')),
       catchError((error: { status?: number }) => {
         if (error?.status === 401) {
-          this.authService.logout();
+          this.authService.expireSession();
           return of(this.router.parseUrl('/login'));
         }
 

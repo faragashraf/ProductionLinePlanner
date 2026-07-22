@@ -1,5 +1,6 @@
 import { ComponentFixture, TestBed, fakeAsync, tick } from '@angular/core/testing';
 import { CommonModule } from '@angular/common';
+import { HttpErrorResponse } from '@angular/common/http';
 import { NO_ERRORS_SCHEMA } from '@angular/core';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
@@ -447,6 +448,66 @@ describe('ManufacturingMasterDataPageComponent', () => {
     expect(api.addModelStage).toHaveBeenCalledWith(firstModel.id, component.modelStageForm.getRawValue(), 'local-correlation');
     expect(realtime.registerLocalOperation).toHaveBeenCalledWith('models');
   });
+
+  it('toggles only the selected ProductModelStage after the server confirms the saved state', () => {
+    const target = { id: 'model-stage-1', productModelId: firstModel.id, subStageId: stage.id, stageOrder: 1, piecePrice: 1, standardSeconds: 20, compensationMode: 'SharedPercentage' as const, isRequired: true, isActive: true };
+    const untouched = { id: 'model-stage-2', productModelId: firstModel.id, subStageId: englishStage.id, stageOrder: 2, piecePrice: 1, standardSeconds: 20, compensationMode: 'SharedPercentage' as const, isRequired: true, isActive: true };
+    const saved = { ...target, isActive: false };
+    component.selected = firstModel;
+    component.stages = [target, untouched];
+    api.updateModelStage.and.returnValue(of(saved));
+
+    component.toggleModelStage(target);
+
+    expect(api.updateModelStage).toHaveBeenCalledOnceWith(firstModel.id, target.id, { isActive: false }, 'local-correlation');
+    expect(component.stages).toEqual([saved, untouched]);
+    expect(component.isModelStageSaving(target.id)).toBeFalse();
+  });
+
+  it('reactivates an inactive ProductModelStage through its relationship id', () => {
+    const inactive = { id: 'model-stage-1', productModelId: firstModel.id, subStageId: stage.id, stageOrder: 1, piecePrice: 1, standardSeconds: 20, compensationMode: 'SharedPercentage' as const, isRequired: true, isActive: false };
+    const saved = { ...inactive, isActive: true };
+    component.selected = firstModel;
+    component.stages = [inactive];
+    api.updateModelStage.and.returnValue(of(saved));
+
+    component.toggleModelStage(inactive);
+
+    expect(api.updateModelStage).toHaveBeenCalledOnceWith(firstModel.id, inactive.id, { isActive: true }, 'local-correlation');
+    expect(component.stages).toEqual([saved]);
+  });
+
+  it('does not optimistically change a model-stage toggle and blocks duplicate clicks for that row', () => {
+    const pending = new Subject<any>();
+    const target = { id: 'model-stage-1', productModelId: firstModel.id, subStageId: stage.id, stageOrder: 1, piecePrice: 1, standardSeconds: 20, compensationMode: 'SharedPercentage' as const, isRequired: true, isActive: true };
+    component.selected = firstModel;
+    component.stages = [target];
+    api.updateModelStage.and.returnValue(pending);
+
+    component.toggleModelStage(target);
+    component.toggleModelStage(target);
+
+    expect(api.updateModelStage).toHaveBeenCalledTimes(1);
+    expect(component.isModelStageSaving(target.id)).toBeTrue();
+    expect(component.stages).toEqual([target]);
+    pending.next({ ...target, isActive: false });
+    pending.complete();
+    expect(component.isModelStageSaving(target.id)).toBeFalse();
+    expect(component.stages).toEqual([{ ...target, isActive: false }]);
+  });
+
+  [404, 409, 0].forEach(status => it(`keeps the saved model-stage state when toggle request fails with ${status}`, () => {
+    const target = { id: 'model-stage-1', productModelId: firstModel.id, subStageId: stage.id, stageOrder: 1, piecePrice: 1, standardSeconds: 20, compensationMode: 'SharedPercentage' as const, isRequired: true, isActive: true };
+    component.selected = firstModel;
+    component.stages = [target];
+    api.updateModelStage.and.returnValue(throwError(() => new HttpErrorResponse({ status, statusText: status === 0 ? 'Network Error' : 'Request failed' })));
+
+    component.toggleModelStage(target);
+
+    expect(component.stages).toEqual([target]);
+    expect(component.isModelStageSaving(target.id)).toBeFalse();
+    expect(component.error).toContain(status === 404 ? 'لم تعد موجودة' : status === 409 ? 'تعارض' : 'تعذر الاتصال');
+  }));
 
   it('updates the stage row immediately after a successful deactivation without reloading', () => {
     const inactiveStage = { ...stage, isActive: false };

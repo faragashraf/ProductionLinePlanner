@@ -104,6 +104,12 @@ test('model journey search lives in the journey card and stays independent from 
     await expect(stageSearch).toBeVisible();
     await stageSearch.fill('ST-01');
     await expect(page.locator('.model-journey')).toContainText('مرحلة التجميع');
+    const activationToggle = page.getByRole('switch', { name: 'تعطيل إعداد المرحلة' });
+    await expect(activationToggle).toBeVisible();
+    await expect(activationToggle).toHaveAttribute('aria-checked', 'true');
+    const toggleBox = await activationToggle.boundingBox();
+    expect(toggleBox?.height).toBeGreaterThanOrEqual(44);
+    await activationToggle.screenshot({ path: path.join(visualOutput, `model-stage-toggle-${name}.png`) });
     await expect(modelSearch).toHaveValue('');
     await page.screenshot({ path: path.join(visualOutput, `models-${name}.png`), fullPage: true });
     await expectViewportSafe(page);

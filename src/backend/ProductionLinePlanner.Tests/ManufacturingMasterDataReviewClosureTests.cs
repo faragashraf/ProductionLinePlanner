@@ -190,6 +190,78 @@ public sealed class ManufacturingMasterDataReviewClosureTests
     }
 
     [Fact]
+    public async Task Patch_stage_activation_updates_only_the_requested_model_relationship_and_supports_reactivation()
+    {
+        await using var fixture = await ProductModelFixture.CreateAsync();
+        var firstRelationship = fixture.AddStage(1, 5m, null, null);
+        var otherModel = new ProductModel(Guid.NewGuid(), "OTHER", "Other model");
+        var otherRelationship = new ProductModelStage(
+            Guid.NewGuid(),
+            otherModel.Id,
+            fixture.SubStages[0].Id,
+            1,
+            5m,
+            null,
+            CompensationMode.FixedAmount);
+        fixture.DbContext.ProductModels.Add(otherModel);
+        fixture.DbContext.ProductModelStages.Add(otherRelationship);
+        await fixture.DbContext.SaveChangesAsync();
+
+        var deactivated = await fixture.Service.UpdateModelStageAsync(
+            fixture.Model.Id,
+            firstRelationship.Id,
+            new UpsertProductModelStageRequest { IsActive = false },
+            fixture.ActorUserId);
+
+        Assert.True(deactivated.IsSuccess);
+        Assert.False(deactivated.Value!.IsActive);
+        fixture.DbContext.ChangeTracker.Clear();
+        Assert.False((await fixture.DbContext.ProductModelStages.SingleAsync(x => x.Id == firstRelationship.Id)).IsActive);
+        Assert.True((await fixture.DbContext.ProductModelStages.SingleAsync(x => x.Id == otherRelationship.Id)).IsActive);
+
+        var reactivated = await fixture.Service.UpdateModelStageAsync(
+            fixture.Model.Id,
+            firstRelationship.Id,
+            new UpsertProductModelStageRequest { IsActive = true },
+            fixture.ActorUserId);
+
+        Assert.True(reactivated.IsSuccess);
+        Assert.True(reactivated.Value!.IsActive);
+        fixture.DbContext.ChangeTracker.Clear();
+        Assert.True((await fixture.DbContext.ProductModelStages.SingleAsync(x => x.Id == firstRelationship.Id)).IsActive);
+        Assert.True((await fixture.DbContext.ProductModelStages.SingleAsync(x => x.Id == otherRelationship.Id)).IsActive);
+    }
+
+    [Fact]
+    public async Task Patch_stage_activation_reports_not_found_for_a_relationship_outside_the_selected_model()
+    {
+        await using var fixture = await ProductModelFixture.CreateAsync();
+        var otherModel = new ProductModel(Guid.NewGuid(), "OTHER", "Other model");
+        var otherRelationship = new ProductModelStage(
+            Guid.NewGuid(),
+            otherModel.Id,
+            fixture.SubStages[0].Id,
+            1,
+            5m,
+            null,
+            CompensationMode.FixedAmount);
+        fixture.DbContext.ProductModels.Add(otherModel);
+        fixture.DbContext.ProductModelStages.Add(otherRelationship);
+        await fixture.DbContext.SaveChangesAsync();
+
+        var result = await fixture.Service.UpdateModelStageAsync(
+            fixture.Model.Id,
+            otherRelationship.Id,
+            new UpsertProductModelStageRequest { IsActive = false },
+            fixture.ActorUserId);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("NotFound", result.Error!.Code);
+        fixture.DbContext.ChangeTracker.Clear();
+        Assert.True((await fixture.DbContext.ProductModelStages.SingleAsync(x => x.Id == otherRelationship.Id)).IsActive);
+    }
+
+    [Fact]
     public async Task Stage_order_conflicts_include_inactive_configurations_and_copy_is_prevalidated()
     {
         await using var fixture = await ProductModelFixture.CreateAsync();
