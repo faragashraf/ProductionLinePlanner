@@ -10,6 +10,8 @@ public enum ManufacturingEntityType
     ProductModel,
     ProductModelStage,
     ProductionOrder,
+    StageProductionRecord,
+    AttendanceRecord,
     Worker,
     WorkerDefaultAssignment
 }

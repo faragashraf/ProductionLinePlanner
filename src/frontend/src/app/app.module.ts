@@ -18,9 +18,6 @@ import { CardModule } from 'primeng/card';
 import { BadgeModule } from 'primeng/badge';
 import { ButtonModule } from 'primeng/button';
 import { SharedModule } from './shared/shared.module';
-import { FactoryRendererComponent } from './pages/factory-map-page/renderers/factory-renderer/factory-renderer.component';
-import { LineRendererComponent } from './pages/factory-map-page/renderers/line-renderer/line-renderer.component';
-import { StageRendererComponent } from './pages/factory-map-page/renderers/stage-renderer/stage-renderer.component';
 import { AuthTokenInterceptor } from './core/interceptors/auth-token.interceptor';
 import { ConfirmationService, MessageService, PrimeNGConfig } from 'primeng/api';
 import { ToastModule } from 'primeng/toast';
@@ -50,10 +47,7 @@ export function initializeRealtimeNotifications(
     FactoryMapPageComponent,
     NotificationsPageComponent,
     LoginPageComponent,
-    AppShellComponent,
-    FactoryRendererComponent,
-    LineRendererComponent,
-    StageRendererComponent
+    AppShellComponent
   ],
   imports: [
     BrowserModule,

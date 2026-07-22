@@ -85,6 +85,7 @@ public static class DependencyInjection
         services.AddScoped<IAttendanceWorkforceEngine, AttendanceWorkforceEngine>();
         services.AddScoped<IAssignmentRecommendationEngine, AssignmentRecommendationEngine>();
         services.AddScoped<IReadinessEngine, ReadinessEngine>();
+        services.AddScoped<IManufacturingCommandCenterEngine, ManufacturingCommandCenterEngine>();
         services.AddScoped<INotificationEngine, NotificationEngine>();
         services.AddSingleton<INotificationEventCatalog, CodeNotificationEventCatalog>();
         services.AddSingleton<INotificationTemplateResolver, NotificationTemplateResolver>();
