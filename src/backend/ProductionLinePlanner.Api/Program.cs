@@ -2583,6 +2583,43 @@ productModelsApi.MapPatch("/{modelId:guid}/activation", async (
     .WithTags("ProductModels")
     .WithName("SetModelActivation");
 
+productModelsApi.MapDelete("/{modelId:guid}", async (
+    Guid modelId,
+    IProductModelService productModelService,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
+    CancellationToken cancellationToken) =>
+{
+    var actorUserId = currentUserService.UserId;
+    if (actorUserId is null)
+    {
+        return ApiResponse.Failure("Unauthorized", "User context is required.");
+    }
+
+    var requestMeta = $"{httpContext.Request.Method} {httpContext.Request.Path}";
+    var result = await productModelService.DeleteModelAsync(modelId, actorUserId.Value, requestMeta, cancellationToken);
+    if (result.IsFailure)
+    {
+        return ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code));
+    }
+
+    return Results.NoContent();
+})
+    .RequirePermission("models.manage")
+    .WithTags("ProductModels")
+    .WithName("DeleteProductModel");
+
+productModelsApi.MapGet("/{modelId:guid}/delete-eligibility", async (Guid modelId, IProductModelService productModelService, CancellationToken cancellationToken) =>
+{
+    var result = await productModelService.GetModelDeleteEligibilityAsync(modelId, cancellationToken);
+    return result.IsFailure
+        ? ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code))
+        : Results.Ok(ApiResponse.Success(result.Value!));
+})
+    .RequirePermission("models.manage")
+    .WithTags("ProductModels")
+    .WithName("GetProductModelDeleteEligibility");
+
 productModelsApi.MapGet("/{modelId:guid}/stages", async (
     Guid modelId,
     IProductModelService productModelService,

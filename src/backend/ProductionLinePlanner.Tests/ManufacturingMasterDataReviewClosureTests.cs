@@ -75,6 +75,68 @@ public sealed class ManufacturingMasterDataReviewClosureTests
     }
 
     [Fact]
+    public async Task Product_model_registration_and_updates_have_no_production_line_contract()
+    {
+        await using var fixture = await ProductModelFixture.CreateAsync();
+
+        var created = await fixture.Service.CreateModelAsync(
+            new CreateProductModelRequest
+            {
+                Code = "MODEL-WITHOUT-LINE",
+                Name = "Line-independent model",
+                Description = "Created without selecting a production line."
+            },
+            fixture.ActorUserId);
+        var updated = await fixture.Service.UpdateModelAsync(
+            created.Value!.Id,
+            new UpdateProductModelRequest { Name = "Updated line-independent model" },
+            fixture.ActorUserId);
+
+        Assert.True(created.IsSuccess);
+        Assert.True(updated.IsSuccess);
+        Assert.Equal("Updated line-independent model", updated.Value!.Name);
+        Assert.DoesNotContain(typeof(ProductModel).GetProperties(), property => property.Name == "ProductionLineId");
+        Assert.DoesNotContain(typeof(CreateProductModelRequest).GetProperties(), property => property.Name == "ProductionLineId");
+        Assert.DoesNotContain(typeof(UpdateProductModelRequest).GetProperties(), property => property.Name == "ProductionLineId");
+        Assert.DoesNotContain(typeof(ProductModelDto).GetProperties(), property => property.Name == "ProductionLineId");
+    }
+
+    [Fact]
+    public async Task Deleting_an_unlinked_model_soft_deactivates_it_without_removing_the_row()
+    {
+        await using var fixture = await ProductModelFixture.CreateAsync();
+
+        var result = await fixture.Service.DeleteModelAsync(fixture.Model.Id, fixture.ActorUserId);
+
+        Assert.True(result.IsSuccess);
+        var persisted = await fixture.DbContext.ProductModels.AsNoTracking().SingleAsync(x => x.Id == fixture.Model.Id);
+        Assert.False(persisted.IsActive);
+    }
+
+    [Fact]
+    public async Task Deleting_a_model_with_stages_or_production_history_is_blocked_by_the_service()
+    {
+        await using var fixture = await ProductModelFixture.CreateAsync();
+        fixture.AddStage(1, 1m, null, null);
+        fixture.DbContext.ProductionOrders.Add(new ProductionOrder(
+            Guid.NewGuid(), "MODEL-DELETE-BLOCKER", fixture.Model.Id, null,
+            DateOnly.FromDateTime(DateTime.UtcNow), 1m, null, fixture.ActorUserId, DateTime.UtcNow));
+        await fixture.DbContext.SaveChangesAsync();
+
+        var eligibility = await fixture.Service.GetModelDeleteEligibilityAsync(fixture.Model.Id);
+        var result = await fixture.Service.DeleteModelAsync(fixture.Model.Id, fixture.ActorUserId);
+
+        Assert.True(eligibility.IsSuccess);
+        Assert.False(eligibility.Value!.CanDelete);
+        Assert.Contains("تشغيل إنتاج", eligibility.Value.MessageAr, StringComparison.Ordinal);
+        Assert.True(result.IsFailure);
+        Assert.Equal("Conflict", result.Error!.Code);
+        Assert.Contains("مرحلة موديل", result.Error.Message, StringComparison.Ordinal);
+        Assert.Contains("تشغيل إنتاج", result.Error.Message, StringComparison.Ordinal);
+        Assert.True((await fixture.DbContext.ProductModels.AsNoTracking().SingleAsync(x => x.Id == fixture.Model.Id)).IsActive);
+    }
+
+    [Fact]
     public async Task Updating_a_model_rejects_code_mutation_without_persisting_any_other_change()
     {
         await using var fixture = await ProductModelFixture.CreateAsync();

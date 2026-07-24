@@ -208,6 +208,19 @@ describe('DailyProductionOperationsPageComponent unified preview', () => {
     expect(stopRealtime).toHaveBeenCalledTimes(1);
   });
 
+  it('loads the global model catalog after selecting an operating line without rewriting model stages', () => {
+    const activeModel = { id: 'model-2', code: 'M2', name: 'Model 2', isActive: true };
+    masterData.models.and.returnValue(of([activeModel, { id: 'inactive-model', code: 'M0', name: 'Inactive', isActive: false }]));
+
+    component.selectProductionLine('line-2');
+
+    expect(masterData.models).toHaveBeenCalledWith();
+    expect(component.activeProductModels).toEqual([activeModel]);
+    expect(component.selectedProductModelId).toBe('');
+    expect(component.stages).toEqual([]);
+    expect(masterData.modelStages).not.toHaveBeenCalled();
+  });
+
   it('sends exactly one request for repeated clicks while preview is active and renders its response without a page reload', () => {
     const pending = new Subject<DailyProductionPreview>();
     production.previewDailyOperations.and.returnValue(pending.asObservable());

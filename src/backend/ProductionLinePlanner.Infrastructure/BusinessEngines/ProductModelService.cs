@@ -274,6 +274,61 @@ public sealed class ProductModelService(
         return Result.Success();
     }
 
+    public async Task<Result> DeleteModelAsync(
+        Guid modelId,
+        Guid actorUserId,
+        string? requestMeta = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (actorUserId == Guid.Empty)
+        {
+            return Result.Failure(new Error("Unauthorized", "User context is required."));
+        }
+
+        if (modelId == Guid.Empty)
+        {
+            return Result.Failure(new Error("ValidationError", "ModelId is required."));
+        }
+
+        var entity = await dbContext.ProductModels.FirstOrDefaultAsync(x => x.Id == modelId, cancellationToken);
+        if (entity is null) return Result.Failure(new Error("NotFound", "Model not found."));
+        var eligibility = await GetModelDeleteEligibilityAsync(modelId, cancellationToken);
+        if (eligibility.IsFailure) return Result.Failure(eligibility.Error!);
+        if (!eligibility.Value!.CanDelete) return Result.Failure(new Error("Conflict", eligibility.Value.MessageAr));
+
+        if (!entity.IsActive)
+        {
+            return Result.Success();
+        }
+
+        var before = new { entity.Id, entity.Code, entity.Name, entity.IsActive };
+        entity.Deactivate();
+        await auditEngine.RecordAsync(
+            actorUserId,
+            AuditActionType.Delete,
+            nameof(ProductModel),
+            entity.Id.ToString(),
+            before: before,
+            after: new { entity.Id, entity.Code, entity.Name, entity.IsActive, Result = "SoftDeleted" },
+            requestMeta: requestMeta);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return Result.Success();
+    }
+
+    public async Task<Result<ProductModelDeleteEligibilityDto>> GetModelDeleteEligibilityAsync(Guid modelId, CancellationToken cancellationToken = default)
+    {
+        if (modelId == Guid.Empty) return Result<ProductModelDeleteEligibilityDto>.Failure(new Error("ValidationError", "ModelId is required."));
+        if (!await dbContext.ProductModels.AsNoTracking().AnyAsync(x => x.Id == modelId, cancellationToken)) return Result<ProductModelDeleteEligibilityDto>.Failure(new Error("NotFound", "Model not found."));
+        var stageCount = await dbContext.ProductModelStages.CountAsync(x => x.ProductModelId == modelId, cancellationToken);
+        var productionOrderCount = await dbContext.ProductionOrders.CountAsync(x => x.ProductModelId == modelId, cancellationToken);
+        var blockers = new List<string>();
+        if (stageCount > 0) blockers.Add($"{stageCount} مرحلة موديل");
+        if (productionOrderCount > 0) blockers.Add($"{productionOrderCount} تشغيل إنتاج");
+        var canDelete = blockers.Count == 0;
+        return Result<ProductModelDeleteEligibilityDto>.Success(new ProductModelDeleteEligibilityDto(modelId, canDelete, canDelete ? "يمكن حذف الموديل من الكتالوج التشغيلي." : $"لا يمكن حذف الموديل لأنه مرتبط بـ {string.Join(" و", blockers)}."));
+    }
+
     public async Task<Result<ProductModelStageDto[]>> GetModelStagesAsync(Guid modelId, CancellationToken cancellationToken = default)
     {
         if (modelId == Guid.Empty)
