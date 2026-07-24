@@ -689,6 +689,38 @@ public sealed class ProductionCostRecordingServiceTests
     }
 
     [Fact]
+    public async Task One_model_loads_its_own_stage_subset_for_each_selected_operating_line()
+    {
+        await using var fixture = await Fixture.CreateAsync("SharedPercentage", 0.50m, 17m);
+        var secondLine = new ProductionLine(Guid.NewGuid(), fixture.Factory.Id, "Second fixture line", 2);
+        var secondMainStage = new MainStage(Guid.NewGuid(), secondLine.Id, "Second fixture main", 1);
+        var secondSubStage = new SubStage(Guid.NewGuid(), secondMainStage.Id, "Second fixture sub", "SECOND", 1, 1, productionLineId: secondLine.Id);
+        var secondModelStage = new ProductModelStage(Guid.NewGuid(), fixture.Model.Id, secondSubStage.Id, 2, 0.50m, 17m, CompensationMode.SharedPercentage);
+        fixture.Db.AddRange(secondLine, secondMainStage, secondSubStage, secondModelStage);
+        await fixture.Db.SaveChangesAsync();
+
+        var firstLineOperations = await fixture.Service.LoadDailyOperationsAsync(
+            fixture.Factory.Id,
+            fixture.Line.Id,
+            fixture.Model.Id,
+            fixture.Today,
+            default);
+        var secondLineOperations = await fixture.Service.LoadDailyOperationsAsync(
+            fixture.Factory.Id,
+            secondLine.Id,
+            fixture.Model.Id,
+            fixture.Today,
+            default);
+
+        Assert.Equal(fixture.Model.Id, firstLineOperations.ProductModelId);
+        Assert.Equal(fixture.Model.Id, secondLineOperations.ProductModelId);
+        Assert.Equal(fixture.Line.Id, firstLineOperations.ProductionLineId);
+        Assert.Equal(secondLine.Id, secondLineOperations.ProductionLineId);
+        Assert.Equal([fixture.Stage.Id], firstLineOperations.Stages.Select(stage => stage.ProductModelStageId));
+        Assert.Equal([secondModelStage.Id], secondLineOperations.Stages.Select(stage => stage.ProductModelStageId));
+    }
+
+    [Fact]
     public async Task Production_participants_are_checked_against_active_worker_attendance_and_current_assignment()
     {
         await using var fixture = await Fixture.CreateAsync("SharedPercentage", 0.50m, 17m);

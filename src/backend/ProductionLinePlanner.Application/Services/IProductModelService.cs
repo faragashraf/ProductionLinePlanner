@@ -30,6 +30,10 @@ public interface IProductModelService
 
     Task<Result> SetModelActivationAsync(Guid modelId, bool isActive, Guid actorUserId, string? requestMeta = null, CancellationToken cancellationToken = default);
 
+    Task<Result> DeleteModelAsync(Guid modelId, Guid actorUserId, string? requestMeta = null, CancellationToken cancellationToken = default);
+
+    Task<Result<ProductModelDeleteEligibilityDto>> GetModelDeleteEligibilityAsync(Guid modelId, CancellationToken cancellationToken = default);
+
     Task<Result<ProductModelStageDto[]>> GetModelStagesAsync(Guid modelId, CancellationToken cancellationToken = default);
 
     Task<Result<ProductModelStageDto>> AddModelStageAsync(

@@ -586,6 +586,20 @@ plp-section-navigation {
   gap: var(--plp-toolbar-action-gap);
 }
 
+.plp-action-group--equal-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.plp-action-group--equal-actions > .p-button {
+  inline-size: 100%;
+  justify-content: center;
+}
+
+.plp-action-group__full {
+  grid-column: 1 / -1;
+}
+
 plp-expandable-form {
   display: block;
 }

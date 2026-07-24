@@ -10,6 +10,7 @@ import { DropdownModule } from 'primeng/dropdown';
 import { TreeModule } from 'primeng/tree';
 import { ContextMenuModule } from 'primeng/contextmenu';
 import { OverlayPanelModule } from 'primeng/overlaypanel';
+import { TooltipModule } from 'primeng/tooltip';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { SharedModule } from '../../shared/shared.module';
 import { ManufacturingWorkspaceLayoutComponent } from './manufacturing-workspace-layout.component';
@@ -69,6 +70,7 @@ import { ReportsResultsToolbarComponent } from '../reports-workspace/reports-res
     TreeModule,
     ContextMenuModule,
     OverlayPanelModule,
+    TooltipModule,
     FormsModule,
     ReactiveFormsModule,
     PlpResponsiveTableDirective,

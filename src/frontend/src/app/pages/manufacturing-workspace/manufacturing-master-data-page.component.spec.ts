@@ -6,9 +6,15 @@ import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
 import { NoopAnimationsModule } from '@angular/platform-browser/animations';
 import { DropdownModule } from 'primeng/dropdown';
+import { TableModule } from 'primeng/table';
+import { TooltipModule } from 'primeng/tooltip';
+import { TreeModule } from 'primeng/tree';
+import { ContextMenuModule } from 'primeng/contextmenu';
 import { Subject, of, throwError } from 'rxjs';
 import { ManufacturingMasterDataApiService } from '../../core/services/manufacturing-master-data-api.service';
 import { ManufacturingRealtimeService } from '../../core/services/manufacturing-realtime.service';
+import { PERMISSIONS } from '../../core/config/permission-identifiers';
+import { PermissionService } from '../../core/services/permission.service';
 import { ManufacturingMasterDataPageComponent } from './manufacturing-master-data-page.component';
 
 describe('ManufacturingMasterDataPageComponent', () => {
@@ -16,6 +22,7 @@ describe('ManufacturingMasterDataPageComponent', () => {
   let component: ManufacturingMasterDataPageComponent;
   let api: jasmine.SpyObj<ManufacturingMasterDataApiService>;
   let realtime: jasmine.SpyObj<ManufacturingRealtimeService>;
+  let grantedPermissions: Set<string>;
 
   const factory = { id: 'factory-1', code: 'FAC', name: 'مصنع الملابس', isActive: true };
   const department = { id: 'department-1', factoryId: factory.id, code: 'CUT', nameAr: 'القص', isActive: true };
@@ -26,10 +33,11 @@ describe('ManufacturingMasterDataPageComponent', () => {
   const secondModel = { id: 'model-2', code: 'MOD-002', name: 'Jacket Model', isActive: true };
 
   beforeEach(async () => {
+    grantedPermissions = new Set([PERMISSIONS.models.manage, PERMISSIONS.stages.manage, PERMISSIONS.stages.delete]);
     api = jasmine.createSpyObj<ManufacturingMasterDataApiService>('ManufacturingMasterDataApiService', [
       'factories', 'departments', 'allProductionLines', 'productionLinesForDepartment', 'operationalStages', 'createOperationalStage', 'updateOperationalStage',
-      'stageDependencies', 'deactivateOperationalStage', 'deleteOperationalStage', 'models', 'modelSearchPage', 'searchSubStages', 'searchSubStagesByNameOrCode', 'allSubStages', 'modelStages',
-      'createModel', 'updateModel', 'setModelActivation', 'addModelStage', 'updateModelStage', 'deactivateModelStage'
+      'stageDependencies', 'deactivateOperationalStage', 'deleteOperationalStage', 'models', 'modelSearchPage', 'searchSubStages', 'allSubStages', 'modelStages',
+      'createModel', 'updateModel', 'setModelActivation', 'deleteModel', 'modelDeleteEligibility', 'addModelStage', 'updateModelStage', 'deactivateModelStage'
     ]);
     api.factories.and.returnValue(of([factory]));
     api.departments.and.returnValue(of([department]));
@@ -44,12 +52,13 @@ describe('ManufacturingMasterDataPageComponent', () => {
     api.models.and.returnValue(of([]));
     api.modelSearchPage.and.returnValue(of({ items: [], totalCount: 0, pageNumber: 1, pageSize: 10 }));
     api.searchSubStages.and.returnValue(of({ items: [], totalCount: 0, pageNumber: 1, pageSize: 50 }));
-    api.searchSubStagesByNameOrCode.and.returnValue(of({ items: [], totalCount: 0, pageNumber: 1, pageSize: 50 }));
     api.allSubStages.and.returnValue(of([stage, englishStage]));
     api.modelStages.and.returnValue(of([]));
     api.createModel.and.returnValue(of({ id: 'model-1', code: 'MOD', name: 'موديل', isActive: true }));
     api.updateModel.and.returnValue(of({ id: 'model-1', code: 'MOD', name: 'موديل', isActive: true }));
     api.setModelActivation.and.returnValue(of(void 0));
+    api.deleteModel.and.returnValue(of(void 0));
+    api.modelDeleteEligibility.and.returnValue(of({ modelId: firstModel.id, canDelete: true, messageAr: 'يمكن حذف الموديل من الكتالوج التشغيلي.' }));
     api.addModelStage.and.returnValue(of({ id: 'model-stage-1', subStageId: stage.id, stageOrder: 1, piecePrice: 1, standardSeconds: 20, compensationMode: 'SharedPercentage', isRequired: true, isActive: true }));
     api.updateModelStage.and.returnValue(of({ id: 'model-stage-1', subStageId: stage.id, stageOrder: 1, piecePrice: 1, standardSeconds: 20, compensationMode: 'SharedPercentage', isRequired: true, isActive: true }));
     api.deactivateModelStage.and.returnValue(of(void 0));
@@ -59,10 +68,11 @@ describe('ManufacturingMasterDataPageComponent', () => {
 
     await TestBed.configureTestingModule({
       declarations: [ManufacturingMasterDataPageComponent],
-      imports: [CommonModule, FormsModule, ReactiveFormsModule, DropdownModule, NoopAnimationsModule],
+      imports: [CommonModule, FormsModule, ReactiveFormsModule, DropdownModule, TableModule, TooltipModule, TreeModule, ContextMenuModule, NoopAnimationsModule],
       providers: [
         { provide: ManufacturingMasterDataApiService, useValue: api },
         { provide: ManufacturingRealtimeService, useValue: realtime },
+        { provide: PermissionService, useValue: { hasPermission: (permission: string) => grantedPermissions.has(permission) } },
         { provide: ActivatedRoute, useValue: { snapshot: { routeConfig: { path: 'stages' } } } }
       ],
       schemas: [NO_ERRORS_SCHEMA]
@@ -70,6 +80,19 @@ describe('ManufacturingMasterDataPageComponent', () => {
     fixture = TestBed.createComponent(ManufacturingMasterDataPageComponent);
     component = fixture.componentInstance;
   });
+
+  function selectSingleStageModelContext(): void {
+    (component as unknown as { mode: 'stages' | 'models' }).mode = 'models';
+    component.factories = [factory];
+    component.models = [firstModel];
+    component.departments = [department];
+    component.lines = [line];
+    component.selected = firstModel;
+    (component as never as { availableStageCatalog: typeof stage[] }).availableStageCatalog = [stage];
+    component.selectModelStageFactory(factory.id);
+    component.selectModelStageDepartment(department.id);
+    component.selectModelStageProductionLine(line.id);
+  }
 
   it('does not expose legacy grouping forms in the stage catalog state', () => {
     expect((component as never as { mainForm?: unknown }).mainForm).toBeUndefined();
@@ -90,6 +113,19 @@ describe('ManufacturingMasterDataPageComponent', () => {
 
     expect(api.updateModel).toHaveBeenCalledWith(firstModel.id, jasmine.objectContaining({ name: 'اسم محدث' }), 'local-correlation');
     expect((api.updateModel.calls.mostRecent().args[1] as Record<string, unknown>)['code']).toBeUndefined();
+    expect((api.updateModel.calls.mostRecent().args[1] as Record<string, unknown>)['productionLineId']).toBeUndefined();
+    expect((api.updateModel.calls.mostRecent().args[1] as Record<string, unknown>)['departmentId']).toBeUndefined();
+  });
+
+  it('creates a product model from its general attributes without a production-line field', () => {
+    component.modelForm.setValue({ code: 'MOD-INDEPENDENT', name: 'موديل مستقل', description: 'لا يتبع خطًا واحدًا' });
+
+    component.saveModel();
+
+    const request = api.createModel.calls.mostRecent().args[0] as unknown as Record<string, unknown>;
+    expect(request).toEqual({ code: 'MOD-INDEPENDENT', name: 'موديل مستقل', description: 'لا يتبع خطًا واحدًا' });
+    expect(request['productionLineId']).toBeUndefined();
+    expect(request['departmentId']).toBeUndefined();
   });
 
   it('loads only the selected factory departments and clears dependent context', () => {
@@ -589,242 +625,355 @@ describe('ManufacturingMasterDataPageComponent', () => {
     expect(api.modelSearchPage).toHaveBeenCalledWith('Jacket', 2, 10, 'all');
     expect(component.models).toEqual([secondModel]);
     expect(component.modelTotal).toBe(11);
-    expect(component.modelPage).toBe(2);
   });
 
-  it('keeps model and stage searches independent when either value is cleared', () => {
-    component.onStageSearch('قص');
-    component.onModelSearch('MOD-001');
+  it('builds one nested factory → model → department → line context tree', () => {
+    (component as unknown as { mode: 'stages' | 'models' }).mode = 'models';
+    const otherDepartment = { ...department, id: 'department-2', code: 'SEW', nameAr: 'الخياطة' };
+    const otherLine = { ...line, id: 'line-2', departmentId: otherDepartment.id, lineCode: 'L2', name: 'خط الخياطة' };
+    api.models.and.returnValue(of([firstModel, secondModel]));
+    api.departments.and.returnValue(of([department, otherDepartment]));
+    api.allProductionLines.and.returnValue(of([line, otherLine]));
 
-    expect(component.stageSearch).toBe('قص');
-    expect(component.modelListSearch).toBe('MOD-001');
-    component.onModelSearch('');
-    expect(component.stageSearch).toBe('قص');
-    component.onStageSearch('');
-    expect(component.modelListSearch).toBe('');
+    component.reload();
+
+    const factoryNode = component.modelStageContextNodes[0];
+    const modelNode = factoryNode.children![0];
+    const departmentNode = modelNode.children![0];
+    const lineNode = departmentNode.children![0];
+    expect(factoryNode.data.contextType).toBe('factory');
+    expect(modelNode.data.contextType).toBe('model');
+    expect(departmentNode.data.contextType).toBe('department');
+    expect(lineNode.data.contextType).toBe('line');
   });
 
-  it('keeps model-list and model-stage searches independent and clears only the stage search when selecting another model', () => {
-    component.modelListSearch = 'MOD';
-    component.modelStageSearch = 'STG';
-    component.stages = [{ id: 'model-stage-1', subStageId: stage.id, subStageCode: stage.code, subStageName: stage.name, stageOrder: 1, piecePrice: 1, standardSeconds: 20, compensationMode: 'SharedPercentage', isRequired: true, isActive: true }];
+  it('requires a final line node before the context is complete and resets dependent selections', () => {
+    (component as unknown as { mode: 'stages' | 'models' }).mode = 'models';
+    api.models.and.returnValue(of([firstModel]));
     api.modelStages.and.returnValue(of([]));
+    component.reload();
+    const factoryNode = component.modelStageContextNodes[0];
+    const modelNode = factoryNode.children![0];
+    const departmentNode = modelNode.children![0];
+    const lineNode = departmentNode.children![0];
 
-    component.onModelStageSearch('غير موجود');
+    component.selectModelStageContextNode(factoryNode);
+    expect(component.modelStageContextMessage).toBe('اختر موديلًا لعرض علاقات مراحله.');
+    component.selectModelStageContextNode(modelNode);
+    expect(component.modelStageContextMessage).toBe('اختر قسمًا تابعًا للمصنع.');
+    component.selectModelStageContextNode(departmentNode);
+    expect(component.modelStageContextMessage).toBe('اختر خط إنتاج تابعًا للقسم.');
+    component.selectModelStageContextNode(lineNode);
+    expect(component.hasModelStageContext).toBeTrue();
 
-    expect(component.modelListSearch).toBe('MOD');
-    expect(component.filteredLinkedStages).toEqual([]);
-    expect(component.linkedStagesEmptyMessage).toContain('لا توجد نتائج مطابقة للبحث');
-
-    component.select(secondModel);
-
-    expect(component.modelListSearch).toBe('MOD');
-    expect(component.modelStageSearch).toBe('');
+    component.selectModelStageContextNode(factoryNode);
+    expect(component.selected).toBeNull();
+    expect(component.selectedModelStageDepartmentId).toBe('');
+    expect(component.selectedModelStageProductionLineId).toBe('');
   });
 
-  it('groups the selected model journey by production line and sorts stages by StageOrder', () => {
-    const sewingLine = { ...line, id: 'line-2', lineCode: 'L2', name: 'خط الخياطة', sequenceOrder: 2 };
-    const sewingStage = { ...englishStage, id: 'stage-2', productionLineId: sewingLine.id, productionLineName: sewingLine.name, sequenceOrder: 2 };
+  it('shows only the selected line stages and all three relationship states', () => {
+    const unlinkedStage = { ...englishStage, id: 'stage-2', productionLineId: line.id, productionLineName: line.name, sequenceOrder: 2 };
+    const inactiveLinkStage = { ...englishStage, id: 'stage-3', productionLineId: line.id, productionLineName: line.name, sequenceOrder: 3 };
+    const activeLink = { id: 'model-stage-1', subStageId: stage.id, stageOrder: 1, piecePrice: 1, standardSeconds: 20, compensationMode: 'SharedPercentage' as const, isRequired: true, isActive: true };
+    const inactiveLink = { id: 'model-stage-2', subStageId: inactiveLinkStage.id, stageOrder: 2, piecePrice: 2, standardSeconds: 30, compensationMode: 'SharedPercentage' as const, isRequired: true, isActive: false };
     component.factories = [factory];
-    component.departments = [department];
-    component.lines = [sewingLine, line];
-    const cache = (component as unknown as { availableStageOptionCache: Map<string, typeof stage> }).availableStageOptionCache;
-    cache.set(stage.id, stage);
-    cache.set(sewingStage.id, sewingStage);
-    component.stages = [
-      { id: 'map-3', subStageId: sewingStage.id, stageOrder: 3, piecePrice: 2, standardSeconds: 30, compensationMode: 'SharedPercentage', isRequired: true, isActive: true },
-      { id: 'map-2', subStageId: stage.id, stageOrder: 2, piecePrice: 1, standardSeconds: 20, compensationMode: 'FixedAmount', isRequired: true, isActive: true },
-      { id: 'map-1', subStageId: stage.id, stageOrder: 1, piecePrice: 1, standardSeconds: 10, compensationMode: 'FixedAmount', isRequired: true, isActive: true }
-    ];
-
-    expect(component.modelJourneyGroups.map(group => group.lineId)).toEqual([line.id, sewingLine.id]);
-    expect(component.modelJourneyGroups[0].stages.map(item => item.stageOrder)).toEqual([1, 2]);
-    expect(component.modelJourneyGroups[0].structurePath).toContain(factory.name);
-    expect(component.modelJourneyGroups[0].structurePath).toContain(department.nameAr);
-    expect(component.modelJourneyGroups[0].structurePath).toContain(line.name);
-  });
-
-  it('filters models by the selected structure scope and clears all model filters', () => {
-    component.factories = [factory];
+    component.models = [firstModel];
     component.departments = [department];
     component.lines = [line];
+    component.selected = firstModel;
+    component.stages = [activeLink, inactiveLink];
+    (component as never as { availableStageCatalog: typeof stage[] }).availableStageCatalog = [stage, unlinkedStage, inactiveLinkStage];
+
+    component.selectModelStageFactory(factory.id);
+    component.selectModelStageDepartment(department.id);
+    component.selectModelStageProductionLine(line.id);
+
+    const rows = component.availableModelStageRows;
+    expect(rows.map(row => component.modelStageRelationshipLabel(row))).toEqual(['مرتبطة وفعالة', 'غير مرتبطة', 'مرتبطة ومعطلة']);
+    expect(rows.map(row => component.modelStageRelationshipStatus(row))).toEqual(['ready', 'info', 'warning']);
+  });
+
+  it('changing the selected line does not change product-stage relationships on other lines', () => {
+    const secondLine = { ...line, id: 'line-2', lineCode: 'L2', name: 'خط الخياطة', sequenceOrder: 2 };
+    const secondStage = { ...englishStage, id: 'stage-2', productionLineId: secondLine.id, productionLineName: secondLine.name, sequenceOrder: 1 };
+    const cuttingLink = { id: 'model-stage-1', subStageId: stage.id, stageOrder: 1, piecePrice: 1, standardSeconds: 20, compensationMode: 'SharedPercentage' as const, isRequired: true, isActive: true };
+    const sewingLink = { id: 'model-stage-2', subStageId: secondStage.id, stageOrder: 2, piecePrice: 2, standardSeconds: 30, compensationMode: 'SharedPercentage' as const, isRequired: true, isActive: true };
+    component.factories = [factory];
+    component.models = [firstModel];
+    component.departments = [department];
+    component.lines = [line, secondLine];
+    component.selected = firstModel;
+    component.stages = [cuttingLink, sewingLink];
+    (component as never as { availableStageCatalog: typeof stage[] }).availableStageCatalog = [stage, secondStage];
+
+    component.selectModelStageFactory(factory.id);
+    component.selectModelStageDepartment(department.id);
+    component.selectModelStageProductionLine(secondLine.id);
+
+    expect(component.availableModelStageRows.map(row => row.stage.id)).toEqual([secondStage.id]);
+    expect(component.stages.map(item => item.id)).toEqual([cuttingLink.id, sewingLink.id]);
+  });
+
+  it('keeps the model catalog independent from the selected context path', () => {
+    component.factories = [factory];
     component.models = [firstModel, secondModel];
-    component.modelFilterTreeNodes = buildTreeForTest();
-    component.selectedModelFilterNode = component.modelFilterTreeNodes[0].children![0].children![0];
-    const membership = (component as unknown as { modelLineMembership: Map<string, Set<string>> }).modelLineMembership;
-    membership.set(firstModel.id, new Set([line.id]));
-    membership.set(secondModel.id, new Set(['another-line']));
+    component.departments = [department];
+    component.lines = [line];
 
-    expect(component.filteredModels).toEqual([firstModel]);
-    component.modelListSearch = 'MOD';
-    component.modelStatusFilter = 'inactive';
-    component.clearModelFilters();
-    expect(component.selectedModelFilterNode).toBeNull();
-    expect(component.modelListSearch).toBe('');
-    expect(component.modelStatusFilter).toBe('all');
+    component.selectModelStageFactory(factory.id);
+    component.selectModelStageDepartment(department.id);
+    component.selectModelStageProductionLine(line.id);
+
+    expect(component.filteredModels).toEqual([firstModel, secondModel]);
   });
 
-  it('reports the model-search empty state when the server returns no matching models', () => {
-    component.modelListSearch = 'موديل غير موجود';
-    component.models = [];
-
-    expect(component.modelEmptyMessage).toBe('لا توجد موديلات مطابقة للبحث.');
-  });
-
-  it('loads a bounded server-side catalog and excludes already linked stages', () => {
-    component.stages = [{ id: 'model-stage-1', subStageId: stage.id, subStageCode: stage.code, subStageName: stage.name, stageOrder: 1, piecePrice: 1, standardSeconds: 20, compensationMode: 'SharedPercentage', isRequired: true, isActive: true }];
-    api.searchSubStagesByNameOrCode.and.returnValue(of({ items: [stage, englishStage], totalCount: 2, pageNumber: 1, pageSize: 200 }));
-
-    (component as never as { loadAvailableStageCatalog(): void }).loadAvailableStageCatalog();
-
-    expect(api.searchSubStagesByNameOrCode).toHaveBeenCalledWith('', 1, 200);
-    expect(component.availableStageChoices.map(item => item.id)).toEqual([englishStage.id]);
-  });
-
-  it('applies the shared full-width searchable select contract to the model-stage dropdown', () => {
+  it('renders a single table and a breadcrumb only after selecting a line tree node', () => {
     (component as unknown as { mode: 'stages' | 'models' }).mode = 'models';
-    component.selected = firstModel;
-    component.availableStageOptions = [stage];
+    api.models.and.returnValue(of([firstModel]));
+    api.modelStages.and.returnValue(of([]));
+    component.reload();
+    const factoryNode = component.modelStageContextNodes[0];
+    const lineNode = factoryNode.children![0].children![0].children![0];
+    factoryNode.expanded = true;
+    factoryNode.children![0].expanded = true;
+    factoryNode.children![0].children![0].expanded = true;
+
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelectorAll('p-table').length).toBe(0);
+    expect(fixture.nativeElement.querySelectorAll('p-tree').length).toBe(1);
+    expect(fixture.nativeElement.querySelectorAll('p-dropdown').length).toBe(0);
+    const contextTree = fixture.nativeElement.querySelector('.master-page__model-context') as HTMLElement;
+    expect(contextTree.getAttribute('dir')).toBe('rtl');
+    expect(getComputedStyle(contextTree).overflowX).toBe('clip');
+    expect(contextTree.textContent).toContain('مصنع الملابس');
+    expect(contextTree.querySelector('.pi-chevron-left')).not.toBeNull();
+    (contextTree.querySelector('.p-tree-toggler') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    expect(contextTree.querySelector('.pi-chevron-down')).not.toBeNull();
+    expect(contextTree.textContent).toContain('MOD-001 — موديل القميص');
+
+    component.selectModelStageContextNode(lineNode);
     fixture.detectChanges();
 
-    const dropdown = fixture.nativeElement.querySelector('p-dropdown') as HTMLElement;
-    expect(dropdown.getAttribute('styleclass')).toContain('app-full-width-select');
-    expect(dropdown.getAttribute('styleclass')).toContain('app-searchable-select');
-    expect(dropdown.getAttribute('panelstyleclass')).toContain('app-searchable-select-panel');
-    expect(dropdown.getAttribute('filterplaceholder')).toBe('ابحث باسم أو كود المرحلة');
+    expect(fixture.nativeElement.querySelectorAll('p-table').length).toBe(1);
+    expect(fixture.nativeElement.textContent).toContain('مصنع الملابس ← MOD-001 — موديل القميص ← القص ← خط القص');
   });
 
-  it('clears a selected stage without opening the dropdown and keeps long text in the label lane', () => {
-    const longStage = { ...stage, name: 'مرحلة تشغيل ذات اسم طويل جدًا للتحقق من عدم تداخل النص مع أزرار الحقل' };
+  function buildModelTree(): { factoryNode: any; modelNode: any; lineNode: any } {
     (component as unknown as { mode: 'stages' | 'models' }).mode = 'models';
+    fixture.detectChanges();
+    component.factories = [factory];
+    component.models = [firstModel];
+    component.departments = [department];
+    component.lines = [line];
+    (component as never as { rebuildModelStageContextTree: () => void }).rebuildModelStageContextTree();
+    const factoryNode = component.modelStageContextNodes[0];
+    const modelNode = factoryNode.children![0];
+    const lineNode = modelNode.children![0].children![0];
+    factoryNode.expanded = true;
+    modelNode.expanded = true;
+    modelNode.children![0].expanded = true;
+    fixture.detectChanges();
+    return { factoryNode, modelNode, lineNode };
+  }
+
+  it('keeps the line-stage table free of an ellipsis context-menu action', () => {
+    (component as unknown as { mode: 'stages' | 'models' }).mode = 'models';
+    api.models.and.returnValue(of([firstModel]));
+    fixture.detectChanges();
+    selectSingleStageModelContext();
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.querySelectorAll('button[aria-label="إجراءات المرحلة"]').length).toBe(0);
+    const actionGroups = fixture.nativeElement.querySelectorAll('.master-page__model-stages-table .master-page__model-stage-row-actions');
+    const addButton = fixture.nativeElement.querySelector('button[aria-label="إضافة المرحلة إلى الموديل"]') as HTMLButtonElement;
+    expect(actionGroups.length).toBe(1);
+    expect(addButton).not.toBeNull();
+    expect(addButton.getAttribute('style')).toBeNull();
+    expect(addButton.classList).toContain('p-button-outlined');
+    expect(addButton.classList).toContain('plp-action-group__full');
+  });
+
+  it('uses matching two-column text actions for a linked model stage', () => {
+    (component as unknown as { mode: 'stages' | 'models' }).mode = 'models';
+    api.models.and.returnValue(of([firstModel]));
+    fixture.detectChanges();
+    selectSingleStageModelContext();
+    component.stages = [{
+      id: 'model-stage-1', productModelId: firstModel.id, subStageId: stage.id, stageOrder: 1,
+      piecePrice: 1, standardSeconds: 20, compensationMode: 'SharedPercentage', isRequired: true, isActive: true
+    }];
+    fixture.detectChanges();
+
+    const group = fixture.nativeElement.querySelector('.master-page__model-stages-table .master-page__model-stage-row-actions') as HTMLElement;
+    const edit = fixture.nativeElement.querySelector('button[aria-label="تعديل إعدادات الارتباط"]') as HTMLButtonElement;
+    const toggle = fixture.nativeElement.querySelector('button[aria-label="تعطيل الارتباط بالموديل"]') as HTMLButtonElement;
+    expect(group.classList).toContain('plp-action-group--equal-actions');
+    expect(getComputedStyle(group).display).toBe('grid');
+    expect(edit.getAttribute('label')).toBe('تعديل');
+    expect(edit.classList).not.toContain('p-button-icon-only');
+    expect(edit.getAttribute('style')).toBeNull();
+    expect(toggle.getAttribute('style')).toBeNull();
+  });
+
+  it('defaults the line-stage relationship filter to all and updates its result count locally', () => {
+    (component as unknown as { mode: 'stages' | 'models' }).mode = 'models';
+    fixture.detectChanges();
+    selectSingleStageModelContext();
+    (component as unknown as { availableStageCatalog: typeof stage[] }).availableStageCatalog = [stage, englishStage];
+    component.stages = [{
+      id: 'model-stage-1', productModelId: firstModel.id, subStageId: stage.id, stageOrder: 1,
+      piecePrice: 1, standardSeconds: 20, compensationMode: 'SharedPercentage', isRequired: true, isActive: true
+    }];
+    const selectedTreeNode = { key: 'selected-line' } as any;
+    component.selectedModelStageContextNode = selectedTreeNode;
+
+    expect(component.modelStageRelationshipFilter).toBe('all');
+    expect(component.filteredAvailableModelStageRows.length).toBe(2);
+    component.setModelStageRelationshipFilter('linked');
+    expect(component.filteredAvailableModelStageRows.map(row => row.stage.id)).toEqual([stage.id]);
+    component.setModelStageRelationshipFilter('unlinked');
+    expect(component.filteredAvailableModelStageRows.map(row => row.stage.id)).toEqual([englishStage.id]);
+    expect(component.selectedModelStageContextNode).toBe(selectedTreeNode);
+
+    fixture.detectChanges();
+    const toolbar = fixture.nativeElement.querySelector('[aria-label="فلتر حالة مراحل الخط"]') as HTMLElement;
+    expect(toolbar).not.toBeNull();
+    expect(toolbar.closest('[dir="rtl"]')).not.toBeNull();
+    expect(toolbar.getAttribute('style')).toBeNull();
+    expect((toolbar.querySelector('plp-status-badge') as unknown as { label: string }).label).toBe('النتائج: 1');
+  });
+
+  it('uses the relationship-specific empty state without reloading the model tree', () => {
+    (component as unknown as { mode: 'stages' | 'models' }).mode = 'models';
+    fixture.detectChanges();
+    selectSingleStageModelContext();
+    const modelStageRequests = api.modelStages.calls.count();
+
+    component.setModelStageRelationshipFilter('linked');
+    expect(component.modelStageFilterEmptyMessage).toBe('لا توجد مراحل مرتبطة بهذا الموديل على الخط المختار.');
+    component.setModelStageRelationshipFilter('unlinked');
+    expect(component.modelStageFilterEmptyMessage).toBe('لا توجد مراحل غير مرتبطة متاحة على الخط المختار.');
+    component.setModelStageRelationshipFilter('all');
+    expect(component.modelStageFilterEmptyMessage).toBe('الخط المختار لا يحتوي مراحل.');
+    expect(api.modelStages.calls.count()).toBe(modelStageRequests);
+  });
+
+  it('recalculates relationship-filtered rows when the selected line changes', () => {
+    const secondLine = { ...line, id: 'line-2', name: 'خط القص الثاني', lineCode: 'L2' };
+    const secondLineStage = { ...englishStage, id: 'stage-line-2', productionLineId: secondLine.id, productionLineName: secondLine.name };
+    (component as unknown as { mode: 'stages' | 'models' }).mode = 'models';
+    fixture.detectChanges();
+    component.factories = [factory];
+    component.models = [firstModel];
+    component.departments = [department];
+    component.lines = [line, secondLine];
     component.selected = firstModel;
-    component.availableStageOptions = [longStage];
-    component.modelStageForm.controls.subStageId.setValue(longStage.id);
-    const onShow = spyOn(component, 'syncStageDropdownPanelWidth').and.callThrough();
+    (component as unknown as { availableStageCatalog: typeof stage[] }).availableStageCatalog = [stage, secondLineStage];
+    component.stages = [{
+      id: 'model-stage-1', productModelId: firstModel.id, subStageId: stage.id, stageOrder: 1,
+      piecePrice: 1, standardSeconds: 20, compensationMode: 'SharedPercentage', isRequired: true, isActive: true
+    }];
+    component.selectModelStageFactory(factory.id);
+    component.selectModelStageDepartment(department.id);
+    component.selectModelStageProductionLine(line.id);
+    component.setModelStageRelationshipFilter('linked');
+
+    expect(component.filteredAvailableModelStageRows.length).toBe(1);
+    component.selectModelStageProductionLine(secondLine.id);
+    expect(component.modelStageRelationshipFilter).toBe('linked');
+    expect(component.filteredAvailableModelStageRows.length).toBe(0);
+    component.setModelStageRelationshipFilter('unlinked');
+    expect(component.filteredAvailableModelStageRows.map(row => row.stage.id)).toEqual([secondLineStage.id]);
+  });
+
+  it('renders exactly one RTL model action button and the requested model actions', () => {
+    const { modelNode } = buildModelTree();
+
+    expect(component.canManageModels).withContext(`permissions=${[...grantedPermissions].join(',')}`).toBeTrue();
+    expect(component.hasModelContextActions(modelNode)).withContext(`node=${JSON.stringify(modelNode.data)}`).toBeTrue();
+    expect(fixture.nativeElement.querySelectorAll('button[aria-label="إجراءات الموديل"]').length).toBe(1);
+    component.openModelContextMenu(new MouseEvent('click'), modelNode);
+    expect(component.modelContextMenuItems.map(item => item.label).filter(Boolean)).toEqual(['إضافة موديل', 'تعديل الموديل', 'حذف الموديل']);
+    expect(component.modelContextMenuItems.some(item => item.separator)).toBeTrue();
+    const tree = fixture.nativeElement.querySelector('.master-page__model-context') as HTMLElement;
+    expect(tree.getAttribute('dir')).toBe('rtl');
+  });
+
+  it('opens the existing model form for add and edit without line or department ownership', () => {
+    const { modelNode } = buildModelTree();
+    component.openModelContextMenu(new MouseEvent('click'), modelNode);
+    const add = component.modelContextMenuItems.find(item => item.label === 'إضافة موديل');
+    expect(add).toBeDefined();
+    add?.command?.({} as never);
+    expect(component.modelFormVisible).toBeTrue();
+    expect(component.editModelId).toBe('');
+    expect(Object.keys(component.modelForm.controls)).not.toContain('productionLineId');
+    expect(Object.keys(component.modelForm.controls)).not.toContain('departmentId');
+
+    component.openModelContextMenu(new MouseEvent('click'), modelNode);
+    component.modelContextMenuItems.find(item => item.label === 'تعديل الموديل')?.command?.({} as never);
+    expect(component.editModelId).toBe(firstModel.id);
+    expect(component.modelForm.getRawValue().name).toBe(firstModel.name);
+  });
+
+  it('asks for confirmation then soft-deletes an unlinked model and clears its selected context', () => {
+    const { modelNode, lineNode } = buildModelTree();
+    component.selectModelStageContextNode(lineNode);
+    component.openModelContextMenu(new MouseEvent('click'), modelNode);
+    component.modelContextMenuItems.find(item => item.label === 'حذف الموديل')?.command?.({} as never);
+    expect(component.modelDeleteDialogVisible).toBeTrue();
+    expect(component.pendingModelDeletion?.name).toBe(firstModel.name);
+
+    component.confirmModelDeletion();
+
+    expect(api.deleteModel).toHaveBeenCalledWith(firstModel.id, 'local-correlation');
+    expect(component.models).toEqual([]);
+    expect(component.selected).toBeNull();
+    expect(component.hasModelStageContext).toBeFalse();
+  });
+
+  it('keeps the delete dialog open and shows the backend dependency reason when deletion is blocked', () => {
+    const { modelNode } = buildModelTree();
+    api.modelDeleteEligibility.and.returnValue(of({ modelId: firstModel.id, canDelete: false, messageAr: 'لا يمكن حذف الموديل لأنه مرتبط بتشغيل إنتاج.' }));
+    component.openModelContextMenu(new MouseEvent('click'), modelNode);
+    const deleteItem = component.modelContextMenuItems.find(item => item.label === 'حذف الموديل');
+
+    expect(deleteItem?.disabled).toBeTrue();
+    expect(deleteItem?.tooltip).toBe('لا يمكن حذف الموديل لأنه مرتبط بتشغيل إنتاج.');
+    expect(component.models).toEqual([firstModel]);
+  });
+
+  it('hides the model action button without models.manage and does not change expanded state when opening it', () => {
+    const { modelNode } = buildModelTree();
+    const wasExpanded = modelNode.expanded;
+    component.openModelContextMenu(new MouseEvent('click'), modelNode);
+    expect(modelNode.expanded).toBe(wasExpanded);
+    grantedPermissions.clear();
     fixture.detectChanges();
-
-    const dropdown = fixture.nativeElement.querySelector('.p-dropdown') as HTMLElement;
-    const label = dropdown.querySelector('.p-dropdown-label') as HTMLElement;
-    const clear = dropdown.querySelector('.p-dropdown-clear-icon') as HTMLElement;
-    const trigger = dropdown.querySelector('.p-dropdown-trigger') as HTMLElement;
-
-    expect(clear).not.toBeNull();
-    expect(trigger).not.toBeNull();
-    expect(getComputedStyle(dropdown).display).toBe('grid');
-    expect(getComputedStyle(label).minWidth).toBe('0px');
-    expect(getComputedStyle(clear).position).toBe('static');
-
-    clear.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    fixture.detectChanges();
-
-    expect(component.modelStageForm.controls.subStageId.value).toBeNull();
-    expect(onShow).not.toHaveBeenCalled();
-    expect(fixture.nativeElement.querySelector('.p-dropdown-panel')).toBeNull();
-    expect(fixture.nativeElement.querySelector('.p-dropdown-clear-icon')).toBeNull();
+    expect(fixture.nativeElement.querySelectorAll('button[aria-label="إجراءات الموديل"]').length).toBe(0);
   });
 
-  it('keeps the model-stage overlay at least as wide as its trigger and caps it to the viewport', () => {
-    const trigger = document.createElement('div');
-    const input = document.createElement('input');
-    trigger.className = 'p-dropdown';
-    input.id = 'modelStageSubStage';
-    trigger.appendChild(input);
-    document.body.appendChild(trigger);
-    spyOn(trigger, 'getBoundingClientRect').and.returnValue({ width: 436 } as DOMRect);
+  it('preserves the selected tree context and breadcrumb after editing the selected model', () => {
+    const { modelNode, lineNode } = buildModelTree();
+    component.selectModelStageContextNode(lineNode);
+    api.updateModel.and.returnValue(of({ ...firstModel, name: 'موديل القميص المحدث' }));
+    component.openModelContextMenu(new MouseEvent('click'), modelNode);
+    component.modelContextMenuItems.find(item => item.label === 'تعديل الموديل')?.command?.({} as never);
+    component.modelForm.patchValue({ name: 'موديل القميص المحدث' });
+    component.saveModel();
 
-    component.syncStageDropdownPanelWidth();
-
-    expect(component.stageDropdownPanelStyle).toEqual(jasmine.objectContaining({
-      width: '436px',
-      minWidth: '436px',
-      maxWidth: 'calc(100vw - 1rem)',
-      boxSizing: 'border-box'
-    }));
-    trigger.remove();
+    expect(component.selected?.name).toBe('موديل القميص المحدث');
+    expect(component.selectedModelStageContextNode?.key).toBe(lineNode.key);
+    expect(component.modelStageContextBreadcrumb).toContain('موديل القميص المحدث');
   });
 
-  it('renders the available-stage hierarchy path without changing the stage relationship', () => {
-    expect(component.stageStructurePath(stage)).toBe('مصنع الملابس ← القص ← خط القص');
-    expect(component.stageStructurePath({ factoryName: null, departmentNameAr: 'القص', productionLineName: 'خط القص' })).toBe('القص ← خط القص');
-  });
-
-  it('filters the dropdown by name and code without mixing linked stages', () => {
-    (component as never as { availableStageCatalog: typeof stage[] }).availableStageCatalog = [stage, englishStage];
-    component.stages = [{ id: 'model-stage-1', subStageId: stage.id, stageOrder: 1, piecePrice: 1, standardSeconds: 20, compensationMode: 'SharedPercentage', isRequired: true, isActive: true }];
-    (component as never as { rebuildAvailableStageOptions(): void }).rebuildAvailableStageOptions();
-
-    component.onAvailableStagesFilter('cutting');
-    expect(api.searchSubStagesByNameOrCode).toHaveBeenCalledWith('cutting', 1, 200);
-    (component as never as { availableStageCatalog: typeof stage[] }).availableStageCatalog = [stage, englishStage];
-    (component as never as { rebuildAvailableStageOptions(): void }).rebuildAvailableStageOptions();
-    expect(component.availableStageChoices.map(item => item.id)).toEqual([englishStage.id]);
-  });
-
-  it('keeps the current edit stage visible and selected even when it is already linked', () => {
-    const linked = { id: 'model-stage-1', subStageId: stage.id, subStageCode: stage.code, subStageName: stage.name, stageOrder: 1, piecePrice: 1, standardSeconds: 20, compensationMode: 'SharedPercentage' as const, isRequired: true, isActive: true };
-    component.stages = [linked];
-    (component as never as { availableStageCatalog: typeof stage[] }).availableStageCatalog = [stage, englishStage];
-    component.editModelStage(linked);
-
-    expect(component.modelStageForm.controls.subStageId.value).toBe(stage.id);
-    expect(component.availableStageChoices.map(item => item.id)).toContain(stage.id);
-  });
-
-  it('ignores a stale catalog response after a newer refresh response is applied', () => {
-    const stale = new Subject<any>();
-    const current = new Subject<any>();
-    api.searchSubStagesByNameOrCode.and.returnValues(stale, current);
-
-    (component as never as { loadAvailableStageCatalog(): void }).loadAvailableStageCatalog();
-    (component as never as { loadAvailableStageCatalog(): void }).loadAvailableStageCatalog();
-    current.next({ items: [englishStage], totalCount: 1, pageNumber: 1, pageSize: 200 });
-    stale.next({ items: [stage], totalCount: 1, pageNumber: 1, pageSize: 200 });
-
-    expect(component.availableStageChoices.map(item => item.id)).toEqual([englishStage.id]);
-  });
-
-  it('shows scoped available-stage error state and retries catalog loading', () => {
-    api.searchSubStagesByNameOrCode.and.returnValues(
-      throwError(() => new Error('انقطع الاتصال')),
-      of({ items: [stage], totalCount: 1, pageNumber: 1, pageSize: 200 })
-    );
-    (component as never as { loadAvailableStageCatalog(): void }).loadAvailableStageCatalog();
-    expect(component.availableStagesError).toBe('انقطع الاتصال');
-
-    component.retryAvailableStages();
-    expect(component.availableStagesError).toBe('');
-    expect(component.availableStageChoices).toEqual([stage]);
-  });
-
-  it('searches linked model stages by name and code, resets the table key, and keeps StageOrder', () => {
-    const later = { id: 'model-stage-2', subStageId: englishStage.id, subStageCode: englishStage.code, subStageName: englishStage.name, stageOrder: 2, piecePrice: 1, standardSeconds: 20, compensationMode: 'SharedPercentage' as const, isRequired: true, isActive: true };
-    const first = { id: 'model-stage-1', subStageId: stage.id, subStageCode: stage.code, subStageName: stage.name, stageOrder: 1, piecePrice: 1, standardSeconds: 20, compensationMode: 'SharedPercentage' as const, isRequired: true, isActive: true };
-    component.stages = [later, first];
-    component.onModelStageSearch('CUT-02');
-    expect(component.filteredLinkedStages.map(item => item.id)).toEqual([later.id]);
-    component.onModelStageSearch('');
-    expect(component.filteredLinkedStages.map(item => item.id)).toEqual([first.id, later.id]);
-    component.clearModelStageSearch();
-    expect(component.modelStageSearch).toBe('');
-  });
-
-  it('keeps the linked-stage search independent from the available-stage search and reports a no-match empty state', () => {
-    component.stages = [{ id: 'model-stage-1', subStageId: stage.id, subStageCode: stage.code, subStageName: stage.name, stageOrder: 1, piecePrice: 1, standardSeconds: 20, compensationMode: 'SharedPercentage', isRequired: true, isActive: true }];
-    component.onAvailableStagesFilter('CUT-02');
-    component.onModelStageSearch('غير موجود');
-
-    expect(component.availableStagesSearch).toBe('CUT-02');
-    expect(component.filteredLinkedStages).toEqual([]);
-    expect(component.linkedStagesEmptyMessage).toBe('توجد مراحل مرتبطة، لكن لا توجد نتائج مطابقة للبحث.');
+  it('uses a native keyboard-focusable action trigger without inline styles or a page reload', () => {
+    buildModelTree();
+    const actionButton = fixture.nativeElement.querySelector('button[aria-label="إجراءات الموديل"]') as HTMLButtonElement;
+    expect(actionButton.tagName).toBe('BUTTON');
+    expect(actionButton.getAttribute('aria-haspopup')).toBe('menu');
+    expect(actionButton.getAttribute('style')).toBeNull();
   });
 });
-
-function buildTreeForTest() {
-  return [{
-    key: 'factory:factory-1', data: { entityId: 'factory-1', entityType: 'factory' as const, name: 'مصنع الملابس', code: 'FAC', isActive: true, source: { id: 'factory-1', code: 'FAC', name: 'مصنع الملابس', isActive: true }, canDelete: false }, children: [{
-      key: 'department:department-1', data: { entityId: 'department-1', entityType: 'department' as const, parentId: 'factory-1', name: 'القص', code: 'CUT', isActive: true, source: { id: 'department-1', factoryId: 'factory-1', nameAr: 'القص', isActive: true }, canDelete: false }, children: [{
-        key: 'line:line-1', leaf: true, data: { entityId: 'line-1', entityType: 'line' as const, parentId: 'department-1', name: 'خط القص', code: 'L1', isActive: true, source: { id: 'line-1', factoryId: 'factory-1', departmentId: 'department-1', name: 'خط القص', sequenceOrder: 1, isActive: true }, canDelete: false }
-      }]
-    }]
-  }];
-}
