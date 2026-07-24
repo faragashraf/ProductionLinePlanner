@@ -1,15 +1,23 @@
 <main class="factory-command" dir="rtl">
   <header class="factory-command__header">
     <div><span>Factory / Department / Line</span><h1>خريطة المصنع التشغيلية</h1><p>كل حالة أدناه ناتجة عن تشغيل مسجل، رحلة موديل، تسكين دائم، وحضور اليوم.</p></div>
-    <small *ngIf="data"><i [class.factory-command__live]="isRefreshing"></i> آخر احتساب {{ data.calculatedAtUtc | date:'yyyy/MM/dd، HH:mm' }}</small>
+    <small *ngIf="data && dataIsCurrent">
+      <ng-container *ngIf="realtimeStatus$ | async as realtimeStatus">
+        <i class="realtime-status__dot" [ngClass]="realtimeClass(realtimeStatus)" aria-hidden="true"></i>
+        <strong>{{ realtimeLabel(realtimeStatus) }}</strong>
+      </ng-container>
+      <span>{{ isRefreshing ? 'جارٍ جلب التحديث · ' : '' }}آخر تحديث ناجح {{ data.calculatedAtUtc | date:'yyyy/MM/dd، HH:mm' }}</span>
+    </small>
   </header>
 
   <app-manufacturing-command-center-filters [catalog]="data?.filterCatalog ?? null" [filters]="filters" [loading]="isLoading" (filtersChange)="onFiltersChange($event)"></app-manufacturing-command-center-filters>
 
-  <section class="factory-command__error" *ngIf="hasLoadError && !data" role="alert"><strong>تعذر تحميل خريطة المصنع.</strong><span>لا توجد بيانات بديلة معروضة.</span><button type="button" (click)="retry()">إعادة المحاولة</button></section>
-  <section class="factory-command__notice" *ngIf="hasLoadError && data">تعذر التحديث اللحظي؛ بقيت الخريطة السابقة وحالة التوسيع كما هما. <button type="button" (click)="retry()">إعادة المحاولة</button></section>
-  <section class="factory-command__loading" *ngIf="isLoading && !data"><div></div><div></div><div></div></section>
+  <section class="factory-command__loading-notice" *ngIf="isLoading && data && !dataIsCurrent" role="status"><i class="pi pi-spin pi-spinner" aria-hidden="true"></i><div><strong>جارٍ تحديث بيانات النطاق المختار…</strong><span>تم إخفاء الخريطة السابقة حتى يكتمل الطلب.</span></div></section>
+  <section class="factory-command__error" *ngIf="hasLoadError && !dataIsCurrent" role="alert"><strong>تعذر تحميل خريطة النطاق المحدد.</strong><span>لا نعرض خريطة النطاق السابق بدلًا منها.</span><button type="button" (click)="retry()">إعادة المحاولة</button></section>
+  <section class="factory-command__notice" *ngIf="hasLoadError && dataIsCurrent">تعذر التحديث اللحظي؛ بقيت آخر خريطة موثوقة لنفس النطاق وحالة التوسيع كما هما. <button type="button" (click)="retry()">إعادة المحاولة</button></section>
+  <section class="factory-command__loading" *ngIf="isLoading && !dataIsCurrent"><div></div><div></div><div></div></section>
 
+  <ng-container *ngIf="dataIsCurrent">
   <ng-container *ngIf="data as current">
     <section class="factory-command__scope"><strong>{{ current.scope.productionDate }}</strong><span>{{ current.lineSummary.activeLines }} خط نشط</span><span>{{ current.lineSummary.problemLines }} خط بمشكلة</span><span>{{ current.operations.linesWithOperation }} خط لديه تشغيل</span></section>
     <section class="factory-command__empty" *ngIf="!isLoading && !current.factories.length"><i class="pi pi-sitemap"></i><h2>لا توجد عقد ضمن النطاق الحالي</h2><p>غيّر الفلاتر لعرض بنية تشغيلية أخرى.</p></section>
@@ -32,17 +40,19 @@
               <span class="node-icon"><i class="pi pi-sitemap"></i></span>
               <span class="node-title"><strong>{{ department.name }}</strong><small>{{ department.code || 'بحاجة ربط تنظيمي' }}</small></span>
               <span class="node-stat"><strong>{{ department.activeLines }}</strong><small>خط</small></span>
-              <span class="node-stat state-ready"><strong>{{ department.readyLines }}</strong><small>جاهز</small></span>
-              <span class="node-stat state-staffing-shortage"><strong>{{ department.notReadyLines }}</strong><small>غير جاهز</small></span>
+              <span class="node-stat state-ready"><strong>{{ department.readyLines }}</strong><small>دون مشكلة جاهزية</small></span>
+              <span class="node-stat state-staffing-shortage"><strong>{{ department.notReadyLines }}</strong><small>تحتاج مراجعة جاهزية</small></span>
               <span class="node-stat"><strong>{{ department.presentPermanentlyAssignedWorkers }}/{{ department.permanentlyAssignedWorkers }}</strong><small>حاضر/مسكن</small></span>
             </summary>
 
             <p class="department-node__note">{{ department.workforceAttributionNote }}</p>
             <div class="line-list">
-              <details class="line-node" *ngFor="let line of department.lines; trackBy: trackById" [open]="isExpanded('line', line.id)" (toggle)="setExpanded('line', line.id, $event)">
+              <details class="line-node" *ngFor="let line of sortedLines(department.lines); trackBy: trackById" [ngClass]="lineContainerClass(line)" [open]="isExpanded('line', line.id)" (toggle)="setExpanded('line', line.id, $event)">
                 <summary>
                   <span class="line-node__identity"><strong>{{ line.name }}</strong><small>{{ line.code || 'بلا كود' }}</small></span>
-                  <em [class]="statusClass(line.readinessStatus)">{{ readinessLabel(line.readinessStatus) }}</em>
+                  <div class="line-dimensions" aria-label="أبعاد حالة الخط">
+                    <span *ngFor="let dimension of lineDimensions(line)" [ngClass]="dimensionClass(dimension)"><small>{{ dimension.label }}</small><strong>{{ dimension.value }}</strong></span>
+                  </div>
                   <span><strong>{{ line.presentPermanentlyAssignedWorkers }}/{{ line.requiredWorkers }}</strong><small>حاضر مسكن / احتياج الرحلة</small></span>
                   <span><strong>{{ line.stagesCoveredByPresentWorker }}/{{ line.journeyStages }}</strong><small>مراحل بها حاضر / الرحلة</small></span>
                   <time>{{ line.lastReliableUpdateUtc | date:'HH:mm' }}</time>
@@ -58,8 +68,8 @@
                       <em [class]="statusClass(operation.status)">{{ operationLabel(operation.status) }}</em>
                     </header>
                     <div class="operation__facts">
-                      <div><span>كمية التشغيل المحفوظة</span><strong>{{ operation.finalLineQuantity | number:'1.0-3' }}</strong><small>قيمة مدخلة في ProductionOrder.PlannedQuantity، وليست إنتاجًا فعليًا مقاسًا</small></div>
-                      <div><span>قيمة سجلات المراحل</span><strong>{{ operation.recordedStageValue | number:'1.2-2' }}</strong><small>ليست كمية إنتاج</small></div>
+                      <div><span>الكمية المخططة</span><strong>{{ operation.finalLineQuantity | number:'1.0-3' }}</strong><small>قيمة ProductionOrder.PlannedQuantity المحفوظة، وليست إنتاجًا فعليًا مقاسًا</small></div>
+                      <div><span>أجور العمال المسجلة</span><strong>{{ operation.recordedStageValue | number:'1.2-2' }}</strong><small>مجموع TotalWorkerEarnings، وليس قيمة أوكمية إنتاج</small></div>
                       <div><span>اكتمال تسجيل المراحل</span><strong>{{ ratioText(operation.stageRegistrationCoverage.percentage) }}</strong><small>{{ operation.registeredStages }} ÷ {{ operation.journeyStages }}</small></div>
                       <div><span>آخر تحديث موثوق</span><strong>{{ operation.lastReliableUpdateUtc | date:'HH:mm' }}</strong><small>{{ operation.lastReliableUpdateUtc | date:'yyyy/MM/dd' }}</small></div>
                     </div>
@@ -78,5 +88,6 @@
         </div>
       </details>
     </section>
+  </ng-container>
   </ng-container>
 </main>

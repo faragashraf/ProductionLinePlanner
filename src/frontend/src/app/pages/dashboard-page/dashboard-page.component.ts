@@ -1,16 +1,20 @@
 import { Component, OnDestroy, OnInit } from '@angular/core';
 import { catchError, finalize, of, Subject, Subscription, takeUntil } from 'rxjs';
-import { ManufacturingDataChanged } from '../../core/models/realtime-notification.models';
+import { ManufacturingDataChanged, RealtimeConnectionStatus, realtimeConnectionStatusLabel } from '../../core/models/realtime-notification.models';
 import { ManufacturingCommandCenterApiService } from '../../core/services/manufacturing-command-center-api.service';
 import { ManufacturingRealtimeService } from '../../core/services/manufacturing-realtime.service';
 import {
   CommandCenterFilters,
+  CommandCenterLine,
+  CommandCenterLineStatusDimension,
   CommandCenterOperation,
+  CommandCenterProblemLine,
   CommandCenterQualityIssue,
   CommandCenterWorkerDetail,
   ManufacturingCommandCenter,
+  commandCenterLineStatusDimensions,
   commandCenterOperationLabel,
-  commandCenterReadinessLabel,
+  commandCenterProblemLines,
   commandCenterScopeMatches,
   defaultCommandCenterFilters
 } from '../../shared/models/manufacturing-command-center.model';
@@ -27,6 +31,7 @@ export class DashboardPageComponent implements OnInit, OnDestroy {
   isLoading = true;
   isRefreshing = false;
   hasLoadError = false;
+  dataIsCurrent = false;
   selectedDetail: DashboardDetail = null;
   readonly skeletons = [1, 2, 3, 4, 5, 6];
 
@@ -39,6 +44,8 @@ export class DashboardPageComponent implements OnInit, OnDestroy {
     private readonly api: ManufacturingCommandCenterApiService,
     private readonly manufacturingRealtime: ManufacturingRealtimeService
   ) {}
+
+  get realtimeStatus$() { return this.manufacturingRealtime.connectionStatus$; }
 
   ngOnInit(): void {
     this.load();
@@ -59,15 +66,22 @@ export class DashboardPageComponent implements OnInit, OnDestroy {
   onFiltersChange(filters: CommandCenterFilters): void {
     this.filters = filters;
     this.selectedDetail = null;
+    this.dataIsCurrent = false;
     this.load();
   }
 
   retry(): void { this.load(); }
   selectDetail(detail: DashboardDetail): void { this.selectedDetail = this.selectedDetail === detail ? null : detail; }
   operationLabel(status: string): string { return commandCenterOperationLabel(status); }
-  readinessLabel(status: string): string { return commandCenterReadinessLabel(status); }
-  statusClass(status: string): string { return `state-${status.replace(/([a-z])([A-Z])/g, '$1-$2').toLowerCase()}`; }
+  realtimeLabel(status: RealtimeConnectionStatus): string { return realtimeConnectionStatusLabel(status); }
+  realtimeClass(status: RealtimeConnectionStatus): string { return `realtime-status--${status}`; }
+  lineDimensions(line: CommandCenterLine): CommandCenterLineStatusDimension[] { return commandCenterLineStatusDimensions(line); }
+  dimensionClass(dimension: CommandCenterLineStatusDimension): string { return `line-dimension--${dimension.tone}`; }
   ratioText(percentage: number | null): string { return percentage === null ? 'لا توجد بيانات' : `${percentage}%`; }
+
+  get problemLines(): CommandCenterProblemLine[] {
+    return this.data && this.dataIsCurrent ? commandCenterProblemLines(this.data) : [];
+  }
 
   get detailTitle(): string {
     return ({
@@ -126,7 +140,10 @@ export class DashboardPageComponent implements OnInit, OnDestroy {
       }),
       takeUntil(this.destroy$)
     ).subscribe(data => {
-      if (loadVersion === this.loadVersion && data) this.data = data;
+      if (loadVersion === this.loadVersion && data) {
+        this.data = data;
+        this.dataIsCurrent = true;
+      }
     });
   }
 

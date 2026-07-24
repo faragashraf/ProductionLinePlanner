@@ -1,13 +1,16 @@
 import { Component, OnDestroy, OnInit } from '@angular/core';
 import { catchError, finalize, of, Subject, Subscription, takeUntil } from 'rxjs';
-import { ManufacturingDataChanged } from '../../core/models/realtime-notification.models';
+import { ManufacturingDataChanged, RealtimeConnectionStatus, realtimeConnectionStatusLabel } from '../../core/models/realtime-notification.models';
 import { ManufacturingCommandCenterApiService } from '../../core/services/manufacturing-command-center-api.service';
 import { ManufacturingRealtimeService } from '../../core/services/manufacturing-realtime.service';
 import {
   CommandCenterFilters,
+  CommandCenterLine,
+  CommandCenterLineStatusDimension,
   ManufacturingCommandCenter,
+  commandCenterLineProblemSeverity,
+  commandCenterLineStatusDimensions,
   commandCenterOperationLabel,
-  commandCenterReadinessLabel,
   commandCenterScopeMatches,
   defaultCommandCenterFilters
 } from '../../shared/models/manufacturing-command-center.model';
@@ -22,6 +25,7 @@ export class FactoryMapPageComponent implements OnInit, OnDestroy {
   isLoading = true;
   isRefreshing = false;
   hasLoadError = false;
+  dataIsCurrent = false;
   readonly expandedFactories = new Set<string>();
   readonly expandedDepartments = new Set<string>();
   readonly expandedLines = new Set<string>();
@@ -35,6 +39,8 @@ export class FactoryMapPageComponent implements OnInit, OnDestroy {
     private readonly api: ManufacturingCommandCenterApiService,
     private readonly manufacturingRealtime: ManufacturingRealtimeService
   ) {}
+
+  get realtimeStatus$() { return this.manufacturingRealtime.connectionStatus$; }
 
   ngOnInit(): void {
     this.load();
@@ -54,13 +60,25 @@ export class FactoryMapPageComponent implements OnInit, OnDestroy {
 
   onFiltersChange(filters: CommandCenterFilters): void {
     this.filters = filters;
+    this.dataIsCurrent = false;
     this.load();
   }
 
   retry(): void { this.load(); }
   operationLabel(status: string): string { return commandCenterOperationLabel(status); }
-  readinessLabel(status: string): string { return commandCenterReadinessLabel(status); }
   statusClass(status: string): string { return `state-${status.replace(/([a-z])([A-Z])/g, '$1-$2').toLowerCase()}`; }
+  realtimeLabel(status: RealtimeConnectionStatus): string { return realtimeConnectionStatusLabel(status); }
+  realtimeClass(status: RealtimeConnectionStatus): string { return `realtime-status--${status}`; }
+  lineDimensions(line: CommandCenterLine): CommandCenterLineStatusDimension[] { return commandCenterLineStatusDimensions(line); }
+  dimensionClass(dimension: CommandCenterLineStatusDimension): string { return `line-dimension--${dimension.tone}`; }
+  lineContainerClass(line: CommandCenterLine): string {
+    const severity = commandCenterLineProblemSeverity(line);
+    return severity >= 500 ? 'line-state-critical' : severity > 0 ? 'line-state-warning' : 'line-state-ok';
+  }
+  sortedLines(lines: CommandCenterLine[]): CommandCenterLine[] {
+    return [...lines].sort((first, second) => commandCenterLineProblemSeverity(second) - commandCenterLineProblemSeverity(first)
+      || first.name.localeCompare(second.name, 'ar'));
+  }
   ratioText(percentage: number | null): string { return percentage === null ? 'لا توجد بيانات' : `${percentage}%`; }
   isExpanded(kind: 'factory' | 'department' | 'line', id: string): boolean { return this.setFor(kind).has(id); }
 
@@ -94,6 +112,7 @@ export class FactoryMapPageComponent implements OnInit, OnDestroy {
     ).subscribe(data => {
       if (loadVersion !== this.loadVersion || !data) return;
       this.data = data;
+      this.dataIsCurrent = true;
       if (this.expandedFactories.size === 0) data.factories.forEach(factory => this.expandedFactories.add(factory.id));
     });
   }

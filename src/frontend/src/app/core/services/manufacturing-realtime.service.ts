@@ -21,6 +21,8 @@ interface ActiveWatch extends ManufacturingRealtimeWatch {
 /** Central manufacturing facade over the application-wide SignalR connection. */
 @Injectable({ providedIn: 'root' })
 export class ManufacturingRealtimeService implements OnDestroy {
+  readonly connectionStatus$ = this.realtime.connectionStatus$;
+
   private readonly watches = new Map<number, ActiveWatch>();
   private readonly joinedScreens = new Set<ManufacturingRealtimeScreen>();
   private readonly joiningScreens = new Map<ManufacturingRealtimeScreen, Promise<void>>();

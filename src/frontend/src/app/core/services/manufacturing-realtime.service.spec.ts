@@ -14,6 +14,18 @@ describe('ManufacturingRealtimeService', () => {
 
   afterEach(() => service.ngOnDestroy());
 
+  it('exposes the actual shared SignalR connection status to manufacturing screens', () => {
+    const statuses: RealtimeConnectionStatus[] = [];
+    const subscription = service.connectionStatus$.subscribe(status => statuses.push(status));
+
+    realtime.status.next('connecting');
+    realtime.status.next('reconnecting');
+    realtime.status.next('connected');
+
+    expect(statuses).toEqual(['disconnected', 'connecting', 'reconnecting', 'connected']);
+    subscription.unsubscribe();
+  });
+
   it('uses one shared connection facade, joins once, coalesces events, and leaves after the final watcher', async () => {
     const first = jasmine.createSpy('first');
     const second = jasmine.createSpy('second');

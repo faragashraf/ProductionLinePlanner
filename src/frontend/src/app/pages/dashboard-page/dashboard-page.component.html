@@ -5,9 +5,12 @@
       <h1>لوحة تحكم التصنيع</h1>
       <p>أرقام مسجلة وقابلة للتتبع للحضور، والتسكين الدائم، ورحلات الموديلات، وتشغيل اليوم.</p>
     </div>
-    <div class="command-page__updated" *ngIf="data">
-      <span [class.command-page__live]="isRefreshing"></span>
-      آخر احتساب موثوق: {{ data.calculatedAtUtc | date:'yyyy/MM/dd، HH:mm' }}
+    <div class="command-page__updated" *ngIf="data && dataIsCurrent">
+      <ng-container *ngIf="realtimeStatus$ | async as realtimeStatus">
+        <span class="realtime-status__dot" [ngClass]="realtimeClass(realtimeStatus)" aria-hidden="true"></span>
+        <strong>{{ realtimeLabel(realtimeStatus) }}</strong>
+      </ng-container>
+      <span>آخر تحديث ناجح: {{ data.calculatedAtUtc | date:'yyyy/MM/dd، HH:mm' }}</span>
     </div>
   </header>
 
@@ -18,24 +21,31 @@
     (filtersChange)="onFiltersChange($event)"
   ></app-manufacturing-command-center-filters>
 
-  <section class="command-page__scope" *ngIf="data">
+  <section class="command-page__scope" *ngIf="data && dataIsCurrent">
     <i class="pi pi-calendar" aria-hidden="true"></i>
     <strong>{{ data.scope.productionDate }}</strong>
     <span>{{ data.scope.description }}</span>
   </section>
 
-  <section class="command-page__skeletons" *ngIf="isLoading && !data" aria-label="جار تحميل المؤشرات">
+  <section class="command-page__loading-notice" *ngIf="isLoading && data && !dataIsCurrent" role="status">
+    <i class="pi pi-spin pi-spinner" aria-hidden="true"></i>
+    <strong>جارٍ تحديث بيانات النطاق المختار…</strong>
+    <span>تم إخفاء أرقام النطاق السابق حتى يكتمل الطلب.</span>
+  </section>
+
+  <section class="command-page__skeletons" *ngIf="isLoading && !dataIsCurrent" aria-label="جار تحميل المؤشرات">
     <div *ngFor="let item of skeletons" class="command-page__skeleton"></div>
   </section>
 
-  <section class="command-page__error" *ngIf="hasLoadError && !data" role="alert">
+  <section class="command-page__error" *ngIf="hasLoadError && !dataIsCurrent" role="alert">
     <i class="pi pi-exclamation-triangle" aria-hidden="true"></i>
-    <div><strong>تعذر تحميل بيانات التشغيل</strong><span>لم تُستبدل الاستجابة بأصفار أو بيانات تجريبية.</span></div>
+    <div><strong>تعذر تحميل بيانات النطاق المحدد</strong><span>لا نعرض أرقام النطاق السابق بدلًا منها.</span></div>
     <button type="button" (click)="retry()">إعادة المحاولة</button>
   </section>
 
+  <ng-container *ngIf="dataIsCurrent">
   <ng-container *ngIf="data as current">
-    <section class="command-page__notice" *ngIf="hasLoadError && data" role="status">
+    <section class="command-page__notice" *ngIf="hasLoadError" role="status">
       فشل آخر تحديث لحظي؛ البيانات السابقة باقية دون تغيير.
       <button type="button" (click)="retry()">حاول الآن</button>
     </section>
@@ -79,7 +89,7 @@
           <article class="metric metric--muted"><span>لا يوجد تشغيل</span><strong>{{ current.operations.linesWithoutOperation }}</strong><small>خطوط نشطة بلا أمر يوم مسجل.</small></article>
           <button class="metric metric--warning" type="button" (click)="selectDetail('drafts')"><span>مسودات تحتاج إجراء</span><strong>{{ current.operations.draftOperations + current.operations.approvalCancelledOperations }}</strong><small>Draft + ملغي الاعتماد.</small></button>
           <button class="metric metric--ready" type="button" (click)="selectDetail('approved')"><span>عمليات معتمدة</span><strong>{{ current.operations.approvedOperations }}</strong><small>ProductionOrder بحالة Completed.</small></button>
-          <article class="metric metric--ink"><span>قيمة سجلات معتمدة</span><strong>{{ current.operations.approvedRecordedValue | number:'1.2-2' }}</strong><small>مجموع TotalWorkerEarnings، وليس مجموع كميات المراحل.</small></article>
+          <article class="metric metric--ink"><span>أجور عمال مسجلة لعمليات معتمدة</span><strong>{{ current.operations.approvedRecordedValue | number:'1.2-2' }}</strong><small>مجموع TotalWorkerEarnings، وليس قيمة إنتاج أوكمية.</small></article>
         </div>
       </section>
 
@@ -88,20 +98,31 @@
           <header><div><span>03</span><h2>جاهزية الخطوط</h2></div><a routerLink="/factory-map">فتح الخريطة</a></header>
           <div class="line-rollup">
             <div><strong>{{ current.lineSummary.activeLines }}</strong><span>خط نشط</span></div>
-            <div class="state-ready"><strong>{{ current.lineSummary.readyLines }}</strong><span>جاهز</span></div>
+            <div class="state-ready"><strong>{{ current.lineSummary.readyLines }}</strong><span>دون مشكلة جاهزية</span></div>
             <div class="state-staffing-shortage"><strong>{{ current.lineSummary.staffingShortageLines }}</strong><span>نقص عمالة</span></div>
             <div class="state-journey-not-configured"><strong>{{ current.lineSummary.journeyNotConfiguredLines }}</strong><span>بلا رحلة</span></div>
           </div>
-          <ul class="problem-lines">
-            <ng-container *ngFor="let factory of current.factories">
-              <ng-container *ngFor="let department of factory.departments">
-                <li *ngFor="let line of department.lines">
-                  <span><strong>{{ line.name }}</strong><small>{{ department.name }} · {{ line.presentPermanentlyAssignedWorkers }}/{{ line.requiredWorkers }} حاضر/مطلوب</small></span>
-                  <em [class]="statusClass(line.readinessStatus)">{{ readinessLabel(line.readinessStatus) }}</em>
-                </li>
-              </ng-container>
-            </ng-container>
+          <ul class="problem-lines" *ngIf="problemLines.length; else noProblemLines">
+            <li *ngFor="let problem of problemLines">
+              <header>
+                <span><strong>{{ problem.line.name }}</strong><small>{{ problem.factoryName }} · {{ problem.departmentName }}</small></span>
+                <em>يحتاج تدخلًا</em>
+              </header>
+              <div class="line-dimensions" aria-label="أبعاد حالة الخط">
+                <span *ngFor="let dimension of lineDimensions(problem.line)" [ngClass]="dimensionClass(dimension)">
+                  <small>{{ dimension.label }}</small><strong>{{ dimension.value }}</strong>
+                </span>
+              </div>
+              <ul class="problem-lines__reasons"><li *ngFor="let reason of problem.reasons">{{ reason }}</li></ul>
+            </li>
           </ul>
+          <ng-template #noProblemLines>
+            <section class="problem-lines__empty">
+              <i class="pi pi-check-circle" aria-hidden="true"></i>
+              <strong>لا توجد خطوط تحتاج تدخلًا في النطاق الحالي</strong>
+              <span>لم تظهر مسودات أوإلغاءات أوفجوات مسار أوعمالة أوبيانات.</span>
+            </section>
+          </ng-template>
         </article>
 
         <article class="command-panel command-panel--quality">
@@ -120,7 +141,7 @@
           <article *ngFor="let worker of detailWorkers"><strong>{{ worker.workerName }}</strong><span>{{ worker.workerCode }} · {{ worker.attendanceStatus }}</span><small>{{ worker.permanentAssignments.join('، ') || 'بلا تسكين دائم' }}</small></article>
         </div>
         <div class="detail-list" *ngIf="detailOperations.length">
-          <article *ngFor="let operation of detailOperations"><strong>{{ operation.productModelCode }} - {{ operation.productModelName }}</strong><span>{{ operationLabel(operation.status) }} · كمية تشغيل محفوظة {{ operation.finalLineQuantity }}</span><small>قيمة مدخلة في الأمر، وليست إنتاجًا فعليًا مقاسًا · تسجيل المراحل {{ operation.registeredStages }}/{{ operation.journeyStages }} · قيمة السجلات {{ operation.recordedStageValue | number:'1.2-2' }}</small></article>
+          <article *ngFor="let operation of detailOperations"><strong>{{ operation.productModelCode }} - {{ operation.productModelName }}</strong><span>{{ operationLabel(operation.status) }} · الكمية المخططة المحفوظة {{ operation.finalLineQuantity }}</span><small>قيمة مدخلة في الأمر، وليست إنتاجًا فعليًا مقاسًا · تسجيل المراحل {{ operation.registeredStages }}/{{ operation.journeyStages }} · أجور العمال المسجلة {{ operation.recordedStageValue | number:'1.2-2' }}</small></article>
         </div>
         <div class="detail-list" *ngIf="detailIssues.length">
           <article *ngFor="let issue of detailIssues"><strong>{{ issue.title }}</strong><span>{{ issue.detail }}</span></article>
@@ -128,5 +149,6 @@
         <p class="detail-panel__empty" *ngIf="!detailWorkers.length && !detailOperations.length && !detailIssues.length">لا توجد عناصر تكوّن هذا الرقم في النطاق الحالي.</p>
       </aside>
     </ng-container>
+  </ng-container>
   </ng-container>
 </main>

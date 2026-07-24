@@ -1,7 +1,7 @@
 import { NgModule } from '@angular/core';
 import { RouterModule, Routes } from '@angular/router';
 import { ManufacturingWorkspaceLayoutComponent } from './manufacturing-workspace-layout.component';
-import { ManufacturingPlaceholderPageComponent } from './manufacturing-placeholder-page.component';
+import { DashboardPageComponent } from '../dashboard-page/dashboard-page.component';
 import { ManufacturingMasterDataPageComponent } from './manufacturing-master-data-page.component';
 import { ManufacturingDepartmentsPageComponent } from './manufacturing-departments-page.component';
 import { FactoryStructureFoundationPageComponent } from './factory-structure-foundation-page.component';
@@ -42,7 +42,7 @@ export const MANUFACTURING_WORKSPACE_ROUTES: Routes = [
     component: ManufacturingWorkspaceLayoutComponent,
     children: [
       { path: '', redirectTo: 'dashboard', pathMatch: 'full' },
-      { path: 'dashboard', component: ManufacturingPlaceholderPageComponent, canMatch: [PermissionCanMatchGuard], canActivate: [PermissionCanActivateGuard], data: manufacturingRouteData(manufacturingDashboard) },
+      { path: 'dashboard', component: DashboardPageComponent, canMatch: [PermissionCanMatchGuard], canActivate: [PermissionCanActivateGuard], data: manufacturingRouteData(manufacturingDashboard) },
       {
         path: 'employees',
         loadChildren: () => import('../workers-page/workers-page.module').then((module) => module.WorkersPageModule),

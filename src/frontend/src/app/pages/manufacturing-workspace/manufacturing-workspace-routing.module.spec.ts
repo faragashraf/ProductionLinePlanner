@@ -6,11 +6,21 @@ import { ManufacturingDepartmentsPageComponent } from './manufacturing-departmen
 import { LineStaffingWorkspacePageComponent } from './line-staffing-workspace-page.component';
 import { DailyProductionOperationsPageComponent } from './daily-production-operations-page.component';
 import { ManufacturingPlaceholderPageComponent } from './manufacturing-placeholder-page.component';
+import { DashboardPageComponent } from '../dashboard-page/dashboard-page.component';
 import { ReportsWorkspacePageComponent } from '../reports-workspace/reports-workspace-page.component';
 import { MANUFACTURING_WORKSPACE_ROUTES } from './manufacturing-workspace-routing.module';
 
 describe('ManufacturingWorkspaceRoutingModule', () => {
   const childRoutes = MANUFACTURING_WORKSPACE_ROUTES[0].children ?? [];
+
+  it('routes the manufacturing dashboard entry to the real command center instead of the foundation placeholder', () => {
+    const route = childRoutes.find(item => item.path === 'dashboard');
+
+    expect(route?.component).toBe(DashboardPageComponent);
+    expect(route?.component).not.toBe(ManufacturingPlaceholderPageComponent);
+    expect(route?.canMatch).toContain(PermissionCanMatchGuard);
+    expect(route?.canActivate).toContain(PermissionCanActivateGuard);
+  });
 
   it('routes departments to the real departments page with departments.view permission', () => {
     const route = childRoutes.find(item => item.path === 'departments');
@@ -72,13 +82,17 @@ describe('ManufacturingWorkspaceRoutingModule', () => {
     ]);
   });
 
-  it('routes daily production to the focused multi-stage workspace with production view and record access', () => {
+  it('routes daily production with the existing view, record, or approve access contract', () => {
     const route = childRoutes.find(item => item.path === 'daily-production-operations');
 
     expect(route?.component).toBe(DailyProductionOperationsPageComponent);
     expect(route?.canMatch).toContain(PermissionCanMatchGuard);
     expect(route?.canActivate).toContain(PermissionCanActivateGuard);
-    expect(route?.data?.['requireAll']).toEqual([PERMISSIONS.production.view, PERMISSIONS.production.record]);
+    expect(route?.data?.['requireAny']).toEqual([
+      PERMISSIONS.production.view,
+      PERMISSIONS.production.record,
+      PERMISSIONS.production.approve
+    ]);
   });
 
   it('routes reports to the quantities workspace with the dedicated report permission', () => {

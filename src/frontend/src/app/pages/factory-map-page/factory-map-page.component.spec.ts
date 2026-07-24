@@ -1,7 +1,7 @@
 import { Subject, of, throwError } from 'rxjs';
 import { ManufacturingCommandCenterApiService } from '../../core/services/manufacturing-command-center-api.service';
 import { ManufacturingRealtimeService } from '../../core/services/manufacturing-realtime.service';
-import { ManufacturingCommandCenter } from '../../shared/models/manufacturing-command-center.model';
+import { CommandCenterOperation, ManufacturingCommandCenter } from '../../shared/models/manufacturing-command-center.model';
 import { FactoryMapPageComponent } from './factory-map-page.component';
 
 describe('FactoryMapPageComponent', () => {
@@ -14,9 +14,10 @@ describe('FactoryMapPageComponent', () => {
 
     component.ngOnInit();
 
-    expect(component.readinessLabel('StaffingShortage')).toBe('نقص عمالة');
     expect(component.operationLabel('Draft')).toBe('مسودة تحتاج استكمالًا');
     expect(component.data?.factories[0].departments[0].lines[0].stagesWithoutPresentWorker).toBe(1);
+    expect(component.lineDimensions(component.data!.factories[0].departments[0].lines[0]).map(dimension => dimension.key))
+      .toEqual(['execution', 'route', 'staffing', 'data']);
   });
 
   it('keeps expanded state during a realtime refresh', () => {
@@ -62,6 +63,7 @@ describe('FactoryMapPageComponent', () => {
 
     const selectedFilters = { ...component.filters, productionLineId: 'line-2', factoryId: 'factory-1' };
     component.onFiltersChange(selectedFilters);
+    expect(component.dataIsCurrent).toBeFalse();
     first.next(sampleMap());
     second.next({ ...sampleMap(), scope: { ...sampleMap().scope, factoryId: 'factory-1', productionLineId: 'line-2', description: 'line scope' }, factories: [] });
     second.complete();
@@ -71,7 +73,42 @@ describe('FactoryMapPageComponent', () => {
     expect(component.data?.factories).toEqual([]);
     expect(component.hasLoadError).toBeFalse();
   });
+
+  it('orders intervention lines first and applies the severity color to the line container', () => {
+    const api = jasmine.createSpyObj<ManufacturingCommandCenterApiService>('api', ['load']);
+    const realtime = jasmine.createSpyObj<ManufacturingRealtimeService>('realtime', ['watchScreen']);
+    realtime.watchScreen.and.returnValue(() => undefined);
+    api.load.and.returnValue(of(sampleMap()));
+    const component = new FactoryMapPageComponent(api, realtime);
+    component.ngOnInit();
+    const intervention = component.data!.factories[0].departments[0].lines[0];
+    const healthy = {
+      ...intervention,
+      id: 'line-healthy',
+      name: 'خط سليم',
+      readinessStatus: 'Ready' as const,
+      presentPermanentlyAssignedWorkers: 1,
+      stagesCoveredByPresentWorker: 1,
+      stagesWithoutPresentWorker: 0,
+      alerts: [],
+      operations: [approvedOperation()]
+    };
+
+    expect(component.sortedLines([healthy, intervention]).map(line => line.id)).toEqual(['line-1', 'line-healthy']);
+    expect(component.lineContainerClass(intervention)).toBe('line-state-critical');
+    expect(component.lineContainerClass(healthy)).toBe('line-state-ok');
+  });
 });
+
+function approvedOperation(): CommandCenterOperation {
+  return {
+    productionOrderId: 'order-approved', productionLineId: 'line-healthy', productModelId: 'model', productModelCode: 'M', productModelName: 'موديل',
+    status: 'Approved', finalLineQuantity: 10, recordedStageValue: 20, registeredStages: 1, journeyStages: 1,
+    stageRegistrationCoverage: { numerator: 1, denominator: 1, percentage: 100, scope: 'scope', date: '2026-07-22', zeroBehavior: 'Calculated' },
+    lastReliableUpdateUtc: '2026-07-22T08:00:00Z',
+    stages: [{ productModelStageId: 'pms', subStageId: 'stage', mainStageName: 'رئيسية', stageCode: 'S', stageName: 'مرحلة', stageOrder: 1, requiredWorkers: 1, permanentlyAssignedWorkers: 1, presentPermanentlyAssignedWorkers: 1, hasPrice: true, hasStandardTime: true, isRegistered: true, alerts: [] }]
+  };
+}
 
 function sampleMap(): ManufacturingCommandCenter {
   return {

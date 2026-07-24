@@ -1,5 +1,14 @@
 export type RealtimeConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'reconnecting';
 
+export function realtimeConnectionStatusLabel(status: RealtimeConnectionStatus): string {
+  return ({
+    connected: 'متصل لحظيًا',
+    connecting: 'جارٍ الاتصال',
+    reconnecting: 'جارٍ إعادة الاتصال',
+    disconnected: 'غير متصل'
+  } as const)[status];
+}
+
 export type ManufacturingEntityType = 'Factory' | 'Department' | 'ProductionLine' | 'MainStage' | 'SubStage' | 'ProductModel' | 'ProductModelStage' | 'ProductionOrder' | 'StageProductionRecord' | 'AttendanceRecord' | 'Worker' | 'WorkerDefaultAssignment';
 export type ManufacturingChangeType = 'Created' | 'Updated' | 'Deleted' | 'Activated' | 'Deactivated' | 'Reordered' | 'RelationshipChanged' | 'permanent-assignment-created' | 'permanent-assignment-updated' | 'permanent-assignment-cancelled';
 

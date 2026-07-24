@@ -1,7 +1,7 @@
 import { Subject, of, throwError } from 'rxjs';
 import { ManufacturingCommandCenterApiService } from '../../core/services/manufacturing-command-center-api.service';
 import { ManufacturingRealtimeService } from '../../core/services/manufacturing-realtime.service';
-import { ManufacturingCommandCenter } from '../../shared/models/manufacturing-command-center.model';
+import { CommandCenterLine, CommandCenterOperation, ManufacturingCommandCenter } from '../../shared/models/manufacturing-command-center.model';
 import { DashboardPageComponent } from './dashboard-page.component';
 
 describe('DashboardPageComponent', () => {
@@ -63,6 +63,8 @@ describe('DashboardPageComponent', () => {
 
     const selectedFilters = { ...component.filters, factoryId: 'factory-new' };
     component.onFiltersChange(selectedFilters);
+    expect(component.dataIsCurrent).toBeFalse();
+    expect(component.problemLines).toEqual([]);
     first.error(new Error('stale request failed'));
     second.next({ ...sampleData(), scope: { ...sampleData().scope, factoryId: 'factory-new', description: 'new scope' } });
     second.complete();
@@ -72,7 +74,55 @@ describe('DashboardPageComponent', () => {
     expect(component.hasLoadError).toBeFalse();
     expect(component.ratioText(0)).toBe('0%');
   });
+
+  it('shows only intervention lines, orders them by severity, and exposes four independent status dimensions', () => {
+    const api = jasmine.createSpyObj<ManufacturingCommandCenterApiService>('api', ['load']);
+    const realtime = jasmine.createSpyObj<ManufacturingRealtimeService>('realtime', ['watchScreen']);
+    realtime.watchScreen.and.returnValue(() => undefined);
+    const healthy = line('healthy', 'Ready', [operation('Approved')]);
+    const draft = line('draft', 'Ready', [operation('Draft')]);
+    const cancelled = line('cancelled', 'Ready', [operation('Cancelled')]);
+    const response = sampleData();
+    response.factories = [{
+      id: 'factory-1', name: 'مصنع', code: 'F', activeDepartments: 1, activeLines: 3,
+      presentPermanentlyAssignedWorkers: 3, problemLines: 2, draftOperations: 1, approvedOperations: 1,
+      departments: [{
+        id: 'department-1', name: 'قسم', code: 'D', activeLines: 3,
+        presentPermanentlyAssignedWorkers: 3, permanentlyAssignedWorkers: 3, presentUnassignedWorkers: 0,
+        readyLines: 3, notReadyLines: 0, draftOperations: 1, approvedOperations: 1,
+        workforceAttributionNote: '', lines: [healthy, draft, cancelled]
+      }]
+    }];
+    api.load.and.returnValue(of(response));
+    const component = new DashboardPageComponent(api, realtime);
+
+    component.ngOnInit();
+
+    expect(component.problemLines.map(problem => problem.line.id)).toEqual(['cancelled', 'draft']);
+    expect(component.problemLines[0].reasons).toContain('يوجد تشغيل ملغى');
+    expect(component.lineDimensions(draft).map(dimension => dimension.key)).toEqual(['execution', 'route', 'staffing', 'data']);
+    expect(component.lineDimensions(draft).find(dimension => dimension.key === 'execution')?.value).toBe('مسودة تحتاج استكمالًا');
+  });
 });
+
+function operation(status: CommandCenterOperation['status']): CommandCenterOperation {
+  return {
+    productionOrderId: `order-${status}`, productionLineId: 'line', productModelId: 'model', productModelCode: 'M', productModelName: 'موديل',
+    status, finalLineQuantity: 10, recordedStageValue: 20, registeredStages: 1, journeyStages: 1,
+    stageRegistrationCoverage: { numerator: 1, denominator: 1, percentage: 100, scope: 'scope', date: '2026-07-22', zeroBehavior: 'Calculated' },
+    lastReliableUpdateUtc: '2026-07-22T08:00:00Z',
+    stages: [{ productModelStageId: 'pms', subStageId: 'stage', mainStageName: 'رئيسية', stageCode: 'S', stageName: 'مرحلة', stageOrder: 1, requiredWorkers: 1, permanentlyAssignedWorkers: 1, presentPermanentlyAssignedWorkers: 1, hasPrice: true, hasStandardTime: true, isRegistered: true, alerts: [] }]
+  };
+}
+
+function line(id: string, readinessStatus: CommandCenterLine['readinessStatus'], operations: CommandCenterOperation[]): CommandCenterLine {
+  return {
+    id, factoryId: 'factory-1', departmentId: 'department-1', name: id, code: id, readinessStatus,
+    permanentlyAssignedWorkers: 1, presentPermanentlyAssignedWorkers: 1, requiredWorkers: 1,
+    journeyStages: 1, stagesCoveredByPresentWorker: 1, stagesWithoutPresentWorker: 0,
+    lastReliableUpdateUtc: '2026-07-22T08:00:00Z', alerts: [], operations
+  };
+}
 
 function sampleData(): ManufacturingCommandCenter {
   return {
