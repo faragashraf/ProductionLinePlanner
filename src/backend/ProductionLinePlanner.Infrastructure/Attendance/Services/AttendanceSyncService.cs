@@ -440,11 +440,13 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
         }
         catch (Exception exception)
         {
-            await FailAttendanceBatchAsync(sourceBatch, "ApplicationWorkerReadFailed");
+            await RetryAttendanceBatchAsync(sourceBatch, "ApplicationWorkerReadFailed");
             _logger.LogError(exception, "Failed to read application workers during attendance sync.");
             return Result<AttendanceSyncResultDto>.Failure(new Error("AttendanceSourceError", "Unable to connect to attendance source or read required tables."));
         }
 
+        try
+        {
         var sourceUsersCount = sourceBatch.SourceUsersCount;
         var sourceCheckInsCount = sourceCheckIns.Length;
         _logger.LogInformation(
@@ -490,6 +492,7 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
                 cancellationToken);
             if (emptyBatchAcknowledgement.IsFailure)
             {
+                await RetryAttendanceBatchAsync(sourceBatch, "AttendanceAcknowledgementFailed");
                 return Result<AttendanceSyncResultDto>.Failure(emptyBatchAcknowledgement.Error!);
             }
 
@@ -672,14 +675,24 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
             updateCount++;
         }
 
-        try
+        await _appDbContext.SaveChangesAsync(cancellationToken);
+
+        var claimedInboxIds = sourceCheckIns
+            .Where(punch => punch.SourceRecordId.HasValue)
+            .Select(punch => punch.SourceRecordId!.Value)
+            .ToHashSet();
+        var unresolvedClaimedInboxIds = claimedInboxIds
+            .Except(processingOutcomes.Keys)
+            .ToArray();
+        foreach (var inboxId in unresolvedClaimedInboxIds)
         {
-            await _appDbContext.SaveChangesAsync(cancellationToken);
+            processingOutcomes[inboxId] = SourceProcessingOutcome.Failed(inboxId, "AttendanceResolutionMissing");
         }
-        catch
+        if (unresolvedClaimedInboxIds.Length > 0)
         {
-            await FailAttendanceBatchAsync(sourceBatch, "AttendancePersistenceFailed");
-            throw;
+            _logger.LogError(
+                "Attendance staging resolution did not produce an explicit outcome for every claimed row. unresolvedClaimedCount={UnresolvedClaimedCount}",
+                unresolvedClaimedInboxIds.Length);
         }
 
         var acknowledgement = await _attendanceSource.CompleteAsync(
@@ -688,6 +701,7 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
             cancellationToken);
         if (acknowledgement.IsFailure)
         {
+            await RetryAttendanceBatchAsync(sourceBatch, "AttendanceAcknowledgementFailed");
             return Result<AttendanceSyncResultDto>.Failure(acknowledgement.Error!);
         }
 
@@ -754,18 +768,36 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
             UpdatedRecords = updateCount,
             SkippedRecords = unchangedCount
         });
+        }
+        catch (OperationCanceledException)
+        {
+            await RetryAttendanceBatchAsync(sourceBatch, "AttendanceProcessingCancelled");
+            throw;
+        }
+        catch (Exception exception)
+        {
+            await RetryAttendanceBatchAsync(sourceBatch, "AttendanceProcessingFailed");
+            _logger.LogError(
+                exception,
+                "Attendance staging processing failed after rows were claimed. claimedCount={ClaimedCount}, leaseId={LeaseId}",
+                sourceCheckIns.Count(punch => punch.SourceRecordId.HasValue),
+                sourceBatch.LeaseId);
+            return Result<AttendanceSyncResultDto>.Failure(new Error(
+                "AttendanceProcessingFailed",
+                "Attendance staging rows were released for retry after processing failed."));
+        }
     }
 
-    private async Task FailAttendanceBatchAsync(AttendanceSourceBatch batch, string errorCode)
+    private async Task RetryAttendanceBatchAsync(AttendanceSourceBatch batch, string errorCode)
     {
         var outcomes = batch.Punches
             .Where(punch => punch.SourceRecordId.HasValue)
-            .Select(punch => SourceProcessingOutcome.Failed(punch.SourceRecordId!.Value, errorCode))
+            .Select(punch => SourceProcessingOutcome.Retry(punch.SourceRecordId!.Value, errorCode))
             .ToArray();
         var result = await _attendanceSource.CompleteAsync(batch, outcomes, CancellationToken.None);
         if (result.IsFailure)
         {
-            _logger.LogWarning("Attendance staging rows could not be released after a failed domain transaction.");
+            _logger.LogWarning("Attendance staging rows could not be released for retry after processing failed.");
         }
     }
 

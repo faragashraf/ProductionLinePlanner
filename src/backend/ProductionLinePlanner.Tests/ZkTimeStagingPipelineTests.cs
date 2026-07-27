@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using ProductionLinePlanner.Application.Abstractions;
@@ -145,6 +146,13 @@ public sealed class ZkTimeStagingPipelineTests
         Assert.Empty(publisher.Changes);
         await using var reloaded = fixture.CreateDbContext();
         Assert.Empty(await reloaded.AttendanceRecords.ToArrayAsync());
+
+        var claimedBatches = fixture.Source.AttendanceClaims.Count;
+        var replay = await fixture.RunAsync();
+
+        Assert.True(replay.IsSuccess, replay.Error?.Message);
+        Assert.Equal(claimedBatches, fixture.Source.AttendanceClaims.Count);
+        Assert.Contains(101, fixture.Source.SkippedPunchIds);
     }
 
     [Fact]
@@ -160,6 +168,7 @@ public sealed class ZkTimeStagingPipelineTests
         Assert.True(second.IsSuccess, second.Error?.Message);
         Assert.Contains(101, fixture.Source.FailedPunchIds);
         Assert.DoesNotContain(101, fixture.Source.PendingPunchIds);
+        Assert.Equal(2, fixture.Source.GetPunchInbox(101).AttemptCount);
     }
 
     [Fact]
@@ -254,6 +263,56 @@ public sealed class ZkTimeStagingPipelineTests
         Assert.Empty(publisher.Changes);
     }
 
+    [Fact]
+    public async Task Claimed_rows_receive_a_lease_and_every_claimed_row_is_completed_once()
+    {
+        await using var fixture = await Fixture.CreateAsync(includeExistingWorker: false);
+        fixture.Source.AddWorkers(Worker(1, 17252, "2429"));
+        fixture.Source.AddPunches(
+            Punch(101, 17252, "2429", 8, 5, "I"),
+            Punch(102, 17252, "2429", 17, 10, "O"));
+
+        var result = await fixture.RunAsync();
+
+        Assert.True(result.IsSuccess, result.Error?.Message);
+        Assert.Single(fixture.Source.AttendanceClaims);
+        var claim = fixture.Source.AttendanceClaims.Single();
+        Assert.NotEqual(Guid.Empty, claim.LeaseId);
+        Assert.Equal([101L, 102L], claim.InboxIds);
+        Assert.Equal([101L, 102L], fixture.Source.AttendanceCompletions.Single().InboxIds);
+        Assert.All([101L, 102L], inboxId =>
+        {
+            var row = fixture.Source.GetPunchInbox(inboxId);
+            Assert.Equal(FakeStagingSource.State.Processed, row.State);
+            Assert.Equal(1, row.AttemptCount);
+            Assert.Null(row.ProcessingLeaseId);
+        });
+    }
+
+    [Fact]
+    public async Task Domain_failure_after_claim_releases_every_row_for_retry_without_leaving_a_lease()
+    {
+        await using var fixture = await Fixture.CreateAsync(
+            includeExistingWorker: false,
+            throwDuringAttendancePersistence: true);
+        fixture.Source.AddWorkers(Worker(1, 17252, "2429"));
+        fixture.Source.AddPunches(
+            Punch(101, 17252, "2429", 8, 5, "I"),
+            Punch(102, 17252, "2429", 17, 10, "O"));
+
+        var result = await fixture.RunAsync();
+
+        Assert.True(result.IsFailure);
+        Assert.All([101L, 102L], inboxId =>
+        {
+            var row = fixture.Source.GetPunchInbox(inboxId);
+            Assert.Equal(FakeStagingSource.State.Pending, row.State);
+            Assert.Equal(1, row.AttemptCount);
+            Assert.Null(row.ProcessingLeaseId);
+        });
+        Assert.Equal([101L, 102L], fixture.Source.AttendanceCompletions.Single().InboxIds);
+    }
+
     private static WorkerIdentitySourceItem Worker(long id, int userId, string badge, string? name = null) =>
         new(id, new AttendanceEmployeeRecord(
             userId.ToString(), 1, badge, name ?? $"Worker {badge}", true, badge), true);
@@ -284,12 +343,17 @@ public sealed class ZkTimeStagingPipelineTests
         public static async Task<Fixture> CreateAsync(
             bool includeExistingWorker = true,
             IManufacturingDataChangePublisher? publisher = null,
-            int maximumAttempts = 5)
+            int maximumAttempts = 5,
+            bool throwDuringAttendancePersistence = false)
         {
             var connection = new SqliteConnection($"Data Source=file:{Guid.NewGuid():N}?mode=memory&cache=shared");
             await connection.OpenAsync();
             connection.CreateCollation("SQL_Latin1_General_CP1_CI_AS", StringComparer.OrdinalIgnoreCase.Compare);
             var optionsBuilder = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection);
+            if (throwDuringAttendancePersistence)
+            {
+                optionsBuilder.AddInterceptors(new ThrowOnAttendancePersistenceInterceptor());
+            }
             if (publisher is not null)
             {
                 var coordinator = new ManufacturingDataChangeTransactionCoordinator(
@@ -346,13 +410,21 @@ public sealed class ZkTimeStagingPipelineTests
     private sealed class FakeStagingSource(int maximumAttempts) : IWorkerIdentitySource, IAttendanceSource
     {
         private readonly Dictionary<long, (WorkerIdentitySourceItem Item, State State, int Attempts)> workers = [];
-        private readonly Dictionary<long, (AttendanceSourcePunch Punch, State State, int Attempts)> punches = [];
+        private readonly Dictionary<long, PunchInboxRow> punches = [];
 
         public IReadOnlySet<long> ProcessedWorkerIds => workers.Where(row => row.Value.State == State.Processed).Select(row => row.Key).ToHashSet();
         public IReadOnlySet<long> ProcessedPunchIds => punches.Where(row => row.Value.State == State.Processed).Select(row => row.Key).ToHashSet();
         public IReadOnlySet<long> PendingPunchIds => punches.Where(row => row.Value.State == State.Pending).Select(row => row.Key).ToHashSet();
         public IReadOnlySet<long> SkippedPunchIds => punches.Where(row => row.Value.State == State.Skipped).Select(row => row.Key).ToHashSet();
         public IReadOnlySet<long> FailedPunchIds => punches.Where(row => row.Value.State == State.Failed).Select(row => row.Key).ToHashSet();
+        public List<AttendanceClaim> AttendanceClaims { get; } = [];
+        public List<AttendanceCompletion> AttendanceCompletions { get; } = [];
+
+        public PunchInboxSnapshot GetPunchInbox(long inboxId)
+        {
+            var row = punches[inboxId];
+            return new PunchInboxSnapshot(row.State, row.Attempts, row.ProcessingLeaseId);
+        }
 
         public void AddWorkers(params WorkerIdentitySourceItem[] rows)
         {
@@ -361,7 +433,7 @@ public sealed class ZkTimeStagingPipelineTests
 
         public void AddPunches(params AttendanceSourcePunch[] rows)
         {
-            foreach (var row in rows) punches[row.SourceRecordId!.Value] = (row, State.Pending, 0);
+            foreach (var row in rows) punches[row.SourceRecordId!.Value] = new PunchInboxRow(row);
         }
 
         public Task<Result<AttendanceEmployeeRecord?>> GetByAttendanceUserIdAsync(string attendanceUserId, CancellationToken cancellationToken = default) =>
@@ -399,15 +471,34 @@ public sealed class ZkTimeStagingPipelineTests
 
         public Task<Result<AttendanceSourceBatch>> ClaimAsync(DateTime startLocal, DateTime endLocal, CancellationToken cancellationToken = default)
         {
+            var leaseId = Guid.NewGuid();
+            var claimed = punches
+                .Where(row => row.Value.State == State.Pending &&
+                              row.Value.Punch.CheckTimeLocal >= startLocal &&
+                              row.Value.Punch.CheckTimeLocal < endLocal)
+                .Select(row => row.Key)
+                .ToHashSet();
+            foreach (var inboxId in claimed)
+            {
+                var row = punches[inboxId];
+                row.State = State.Processing;
+                row.Attempts++;
+                row.ProcessingLeaseId = leaseId;
+            }
+
             var rows = punches.Values
                 .Where(row => row.Punch.CheckTimeLocal >= startLocal && row.Punch.CheckTimeLocal < endLocal)
-                .Select(row => row.State == State.Pending
+                .Select(row => claimed.Contains(row.Punch.SourceRecordId!.Value)
                     ? row.Punch
                     : row.Punch with { SourceRecordId = null })
                 .OrderBy(row => row.CheckTimeLocal)
                 .ToArray();
+            if (claimed.Count > 0)
+            {
+                AttendanceClaims.Add(new AttendanceClaim(leaseId, claimed.OrderBy(inboxId => inboxId).ToArray()));
+            }
             return Task.FromResult(Result<AttendanceSourceBatch>.Success(new(
-                Guid.NewGuid(),
+                claimed.Count > 0 ? leaseId : null,
                 rows.Select(row => row.UserId).Distinct().Count(),
                 rows,
                 true)));
@@ -418,7 +509,19 @@ public sealed class ZkTimeStagingPipelineTests
             foreach (var outcome in outcomes)
             {
                 var row = punches[outcome.SourceRecordId];
-                punches[outcome.SourceRecordId] = (row.Punch, ResolveState(outcome, row.Attempts + 1), row.Attempts + 1);
+                if (row.State != State.Processing || row.ProcessingLeaseId != batch.LeaseId)
+                {
+                    continue;
+                }
+
+                row.State = ResolveState(outcome, row.Attempts);
+                row.ProcessingLeaseId = null;
+            }
+            if (batch.LeaseId.HasValue && outcomes.Count > 0)
+            {
+                AttendanceCompletions.Add(new AttendanceCompletion(
+                    batch.LeaseId.Value,
+                    outcomes.Select(outcome => outcome.SourceRecordId).OrderBy(inboxId => inboxId).ToArray()));
             }
             return Task.FromResult(Result.Success());
         }
@@ -432,7 +535,42 @@ public sealed class ZkTimeStagingPipelineTests
             _ => State.Pending
         };
 
-        private enum State { Pending, Processed, Skipped, Failed }
+        private sealed class PunchInboxRow(AttendanceSourcePunch punch)
+        {
+            public AttendanceSourcePunch Punch { get; } = punch;
+            public State State { get; set; } = State.Pending;
+            public int Attempts { get; set; }
+            public Guid? ProcessingLeaseId { get; set; }
+        }
+
+        public sealed record AttendanceClaim(Guid LeaseId, long[] InboxIds);
+        public sealed record AttendanceCompletion(Guid LeaseId, long[] InboxIds);
+        public sealed record PunchInboxSnapshot(State State, int AttemptCount, Guid? ProcessingLeaseId);
+        public enum State { Pending, Processing, Processed, Skipped, Failed }
+    }
+
+    private sealed class ThrowOnAttendancePersistenceInterceptor : SaveChangesInterceptor
+    {
+        public override InterceptionResult<int> SavingChanges(
+            DbContextEventData eventData,
+            InterceptionResult<int> result)
+        {
+            if (eventData.Context?.ChangeTracker.Entries<AttendanceRecord>().Any(entry => entry.State == EntityState.Added) == true)
+            {
+                throw new InvalidOperationException("Synthetic attendance persistence failure.");
+            }
+
+            return result;
+        }
+
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            var intercepted = SavingChanges(eventData, result);
+            return ValueTask.FromResult(intercepted);
+        }
     }
 
     private sealed class RecordingPublisher : IManufacturingDataChangePublisher

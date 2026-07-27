@@ -51,6 +51,17 @@ public sealed class ZkTimeStagingSqlContractTests
     }
 
     [Fact]
+    public void Pending_date_backlog_uses_the_same_calendar_day_contract_as_attendance_claims()
+    {
+        var processing = Read("database/zktime-staging/004-create-processing-procedures.sql");
+        var pendingDates = processing[processing.IndexOf("ALTER PROCEDURE dbo.usp_ZkAttendanceInboxPendingDates", StringComparison.OrdinalIgnoreCase)..];
+
+        Assert.Contains("CONVERT(date, SourceCheckTimeLocal) AS ProductionDate", pendingDates, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("DATEADD(DAY, -1, SourceCheckTimeLocal)", pendingDates, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("same calendar-day contract used by usp_ZkAttendanceInboxClaim", pendingDates, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void Agent_job_has_separate_steps_failure_path_and_five_minute_schedule()
     {
         var job = Read("database/zktime-staging/010-create-sql-agent-job.sql");

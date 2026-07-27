@@ -295,16 +295,18 @@ ALTER PROCEDURE dbo.usp_ZkAttendanceInboxPendingDates
 AS
 BEGIN
     SET NOCOUNT ON;
+    -- Retained for compatibility with existing callers. Backlog dates deliberately follow
+    -- the same calendar-day contract used by usp_ZkAttendanceInboxClaim.
     IF @MaximumDates < 1 OR @MaximumDates > 31 THROW 51221, 'MaximumDates must be between 1 and 31.', 1;
     IF @MaxAttempts < 1 OR @MaxAttempts > 100 THROW 51222, 'MaxAttempts must be between 1 and 100.', 1;
     IF @LeaseMinutes < 1 OR @LeaseMinutes > 120 THROW 51223, 'LeaseMinutes must be between 1 and 120.', 1;
 
+    -- AttendanceSyncService claims raw inbox records with calendar-day local bounds.
+    -- Do not derive an operational day here: a 02:00 punch could otherwise be returned
+    -- as the prior production date while the claim for that prior calendar day cannot see it.
+    -- @DayStartTime remains in the signature for backwards-compatible callers.
     SELECT TOP (@MaximumDates)
-        CONVERT(date,
-            CASE
-                WHEN CONVERT(time(7), SourceCheckTimeLocal) < @DayStartTime THEN DATEADD(DAY, -1, SourceCheckTimeLocal)
-                ELSE SourceCheckTimeLocal
-            END) AS ProductionDate
+        CONVERT(date, SourceCheckTimeLocal) AS ProductionDate
     FROM dbo.ZkAttendanceSyncInbox
     WHERE
         (
@@ -312,11 +314,7 @@ BEGIN
             OR (ProcessingStatus = 'Processing' AND ProcessingStartedAtUtc < DATEADD(MINUTE, -@LeaseMinutes, SYSUTCDATETIME()))
         )
       AND AttemptCount < @MaxAttempts
-    GROUP BY CONVERT(date,
-        CASE
-            WHEN CONVERT(time(7), SourceCheckTimeLocal) < @DayStartTime THEN DATEADD(DAY, -1, SourceCheckTimeLocal)
-            ELSE SourceCheckTimeLocal
-        END)
+    GROUP BY CONVERT(date, SourceCheckTimeLocal)
     ORDER BY ProductionDate;
 END;
 GO

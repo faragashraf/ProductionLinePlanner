@@ -203,6 +203,14 @@ public sealed class ZkTimeStagingSource(
                 }
             }
 
+            var claimedCount = punches.Count(punch => punch.SourceRecordId.HasValue);
+            logger.LogInformation(
+                "ZKTime staging attendance rows claimed. claimedCount={ClaimedCount}, leaseId={LeaseId}, startLocal={StartLocal}, endLocal={EndLocal}",
+                claimedCount,
+                leaseId,
+                startLocal,
+                endLocal);
+
             return Result<AttendanceSourceBatch>.Success(new AttendanceSourceBatch(
                 leaseId,
                 sourceUsersCount,
@@ -381,12 +389,13 @@ public sealed class ZkTimeStagingSource(
                 .Select(group => new { Code = group.Key, Count = group.Count() })
                 .ToArray();
             logger.LogInformation(
-                "ZKTime staging batch acknowledged. inbox={InboxType}, processed={ProcessedCount}, skipped={SkippedCount}, failed={FailedCount}, retried={RetryCount}, reasonCodes={ReasonCodes}",
+                "ZKTime staging batch completed. inbox={InboxType}, leaseId={LeaseId}, completedProcessedCount={CompletedProcessedCount}, completedSkippedCount={CompletedSkippedCount}, completedPendingCount={CompletedPendingCount}, completedFailedCount={CompletedFailedCount}, reasonCodes={ReasonCodes}",
                 procedureName.Contains("Worker", StringComparison.Ordinal) ? "Worker" : "Attendance",
+                leaseId,
                 grouped.GetValueOrDefault(SourceProcessingDisposition.Processed),
                 grouped.GetValueOrDefault(SourceProcessingDisposition.Skipped),
-                grouped.GetValueOrDefault(SourceProcessingDisposition.Failed),
                 grouped.GetValueOrDefault(SourceProcessingDisposition.Pending),
+                grouped.GetValueOrDefault(SourceProcessingDisposition.Failed),
                 topReasonCodes);
             return Result.Success();
         }
