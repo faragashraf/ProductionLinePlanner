@@ -70,12 +70,12 @@ public sealed class ManufacturingDataChangeSaveChangesInterceptor(
         if (context is null) return;
 
         var actorUserId = currentUserService.UserId;
-        var changes = context.ChangeTracker.Entries()
+        var changes = CoalesceBatchInvalidations(context.ChangeTracker.Entries()
             .Where(entry => entry.State is EntityState.Added or EntityState.Modified or EntityState.Deleted)
             .Select(entry => CreateChange(entry, actorUserId))
             .Where(change => change is not null)
             .Cast<ManufacturingDataChanged>()
-            .ToArray();
+            .ToArray());
 
         if (changes.Length > 0)
         {
@@ -83,6 +83,35 @@ public sealed class ManufacturingDataChangeSaveChangesInterceptor(
                 changes,
                 context.Database.CurrentTransaction?.GetDbTransaction());
         }
+    }
+
+    private static ManufacturingDataChanged[] CoalesceBatchInvalidations(IReadOnlyCollection<ManufacturingDataChanged> changes)
+    {
+        var batchTypes = new[] { ManufacturingEntityType.Worker, ManufacturingEntityType.AttendanceRecord };
+        var result = changes.Where(change => !batchTypes.Contains(change.EntityType)).ToList();
+
+        foreach (var entityType in batchTypes)
+        {
+            var batch = changes.Where(change => change.EntityType == entityType).ToArray();
+            if (batch.Length == 0) continue;
+            if (batch.Length == 1)
+            {
+                result.Add(batch[0]);
+                continue;
+            }
+
+            var representative = batch[0];
+            result.Add(new ManufacturingDataChanged(
+                Guid.NewGuid(),
+                entityType,
+                ManufacturingChangeType.Updated,
+                Guid.Empty,
+                batch.Max(change => change.OccurredAtUtc),
+                representative.ActorUserId,
+                representative.CorrelationId));
+        }
+
+        return result.ToArray();
     }
 
     private async Task PublishAfterSaveAsync(DbContext? context, CancellationToken cancellationToken)

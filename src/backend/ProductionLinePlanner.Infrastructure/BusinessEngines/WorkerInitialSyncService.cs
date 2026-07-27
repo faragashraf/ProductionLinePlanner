@@ -18,7 +18,7 @@ namespace ProductionLinePlanner.Infrastructure.BusinessEngines;
 /// </summary>
 public sealed class WorkerInitialSyncService(
     AppDbContext dbContext,
-    IAttendanceEmployeeReader attendanceEmployeeReader,
+    IWorkerIdentitySource workerIdentitySource,
     IWorkerSyncPolicy workerSyncPolicy,
     IAuthoritativeWorkerSnapshotValidator snapshotValidator,
     IAuditEngine auditEngine,
@@ -27,7 +27,7 @@ public sealed class WorkerInitialSyncService(
     public async Task<Result<WorkerActiveServiceSyncPreviewDto>> PreviewActiveServiceSyncAsync(
         CancellationToken cancellationToken = default)
     {
-        var sourceResult = await ReadSourceSnapshotAsync(cancellationToken);
+        var sourceResult = await ReadSourceSnapshotAsync(claim: false, cancellationToken);
         if (sourceResult.IsFailure)
         {
             return Result<WorkerActiveServiceSyncPreviewDto>.Failure(sourceResult.Error!);
@@ -66,7 +66,7 @@ public sealed class WorkerInitialSyncService(
         CancellationToken cancellationToken)
     {
         var startedAtUtc = DateTime.UtcNow;
-        var sourceResult = await ReadSourceSnapshotAsync(cancellationToken);
+        var sourceResult = await ReadSourceSnapshotAsync(claim: true, cancellationToken);
         if (sourceResult.IsFailure)
         {
             return Result<WorkerInitialSyncResultDto>.Failure(sourceResult.Error!);
@@ -80,11 +80,16 @@ public sealed class WorkerInitialSyncService(
         var createdCount = 0;
         var updatedCount = 0;
 
-        foreach (var candidate in plan.Rows.Where(row => row.Preview.Action == WorkerSyncActions.NewWorkerCandidate))
+        var failedSourceIds = new HashSet<long>();
+        foreach (var candidate in plan.Rows.Where(row => row.IsClaimed && row.Preview.Action == WorkerSyncActions.NewWorkerCandidate))
         {
             var workerResult = workerSyncPolicy.CreateNewWorker(candidate.Source!, DateTime.UtcNow);
             if (workerResult.IsFailure)
             {
+                if (candidate.SourceRecordId.HasValue)
+                {
+                    failedSourceIds.Add(candidate.SourceRecordId.Value);
+                }
                 continue;
             }
 
@@ -92,7 +97,7 @@ public sealed class WorkerInitialSyncService(
             createdCount++;
         }
 
-        foreach (var existing in plan.Rows.Where(row => row.Preview.Action == WorkerSyncActions.ExistingWorkerUpdated))
+        foreach (var existing in plan.Rows.Where(row => row.IsClaimed && row.Preview.Action == WorkerSyncActions.ExistingWorkerUpdated))
         {
             if (existing.Worker is not null &&
                 workerSyncPolicy.SynchronizeExistingWorker(existing.Worker, existing.Source!, DateTime.UtcNow))
@@ -108,7 +113,7 @@ public sealed class WorkerInitialSyncService(
         var unchangedCount = plan.Rows.Count(row => row.Preview.Action == WorkerSyncActions.ExistingWorkerUnchanged);
         var result = new WorkerInitialSyncResultDto
         {
-            SourceCount = sourceResult.Value!.Rows.Count,
+            SourceCount = sourceResult.Value!.Snapshot.Rows.Count,
             CreatedCount = createdCount,
             UpdatedCount = updatedCount,
             UnchangedCount = unchangedCount,
@@ -147,38 +152,53 @@ public sealed class WorkerInitialSyncService(
         {
             await transaction.RollbackAsync(CancellationToken.None);
             logger.LogError(exception, "Worker identity synchronization failed before it could be committed.");
+            await FailClaimedWorkerRowsAsync(sourceResult.Value!.Batch, "WorkerPersistenceFailed");
             return Result<WorkerInitialSyncResultDto>.Failure(new Error(
                 "WorkerInitialSyncFailed",
                 "Unable to persist worker import results."));
         }
 
+        var acknowledgement = await workerIdentitySource.CompleteBatchAsync(
+            sourceResult.Value!.Batch,
+            CreateWorkerOutcomes(plan, failedSourceIds),
+            cancellationToken);
+        if (acknowledgement.IsFailure)
+        {
+            return Result<WorkerInitialSyncResultDto>.Failure(acknowledgement.Error!);
+        }
+
         return Result<WorkerInitialSyncResultDto>.Success(result);
     }
 
-    private async Task<Result<WorkerSourceSnapshot>> ReadSourceSnapshotAsync(CancellationToken cancellationToken)
+    private async Task<Result<WorkerSourceRead>> ReadSourceSnapshotAsync(
+        bool claim,
+        CancellationToken cancellationToken)
     {
         try
         {
-            var sourceResult = await attendanceEmployeeReader.GetAllAsync(cancellationToken);
+            var sourceResult = claim
+                ? await workerIdentitySource.ClaimBatchAsync(cancellationToken)
+                : await workerIdentitySource.ReadSnapshotAsync(cancellationToken);
             if (sourceResult.IsFailure)
             {
-                return Result<WorkerSourceSnapshot>.Failure(sourceResult.Error!);
+                return Result<WorkerSourceRead>.Failure(sourceResult.Error!);
             }
 
-            var orderedRows = (sourceResult.Value ?? [])
-                .OrderBy(row => WorkerSyncPolicy.Normalize(row.AttendanceUserId), StringComparer.OrdinalIgnoreCase)
-                .ThenBy(row => WorkerSyncPolicy.Normalize(row.BadgeNumber), StringComparer.OrdinalIgnoreCase)
-                .ThenBy(row => WorkerSyncPolicy.Normalize(row.EmployeeCode), StringComparer.OrdinalIgnoreCase)
-                .ThenBy(row => WorkerSyncPolicy.Normalize(row.Name), StringComparer.OrdinalIgnoreCase)
+            var orderedItems = sourceResult.Value!.Items
+                .OrderBy(item => WorkerSyncPolicy.Normalize(item.Worker.AttendanceUserId), StringComparer.OrdinalIgnoreCase)
+                .ThenBy(item => WorkerSyncPolicy.Normalize(item.Worker.BadgeNumber), StringComparer.OrdinalIgnoreCase)
+                .ThenBy(item => WorkerSyncPolicy.Normalize(item.Worker.EmployeeCode), StringComparer.OrdinalIgnoreCase)
+                .ThenBy(item => WorkerSyncPolicy.Normalize(item.Worker.Name), StringComparer.OrdinalIgnoreCase)
                 .ToArray();
 
-            return Result<WorkerSourceSnapshot>.Success(new WorkerSourceSnapshot(
-                orderedRows,
+            var snapshot = new WorkerSourceSnapshot(
+                orderedItems.Select(item => item.Worker).ToArray(),
                 IsComplete: false,
                 AbsenceIsAuthoritative: false,
                 EmploymentStatusIsAuthoritative: false,
                 DepartmentIsAuthoritative: false,
-                ShiftIsAuthoritative: false));
+                ShiftIsAuthoritative: false);
+            return Result<WorkerSourceRead>.Success(new WorkerSourceRead(snapshot, orderedItems, sourceResult.Value));
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -186,14 +206,15 @@ public sealed class WorkerInitialSyncService(
         }
         catch
         {
-            return Result<WorkerSourceSnapshot>.Failure(new Error(
+            return Result<WorkerSourceRead>.Failure(new Error(
                 "AttendanceSourceError",
                 "Unable to read worker data from attendance source."));
         }
     }
 
-    private WorkerSyncPlan BuildPlan(WorkerSourceSnapshot snapshot, IReadOnlyCollection<Worker> localWorkers)
+    private WorkerSyncPlan BuildPlan(WorkerSourceRead sourceRead, IReadOnlyCollection<Worker> localWorkers)
     {
+        var snapshot = sourceRead.Snapshot;
         var validation = snapshotValidator.Inspect(snapshot);
         var attendanceUsers = BuildLookup(localWorkers, worker => worker.AttendanceUserId);
         var badges = BuildLookup(localWorkers, worker => worker.BadgeNumber);
@@ -202,8 +223,9 @@ public sealed class WorkerInitialSyncService(
         var rows = new List<WorkerSyncPlanRow>();
 
         var sourceIndex = 0;
-        foreach (var source in snapshot.Rows)
+        foreach (var sourceItem in sourceRead.Items)
         {
+            var source = sourceItem.Worker;
             var sourceAttendanceUserId = WorkerSyncPolicy.Normalize(source.AttendanceUserId);
             var sourceBadge = WorkerSyncPolicy.Normalize(source.BadgeNumber);
             var sourceEmployeeCode = WorkerSyncPolicy.Normalize(source.EmployeeCode);
@@ -214,6 +236,8 @@ public sealed class WorkerInitialSyncService(
                 rows.Add(new WorkerSyncPlanRow(
                     source,
                     null,
+                    sourceItem.SourceRecordId,
+                    sourceItem.IsClaimed,
                     CreatePreviewRow(
                         WorkerSyncActions.UnsupportedSourceState,
                         null,
@@ -237,6 +261,8 @@ public sealed class WorkerInitialSyncService(
                 rows.Add(new WorkerSyncPlanRow(
                     source,
                     null,
+                    sourceItem.SourceRecordId,
+                    sourceItem.IsClaimed,
                     CreatePreviewRow(
                         WorkerSyncActions.IdentityConflict,
                         null,
@@ -261,6 +287,8 @@ public sealed class WorkerInitialSyncService(
                 rows.Add(new WorkerSyncPlanRow(
                     source,
                     null,
+                    sourceItem.SourceRecordId,
+                    sourceItem.IsClaimed,
                     CreatePreviewRow(
                         WorkerSyncActions.IdentityConflict,
                         null,
@@ -280,6 +308,8 @@ public sealed class WorkerInitialSyncService(
                 rows.Add(new WorkerSyncPlanRow(
                     source,
                     worker,
+                    sourceItem.SourceRecordId,
+                    sourceItem.IsClaimed,
                     CreatePreviewRow(
                         decision.Action,
                         worker,
@@ -297,6 +327,8 @@ public sealed class WorkerInitialSyncService(
             rows.Add(new WorkerSyncPlanRow(
                 source,
                 null,
+                sourceItem.SourceRecordId,
+                sourceItem.IsClaimed,
                 CreatePreviewRow(
                     createResult.IsSuccess ? WorkerSyncActions.NewWorkerCandidate : WorkerSyncActions.UnsupportedSourceState,
                     null,
@@ -314,6 +346,8 @@ public sealed class WorkerInitialSyncService(
             rows.Add(new WorkerSyncPlanRow(
                 null,
                 worker,
+                null,
+                false,
                 CreatePreviewRow(
                     WorkerSyncActions.ExistingWorkerUnchanged,
                     worker,
@@ -324,6 +358,36 @@ public sealed class WorkerInitialSyncService(
         }
 
         return new WorkerSyncPlan(snapshot, validation, rows);
+    }
+
+    private static SourceProcessingOutcome[] CreateWorkerOutcomes(
+        WorkerSyncPlan plan,
+        IReadOnlySet<long> failedSourceIds) =>
+        plan.Rows
+            .Where(row => row.IsClaimed && row.SourceRecordId.HasValue)
+            .Select(row =>
+            {
+                var explicitlyFailed = failedSourceIds.Contains(row.SourceRecordId!.Value);
+                var invalid = row.Preview.Action is WorkerSyncActions.IdentityConflict or WorkerSyncActions.UnsupportedSourceState;
+                return explicitlyFailed
+                    ? SourceProcessingOutcome.Failed(row.SourceRecordId.Value, "WorkerCreationFailed")
+                    : invalid
+                        ? SourceProcessingOutcome.Failed(row.SourceRecordId.Value, row.Preview.Action)
+                        : SourceProcessingOutcome.Processed(row.SourceRecordId.Value);
+            })
+            .ToArray();
+
+    private async Task FailClaimedWorkerRowsAsync(WorkerIdentitySourceBatch batch, string errorCode)
+    {
+        var outcomes = batch.Items
+            .Where(item => item.IsClaimed && item.SourceRecordId.HasValue)
+            .Select(item => SourceProcessingOutcome.Failed(item.SourceRecordId!.Value, errorCode))
+            .ToArray();
+        var acknowledgement = await workerIdentitySource.CompleteBatchAsync(batch, outcomes, CancellationToken.None);
+        if (acknowledgement.IsFailure)
+        {
+            logger.LogWarning("Worker staging rows could not be released after a failed domain transaction.");
+        }
     }
 
     private WorkerActiveServiceSyncPreviewDto MapPreview(WorkerSyncPlan plan, IReadOnlyCollection<Worker> localWorkers)
@@ -443,7 +507,14 @@ public sealed class WorkerInitialSyncService(
     private sealed record WorkerSyncPlanRow(
         AttendanceEmployeeRecord? Source,
         Worker? Worker,
+        long? SourceRecordId,
+        bool IsClaimed,
         WorkerMasterSyncPreviewRowDto Preview);
+
+    private sealed record WorkerSourceRead(
+        WorkerSourceSnapshot Snapshot,
+        IReadOnlyCollection<WorkerIdentitySourceItem> Items,
+        WorkerIdentitySourceBatch Batch);
 
     private sealed record IdentityResolution(Worker? Worker, string? ConflictReason)
     {

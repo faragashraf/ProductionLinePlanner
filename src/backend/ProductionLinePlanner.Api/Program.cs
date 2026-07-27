@@ -29,6 +29,7 @@ using ProductionLinePlanner.Api.Security;
 using ProductionLinePlanner.Api.Authorization;
 using ProductionLinePlanner.Api.Bootstrap;
 using ProductionLinePlanner.Api.Database;
+using ProductionLinePlanner.Api.HostedServices;
 using ProductionLinePlanner.Api.Diagnostics;
 using ProductionLinePlanner.Api.Endpoints;
 using ProductionLinePlanner.Api.Realtime;
@@ -36,6 +37,7 @@ using ProductionLinePlanner.Domain.Entities;
 using ProductionLinePlanner.Domain.Enums;
 using ProductionLinePlanner.Domain.Authorization;
 using ProductionLinePlanner.Infrastructure;
+using ProductionLinePlanner.Infrastructure.Attendance;
 using ProductionLinePlanner.Infrastructure.Data;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -177,7 +179,17 @@ builder.Services.AddRateLimiter(options =>
     };
 });
 
+var configuredAttendanceSourceOptions = new AttendanceSourceOptions
+{
+    Mode = AttendanceSourceOptions.ResolveMode(
+        builder.Configuration[$"{AttendanceSourceOptions.SectionName}:Mode"]),
+    StagingProcessorEnabled = AttendanceSourceOptions.ResolveStagingProcessorEnabled(
+        builder.Configuration[$"{AttendanceSourceOptions.SectionName}:StagingProcessorEnabled"])
+};
 builder.Services.AddInfrastructure(builder.Configuration);
+var stagingProcessorRegistered = ZkStagingHostedServiceRegistration.Register(
+    builder.Services,
+    configuredAttendanceSourceOptions);
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUserService, CurrentUserService>();
 builder.Services.AddScoped<IManufacturingRealtimeCorrelationContext, HttpManufacturingRealtimeCorrelationContext>();
@@ -240,6 +252,16 @@ builder.Services.AddAuthorization(options =>
 });
 
 var app = builder.Build();
+
+var resolvedAttendanceSourceOptions = app.Services
+    .GetRequiredService<IOptions<AttendanceSourceOptions>>().Value;
+app.Services.GetRequiredService<ILoggerFactory>()
+    .CreateLogger("ProductionLinePlanner.Api.Startup")
+    .LogInformation(
+        "Attendance mode resolved as {AttendanceMode}. Staging processor enabled resolved as {StagingProcessorEnabled}. ZkStagingProcessingBackgroundService registered={StagingProcessorRegistered}.",
+        resolvedAttendanceSourceOptions.Mode,
+        resolvedAttendanceSourceOptions.StagingProcessorEnabled,
+        stagingProcessorRegistered);
 
 if (ZkTimeWorkerSchemaInspectionCommand.IsRequested(args))
 {

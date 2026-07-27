@@ -295,11 +295,11 @@ test('redirects the legacy production-recording route safely to daily operations
   const diagnostics = await preparePage(page);
   await page.goto('/manufacturing/production-recording');
   await expect(page).toHaveURL(/\/manufacturing\/daily-production-operations$/);
-  await expect(page.getByText('تشغيل الإنتاج اليومي', { exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'تشغيل الإنتاج اليومي', exact: true })).toBeVisible();
 
   for (const [name, width, height] of exactViewports) {
     await page.setViewportSize({ width, height });
-    await expect(page.getByText('تشغيل الإنتاج اليومي', { exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'تشغيل الإنتاج اليومي', exact: true })).toBeVisible();
     await expectViewportSafe(page);
     await page.screenshot({ path: path.join(visualOutput, `daily-production-redirect-${name}.png`), fullPage: true });
   }
