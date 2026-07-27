@@ -179,18 +179,17 @@ builder.Services.AddRateLimiter(options =>
     };
 });
 
-builder.Services.AddInfrastructure(builder.Configuration);
-if (string.Equals(
-        builder.Configuration[$"{AttendanceSourceOptions.SectionName}:Mode"],
-        AttendanceSourceOptions.StagingMode,
-        StringComparison.OrdinalIgnoreCase))
+var configuredAttendanceSourceOptions = new AttendanceSourceOptions
 {
-    builder.Services.AddHostedService<ZkStagingSchemaValidationHostedService>();
-    if (builder.Configuration.GetValue($"{AttendanceSourceOptions.SectionName}:StagingProcessorEnabled", true))
-    {
-        builder.Services.AddHostedService<ZkStagingProcessingBackgroundService>();
-    }
-}
+    Mode = AttendanceSourceOptions.ResolveMode(
+        builder.Configuration[$"{AttendanceSourceOptions.SectionName}:Mode"]),
+    StagingProcessorEnabled = AttendanceSourceOptions.ResolveStagingProcessorEnabled(
+        builder.Configuration[$"{AttendanceSourceOptions.SectionName}:StagingProcessorEnabled"])
+};
+builder.Services.AddInfrastructure(builder.Configuration);
+var stagingProcessorRegistered = ZkStagingHostedServiceRegistration.Register(
+    builder.Services,
+    configuredAttendanceSourceOptions);
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUserService, CurrentUserService>();
 builder.Services.AddScoped<IManufacturingRealtimeCorrelationContext, HttpManufacturingRealtimeCorrelationContext>();
@@ -253,6 +252,16 @@ builder.Services.AddAuthorization(options =>
 });
 
 var app = builder.Build();
+
+var resolvedAttendanceSourceOptions = app.Services
+    .GetRequiredService<IOptions<AttendanceSourceOptions>>().Value;
+app.Services.GetRequiredService<ILoggerFactory>()
+    .CreateLogger("ProductionLinePlanner.Api.Startup")
+    .LogInformation(
+        "Attendance mode resolved as {AttendanceMode}. Staging processor enabled resolved as {StagingProcessorEnabled}. ZkStagingProcessingBackgroundService registered={StagingProcessorRegistered}.",
+        resolvedAttendanceSourceOptions.Mode,
+        resolvedAttendanceSourceOptions.StagingProcessorEnabled,
+        stagingProcessorRegistered);
 
 if (ZkTimeWorkerSchemaInspectionCommand.IsRequested(args))
 {

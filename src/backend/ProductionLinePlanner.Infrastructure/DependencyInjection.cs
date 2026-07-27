@@ -48,17 +48,10 @@ public static class DependencyInjection
         var stagingProcessorIntervalSeconds = attendanceSourceSection["StagingProcessorIntervalSeconds"];
         var maxPendingProductionDates = attendanceSourceSection["MaxPendingProductionDates"];
 
-        if (!string.IsNullOrWhiteSpace(sourceMode) &&
-            !string.Equals(sourceMode, AttendanceSourceOptions.DirectMode, StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(sourceMode, AttendanceSourceOptions.StagingMode, StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidOperationException("AttendanceSource:Mode must be 'Direct' or 'Staging'.");
-        }
-
         var attendanceSourceOptions = new AttendanceSourceOptions
         {
             ConnectionString = attendanceConnectionString,
-            Mode = string.IsNullOrWhiteSpace(sourceMode) ? AttendanceSourceOptions.DirectMode : sourceMode,
+            Mode = AttendanceSourceOptions.ResolveMode(sourceMode),
             SourceName = string.IsNullOrWhiteSpace(sourceName) ? "AttendanceSync" : sourceName,
             DayStartTime = TimeSpan.TryParse(dayStartTime, out var parsedDayStart) ? parsedDayStart : new TimeSpan(8, 0, 0),
             LateThresholdMinutes = int.TryParse(lateThresholdMinutes, out var parsedLateThreshold) ? parsedLateThreshold : 15,
@@ -70,8 +63,8 @@ public static class DependencyInjection
             StagingBatchSize = int.TryParse(stagingBatchSize, out var parsedStagingBatchSize) ? Math.Clamp(parsedStagingBatchSize, 1, 10000) : 2000,
             ProcessingLeaseMinutes = int.TryParse(processingLeaseMinutes, out var parsedProcessingLeaseMinutes) ? Math.Clamp(parsedProcessingLeaseMinutes, 1, 120) : 15,
             MaxProcessingAttempts = int.TryParse(maxProcessingAttempts, out var parsedMaxProcessingAttempts) ? Math.Clamp(parsedMaxProcessingAttempts, 1, 100) : 5,
-            StagingProcessorEnabled = !bool.TryParse(stagingProcessorEnabled, out var parsedStagingProcessorEnabled) || parsedStagingProcessorEnabled,
-            StagingProcessorIntervalSeconds = int.TryParse(stagingProcessorIntervalSeconds, out var parsedProcessorInterval) ? Math.Clamp(parsedProcessorInterval, 15, 3600) : 60,
+            StagingProcessorEnabled = AttendanceSourceOptions.ResolveStagingProcessorEnabled(stagingProcessorEnabled),
+            StagingProcessorIntervalSeconds = AttendanceSourceOptions.ResolveStagingProcessorIntervalSeconds(stagingProcessorIntervalSeconds),
             MaxPendingProductionDates = int.TryParse(maxPendingProductionDates, out var parsedMaximumDates) ? Math.Clamp(parsedMaximumDates, 1, 31) : 3
         };
 

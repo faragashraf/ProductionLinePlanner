@@ -24,4 +24,27 @@ public sealed class AttendanceSourceOptions
     public int MaxPendingProductionDates { get; init; } = 3;
 
     public bool UsesStaging => string.Equals(Mode, StagingMode, StringComparison.OrdinalIgnoreCase);
+
+    public static string ResolveMode(string? configuredMode)
+    {
+        var mode = configuredMode?.Trim();
+        if (string.IsNullOrWhiteSpace(mode))
+        {
+            return DirectMode;
+        }
+
+        if (!string.Equals(mode, DirectMode, StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(mode, StagingMode, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("AttendanceSource:Mode must be 'Direct' or 'Staging'.");
+        }
+
+        return mode;
+    }
+
+    public static bool ResolveStagingProcessorEnabled(string? configuredValue) =>
+        !bool.TryParse(configuredValue, out var enabled) || enabled;
+
+    public static int ResolveStagingProcessorIntervalSeconds(string? configuredValue) =>
+        int.TryParse(configuredValue, out var interval) ? Math.Clamp(interval, 15, 3600) : 60;
 }

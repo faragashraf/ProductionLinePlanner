@@ -8,13 +8,31 @@ namespace ProductionLinePlanner.Api.HostedServices;
 /// </summary>
 public sealed class ZkStagingSchemaValidationHostedService(
     IZkStagingSchemaValidator validator,
-    ILogger<ZkStagingSchemaValidationHostedService> logger) : IHostedService
+    ILogger<ZkStagingSchemaValidationHostedService> logger) : IHostedService, IZkStagingSchemaReadiness
 {
+    private readonly TaskCompletionSource schemaReady = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        await validator.ValidateAsync(cancellationToken);
-        logger.LogInformation("ZKTime staging schema version {SchemaVersion} is ready.", ZkTimeStagingSchema.CurrentVersion);
+        try
+        {
+            await validator.ValidateAsync(cancellationToken);
+            schemaReady.TrySetResult();
+            logger.LogInformation("ZKTime staging schema version {SchemaVersion} is ready.", ZkTimeStagingSchema.CurrentVersion);
+        }
+        catch (Exception exception)
+        {
+            schemaReady.TrySetException(exception);
+            throw;
+        }
     }
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    public Task WaitUntilReadyAsync(CancellationToken cancellationToken) => schemaReady.Task.WaitAsync(cancellationToken);
+}
+
+public interface IZkStagingSchemaReadiness
+{
+    Task WaitUntilReadyAsync(CancellationToken cancellationToken);
 }
