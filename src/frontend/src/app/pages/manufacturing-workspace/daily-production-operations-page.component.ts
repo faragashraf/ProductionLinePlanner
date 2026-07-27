@@ -1626,6 +1626,12 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
         change.productModelId === this.selectedProductModelId;
     }
 
+    // Worker and attendance invalidations are intentionally batch-scoped. The
+    // current selection is preserved, while the existing unsaved-edit guard
+    // decides whether to reload immediately or show the remote-update notice.
+    if (change.entityType === 'Worker' || change.entityType === 'AttendanceRecord')
+      return true;
+
     if (change.entityType !== 'WorkerDefaultAssignment' || !change.subStageId)
       return false;
 

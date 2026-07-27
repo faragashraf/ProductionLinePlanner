@@ -84,7 +84,7 @@ public sealed class WorkerAttendancePipelineIntegrationTests
                 NullLogger<WorkerInitialSyncService>.Instance);
             var attendanceSync = new AttendanceSyncService(
                 appDb,
-                attendanceDb,
+                new ZkTimeDirectAttendanceSource(attendanceDb, sourceOptions, NullLogger<ZkTimeDirectAttendanceSource>.Instance),
                 sourceOptions,
                 NullLogger<AttendanceSyncService>.Instance,
                 TestCairoTimeZoneProvider.Instance,

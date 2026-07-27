@@ -138,6 +138,23 @@ describe('DailyProductionOperationsPageComponent unified preview', () => {
     expect(production.loadDailyOperations).not.toHaveBeenCalled();
   });
 
+  it('reloads readiness for batched worker and attendance invalidations while preserving the selected context', () => {
+    masterData.factories.and.returnValue(of([]));
+    production.loadDailyOperations.and.returnValue(of(component.operations));
+    component.attendanceSyncedForDate = component.productionDate;
+    const selectedLine = component.selectedProductionLineId;
+    const selectedModel = component.selectedProductModelId;
+
+    component.ngOnInit();
+    expect(watchConfig.matches?.(dailyChange({ entityType: 'Worker', productionDate: null, productionLineId: null, productModelId: null }))).toBeTrue();
+    expect(watchConfig.matches?.(dailyChange({ entityType: 'AttendanceRecord', productionDate: null, productionLineId: null, productModelId: null }))).toBeTrue();
+    watchConfig.refresh();
+
+    expect(production.loadDailyOperations).toHaveBeenCalledTimes(1);
+    expect(component.selectedProductionLineId).toBe(selectedLine);
+    expect(component.selectedProductModelId).toBe(selectedModel);
+  });
+
   it('reloads current operations only for a permanent-assignment event affecting a displayed stage in the same factory and line', () => {
     masterData.factories.and.returnValue(of([]));
     production.loadDailyOperations.and.returnValue(of(component.operations));

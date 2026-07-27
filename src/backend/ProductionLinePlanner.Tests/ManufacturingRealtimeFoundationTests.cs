@@ -6,6 +6,7 @@ using ProductionLinePlanner.Api.Realtime;
 using ProductionLinePlanner.Application.Abstractions;
 using ProductionLinePlanner.Application.Realtime;
 using ProductionLinePlanner.Domain.Entities;
+using ProductionLinePlanner.Domain.Enums;
 using ProductionLinePlanner.Infrastructure.Data;
 using ProductionLinePlanner.Infrastructure.Realtime;
 
@@ -13,6 +14,78 @@ namespace ProductionLinePlanner.Tests;
 
 public sealed class ManufacturingRealtimeFoundationTests
 {
+    [Fact]
+    public async Task Worker_batch_publishes_one_compact_invalidation_after_successful_save()
+    {
+        var publisher = new RecordingPublisher();
+        await using var db = CreateDb(publisher, Guid.NewGuid());
+        db.Workers.AddRange(Enumerable.Range(1, 50)
+            .Select(index => new Worker(Guid.NewGuid(), $"W-{index:000}", $"Worker {index}", index.ToString(), index.ToString())));
+
+        await db.SaveChangesAsync();
+
+        var change = Assert.Single(publisher.Changes);
+        Assert.Equal(ManufacturingEntityType.Worker, change.EntityType);
+        Assert.Equal(ManufacturingChangeType.Updated, change.ChangeType);
+        Assert.Equal(Guid.Empty, change.EntityId);
+        Assert.Null(change.WorkerId);
+    }
+
+    [Fact]
+    public async Task Attendance_batch_publishes_one_compact_invalidation_and_empty_save_publishes_none()
+    {
+        var publisher = new RecordingPublisher();
+        await using var db = CreateDb(publisher, Guid.NewGuid());
+        var workers = Enumerable.Range(1, 20)
+            .Select(index => new Worker(Guid.NewGuid(), $"A-{index:000}", $"Worker {index}"))
+            .ToArray();
+        db.Workers.AddRange(workers);
+        await db.SaveChangesAsync();
+        publisher.Changes.Clear();
+        db.AttendanceRecords.AddRange(workers.Select((worker, index) => new AttendanceRecord(
+            Guid.NewGuid(), worker.Id, DateTime.UtcNow.AddMinutes(index), AttendanceStatus.Present, "staging")));
+
+        await db.SaveChangesAsync();
+
+        var change = Assert.Single(publisher.Changes);
+        Assert.Equal(ManufacturingEntityType.AttendanceRecord, change.EntityType);
+        Assert.Equal(Guid.Empty, change.EntityId);
+        Assert.Null(change.WorkerId);
+        publisher.Changes.Clear();
+
+        await db.SaveChangesAsync();
+
+        Assert.Empty(publisher.Changes);
+    }
+
+    [Fact]
+    public async Task Failed_worker_batch_save_publishes_no_invalidation()
+    {
+        var publisher = new RecordingPublisher();
+        var coordinator = new ManufacturingDataChangeTransactionCoordinator(
+            publisher,
+            NullLogger<ManufacturingDataChangeTransactionCoordinator>.Instance);
+        var options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .AddInterceptors(
+                new ManufacturingDataChangeSaveChangesInterceptor(
+                    publisher,
+                    new CurrentUserStub(Guid.NewGuid()),
+                    new CorrelationStub(),
+                    coordinator,
+                    NullLogger<ManufacturingDataChangeSaveChangesInterceptor>.Instance),
+                new ThrowOnSavingWorkerInterceptor())
+            .Options;
+        await using var db = new AppDbContext(options);
+        db.Workers.AddRange(
+            new Worker(Guid.NewGuid(), "W-001", "Worker 1"),
+            new Worker(Guid.NewGuid(), "W-002", "Worker 2"));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => db.SaveChangesAsync());
+
+        Assert.Empty(publisher.Changes);
+    }
+
     [Fact]
     public async Task Successful_master_data_save_publishes_a_compact_event_after_commit()
     {
@@ -292,7 +365,7 @@ public sealed class ManufacturingRealtimeFoundationTests
 
         Assert.Equal(["manufacturing:models", "manufacturing:manufacturing-command-center"], modelGroups);
         Assert.Equal(["manufacturing:factory-structure", "manufacturing:departments", "manufacturing:stages", "manufacturing:manufacturing-command-center"], departmentGroups);
-        Assert.Equal(["manufacturing:employees", "manufacturing:manufacturing-command-center"], workerGroups);
+        Assert.Equal(["manufacturing:employees", "manufacturing:daily-production-operations", "manufacturing:manufacturing-command-center"], workerGroups);
         Assert.Equal(["manufacturing:daily-production-operations", "manufacturing:manufacturing-command-center"], dailyGroups);
         Assert.Equal(["manufacturing:daily-production-operations", "manufacturing:manufacturing-command-center"], attendanceGroups);
         Assert.Equal(["manufacturing:daily-production-operations", "manufacturing:manufacturing-command-center"], stageRecordGroups);
@@ -385,5 +458,14 @@ public sealed class ManufacturingRealtimeFoundationTests
                 throw new InvalidOperationException("Simulated permanent-assignment failure.");
             return ValueTask.FromResult(result);
         }
+    }
+
+    private sealed class ThrowOnSavingWorkerInterceptor : SaveChangesInterceptor
+    {
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("Simulated worker persistence failure.");
     }
 }

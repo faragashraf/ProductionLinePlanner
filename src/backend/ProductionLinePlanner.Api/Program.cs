@@ -29,6 +29,7 @@ using ProductionLinePlanner.Api.Security;
 using ProductionLinePlanner.Api.Authorization;
 using ProductionLinePlanner.Api.Bootstrap;
 using ProductionLinePlanner.Api.Database;
+using ProductionLinePlanner.Api.HostedServices;
 using ProductionLinePlanner.Api.Diagnostics;
 using ProductionLinePlanner.Api.Endpoints;
 using ProductionLinePlanner.Api.Realtime;
@@ -36,6 +37,7 @@ using ProductionLinePlanner.Domain.Entities;
 using ProductionLinePlanner.Domain.Enums;
 using ProductionLinePlanner.Domain.Authorization;
 using ProductionLinePlanner.Infrastructure;
+using ProductionLinePlanner.Infrastructure.Attendance;
 using ProductionLinePlanner.Infrastructure.Data;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -178,6 +180,17 @@ builder.Services.AddRateLimiter(options =>
 });
 
 builder.Services.AddInfrastructure(builder.Configuration);
+if (string.Equals(
+        builder.Configuration[$"{AttendanceSourceOptions.SectionName}:Mode"],
+        AttendanceSourceOptions.StagingMode,
+        StringComparison.OrdinalIgnoreCase))
+{
+    builder.Services.AddHostedService<ZkStagingSchemaValidationHostedService>();
+    if (builder.Configuration.GetValue($"{AttendanceSourceOptions.SectionName}:StagingProcessorEnabled", true))
+    {
+        builder.Services.AddHostedService<ZkStagingProcessingBackgroundService>();
+    }
+}
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUserService, CurrentUserService>();
 builder.Services.AddScoped<IManufacturingRealtimeCorrelationContext, HttpManufacturingRealtimeCorrelationContext>();

@@ -90,7 +90,7 @@ public sealed class AttendanceSyncReliabilityTests
             sourceOptions);
         appDb.Workers.Add(new Worker(Guid.NewGuid(), "001", "Active", attendanceUserId: "1001"));
         await appDb.SaveChangesAsync();
-        var service = new AttendanceSyncService(appDb, attendanceDb, sourceOptions, NullLogger<AttendanceSyncService>.Instance, TestCairoTimeZoneProvider.Instance, new NoOpWorkerInitialSyncService());
+        var service = new AttendanceSyncService(appDb, new ZkTimeDirectAttendanceSource(attendanceDb, sourceOptions, NullLogger<ZkTimeDirectAttendanceSource>.Instance), sourceOptions, NullLogger<AttendanceSyncService>.Instance, TestCairoTimeZoneProvider.Instance, new NoOpWorkerInitialSyncService());
         var date = new DateOnly(2026, 7, 16);
 
         Assert.True((await service.SyncForProductionDateAsync(date)).IsSuccess);
@@ -124,7 +124,7 @@ public sealed class AttendanceSyncReliabilityTests
 
         await using var appDb = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString("N")).Options);
-        var service = new AttendanceSyncService(appDb, attendanceDb, sourceOptions, NullLogger<AttendanceSyncService>.Instance, TestCairoTimeZoneProvider.Instance, new NoOpWorkerInitialSyncService());
+        var service = new AttendanceSyncService(appDb, new ZkTimeDirectAttendanceSource(attendanceDb, sourceOptions, NullLogger<ZkTimeDirectAttendanceSource>.Instance), sourceOptions, NullLogger<AttendanceSyncService>.Instance, TestCairoTimeZoneProvider.Instance, new NoOpWorkerInitialSyncService());
 
         var result = await service.SyncForProductionDateAsync(new DateOnly(2026, 7, 16));
 
