@@ -114,6 +114,9 @@ public sealed class WorkerSyncHttpIntegrationTests
             ApplyCalls++;
             throw new InvalidOperationException("Apply must not be invoked from the preview endpoint.");
         }
+
+        public Task<Result<WorkerInitialSyncResultDto>> SyncWorkersForAttendanceAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(Result<WorkerInitialSyncResultDto>.Success(new WorkerInitialSyncResultDto()));
     }
 
     private sealed class HeaderPermissionService(IHttpContextAccessor accessor) : IPermissionService

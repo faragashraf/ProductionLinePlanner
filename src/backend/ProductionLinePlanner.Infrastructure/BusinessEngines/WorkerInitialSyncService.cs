@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using ProductionLinePlanner.Application.Abstractions;
 using ProductionLinePlanner.Application.Common;
 using ProductionLinePlanner.Application.DTOs;
@@ -12,15 +13,16 @@ using ProductionLinePlanner.Infrastructure.Data;
 namespace ProductionLinePlanner.Infrastructure.BusinessEngines;
 
 /// <summary>
-/// Separate worker-master capability. Existing planner workers are comparison-only; only a new,
-/// structurally valid source identity may be initialized, and no attendance transaction is read.
+/// Synchronizes ZKTime worker identities before attendance is matched. Only external attendance
+/// identifiers may change on an existing planner worker; planner-owned fields are protected.
 /// </summary>
 public sealed class WorkerInitialSyncService(
     AppDbContext dbContext,
     IAttendanceEmployeeReader attendanceEmployeeReader,
     IWorkerSyncPolicy workerSyncPolicy,
     IAuthoritativeWorkerSnapshotValidator snapshotValidator,
-    IAuditEngine auditEngine) : IWorkerInitialSyncService
+    IAuditEngine auditEngine,
+    ILogger<WorkerInitialSyncService> logger) : IWorkerInitialSyncService
 {
     public async Task<Result<WorkerActiveServiceSyncPreviewDto>> PreviewActiveServiceSyncAsync(
         CancellationToken cancellationToken = default)
@@ -51,6 +53,18 @@ public sealed class WorkerInitialSyncService(
             return Result<WorkerInitialSyncResultDto>.Failure(new Error("Unauthorized", "User context is required."));
         }
 
+        return await SynchronizeCoreAsync(actorUserId, requestMeta, cancellationToken);
+    }
+
+    public Task<Result<WorkerInitialSyncResultDto>> SyncWorkersForAttendanceAsync(
+        CancellationToken cancellationToken = default) =>
+        SynchronizeCoreAsync(actorUserId: null, requestMeta: null, cancellationToken);
+
+    private async Task<Result<WorkerInitialSyncResultDto>> SynchronizeCoreAsync(
+        Guid? actorUserId,
+        string? requestMeta,
+        CancellationToken cancellationToken)
+    {
         var startedAtUtc = DateTime.UtcNow;
         var sourceResult = await ReadSourceSnapshotAsync(cancellationToken);
         if (sourceResult.IsFailure)
@@ -64,6 +78,7 @@ public sealed class WorkerInitialSyncService(
             .ToArrayAsync(cancellationToken);
         var plan = BuildPlan(sourceResult.Value!, localWorkers);
         var createdCount = 0;
+        var updatedCount = 0;
 
         foreach (var candidate in plan.Rows.Where(row => row.Preview.Action == WorkerSyncActions.NewWorkerCandidate))
         {
@@ -77,6 +92,15 @@ public sealed class WorkerInitialSyncService(
             createdCount++;
         }
 
+        foreach (var existing in plan.Rows.Where(row => row.Preview.Action == WorkerSyncActions.ExistingWorkerUpdated))
+        {
+            if (existing.Worker is not null &&
+                workerSyncPolicy.SynchronizeExistingWorker(existing.Worker, existing.Source!, DateTime.UtcNow))
+            {
+                updatedCount++;
+            }
+        }
+
         var completedAtUtc = DateTime.UtcNow;
         var identityConflictCount = plan.Rows.Count(row => row.Preview.Action == WorkerSyncActions.IdentityConflict);
         var unsupportedCount = plan.Rows.Count(row => row.Preview.Action == WorkerSyncActions.UnsupportedSourceState);
@@ -86,7 +110,7 @@ public sealed class WorkerInitialSyncService(
         {
             SourceCount = sourceResult.Value!.Rows.Count,
             CreatedCount = createdCount,
-            UpdatedCount = 0,
+            UpdatedCount = updatedCount,
             UnchangedCount = unchangedCount,
             MissingFromSourceCount = missingFromSourceCount,
             MarkedInactiveCount = 0,
@@ -99,15 +123,18 @@ public sealed class WorkerInitialSyncService(
         await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
         try
         {
-            await auditEngine.RecordAsync(
-                actorUserId,
-                AuditActionType.WorkerInitialSync,
-                nameof(Worker),
-                nameof(Worker),
-                before: null,
-                after: result,
-                requestMeta: requestMeta,
-                cancellationToken: cancellationToken);
+            if (actorUserId.HasValue)
+            {
+                await auditEngine.RecordAsync(
+                    actorUserId.Value,
+                    AuditActionType.WorkerInitialSync,
+                    nameof(Worker),
+                    nameof(Worker),
+                    before: null,
+                    after: result,
+                    requestMeta: requestMeta,
+                    cancellationToken: cancellationToken);
+            }
             await dbContext.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
         }
@@ -116,9 +143,10 @@ public sealed class WorkerInitialSyncService(
             await transaction.RollbackAsync(CancellationToken.None);
             throw;
         }
-        catch
+        catch (Exception exception)
         {
             await transaction.RollbackAsync(CancellationToken.None);
+            logger.LogError(exception, "Worker identity synchronization failed before it could be committed.");
             return Result<WorkerInitialSyncResultDto>.Failure(new Error(
                 "WorkerInitialSyncFailed",
                 "Unable to persist worker import results."));
@@ -220,12 +248,15 @@ public sealed class WorkerInitialSyncService(
                 continue;
             }
 
-            var candidateWorkers = new Dictionary<Guid, Worker>();
-            AddCandidates(candidateWorkers, attendanceUsers, sourceAttendanceUserId);
-            AddCandidates(candidateWorkers, badges, sourceBadge);
-            AddCandidates(candidateWorkers, employeeCodes, sourceEmployeeCode);
+            var match = ResolveWorkerByIdentityPriority(
+                attendanceUsers,
+                badges,
+                employeeCodes,
+                sourceAttendanceUserId,
+                sourceBadge,
+                sourceEmployeeCode);
 
-            if (candidateWorkers.Count > 1)
+            if (match.IsConflict)
             {
                 rows.Add(new WorkerSyncPlanRow(
                     source,
@@ -235,15 +266,15 @@ public sealed class WorkerInitialSyncService(
                         null,
                         source,
                         workerSyncPolicy.ProtectedLocalFields,
-                        ["SourceIdentityMatchesMultipleWorkers"],
+                        [match.ConflictReason!],
                         "The source identities resolve to more than one local worker.")));
                 sourceIndex++;
                 continue;
             }
 
-            if (candidateWorkers.Count == 1)
+            if (match.Worker is not null)
             {
-                var worker = candidateWorkers.Values.Single();
+                var worker = match.Worker;
                 matchedWorkerIds.Add(worker.Id);
                 var decision = workerSyncPolicy.EvaluateExistingWorker(worker, source);
                 rows.Add(new WorkerSyncPlanRow(
@@ -255,8 +286,8 @@ public sealed class WorkerInitialSyncService(
                         source,
                         decision.ProtectedLocalFields,
                         decision.IdentityConflicts,
-                        decision.Action == WorkerSyncActions.IdentityConflict
-                            ? "Identity differences require explicit reconciliation and are never applied automatically."
+                        decision.Action == WorkerSyncActions.ExistingWorkerUpdated
+                            ? "External attendance identifiers will be reconciled; planner-owned data remains unchanged."
                             : "Existing planner-owned worker data remains unchanged.")));
                 sourceIndex++;
                 continue;
@@ -289,7 +320,7 @@ public sealed class WorkerInitialSyncService(
                     null,
                     workerSyncPolicy.ProtectedLocalFields,
                     [],
-                    "Missing from CurrentEmployeesImport does not imply LeftEmployment.")));
+                    "Missing from USERINFO does not imply LeftEmployment.")));
         }
 
         return new WorkerSyncPlan(snapshot, validation, rows);
@@ -298,6 +329,7 @@ public sealed class WorkerInitialSyncService(
     private WorkerActiveServiceSyncPreviewDto MapPreview(WorkerSyncPlan plan, IReadOnlyCollection<Worker> localWorkers)
     {
         var existingUnchanged = plan.Rows.Count(row => row.Preview.Action == WorkerSyncActions.ExistingWorkerUnchanged);
+        var existingUpdated = plan.Rows.Count(row => row.Preview.Action == WorkerSyncActions.ExistingWorkerUpdated);
         var newCandidates = plan.Rows.Count(row => row.Preview.Action == WorkerSyncActions.NewWorkerCandidate);
         var identityConflicts = plan.Rows.Count(row => row.Preview.Action == WorkerSyncActions.IdentityConflict);
         var unsupported = plan.Rows.Count(row => row.Preview.Action == WorkerSyncActions.UnsupportedSourceState);
@@ -308,7 +340,7 @@ public sealed class WorkerInitialSyncService(
             CanApply = false,
             CurrentLocalWorkers = localWorkers.Count,
             ActiveOnServiceWorkersInZkTime = plan.Snapshot.Rows.Count(row => row.IsActive),
-            WorkersToRemainActive = existingUnchanged,
+            WorkersToRemainActive = existingUnchanged + existingUpdated,
             WorkersToReactivate = 0,
             WorkersToCreate = newCandidates,
             WorkersToMarkInactiveOrExcluded = 0,
@@ -365,13 +397,42 @@ public sealed class WorkerInitialSyncService(
         return lookup;
     }
 
-    private static void AddCandidates(
-        IDictionary<Guid, Worker> candidates,
-        IReadOnlyDictionary<string, List<Worker>> lookup,
-        string? identity)
+    private static IdentityResolution ResolveWorkerByIdentityPriority(
+        IReadOnlyDictionary<string, List<Worker>> attendanceUsers,
+        IReadOnlyDictionary<string, List<Worker>> badges,
+        IReadOnlyDictionary<string, List<Worker>> employeeCodes,
+        string? attendanceUserId,
+        string? badgeNumber,
+        string? employeeCode)
     {
-        if (identity is null || !lookup.TryGetValue(identity, out var matches)) return;
-        foreach (var worker in matches) candidates[worker.Id] = worker;
+        var orderedLookups = new[]
+        {
+            (Name: "AttendanceUserId", Lookup: attendanceUsers, Identity: attendanceUserId),
+            (Name: "BadgeNumber", Lookup: badges, Identity: badgeNumber),
+            (Name: "EmployeeCode", Lookup: employeeCodes, Identity: employeeCode)
+        };
+
+        Worker? selected = null;
+        foreach (var (_, lookup, identity) in orderedLookups)
+        {
+            if (identity is null || !lookup.TryGetValue(identity, out var matches))
+            {
+                continue;
+            }
+
+            if (matches.Count != 1)
+            {
+                return new IdentityResolution(null, "LocalIdentityIsNotUnique");
+            }
+
+            selected ??= matches[0];
+            if (selected.Id != matches[0].Id)
+            {
+                return new IdentityResolution(null, "SourceIdentityMatchesMultipleWorkers");
+            }
+        }
+
+        return new IdentityResolution(selected, null);
     }
 
     private sealed record WorkerSyncPlan(
@@ -383,4 +444,9 @@ public sealed class WorkerInitialSyncService(
         AttendanceEmployeeRecord? Source,
         Worker? Worker,
         WorkerMasterSyncPreviewRowDto Preview);
+
+    private sealed record IdentityResolution(Worker? Worker, string? ConflictReason)
+    {
+        public bool IsConflict => ConflictReason is not null;
+    }
 }
