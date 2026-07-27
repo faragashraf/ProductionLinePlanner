@@ -58,7 +58,7 @@ public interface IProductModelService
         string? requestMeta = null,
         CancellationToken cancellationToken = default);
 
-    Task<Result> CopyModelStagesAsync(
+    Task<Result<CopyProductModelStagesSummaryDto>> CopyModelStagesAsync(
         Guid sourceModelId,
         CopyProductModelStagesRequest request,
         Guid actorUserId,

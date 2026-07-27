@@ -11,6 +11,7 @@
 @import './app/shared/design-system/shell/enterprise-app-shell.scss';
 @import './app/shared/design-system/primeng/primeng-theme-bridge.scss';
 @import './app/shared/design-system/manufacturing/operational-workspaces.scss';
+@import './app/shared/design-system/manufacturing/bulk-operation-workspace.scss';
 @import './app/shared/product/product-experience.scss';
 // The dashboard and factory map share the application shell rather than a
 // component shadow boundary. Keep their responsive operational styles here so

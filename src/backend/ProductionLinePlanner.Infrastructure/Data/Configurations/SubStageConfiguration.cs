@@ -25,7 +25,7 @@ public sealed class SubStageConfiguration : IEntityTypeConfiguration<SubStage>
         builder.Property(x => x.IsActive).HasDefaultValue(true);
         builder.Property(x => x.CreatedAtUtc).IsRequired();
         builder.Property(x => x.UpdatedAtUtc).IsRequired();
-        builder.HasIndex(x => x.Code).IsUnique();
+        builder.HasIndex(x => new { x.ProductionLineId, x.Code }).IsUnique();
         builder.HasIndex(x => new { x.MainStageId, x.DefaultOrder }).IsUnique();
         builder.HasIndex(x => x.ProductionLineId);
 

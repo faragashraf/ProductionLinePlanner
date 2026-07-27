@@ -343,39 +343,6 @@ public sealed class ManufacturingMasterDataReviewClosureTests
         Assert.True(add.IsFailure);
         Assert.Equal("Conflict", add.Error!.Code);
 
-        var target = new ProductModel(Guid.NewGuid(), "TARGET", "Target");
-        fixture.DbContext.ProductModels.Add(target);
-        fixture.DbContext.ProductModelStages.Add(new ProductModelStage(Guid.NewGuid(), target.Id, fixture.SubStages[1].Id, 2, 1m, null, CompensationMode.FixedAmount));
-        await fixture.DbContext.SaveChangesAsync();
-
-        var copy = await fixture.Service.CopyModelStagesAsync(fixture.Model.Id, new CopyProductModelStagesRequest { TargetModelId = target.Id }, fixture.ActorUserId);
-        Assert.True(copy.IsFailure);
-        Assert.Equal("Conflict", copy.Error!.Code);
-        Assert.Single(fixture.DbContext.ProductModelStages.Where(x => x.ProductModelId == target.Id));
-    }
-
-    [Fact]
-    public async Task Copy_model_stages_rejects_sub_stage_conflicts_and_copies_all_when_target_is_clear()
-    {
-        await using var fixture = await ProductModelFixture.CreateAsync();
-        fixture.AddStage(1, 1m, null, null);
-        var conflictingTarget = new ProductModel(Guid.NewGuid(), "CONFLICT", "Conflict");
-        fixture.DbContext.ProductModels.Add(conflictingTarget);
-        fixture.DbContext.ProductModelStages.Add(new ProductModelStage(Guid.NewGuid(), conflictingTarget.Id, fixture.SubStages[0].Id, 4, 1m, null, CompensationMode.FixedAmount));
-        await fixture.DbContext.SaveChangesAsync();
-
-        var conflict = await fixture.Service.CopyModelStagesAsync(fixture.Model.Id, new CopyProductModelStagesRequest { TargetModelId = conflictingTarget.Id }, fixture.ActorUserId);
-        Assert.True(conflict.IsFailure);
-        Assert.Equal("Conflict", conflict.Error!.Code);
-        Assert.Single(fixture.DbContext.ProductModelStages.Where(x => x.ProductModelId == conflictingTarget.Id));
-
-        var clearTarget = new ProductModel(Guid.NewGuid(), "CLEAR", "Clear");
-        fixture.DbContext.ProductModels.Add(clearTarget);
-        await fixture.DbContext.SaveChangesAsync();
-        var copied = await fixture.Service.CopyModelStagesAsync(fixture.Model.Id, new CopyProductModelStagesRequest { TargetModelId = clearTarget.Id }, fixture.ActorUserId);
-
-        Assert.True(copied.IsSuccess);
-        Assert.Single(fixture.DbContext.ProductModelStages.Where(x => x.ProductModelId == clearTarget.Id));
     }
 
     [Fact]

@@ -244,12 +244,11 @@ public sealed class PilotMasterDataBootstrapService(
                 .Include(x => x.MainStage)
                 .Where(x => x.MainStage!.ProductionLineId == existingLine.Id)
                 .ToArrayAsync(ct);
-        var allSubStages = await db.SubStages.AsNoTracking().ToArrayAsync(ct);
         var existingMappings = existingProduct is null
             ? Array.Empty<ProductModelStage>()
             : await db.ProductModelStages.AsNoTracking().Where(x => x.ProductModelId == existingProduct.Id).ToArrayAsync(ct);
 
-        var stages = BuildStagePlans(sourceStages, existingSubStages, allSubStages, existingMappings, input.ExplicitCompensationMode, issues);
+        var stages = BuildStagePlans(sourceStages, existingSubStages, existingMappings, input.ExplicitCompensationMode, issues);
         var unexpectedProductStageMappings = ValidateExistingProductMappings(existingMappings, stages, issues);
 
         var workers = await db.Workers.AsNoTracking().ToArrayAsync(ct);
@@ -268,7 +267,6 @@ public sealed class PilotMasterDataBootstrapService(
     private IReadOnlyCollection<StagePlan> BuildStagePlans(
         IReadOnlyCollection<SourceStage> sourceStages,
         IReadOnlyCollection<SubStage> existingSubStages,
-        IReadOnlyCollection<SubStage> allSubStages,
         IReadOnlyCollection<ProductModelStage> existingMappings,
         CompensationMode? explicitCompensationMode,
         List<PilotBootstrapIssueDto> issues)
@@ -278,7 +276,7 @@ public sealed class PilotMasterDataBootstrapService(
             .GroupBy(x => StageIdentity(x.MainStage!.Name, x.Name))
             .ToDictionary(x => x.Key, x => x.ToArray());
         var mappingsByStage = existingMappings.GroupBy(x => x.SubStageId).ToDictionary(x => x.Key, x => x.ToArray());
-        var globalCodes = allSubStages.Select(x => x.Code).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var lineCodes = existingSubStages.Select(x => x.Code).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var plannedCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var generatedNumber = 4;
 
@@ -313,7 +311,7 @@ public sealed class PilotMasterDataBootstrapService(
                 generated = true;
             }
 
-            var codeOwners = allSubStages.Where(x => string.Equals(x.Code, code, StringComparison.OrdinalIgnoreCase)).ToArray();
+            var codeOwners = existingSubStages.Where(x => string.Equals(x.Code, code, StringComparison.OrdinalIgnoreCase)).ToArray();
             if (codeOwners.Length > 0 && (existing is null || codeOwners.Any(x => x.Id != existing.Id)))
             {
                 rowIssues.Add(Block("DuplicateStageCode", "The generated or preserved stage code belongs to a different stage."));
@@ -322,7 +320,7 @@ public sealed class PilotMasterDataBootstrapService(
             {
                 rowIssues.Add(Block("DuplicateStageCodeInWorkbook", "The workbook produces the same stage code more than once."));
             }
-            if (globalCodes.Contains(code) && existing is null && codeOwners.Length == 0)
+            if (lineCodes.Contains(code) && existing is null && codeOwners.Length == 0)
             {
                 rowIssues.Add(Block("DuplicateStageCode", "The generated or preserved stage code is already in use."));
             }

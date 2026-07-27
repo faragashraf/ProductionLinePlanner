@@ -1,3 +1,4 @@
+using System.Data;
 using Microsoft.EntityFrameworkCore;
 using ProductionLinePlanner.Application.Common;
 using ProductionLinePlanner.Application.DTOs;
@@ -657,7 +658,7 @@ public sealed class ProductModelService(
         return Result.Success();
     }
 
-    public async Task<Result> CopyModelStagesAsync(
+    public async Task<Result<CopyProductModelStagesSummaryDto>> CopyModelStagesAsync(
         Guid sourceModelId,
         CopyProductModelStagesRequest request,
         Guid actorUserId,
@@ -666,79 +667,262 @@ public sealed class ProductModelService(
     {
         if (actorUserId == Guid.Empty)
         {
-            return Result.Failure(new Error("Unauthorized", "User context is required."));
+            return Result<CopyProductModelStagesSummaryDto>.Failure(new Error("Unauthorized", "User context is required."));
         }
 
-        if (sourceModelId == Guid.Empty)
+        if (sourceModelId == Guid.Empty || request.SourceProductionLineId == Guid.Empty)
         {
-            return Result.Failure(new Error("ValidationError", "SourceModelId is required."));
+            return Result<CopyProductModelStagesSummaryDto>.Failure(new Error("ValidationError", "Source model and production line are required."));
         }
 
-        if (request.TargetModelId == Guid.Empty)
+        if (request.TargetModelId == Guid.Empty || request.TargetProductionLineId == Guid.Empty)
         {
-            return Result.Failure(new Error("ValidationError", "TargetModelId is required."));
+            return Result<CopyProductModelStagesSummaryDto>.Failure(new Error("ValidationError", "Target model and production line are required."));
         }
 
-        if (sourceModelId == request.TargetModelId)
+        if (sourceModelId == request.TargetModelId && request.SourceProductionLineId == request.TargetProductionLineId)
         {
-            return Result.Failure(new Error("ValidationError", "Source and target models must be different."));
+            return Result<CopyProductModelStagesSummaryDto>.Failure(new Error("ValidationError", "Source and target model/line context must be different."));
         }
 
-        var sourceExists = await dbContext.ProductModels.AnyAsync(x => x.Id == sourceModelId, cancellationToken);
-        if (!sourceExists)
+        if (request.SourceProductModelStageIds is not { Length: > 0 and <= 200 })
         {
-            return Result.Failure(new Error("NotFound", "Source model not found."));
+            return Result<CopyProductModelStagesSummaryDto>.Failure(new Error("ValidationError", "Select between 1 and 200 model stages to copy."));
         }
 
-        var targetExists = await dbContext.ProductModels.AnyAsync(x => x.Id == request.TargetModelId, cancellationToken);
-        if (!targetExists)
+        if (request.SourceProductModelStageIds.Any(stageId => stageId == Guid.Empty))
         {
-            return Result.Failure(new Error("NotFound", "Target model not found."));
+            return Result<CopyProductModelStagesSummaryDto>.Failure(new Error("ValidationError", "Every selected model stage must have a valid identifier."));
         }
 
+        await using var transaction = request.PreviewOnly
+            ? null
+            : await dbContext.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+
+        var modelIds = new[] { sourceModelId, request.TargetModelId }.Distinct().ToArray();
+        var existingModelIds = await dbContext.ProductModels
+            .AsNoTracking()
+            .Where(model => modelIds.Contains(model.Id))
+            .Select(model => model.Id)
+            .ToArrayAsync(cancellationToken);
+        if (existingModelIds.Length != modelIds.Length)
+        {
+            return Result<CopyProductModelStagesSummaryDto>.Failure(new Error("NotFound", "Source or target model was not found."));
+        }
+
+        var lineIds = new[] { request.SourceProductionLineId, request.TargetProductionLineId }.Distinct().ToArray();
+        var existingLines = await dbContext.ProductionLines
+            .AsNoTracking()
+            .Where(line => lineIds.Contains(line.Id))
+            .Select(line => new { line.Id, line.IsActive })
+            .ToArrayAsync(cancellationToken);
+        if (existingLines.Length != lineIds.Length)
+        {
+            return Result<CopyProductModelStagesSummaryDto>.Failure(new Error("NotFound", "Source or target production line was not found."));
+        }
+        if (existingLines.Single(line => line.Id == request.TargetProductionLineId).IsActive == false)
+        {
+            return Result<CopyProductModelStagesSummaryDto>.Failure(new Error("ValidationError", "Target production line must be active."));
+        }
+
+        var requestedSourceIds = request.SourceProductModelStageIds.Distinct().ToArray();
         var sourceStages = await dbContext.ProductModelStages
             .AsNoTracking()
-            .Where(x => x.ProductModelId == sourceModelId)
-            .ToListAsync(cancellationToken);
-
-        if (sourceStages.Count == 0)
-        {
-            return Result.Success();
-        }
-
-        var targetExisting = await dbContext.ProductModelStages
+            .Include(stage => stage.SubStage)
+            .Where(stage => requestedSourceIds.Contains(stage.Id))
+            .ToDictionaryAsync(stage => stage.Id, cancellationToken);
+        var targetStages = await dbContext.SubStages
             .AsNoTracking()
-            .Where(x => x.ProductModelId == request.TargetModelId)
-            .Select(x => new { x.SubStageId, x.StageOrder })
-            .ToListAsync(cancellationToken);
+            .Where(stage => stage.ProductionLineId == request.TargetProductionLineId)
+            .ToArrayAsync(cancellationToken);
+        var targetRelations = await dbContext.ProductModelStages
+            .AsNoTracking()
+            .Where(stage => stage.ProductModelId == request.TargetModelId
+                && stage.SubStage != null
+                && stage.SubStage.ProductionLineId == request.TargetProductionLineId)
+            .Select(stage => new { stage.SubStageId, stage.StageOrder })
+            .ToArrayAsync(cancellationToken);
+        var targetModelStageOrders = await dbContext.ProductModelStages
+            .AsNoTracking()
+            .Where(stage => stage.ProductModelId == request.TargetModelId)
+            .Select(stage => stage.StageOrder)
+            .ToArrayAsync(cancellationToken);
+        var targetGroups = await dbContext.MainStages
+            .AsNoTracking()
+            .Where(stage => stage.ProductionLineId == request.TargetProductionLineId)
+            .OrderBy(stage => stage.SequenceOrder)
+            .ThenBy(stage => stage.Name)
+            .ThenBy(stage => stage.Id)
+            .ToArrayAsync(cancellationToken);
 
-        if (sourceStages.Any(stage => targetExisting.Any(existing => existing.SubStageId == stage.SubStageId)))
+        var validationErrors = new List<string>();
+        if (requestedSourceIds.Length != request.SourceProductModelStageIds.Length)
         {
-            return Result.Failure(new Error("Conflict", "Target model already has stage entries for one or more source stages."));
+            validationErrors.Add("لا يمكن تكرار علاقة مرحلة مصدر داخل الطلب نفسه.");
         }
 
-        if (sourceStages.Any(stage => targetExisting.Any(existing => existing.StageOrder == stage.StageOrder)))
+        var sourceCandidates = new List<ProductModelStage>();
+        foreach (var sourceProductModelStageId in request.SourceProductModelStageIds)
         {
-            return Result.Failure(new Error("Conflict", "Target model already has stage entries for one or more source stage orders."));
+            if (!sourceStages.TryGetValue(sourceProductModelStageId, out var sourceStage)
+                || sourceStage.ProductModelId != sourceModelId
+                || sourceStage.SubStage?.ProductionLineId != request.SourceProductionLineId)
+            {
+                validationErrors.Add($"علاقة مرحلة المصدر {sourceProductModelStageId} لا تنتمي إلى سياق المصدر المختار.");
+                continue;
+            }
+
+            sourceCandidates.Add(sourceStage);
         }
 
-        foreach (var sourceStage in sourceStages)
+        if (validationErrors.Count > 0)
         {
-            var clone = new ProductModelStage(
-                id: Guid.NewGuid(),
-                productModelId: request.TargetModelId,
-                subStageId: sourceStage.SubStageId,
-                stageOrder: sourceStage.StageOrder,
-                piecePrice: sourceStage.PiecePrice,
-                standardSeconds: sourceStage.StandardSeconds,
-                compensationMode: sourceStage.CompensationMode,
-                isRequired: sourceStage.IsRequired,
-                isActive: sourceStage.IsActive,
-                effectiveFrom: sourceStage.EffectiveFrom,
-                createdAtUtc: DateTime.UtcNow);
-
-            dbContext.ProductModelStages.Add(clone);
+            return Result<CopyProductModelStagesSummaryDto>.Success(new CopyProductModelStagesSummaryDto
+            {
+                IsPreview = request.PreviewOnly,
+                RequestedCount = request.SourceProductModelStageIds.Length,
+                FailedCount = validationErrors.Count,
+                ValidationErrors = validationErrors.Distinct().ToArray()
+            });
         }
+
+        var targetStagesByCode = targetStages.ToDictionary(stage => stage.Code, StringComparer.OrdinalIgnoreCase);
+        var targetRelationStageIds = targetRelations.Select(stage => stage.SubStageId).ToHashSet();
+        var candidates = new List<CopyCandidate>();
+        var skipped = new List<CopyProductModelStageSkipDto>();
+        var failed = new List<CopyProductModelStageFailureDto>();
+        foreach (var sourceStage in sourceCandidates.OrderBy(stage => stage.StageOrder).ThenBy(stage => stage.Id))
+        {
+            var sourceCatalogStage = sourceStage.SubStage!;
+            if (!targetStagesByCode.TryGetValue(sourceCatalogStage.Code, out var existingTargetStage))
+            {
+                candidates.Add(new CopyCandidate(sourceStage, null));
+                continue;
+            }
+
+            if (!RepresentsSameCatalogStage(sourceCatalogStage, existingTargetStage))
+            {
+                failed.Add(new CopyProductModelStageFailureDto
+                {
+                    SourceProductModelStageId = sourceStage.Id,
+                    SubStageId = sourceCatalogStage.Id,
+                    StageCode = sourceCatalogStage.Code,
+                    StageName = sourceCatalogStage.Name,
+                    ReasonCode = "TargetStageCodeConflict",
+                    Reason = $"يوجد على خط الإنتاج الهدف مرحلة أخرى بالكود {sourceCatalogStage.Code}. لم يتم استبدالها أو تعديلها."
+                });
+                continue;
+            }
+
+            if (targetRelationStageIds.Contains(existingTargetStage.Id))
+            {
+                skipped.Add(CreateSkippedStage(
+                    sourceStage,
+                    "AlreadyLinked",
+                    "المرحلة موجودة بالفعل ضمن الموديل الهدف وخط الإنتاج الهدف."));
+                continue;
+            }
+
+            candidates.Add(new CopyCandidate(sourceStage, existingTargetStage));
+        }
+
+        static CopyProductModelStageSkipDto CreateSkippedStage(ProductModelStage sourceStage, string reasonCode, string reason) =>
+            new()
+            {
+                SourceProductModelStageId = sourceStage.Id,
+                SubStageId = sourceStage.SubStageId,
+                StageCode = sourceStage.SubStage?.Code ?? string.Empty,
+                StageName = sourceStage.SubStage?.Name ?? string.Empty,
+                ReasonCode = reasonCode,
+                Reason = reason
+            };
+
+        var activeTargetGroup = targetGroups.FirstOrDefault(group => group.IsActive);
+        var targetGroupId = activeTargetGroup?.Id ?? Guid.NewGuid();
+        var occupiedCatalogOrders = targetStages
+            .Where(stage => stage.MainStageId == targetGroupId)
+            .Select(stage => stage.DefaultOrder)
+            .ToHashSet();
+        var nextCatalogOrder = occupiedCatalogOrders.Count == 0 ? 1 : occupiedCatalogOrders.Max() + 1;
+        var occupiedModelOrders = targetModelStageOrders.ToHashSet();
+        var preserveSourceOrders = candidates.All(candidate => !occupiedModelOrders.Contains(candidate.SourceStage.StageOrder));
+        var nextModelOrder = targetModelStageOrders.Length == 0 ? 1 : targetModelStageOrders.Max() + 1;
+        var plans = candidates.Select((candidate, index) =>
+        {
+            var targetStageOrder = candidate.ExistingTargetStage?.DefaultOrder
+                ?? AllocateTargetStageOrder(candidate.SourceStage.SubStage!.DefaultOrder, occupiedCatalogOrders, ref nextCatalogOrder);
+            return new CopyPlan(
+                candidate,
+                preserveSourceOrders ? candidate.SourceStage.StageOrder : nextModelOrder + index,
+                targetStageOrder,
+                candidate.ExistingTargetStage?.Id ?? Guid.NewGuid(),
+                targetGroupId);
+        }).ToArray();
+
+        if (request.PreviewOnly)
+        {
+            return Result<CopyProductModelStagesSummaryDto>.Success(BuildCopySummary(
+                true,
+                request.SourceProductModelStageIds.Length,
+                plans,
+                skipped,
+                failed,
+                []));
+        }
+
+        if (failed.Count > 0)
+        {
+            return Result<CopyProductModelStagesSummaryDto>.Success(BuildCopySummary(
+                false,
+                request.SourceProductModelStageIds.Length,
+                [],
+                skipped,
+                failed,
+                []));
+        }
+
+        var createdAtUtc = DateTime.UtcNow;
+        MainStage? createdTargetGroup = null;
+        if (plans.Any(plan => plan.Candidate.ExistingTargetStage is null) && activeTargetGroup is null)
+        {
+            var nextGroupOrder = targetGroups.Length == 0 ? 1 : targetGroups.Max(group => group.SequenceOrder) + 1;
+            createdTargetGroup = new MainStage(
+                targetGroupId,
+                request.TargetProductionLineId,
+                "Internal operational stage group",
+                nextGroupOrder,
+                createdAtUtc: createdAtUtc);
+            dbContext.MainStages.Add(createdTargetGroup);
+        }
+
+        var addedSubStages = plans
+            .Where(plan => plan.Candidate.ExistingTargetStage is null)
+            .Select(plan => new SubStage(
+                plan.ResultSubStageId,
+                plan.TargetMainStageId,
+                plan.Candidate.SourceStage.SubStage!.Name,
+                plan.Candidate.SourceStage.SubStage.Code,
+                plan.Candidate.SourceStage.SubStage.Capacity,
+                plan.TargetStageOrder,
+                plan.Candidate.SourceStage.SubStage.IsActive,
+                createdAtUtc,
+                request.TargetProductionLineId))
+            .ToArray();
+        dbContext.SubStages.AddRange(addedSubStages);
+
+        var addedEntities = plans.Select(plan => new ProductModelStage(
+            id: Guid.NewGuid(),
+            productModelId: request.TargetModelId,
+            subStageId: plan.ResultSubStageId,
+            stageOrder: plan.StageOrder,
+            piecePrice: plan.Candidate.SourceStage.PiecePrice,
+            standardSeconds: plan.Candidate.SourceStage.StandardSeconds,
+            compensationMode: plan.Candidate.SourceStage.CompensationMode,
+            isRequired: plan.Candidate.SourceStage.IsRequired,
+            isActive: plan.Candidate.SourceStage.IsActive,
+            effectiveFrom: plan.Candidate.SourceStage.EffectiveFrom,
+            createdAtUtc: createdAtUtc)).ToArray();
+        dbContext.ProductModelStages.AddRange(addedEntities);
 
         await auditEngine.RecordAsync(
             actorUserId,
@@ -746,11 +930,92 @@ public sealed class ProductModelService(
             nameof(ProductModelStage),
             request.TargetModelId.ToString(),
             before: null,
-            after: new { SourceModelId = sourceModelId, TargetModelId = request.TargetModelId, CopiedCount = sourceStages.Count, request.Note },
-            requestMeta: requestMeta);
+            after: new
+            {
+                SourceModelId = sourceModelId,
+                TargetModelId = request.TargetModelId,
+                request.SourceProductionLineId,
+                request.TargetProductionLineId,
+                RequestedCount = request.SourceProductModelStageIds.Length,
+                AddedCount = addedEntities.Length,
+                SkippedCount = skipped.Count,
+                FailedCount = 0,
+                AddedStageIds = addedEntities.Select(stage => stage.Id).ToArray(),
+                AddedSubStageIds = addedSubStages.Select(stage => stage.Id).ToArray(),
+                SkippedStageIds = skipped.Select(stage => stage.SubStageId).ToArray(),
+                request.Note
+            },
+            requestMeta: requestMeta,
+            cancellationToken: cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
+        await transaction!.CommitAsync(cancellationToken);
 
-        return Result.Success();
+        return Result<CopyProductModelStagesSummaryDto>.Success(
+            BuildCopySummary(
+                false,
+                request.SourceProductModelStageIds.Length,
+                plans,
+                skipped,
+                failed,
+                addedEntities.Select(stage => stage.Id).ToArray()));
     }
+
+    private static bool RepresentsSameCatalogStage(SubStage source, SubStage target) =>
+        string.Equals(source.Code.Trim(), target.Code.Trim(), StringComparison.OrdinalIgnoreCase)
+        && string.Equals(source.Name.Trim(), target.Name.Trim(), StringComparison.OrdinalIgnoreCase)
+        && source.Capacity == target.Capacity
+        && source.IsActive == target.IsActive;
+
+    private static int AllocateTargetStageOrder(int preferredOrder, HashSet<int> occupiedOrders, ref int nextOrder)
+    {
+        if (preferredOrder > 0 && occupiedOrders.Add(preferredOrder))
+        {
+            if (preferredOrder >= nextOrder) nextOrder = preferredOrder + 1;
+            return preferredOrder;
+        }
+
+        while (!occupiedOrders.Add(nextOrder)) nextOrder++;
+        return nextOrder++;
+    }
+
+    private static CopyProductModelStagesSummaryDto BuildCopySummary(
+        bool isPreview,
+        int requestedCount,
+        IReadOnlyList<CopyPlan> plans,
+        IReadOnlyList<CopyProductModelStageSkipDto> skipped,
+        IReadOnlyList<CopyProductModelStageFailureDto> failed,
+        Guid[] addedStageIds) =>
+        new()
+        {
+            IsPreview = isPreview,
+            RequestedCount = requestedCount,
+            AddedCount = plans.Count,
+            SkippedCount = skipped.Count,
+            FailedCount = failed.Count,
+            AddedStageIds = addedStageIds,
+            PlannedStages = plans.Select(plan => new CopyProductModelStagePlanDto
+            {
+                SourceProductModelStageId = plan.Candidate.SourceStage.Id,
+                SubStageId = plan.Candidate.SourceStage.SubStageId,
+                SubStageCode = plan.Candidate.SourceStage.SubStage?.Code ?? string.Empty,
+                SubStageName = plan.Candidate.SourceStage.SubStage?.Name ?? string.Empty,
+                StageOrder = plan.StageOrder,
+                TargetStageOrder = plan.TargetStageOrder,
+                CreatesTargetStage = plan.Candidate.ExistingTargetStage is null,
+                StatusLabel = plan.Candidate.ExistingTargetStage is null
+                    ? "ستُنشأ على الخط الهدف ثم ترتبط بالموديل."
+                    : "المرحلة موجودة على الخط الهدف وسترتبط بالموديل."
+            }).ToArray(),
+            SkippedStages = skipped.ToArray(),
+            FailedStages = failed.ToArray()
+        };
+
+    private sealed record CopyCandidate(ProductModelStage SourceStage, SubStage? ExistingTargetStage);
+    private sealed record CopyPlan(
+        CopyCandidate Candidate,
+        int StageOrder,
+        int TargetStageOrder,
+        Guid ResultSubStageId,
+        Guid TargetMainStageId);
 
 }
