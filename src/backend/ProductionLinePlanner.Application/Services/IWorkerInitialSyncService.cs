@@ -12,4 +12,11 @@ public interface IWorkerInitialSyncService
         Guid actorUserId,
         string? requestMeta = null,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Executes the source-to-worker synchronization as part of the attendance pipeline.
+    /// It has no end-user audit actor because it is system orchestration rather than a UI action.
+    /// </summary>
+    Task<Result<WorkerInitialSyncResultDto>> SyncWorkersForAttendanceAsync(
+        CancellationToken cancellationToken = default);
 }

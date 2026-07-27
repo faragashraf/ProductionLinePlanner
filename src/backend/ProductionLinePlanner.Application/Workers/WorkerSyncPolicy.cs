@@ -7,6 +7,7 @@ namespace ProductionLinePlanner.Application.Workers;
 public static class WorkerSyncActions
 {
     public const string NewWorkerCandidate = "NewWorkerCandidate";
+    public const string ExistingWorkerUpdated = "ExistingWorkerUpdated";
     public const string ExistingWorkerUnchanged = "ExistingWorkerUnchanged";
     public const string IdentityConflict = "IdentityConflict";
     public const string UnsupportedSourceState = "UnsupportedSourceState";
@@ -25,12 +26,14 @@ public interface IWorkerSyncPolicy
     IReadOnlyCollection<string> SourceObservedOnlyFields { get; }
 
     WorkerSyncPolicyDecision EvaluateExistingWorker(Worker worker, AttendanceEmployeeRecord source);
+    bool SynchronizeExistingWorker(Worker worker, AttendanceEmployeeRecord source, DateTime synchronizedAtUtc);
     Result<Worker> CreateNewWorker(AttendanceEmployeeRecord source, DateTime createdAtUtc);
 }
 
 /// <summary>
 /// Central ownership boundary for worker master synchronization. The attendance source may
-/// initialize a new local identity, but it never mutates planner-owned fields on an existing worker.
+/// initialize a new local worker and reconcile its external attendance identifiers, but it never
+/// mutates planner-owned profile, employment, or configuration fields.
 /// </summary>
 public sealed class WorkerSyncPolicy : IWorkerSyncPolicy
 {
@@ -74,36 +77,35 @@ public sealed class WorkerSyncPolicy : IWorkerSyncPolicy
     {
         ArgumentNullException.ThrowIfNull(worker);
 
-        var conflicts = new List<string>();
         var sourceAttendanceUserId = Normalize(source.AttendanceUserId);
         var sourceBadge = Normalize(source.BadgeNumber);
-        var sourceEmployeeCode = Normalize(source.EmployeeCode);
 
-        if (sourceAttendanceUserId is not null &&
-            Normalize(worker.AttendanceUserId) is { } localAttendanceUserId &&
-            !string.Equals(localAttendanceUserId, sourceAttendanceUserId, StringComparison.OrdinalIgnoreCase))
-        {
-            conflicts.Add("AttendanceUserIdConflict");
-        }
-
-        if (sourceBadge is not null &&
-            Normalize(worker.BadgeNumber) is { } localBadge &&
-            !string.Equals(localBadge, sourceBadge, StringComparison.OrdinalIgnoreCase))
-        {
-            conflicts.Add("BadgeNumberConflict");
-        }
-
-        if (sourceEmployeeCode is not null &&
-            !string.Equals(worker.EmployeeCode, sourceEmployeeCode, StringComparison.OrdinalIgnoreCase))
-        {
-            conflicts.Add("EmployeeCodeConflict");
-        }
+        var needsExternalIdentityUpdate =
+            sourceAttendanceUserId is not null &&
+            sourceBadge is not null &&
+            (!string.Equals(Normalize(worker.AttendanceUserId), sourceAttendanceUserId, StringComparison.OrdinalIgnoreCase) ||
+             !string.Equals(Normalize(worker.BadgeNumber), sourceBadge, StringComparison.OrdinalIgnoreCase) ||
+             worker.LastExternalSyncAt is null);
 
         return new WorkerSyncPolicyDecision(
-            conflicts.Count == 0 ? WorkerSyncActions.ExistingWorkerUnchanged : WorkerSyncActions.IdentityConflict,
+            needsExternalIdentityUpdate ? WorkerSyncActions.ExistingWorkerUpdated : WorkerSyncActions.ExistingWorkerUnchanged,
             Protected,
-            conflicts,
+            [],
             SourceObservedOnly);
+    }
+
+    public bool SynchronizeExistingWorker(Worker worker, AttendanceEmployeeRecord source, DateTime synchronizedAtUtc)
+    {
+        ArgumentNullException.ThrowIfNull(worker);
+
+        var attendanceUserId = Normalize(source.AttendanceUserId);
+        var badgeNumber = Normalize(source.BadgeNumber);
+        if (attendanceUserId is null || badgeNumber is null)
+        {
+            return false;
+        }
+
+        return worker.SynchronizeAttendanceIdentity(attendanceUserId, badgeNumber, synchronizedAtUtc);
     }
 
     public Result<Worker> CreateNewWorker(AttendanceEmployeeRecord source, DateTime createdAtUtc)

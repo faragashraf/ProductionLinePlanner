@@ -4,6 +4,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using ProductionLinePlanner.Application.Abstractions;
 using ProductionLinePlanner.Application.Common;
@@ -68,23 +69,27 @@ public sealed class WorkerInitialSyncServiceTests
     }
 
     [Fact]
-    public async Task Badge_conflict_is_previewed_and_never_applied()
+    public async Task Existing_worker_reconciles_changed_badge_without_overwriting_planner_owned_fields()
     {
-        var worker = LocalWorker(badgeNumber: "OLD");
+        var worker = LocalWorker(badgeNumber: "OLD", photoReference: "local-photo.png");
         await using var fixture = await Fixture.CreateAsync([Source(badge: "NEW", employeeCode: "001")], [worker]);
 
         var preview = await fixture.Service.PreviewActiveServiceSyncAsync();
         var sync = await fixture.Service.SyncWorkersAsync(fixture.ActorUserId);
 
         Assert.True(preview.IsSuccess);
-        var conflict = Assert.Single(preview.Value!.Rows, row => row.Action == WorkerSyncActions.IdentityConflict);
-        Assert.Contains("BadgeNumberConflict", conflict.IdentityConflicts);
+        var update = Assert.Single(preview.Value!.Rows, row => row.Action == WorkerSyncActions.ExistingWorkerUpdated);
+        Assert.Empty(update.IdentityConflicts);
         Assert.True(sync.IsSuccess);
-        Assert.Equal("OLD", (await fixture.Db.Workers.AsNoTracking().SingleAsync()).BadgeNumber);
+        Assert.Equal(1, sync.Value!.UpdatedCount);
+        var persisted = await fixture.Db.Workers.AsNoTracking().SingleAsync();
+        Assert.Equal("NEW", persisted.BadgeNumber);
+        Assert.Equal("Local Name", persisted.FullName);
+        Assert.Equal("local-photo.png", persisted.PhotoReference);
     }
 
     [Fact]
-    public async Task Employee_code_conflict_is_previewed_and_never_applied()
+    public async Task Employee_code_remains_planner_owned_when_attendance_identity_is_reconciled()
     {
         var worker = LocalWorker(employeeCode: "LOCAL", badgeNumber: "001");
         await using var fixture = await Fixture.CreateAsync([Source(employeeCode: "SOURCE")], [worker]);
@@ -92,9 +97,49 @@ public sealed class WorkerInitialSyncServiceTests
         var preview = await fixture.Service.PreviewActiveServiceSyncAsync();
         var sync = await fixture.Service.SyncWorkersAsync(fixture.ActorUserId);
 
-        Assert.Contains(preview.Value!.Rows, row => row.IdentityConflicts.Contains("EmployeeCodeConflict"));
+        Assert.Contains(preview.Value!.Rows, row => row.Action == WorkerSyncActions.ExistingWorkerUpdated);
         Assert.True(sync.IsSuccess);
         Assert.Equal("LOCAL", (await fixture.Db.Workers.AsNoTracking().SingleAsync()).EmployeeCode);
+    }
+
+    [Fact]
+    public async Task Badge_number_is_used_when_attendance_user_id_has_not_been_linked_yet()
+    {
+        var worker = LocalWorker(employeeCode: "LOCAL", attendanceUserId: "OLD", badgeNumber: "2429");
+        await using var fixture = await Fixture.CreateAsync(
+            [Source(attendanceUserId: "17252", badge: "2429", employeeCode: "SOURCE")],
+            [worker]);
+
+        var result = await fixture.Service.SyncWorkersAsync(fixture.ActorUserId);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(0, result.Value!.CreatedCount);
+        Assert.Equal(1, result.Value.UpdatedCount);
+        var persisted = await fixture.Db.Workers.AsNoTracking().SingleAsync();
+        Assert.Equal(worker.Id, persisted.Id);
+        Assert.Equal("17252", persisted.AttendanceUserId);
+        Assert.Equal("2429", persisted.BadgeNumber);
+        Assert.Equal("LOCAL", persisted.EmployeeCode);
+    }
+
+    [Fact]
+    public async Task Employee_code_is_used_only_after_attendance_user_id_and_badge_do_not_match()
+    {
+        var worker = LocalWorker(employeeCode: "2429", attendanceUserId: "OLD", badgeNumber: "OLD-BADGE");
+        await using var fixture = await Fixture.CreateAsync(
+            [Source(attendanceUserId: "17252", badge: "2429", employeeCode: "2429")],
+            [worker]);
+
+        var result = await fixture.Service.SyncWorkersAsync(fixture.ActorUserId);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(0, result.Value!.CreatedCount);
+        Assert.Equal(1, result.Value.UpdatedCount);
+        var persisted = await fixture.Db.Workers.AsNoTracking().SingleAsync();
+        Assert.Equal(worker.Id, persisted.Id);
+        Assert.Equal("17252", persisted.AttendanceUserId);
+        Assert.Equal("2429", persisted.BadgeNumber);
+        Assert.Equal("2429", persisted.EmployeeCode);
     }
 
     [Fact]
@@ -185,7 +230,8 @@ public sealed class WorkerInitialSyncServiceTests
             new AttendanceDirectoryService(attendanceDb),
             new WorkerSyncPolicy(),
             new AuthoritativeWorkerSnapshotValidator(),
-            new RecordingAuditEngine());
+            new RecordingAuditEngine(),
+            NullLogger<WorkerInitialSyncService>.Instance);
 
         var preview = await service.PreviewActiveServiceSyncAsync();
 
@@ -199,6 +245,32 @@ public sealed class WorkerInitialSyncServiceTests
             command => command.Contains("CHECKINOUT", StringComparison.OrdinalIgnoreCase));
         Assert.Equal(0, await appDb.Workers.CountAsync());
         Assert.Equal(0, await appDb.AttendanceRecords.CountAsync());
+    }
+
+    [Fact]
+    public async Task Userinfo_worker_is_a_create_candidate_even_when_missing_from_current_employees_import()
+    {
+        var sourceOptions = Options.Create(new AttendanceSourceOptions());
+        await using var sourceConnection = new SqliteConnection("Data Source=:memory:");
+        await sourceConnection.OpenAsync();
+        await using var attendanceDb = new AttendanceDbContext(
+            new DbContextOptionsBuilder<AttendanceDbContext>().UseSqlite(sourceConnection).Options,
+            sourceOptions);
+        await attendanceDb.Database.ExecuteSqlRawAsync(
+            "CREATE TABLE USERINFO (USERID INTEGER NULL, BADGENUMBER TEXT NULL, Name TEXT NULL, DEFAULTDEPTID INTEGER NULL, PHOTO BLOB NULL);");
+        await attendanceDb.Database.ExecuteSqlRawAsync(
+            "CREATE TABLE CurrentEmployeesImport (EmployeeCode TEXT NULL);");
+        await attendanceDb.Database.ExecuteSqlRawAsync(
+            "INSERT INTO USERINFO (USERID, BADGENUMBER, Name, DEFAULTDEPTID) VALUES (17252, '2429', 'ZK worker', 1);");
+
+        var reader = new AttendanceDirectoryService(attendanceDb);
+        var source = await reader.GetAllAsync();
+
+        Assert.True(source.IsSuccess);
+        var worker = Assert.Single(source.Value!);
+        Assert.Equal("17252", worker.AttendanceUserId);
+        Assert.Equal("2429", worker.BadgeNumber);
+        Assert.False(worker.IsActive);
     }
 
     [Fact]
@@ -435,7 +507,7 @@ public sealed class WorkerInitialSyncServiceTests
             Reader = reader;
             Audit = audit;
             ActorUserId = Guid.NewGuid();
-            Service = new WorkerInitialSyncService(db, reader, policy, snapshotValidator, audit);
+            Service = new WorkerInitialSyncService(db, reader, policy, snapshotValidator, audit, NullLogger<WorkerInitialSyncService>.Instance);
         }
 
         public AppDbContext Db { get; }
@@ -514,6 +586,9 @@ public sealed class WorkerInitialSyncServiceTests
             CreateNewCalls++;
             return inner.CreateNewWorker(source, createdAtUtc);
         }
+
+        public bool SynchronizeExistingWorker(Worker worker, AttendanceEmployeeRecord source, DateTime synchronizedAtUtc) =>
+            inner.SynchronizeExistingWorker(worker, source, synchronizedAtUtc);
     }
 
     private sealed class TrackingSnapshotValidator : IAuthoritativeWorkerSnapshotValidator

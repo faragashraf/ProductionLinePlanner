@@ -25,19 +25,22 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
     private readonly AttendanceSourceOptions _sourceOptions;
     private readonly ILogger<AttendanceSyncService> _logger;
     private readonly ICairoTimeZoneProvider _cairoTimeZoneProvider;
+    private readonly IWorkerInitialSyncService _workerSyncService;
 
     public AttendanceSyncService(
         AppDbContext appDbContext,
         AttendanceDbContext attendanceDbContext,
         IOptions<AttendanceSourceOptions> sourceOptions,
         ILogger<AttendanceSyncService> logger,
-        ICairoTimeZoneProvider cairoTimeZoneProvider)
+        ICairoTimeZoneProvider cairoTimeZoneProvider,
+        IWorkerInitialSyncService workerSyncService)
     {
         _appDbContext = appDbContext;
         _attendanceDbContext = attendanceDbContext;
         _sourceOptions = sourceOptions.Value;
         _logger = logger;
         _cairoTimeZoneProvider = cairoTimeZoneProvider;
+        _workerSyncService = workerSyncService;
     }
 
     public async Task<Result<AttendanceWorkerStateDto[]>> GetTodayAttendanceAsync(
@@ -393,6 +396,19 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
         if (productionDate == default)
         {
             return Result<AttendanceSyncResultDto>.Failure(new Error("ValidationError", "Production date is required."));
+        }
+
+        var workerSyncResult = await _workerSyncService.SyncWorkersForAttendanceAsync(cancellationToken);
+        if (workerSyncResult.IsFailure)
+        {
+            _logger.LogError(
+                "Attendance sync stopped because worker identity synchronization failed. correlationId={CorrelationId}, date={SyncDate}, errorCode={ErrorCode}",
+                context.CorrelationId,
+                productionDate,
+                workerSyncResult.Error?.Code);
+            return Result<AttendanceSyncResultDto>.Failure(new Error(
+                "WorkerSyncFailed",
+                "Worker synchronization must complete before attendance can be matched."));
         }
 
         var (startUtc, endUtc, startLocal, endLocal) = GetEgyptDayBounds(productionDate);

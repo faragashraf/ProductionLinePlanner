@@ -104,14 +104,16 @@ public sealed class AttendanceDirectoryService(AttendanceDbContext attendanceDbC
             })
             .ToArrayAsync(cancellationToken);
 
+        // USERINFO is the authoritative directory for attendance identities. CurrentEmployeesImport
+        // is observed metadata only; filtering here prevented legitimate USERINFO users from ever
+        // reaching the worker upsert pipeline.
         var records = sourceUsers
-            .Where(x => currentEmployeeCodes.Contains(NormalizeCode(x.BadgeNumber)))
             .Select(x => new AttendanceEmployeeRecord(
                 AttendanceUserId: x.UserId?.ToString(),
                 DepartmentId: x.DefaultDeptId,
                 BadgeNumber: x.BadgeNumber,
                 Name: x.Name,
-                IsActive: true,
+                IsActive: currentEmployeeCodes.Contains(NormalizeCode(x.BadgeNumber)),
                 EmployeeCode: NormalizeCode(x.BadgeNumber)))
             .ToArray();
 

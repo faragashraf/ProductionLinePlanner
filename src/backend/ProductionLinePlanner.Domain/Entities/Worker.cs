@@ -92,6 +92,39 @@ public class Worker
         UpdatedAtUtc = atUtc ?? DateTime.UtcNow;
     }
 
+    /// <summary>
+    /// Updates only the stable identities observed in the external attendance directory.
+    /// Planner-owned profile, employment, assignment, and compensation fields deliberately
+    /// remain outside this synchronization boundary.
+    /// </summary>
+    public bool SynchronizeAttendanceIdentity(
+        string attendanceUserId,
+        string badgeNumber,
+        DateTime synchronizedAtUtc)
+    {
+        if (string.IsNullOrWhiteSpace(attendanceUserId))
+            throw new ArgumentException("AttendanceUserId is required.", nameof(attendanceUserId));
+        if (string.IsNullOrWhiteSpace(badgeNumber))
+            throw new ArgumentException("BadgeNumber is required.", nameof(badgeNumber));
+
+        var normalizedAttendanceUserId = attendanceUserId.Trim();
+        var normalizedBadgeNumber = badgeNumber.Trim();
+        var changed = !string.Equals(AttendanceUserId, normalizedAttendanceUserId, StringComparison.OrdinalIgnoreCase) ||
+                      !string.Equals(BadgeNumber, normalizedBadgeNumber, StringComparison.OrdinalIgnoreCase) ||
+                      LastExternalSyncAt is null;
+
+        if (!changed)
+        {
+            return false;
+        }
+
+        AttendanceUserId = normalizedAttendanceUserId;
+        BadgeNumber = normalizedBadgeNumber;
+        LastExternalSyncAt = synchronizedAtUtc;
+        UpdatedAtUtc = synchronizedAtUtc;
+        return true;
+    }
+
     public void SetEmploymentStatus(EmploymentStatus status, DateTime? atUtc = null, DateTime? employmentEndDate = null)
     {
         EmploymentStatus = status;
