@@ -62,6 +62,8 @@ public sealed class ZkStagingSchemaValidator(string appConnectionString) : IZkSt
                         COL_LENGTH(N'dbo.ZkWorkerSyncInbox', N'ResolutionCode') IS NOT NULL AND
                         COL_LENGTH(N'dbo.ZkWorkerSyncInbox', N'ResolutionDetails') IS NOT NULL AND
                         COL_LENGTH(N'dbo.ZkWorkerSyncInbox', N'ResolvedAtUtc') IS NOT NULL AND
+                        COL_LENGTH(N'dbo.ZkWorkerSyncInbox', N'SourceDefaultDepartmentId') IS NOT NULL AND
+                        COL_LENGTH(N'dbo.ZkWorkerSyncInbox', N'IsCurrentWorker') IS NOT NULL AND
                         COL_LENGTH(N'dbo.ZkAttendanceSyncInbox', N'ResolutionCode') IS NOT NULL AND
                         COL_LENGTH(N'dbo.ZkAttendanceSyncInbox', N'ResolutionDetails') IS NOT NULL AND
                         COL_LENGTH(N'dbo.ZkAttendanceSyncInbox', N'ResolvedAtUtc') IS NOT NULL AND
@@ -311,17 +313,21 @@ public sealed class ZkTimeStagingSource(
                 {
                     var userId = reader.GetInt32(reader.GetOrdinal("SourceUserId"));
                     var badge = OptionalString(reader, "BadgeNumber");
+                    int? sourceDefaultDepartmentId = reader.IsDBNull(reader.GetOrdinal("SourceDefaultDepartmentId"))
+                        ? null
+                        : reader.GetInt32(reader.GetOrdinal("SourceDefaultDepartmentId"));
+                    var isCurrentWorker = reader.GetBoolean(reader.GetOrdinal("IsCurrentWorker"));
                     items.Add(new WorkerIdentitySourceItem(
                         SourceRecordId: reader.GetInt64(reader.GetOrdinal("InboxId")),
                         Worker: new AttendanceEmployeeRecord(
                             AttendanceUserId: userId.ToString(),
-                            DepartmentId: reader.IsDBNull(reader.GetOrdinal("DefaultDepartmentId"))
-                                ? null
-                                : reader.GetInt32(reader.GetOrdinal("DefaultDepartmentId")),
+                            DepartmentId: sourceDefaultDepartmentId,
                             BadgeNumber: badge,
                             Name: OptionalString(reader, "SourceName"),
-                            IsActive: reader.GetBoolean(reader.GetOrdinal("IsCurrentEmployee")),
-                            EmployeeCode: badge?.Trim()),
+                            IsActive: isCurrentWorker,
+                            EmployeeCode: badge?.Trim(),
+                            SourceDefaultDepartmentId: sourceDefaultDepartmentId,
+                            IsCurrentWorker: isCurrentWorker),
                         IsClaimed: reader.GetBoolean(reader.GetOrdinal("IsClaimed"))));
                 }
             }

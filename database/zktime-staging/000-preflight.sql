@@ -455,6 +455,38 @@ BEGIN
           1;
 END;
 
+-- Version 2 installations may predate the additive worker-employment payload. Missing columns are
+-- upgradeable by 001; if either column already exists, its shape must be compatible.
+IF OBJECT_ID(N'dbo.ZkWorkerSyncInbox', N'U') IS NOT NULL
+   AND EXISTS
+   (
+       SELECT 1
+       FROM sys.columns
+       WHERE object_id = OBJECT_ID(N'dbo.ZkWorkerSyncInbox')
+         AND name = N'SourceDefaultDepartmentId'
+         AND (TYPE_NAME(user_type_id) <> N'int' OR is_nullable <> 1)
+   )
+BEGIN
+    THROW 51325,
+          'dbo.ZkWorkerSyncInbox.SourceDefaultDepartmentId has an incompatible shape.',
+          1;
+END;
+
+IF OBJECT_ID(N'dbo.ZkWorkerSyncInbox', N'U') IS NOT NULL
+   AND EXISTS
+   (
+       SELECT 1
+       FROM sys.columns
+       WHERE object_id = OBJECT_ID(N'dbo.ZkWorkerSyncInbox')
+         AND name = N'IsCurrentWorker'
+         AND (TYPE_NAME(user_type_id) <> N'bit' OR is_nullable <> 0)
+   )
+BEGIN
+    THROW 51326,
+          'dbo.ZkWorkerSyncInbox.IsCurrentWorker has an incompatible shape.',
+          1;
+END;
+
 
 /* ============================================================================
    7. Validate existing staging data

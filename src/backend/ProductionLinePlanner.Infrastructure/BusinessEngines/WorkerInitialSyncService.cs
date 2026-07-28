@@ -13,8 +13,8 @@ using ProductionLinePlanner.Infrastructure.Data;
 namespace ProductionLinePlanner.Infrastructure.BusinessEngines;
 
 /// <summary>
-/// Synchronizes ZKTime worker identities before attendance is matched. Only external attendance
-/// identifiers may change on an existing planner worker; planner-owned fields are protected.
+/// Synchronizes ZKTime worker identities before attendance is matched. External attendance identities
+/// and the explicit staged current-worker state may change; planner-owned profile fields are protected.
 /// </summary>
 public sealed class WorkerInitialSyncService(
     AppDbContext dbContext,
@@ -79,11 +79,18 @@ public sealed class WorkerInitialSyncService(
         var plan = BuildPlan(sourceResult.Value!, localWorkers);
         var createdCount = 0;
         var updatedCount = 0;
+        var synchronizedAtUtc = DateTime.UtcNow;
+        var markedInactiveCount = plan.Rows.Count(row =>
+            row.IsClaimed && row.Worker is not null && row.Source?.IsCurrentWorker == false &&
+            (row.Worker.IsActive || row.Worker.EmploymentStatus != EmploymentStatus.LeftEmployment));
+        var reactivatedCount = plan.Rows.Count(row =>
+            row.IsClaimed && row.Worker is not null && row.Source?.IsCurrentWorker == true &&
+            (!row.Worker.IsActive || row.Worker.EmploymentStatus != EmploymentStatus.Active || row.Worker.EmploymentEndDate is not null));
 
         var failedSourceIds = new HashSet<long>();
         foreach (var candidate in plan.Rows.Where(row => row.IsClaimed && row.Preview.Action == WorkerSyncActions.NewWorkerCandidate))
         {
-            var workerResult = workerSyncPolicy.CreateNewWorker(candidate.Source!, DateTime.UtcNow);
+            var workerResult = workerSyncPolicy.CreateNewWorker(candidate.Source!, synchronizedAtUtc);
             if (workerResult.IsFailure)
             {
                 if (candidate.SourceRecordId.HasValue)
@@ -100,7 +107,7 @@ public sealed class WorkerInitialSyncService(
         foreach (var existing in plan.Rows.Where(row => row.IsClaimed && row.Preview.Action == WorkerSyncActions.ExistingWorkerUpdated))
         {
             if (existing.Worker is not null &&
-                workerSyncPolicy.SynchronizeExistingWorker(existing.Worker, existing.Source!, DateTime.UtcNow))
+                workerSyncPolicy.SynchronizeExistingWorker(existing.Worker, existing.Source!, synchronizedAtUtc))
             {
                 updatedCount++;
             }
@@ -118,8 +125,8 @@ public sealed class WorkerInitialSyncService(
             UpdatedCount = updatedCount,
             UnchangedCount = unchangedCount,
             MissingFromSourceCount = missingFromSourceCount,
-            MarkedInactiveCount = 0,
-            ReactivatedCount = 0,
+            MarkedInactiveCount = markedInactiveCount,
+            ReactivatedCount = reactivatedCount,
             WarningCount = identityConflictCount + unsupportedCount,
             StartedAtUtc = startedAtUtc,
             CompletedAtUtc = completedAtUtc
@@ -158,6 +165,16 @@ public sealed class WorkerInitialSyncService(
                 "Unable to persist worker import results."));
         }
 
+        logger.LogInformation(
+            "Worker external synchronization committed. sourceCount={SourceCount}, createdCount={CreatedCount}, updatedCount={UpdatedCount}, markedInactiveCount={MarkedInactiveCount}, reactivatedCount={ReactivatedCount}, unchangedCount={UnchangedCount}, warningCount={WarningCount}",
+            result.SourceCount,
+            result.CreatedCount,
+            result.UpdatedCount,
+            result.MarkedInactiveCount,
+            result.ReactivatedCount,
+            result.UnchangedCount,
+            result.WarningCount);
+
         var acknowledgement = await workerIdentitySource.CompleteBatchAsync(
             sourceResult.Value!.Batch,
             CreateWorkerOutcomes(plan, failedSourceIds),
@@ -195,7 +212,8 @@ public sealed class WorkerInitialSyncService(
                 orderedItems.Select(item => item.Worker).ToArray(),
                 IsComplete: false,
                 AbsenceIsAuthoritative: false,
-                EmploymentStatusIsAuthoritative: false,
+                EmploymentStatusIsAuthoritative: orderedItems.Length > 0 &&
+                                                    orderedItems.All(item => item.Worker.IsCurrentWorker.HasValue),
                 DepartmentIsAuthoritative: false,
                 ShiftIsAuthoritative: false);
             return Result<WorkerSourceRead>.Success(new WorkerSourceRead(snapshot, orderedItems, sourceResult.Value));
@@ -317,7 +335,7 @@ public sealed class WorkerInitialSyncService(
                         decision.ProtectedLocalFields,
                         decision.IdentityConflicts,
                         decision.Action == WorkerSyncActions.ExistingWorkerUpdated
-                            ? "External attendance identifiers will be reconciled; planner-owned data remains unchanged."
+                            ? "Authorized external attendance identity and current-worker state will be reconciled; planner-owned profile data remains unchanged."
                             : "Existing planner-owned worker data remains unchanged.")));
                 sourceIndex++;
                 continue;
@@ -397,6 +415,7 @@ public sealed class WorkerInitialSyncService(
         var newCandidates = plan.Rows.Count(row => row.Preview.Action == WorkerSyncActions.NewWorkerCandidate);
         var identityConflicts = plan.Rows.Count(row => row.Preview.Action == WorkerSyncActions.IdentityConflict);
         var unsupported = plan.Rows.Count(row => row.Preview.Action == WorkerSyncActions.UnsupportedSourceState);
+        var employmentStatusIsAuthoritative = plan.Snapshot.EmploymentStatusIsAuthoritative;
 
         return new WorkerActiveServiceSyncPreviewDto
         {
@@ -404,10 +423,22 @@ public sealed class WorkerInitialSyncService(
             CanApply = false,
             CurrentLocalWorkers = localWorkers.Count,
             ActiveOnServiceWorkersInZkTime = plan.Snapshot.Rows.Count(row => row.IsActive),
-            WorkersToRemainActive = existingUnchanged + existingUpdated,
-            WorkersToReactivate = 0,
+            WorkersToRemainActive = employmentStatusIsAuthoritative
+                ? plan.Rows.Count(row =>
+                    row.Worker is not null && row.Source?.IsCurrentWorker == true && row.Worker.IsActive &&
+                    row.Worker.EmploymentStatus == EmploymentStatus.Active && row.Worker.EmploymentEndDate is null)
+                : existingUnchanged + existingUpdated,
+            WorkersToReactivate = employmentStatusIsAuthoritative
+                ? plan.Rows.Count(row =>
+                    row.Worker is not null && row.Source?.IsCurrentWorker == true &&
+                    (!row.Worker.IsActive || row.Worker.EmploymentStatus != EmploymentStatus.Active || row.Worker.EmploymentEndDate is not null))
+                : 0,
             WorkersToCreate = newCandidates,
-            WorkersToMarkInactiveOrExcluded = 0,
+            WorkersToMarkInactiveOrExcluded = employmentStatusIsAuthoritative
+                ? plan.Rows.Count(row =>
+                    row.Worker is not null && row.Source?.IsCurrentWorker == false &&
+                    (row.Worker.IsActive || row.Worker.EmploymentStatus != EmploymentStatus.LeftEmployment))
+                : 0,
             WorkersAlreadyInactiveOrExcluded = localWorkers.Count(worker => !worker.IsActive),
             WorkersSafelyRemovable = 0,
             WarningCount = identityConflicts + unsupported,

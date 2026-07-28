@@ -135,7 +135,7 @@ public sealed class ZkTimeStagingPipelineTests
             await setup.SaveChangesAsync();
         }
 
-        fixture.Source.AddWorkers(Worker(1, 17252, "2429"));
+        fixture.Source.AddWorkers(Worker(1, 17252, "2429", isCurrentWorker: false));
         fixture.Source.AddPunches(Punch(101, 17252, "2429", 8, 5, "I"));
         publisher.Changes.Clear();
 
@@ -143,15 +143,18 @@ public sealed class ZkTimeStagingPipelineTests
 
         Assert.True(result.IsSuccess, result.Error?.Message);
         Assert.Contains(101, fixture.Source.SkippedPunchIds);
-        Assert.Empty(publisher.Changes);
+        Assert.DoesNotContain(publisher.Changes, change => change.EntityType == ManufacturingEntityType.AttendanceRecord);
+        Assert.Single(publisher.Changes, change => change.EntityType == ManufacturingEntityType.Worker);
         await using var reloaded = fixture.CreateDbContext();
         Assert.Empty(await reloaded.AttendanceRecords.ToArrayAsync());
 
         var claimedBatches = fixture.Source.AttendanceClaims.Count;
+        var publishedChanges = publisher.Changes.Count;
         var replay = await fixture.RunAsync();
 
         Assert.True(replay.IsSuccess, replay.Error?.Message);
         Assert.Equal(claimedBatches, fixture.Source.AttendanceClaims.Count);
+        Assert.Equal(publishedChanges, publisher.Changes.Count);
         Assert.Contains(101, fixture.Source.SkippedPunchIds);
     }
 
@@ -183,7 +186,7 @@ public sealed class ZkTimeStagingPipelineTests
             await setup.SaveChangesAsync();
         }
 
-        fixture.Source.AddWorkers(Worker(1, 17252, "2429"));
+        fixture.Source.AddWorkers(Worker(1, 17252, "2429", isCurrentWorker: false));
         fixture.Source.AddPunches(Punch(101, 17252, "2429", 8, 5, "I"));
 
         var result = await fixture.RunAsync();
@@ -313,9 +316,15 @@ public sealed class ZkTimeStagingPipelineTests
         Assert.Equal([101L, 102L], fixture.Source.AttendanceCompletions.Single().InboxIds);
     }
 
-    private static WorkerIdentitySourceItem Worker(long id, int userId, string badge, string? name = null) =>
+    private static WorkerIdentitySourceItem Worker(
+        long id,
+        int userId,
+        string badge,
+        string? name = null,
+        bool isCurrentWorker = true) =>
         new(id, new AttendanceEmployeeRecord(
-            userId.ToString(), 1, badge, name ?? $"Worker {badge}", true, badge), true);
+            userId.ToString(), isCurrentWorker ? 1 : 2, badge, name ?? $"Worker {badge}", isCurrentWorker, badge,
+            SourceDefaultDepartmentId: isCurrentWorker ? 1 : 2, IsCurrentWorker: isCurrentWorker), true);
 
     private static AttendanceSourcePunch Punch(long id, int userId, string badge, int hour, int minute, string checkType) =>
         new(id, userId, badge, new DateTime(2026, 7, 16, hour, minute, 0, DateTimeKind.Unspecified), checkType, $"source-{id}");

@@ -36,6 +36,44 @@ public sealed class ZkTimeStagingSqlContractTests
     }
 
     [Fact]
+    public void Worker_staging_uses_default_department_current_worker_rule_without_filtering_former_workers()
+    {
+        var schema = Read("database/zktime-staging/001-create-staging-schema.sql");
+        var ingestion = Read("database/zktime-staging/003-create-ingestion-procedures.sql");
+        var processing = Read("database/zktime-staging/004-create-processing-procedures.sql");
+
+        Assert.Contains("SourceDefaultDepartmentId int NULL", schema, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("IsCurrentWorker bit NOT NULL", schema, StringComparison.OrdinalIgnoreCase);
+        Assert.Matches(
+            new Regex(@"CASE\s+WHEN\s+U\.DEFAULTDEPTID\s+IN\s*\(1,\s*4\)\s+THEN\s+1\s+ELSE\s+0\s+END", RegexOptions.IgnoreCase),
+            ingestion);
+        Assert.DoesNotContain("WHERE U.DEFAULTDEPTID", ingestion, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("WHERE U.USERID IS NOT NULL", ingestion, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Inbox.SourceDefaultDepartmentId", processing, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Inbox.IsCurrentWorker", processing, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Version_two_worker_payload_upgrade_is_additive_and_recreates_worker_procedures()
+    {
+        var install = Read("database/zktime-staging/000-install-or-upgrade.sql");
+        var schema = Read("database/zktime-staging/001-create-staging-schema.sql");
+        var ingestion = Read("database/zktime-staging/003-create-ingestion-procedures.sql");
+        var processing = Read("database/zktime-staging/004-create-processing-procedures.sql");
+
+        Assert.Contains("COL_LENGTH(N'dbo.ZkWorkerSyncInbox', N'SourceDefaultDepartmentId') IS NULL", schema, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("COL_LENGTH(N'dbo.ZkWorkerSyncInbox', N'IsCurrentWorker') IS NULL", schema, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("CASE WHEN DefaultDepartmentId IN (1, 4) THEN 1 ELSE 0 END", schema, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("WORKER_STATUS_RULE=DEFAULTDEPTID_1_4", ingestion, StringComparison.Ordinal);
+        Assert.Contains("Target.IsCurrentEmployee <> Source.IsCurrentWorker", ingestion, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(":r database/zktime-staging/003-create-ingestion-procedures.sql", install, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(":r database/zktime-staging/004-create-processing-procedures.sql", install, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("ALTER PROCEDURE dbo.usp_ZkStageWorkers", ingestion, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("ALTER PROCEDURE dbo.usp_ZkWorkerInboxReadSnapshot", processing, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("@Version int = 2", Read("database/zktime-staging/005-record-schema-version.sql"), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void Processing_claims_only_new_rows_but_returns_complete_day_context()
     {
         var processing = Read("database/zktime-staging/004-create-processing-procedures.sql");

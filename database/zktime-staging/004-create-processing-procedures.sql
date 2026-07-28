@@ -85,8 +85,8 @@ BEGIN
         Inbox.SourceUserId,
         Inbox.BadgeNumber,
         Inbox.SourceName,
-        Inbox.DefaultDepartmentId,
-        Inbox.IsCurrentEmployee,
+        Inbox.SourceDefaultDepartmentId,
+        Inbox.IsCurrentWorker,
         CONVERT(bit, CASE WHEN Claimed.InboxId IS NULL THEN 0 ELSE 1 END) AS IsClaimed
     FROM dbo.ZkWorkerSyncInbox AS Inbox
     LEFT JOIN @Claimed AS Claimed ON Claimed.InboxId = Inbox.InboxId

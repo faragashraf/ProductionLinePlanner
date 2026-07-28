@@ -88,6 +88,10 @@ BEGIN TRY
             SourceUserId int NOT NULL,
             BadgeNumber nvarchar(120) NULL,
             SourceName nvarchar(200) NULL,
+            SourceDefaultDepartmentId int NULL,
+            IsCurrentWorker bit NOT NULL CONSTRAINT DF_ZkWorkerSyncInbox_IsCurrentWorker DEFAULT (0),
+            -- Legacy aliases remain during the version 2 in-place upgrade. New procedures use the
+            -- explicit SourceDefaultDepartmentId/IsCurrentWorker contract.
             DefaultDepartmentId int NULL,
             IsCurrentEmployee bit NOT NULL CONSTRAINT DF_ZkWorkerSyncInbox_IsCurrentEmployee DEFAULT (1),
             FirstDiscoveredAtUtc datetime2(7) NOT NULL,
@@ -111,6 +115,23 @@ BEGIN TRY
             CONSTRAINT CK_ZkWorkerSyncInbox_AttemptCount CHECK (AttemptCount >= 0)
         );
     END;
+
+    IF COL_LENGTH(N'dbo.ZkWorkerSyncInbox', N'SourceDefaultDepartmentId') IS NULL
+        ALTER TABLE dbo.ZkWorkerSyncInbox ADD SourceDefaultDepartmentId int NULL;
+    IF COL_LENGTH(N'dbo.ZkWorkerSyncInbox', N'IsCurrentWorker') IS NULL
+        ALTER TABLE dbo.ZkWorkerSyncInbox ADD IsCurrentWorker bit NOT NULL
+            CONSTRAINT DF_ZkWorkerSyncInbox_IsCurrentWorker DEFAULT (0) WITH VALUES;
+
+    -- Backfill the new contract atomically without changing inbox processing state, so a pre-existing
+    -- Pending row is always safe for the new backend to read. The versioned worker hash in 003 makes
+    -- the next collector run requeue every upgraded worker row exactly once.
+    UPDATE dbo.ZkWorkerSyncInbox
+    SET SourceDefaultDepartmentId = DefaultDepartmentId,
+        IsCurrentWorker = CONVERT(bit, CASE WHEN DefaultDepartmentId IN (1, 4) THEN 1 ELSE 0 END)
+    WHERE (SourceDefaultDepartmentId <> DefaultDepartmentId)
+       OR (SourceDefaultDepartmentId IS NULL AND DefaultDepartmentId IS NOT NULL)
+       OR (SourceDefaultDepartmentId IS NOT NULL AND DefaultDepartmentId IS NULL)
+       OR IsCurrentWorker <> CONVERT(bit, CASE WHEN DefaultDepartmentId IN (1, 4) THEN 1 ELSE 0 END);
 
     IF COL_LENGTH(N'dbo.ZkWorkerSyncInbox', N'ResolutionCode') IS NULL
         ALTER TABLE dbo.ZkWorkerSyncInbox ADD ResolutionCode nvarchar(100) NULL;

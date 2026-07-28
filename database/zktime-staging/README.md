@@ -34,6 +34,16 @@ The scripts use the SQL Server 2016-compatible create-stub/`ALTER PROCEDURE` pat
 assuming `CREATE OR ALTER` is available on every SQL Server 2016 patch level. No installer statement
 resets a watermark, processing status, `Pending` row, or `Failed` row.
 
+The schema remains at version 2 for the additive worker-employment payload. Install/upgrade adds
+`SourceDefaultDepartmentId` and non-null `IsCurrentWorker` in place, preserves existing inbox rows and
+statuses, atomically backfills the new classification, and recreates the worker ingestion/snapshot
+procedures. The worker row hash includes a stable rule revision, so the next worker collection requeues
+every upgraded worker row once without inserting duplicates; later identical collections remain no-ops.
+
+`USERINFO.DEFAULTDEPTID IN (1, 4)` is the authoritative current-worker rule. Every other value,
+including `NULL`, means non-worker. `usp_ZkStageWorkers` still reads every ordinary `USERINFO` row
+with a non-null `USERID`; it never filters former workers out of durable staging.
+
 ## Inbox processing states (schema version 2)
 
 - `Pending`: eligible for backend processing, including an explicitly retried transient identity miss.
@@ -43,6 +53,12 @@ resets a watermark, processing status, `Pending` row, or `Failed` row.
 - `Skipped`: technically valid but intentionally not applied by a documented business rule, such as
   `WorkerInactive` or `AttendanceAfterEmploymentEnd`.
 - `Failed`: malformed/ambiguous source data or a technical persistence failure requiring review.
+
+For a staged non-worker, the backend keeps the `Workers` row and historical relations, applies the
+domain value `LeftEmployment`, and sets `EmploymentEndDate` only on the first transition. Repeated
+identical staging data does not move that date. A later department 1/4 observation uses the existing
+domain activation rule (`Active`, `IsActive=true`, cleared prior employment end date). Local names and
+photos remain planner-owned and are never replaced by this synchronization.
 
 `ResolutionCode`, `ResolutionDetails`, and `ResolvedAtUtc` carry the outcome independently of
 `LastError`. `LastError` remains reserved for actual failures. A missing worker produces the transient

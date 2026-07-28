@@ -158,6 +158,81 @@ public sealed class WorkerInitialSyncServiceTests
         Assert.Equal(EmploymentStatus.Active, persisted.EmploymentStatus);
     }
 
+    [Theory]
+    [InlineData(1, true, EmploymentStatus.Active, true)]
+    [InlineData(4, true, EmploymentStatus.Active, true)]
+    [InlineData(2, false, EmploymentStatus.LeftEmployment, false)]
+    [InlineData(null, false, EmploymentStatus.LeftEmployment, false)]
+    public void Staged_default_department_classification_initializes_the_domain_status(
+        int? sourceDefaultDepartmentId,
+        bool isCurrentWorker,
+        EmploymentStatus expectedStatus,
+        bool expectedIsActive)
+    {
+        var policy = new WorkerSyncPolicy();
+        var source = Source(
+            departmentId: sourceDefaultDepartmentId,
+            sourceDefaultDepartmentId: sourceDefaultDepartmentId,
+            isCurrentWorker: isCurrentWorker);
+
+        var result = policy.CreateNewWorker(source, new DateTime(2026, 7, 28, 8, 0, 0, DateTimeKind.Utc));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(expectedStatus, result.Value!.EmploymentStatus);
+        Assert.Equal(expectedIsActive, result.Value.IsActive);
+        Assert.Null(result.Value.EmploymentEndDate);
+    }
+
+    [Fact]
+    public async Task Staged_worker_transition_is_idempotent_preserves_local_profile_and_reactivates_safely()
+    {
+        var worker = LocalWorker(fullName: "الاسم العربي المحلي", photoReference: "local-photo.png");
+        var sourceRows = new[]
+        {
+            Source(departmentId: 2, sourceDefaultDepartmentId: 2, isCurrentWorker: false)
+        };
+        await using var fixture = await Fixture.CreateAsync(
+            workers: [worker],
+            getAllAsync: _ => Task.FromResult(Result<AttendanceEmployeeRecord[]>.Success(sourceRows)));
+
+        var departure = await fixture.Service.SyncWorkersAsync(fixture.ActorUserId);
+        var afterDeparture = await fixture.Db.Workers.AsNoTracking().SingleAsync();
+        var firstEmploymentEndDate = afterDeparture.EmploymentEndDate;
+        var firstExternalSyncAt = afterDeparture.LastExternalSyncAt;
+
+        Assert.True(departure.IsSuccess);
+        Assert.Equal(1, departure.Value!.MarkedInactiveCount);
+        Assert.False(afterDeparture.IsActive);
+        Assert.Equal(EmploymentStatus.LeftEmployment, afterDeparture.EmploymentStatus);
+        Assert.NotNull(firstEmploymentEndDate);
+        Assert.Equal("الاسم العربي المحلي", afterDeparture.FullName);
+        Assert.Equal("local-photo.png", afterDeparture.PhotoReference);
+
+        var replay = await fixture.Service.SyncWorkersAsync(fixture.ActorUserId);
+        var afterReplay = await fixture.Db.Workers.AsNoTracking().SingleAsync();
+
+        Assert.True(replay.IsSuccess);
+        Assert.Equal(0, replay.Value!.MarkedInactiveCount);
+        Assert.Equal(0, replay.Value.UpdatedCount);
+        Assert.Equal(firstEmploymentEndDate, afterReplay.EmploymentEndDate);
+        Assert.Equal(firstExternalSyncAt, afterReplay.LastExternalSyncAt);
+
+        sourceRows[0] = Source(
+            departmentId: 1,
+            sourceDefaultDepartmentId: 1,
+            isCurrentWorker: true);
+        var reactivation = await fixture.Service.SyncWorkersAsync(fixture.ActorUserId);
+        var afterReactivation = await fixture.Db.Workers.AsNoTracking().SingleAsync();
+
+        Assert.True(reactivation.IsSuccess);
+        Assert.Equal(1, reactivation.Value!.ReactivatedCount);
+        Assert.True(afterReactivation.IsActive);
+        Assert.Equal(EmploymentStatus.Active, afterReactivation.EmploymentStatus);
+        Assert.Null(afterReactivation.EmploymentEndDate);
+        Assert.Equal("الاسم العربي المحلي", afterReactivation.FullName);
+        Assert.Equal("local-photo.png", afterReactivation.PhotoReference);
+    }
+
     [Fact]
     public async Task Employment_department_and_shift_are_source_observed_only()
     {
@@ -480,8 +555,21 @@ public sealed class WorkerInitialSyncServiceTests
         string? employeeCode = "001",
         string? employmentStatus = null,
         string? department = null,
-        string? shift = null) =>
-        new(attendanceUserId, departmentId, badge, name, isActive, employeeCode, employmentStatus, department, shift);
+        string? shift = null,
+        int? sourceDefaultDepartmentId = null,
+        bool? isCurrentWorker = null) =>
+        new(
+            attendanceUserId,
+            departmentId,
+            badge,
+            name,
+            isActive,
+            employeeCode,
+            employmentStatus,
+            department,
+            shift,
+            sourceDefaultDepartmentId,
+            isCurrentWorker);
 
     private static Worker LocalWorker(
         string employeeCode = "001",

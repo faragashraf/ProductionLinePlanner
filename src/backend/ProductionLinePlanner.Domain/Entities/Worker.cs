@@ -125,6 +125,39 @@ public class Worker
         return true;
     }
 
+    /// <summary>
+    /// Applies the authoritative current-worker signal supplied by the durable attendance staging
+    /// contract. A repeated former-worker observation preserves the original employment end date.
+    /// </summary>
+    public bool SynchronizeAttendanceEmployment(bool isCurrentWorker, DateTime synchronizedAtUtc)
+    {
+        if (isCurrentWorker)
+        {
+            if (IsActive && EmploymentStatus == EmploymentStatus.Active && EmploymentEndDate is null)
+            {
+                return false;
+            }
+
+            Activate(synchronizedAtUtc);
+        }
+        else
+        {
+            if (!IsActive && EmploymentStatus == EmploymentStatus.LeftEmployment)
+            {
+                return false;
+            }
+
+            SetEmploymentStatus(
+                EmploymentStatus.LeftEmployment,
+                synchronizedAtUtc,
+                EmploymentEndDate ?? synchronizedAtUtc);
+        }
+
+        LastExternalSyncAt = synchronizedAtUtc;
+        UpdatedAtUtc = synchronizedAtUtc;
+        return true;
+    }
+
     public void SetEmploymentStatus(EmploymentStatus status, DateTime? atUtc = null, DateTime? employmentEndDate = null)
     {
         EmploymentStatus = status;

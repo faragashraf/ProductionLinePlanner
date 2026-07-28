@@ -24,6 +24,8 @@ INSERT @Objects (ObjectType, ObjectName, IsInstalled) VALUES
     (N'Table', N'dbo.ZkSyncState', CONVERT(bit, CASE WHEN OBJECT_ID(N'dbo.ZkSyncState', N'U') IS NULL THEN 0 ELSE 1 END)),
     (N'Table', N'dbo.ZkWorkerSyncInbox', CONVERT(bit, CASE WHEN OBJECT_ID(N'dbo.ZkWorkerSyncInbox', N'U') IS NULL THEN 0 ELSE 1 END)),
     (N'Table', N'dbo.ZkAttendanceSyncInbox', CONVERT(bit, CASE WHEN OBJECT_ID(N'dbo.ZkAttendanceSyncInbox', N'U') IS NULL THEN 0 ELSE 1 END)),
+    (N'Column', N'dbo.ZkWorkerSyncInbox.SourceDefaultDepartmentId', CONVERT(bit, CASE WHEN COL_LENGTH(N'dbo.ZkWorkerSyncInbox', N'SourceDefaultDepartmentId') IS NULL THEN 0 ELSE 1 END)),
+    (N'Column', N'dbo.ZkWorkerSyncInbox.IsCurrentWorker', CONVERT(bit, CASE WHEN COL_LENGTH(N'dbo.ZkWorkerSyncInbox', N'IsCurrentWorker') IS NULL THEN 0 ELSE 1 END)),
     (N'Type', N'dbo.ZkInboxProcessingResult', CONVERT(bit, CASE WHEN TYPE_ID(N'dbo.ZkInboxProcessingResult') IS NULL THEN 0 ELSE 1 END)),
     (N'Type', N'dbo.ZkInboxResolutionResult', CONVERT(bit, CASE WHEN TYPE_ID(N'dbo.ZkInboxResolutionResult') IS NULL THEN 0 ELSE 1 END)),
     (N'Procedure', N'dbo.usp_ZkSyncRunStart', CONVERT(bit, CASE WHEN OBJECT_ID(N'dbo.usp_ZkSyncRunStart', N'P') IS NULL THEN 0 ELSE 1 END)),
@@ -96,6 +98,13 @@ CROSS JOIN Statuses
 LEFT JOIN #InboxCounts AS Counts
     ON Counts.InboxType = InboxTypes.InboxType AND Counts.ProcessingStatus = Statuses.ProcessingStatus
 ORDER BY InboxTypes.InboxType, Statuses.ProcessingStatus;
+
+-- Worker current/non-worker classification counts contain no identity or profile data.
+IF COL_LENGTH(N'dbo.ZkWorkerSyncInbox', N'IsCurrentWorker') IS NOT NULL
+    EXEC(N'SELECT IsCurrentWorker, COUNT_BIG(*) AS WorkerCount, MAX(LastSeenAtUtc) AS LatestSeenAtUtc
+          FROM dbo.ZkWorkerSyncInbox
+          GROUP BY IsCurrentWorker
+          ORDER BY IsCurrentWorker DESC;');
 
 -- 7. Source freshness and evidence that the backend processor is draining the inboxes.
 CREATE TABLE #InboxFreshness

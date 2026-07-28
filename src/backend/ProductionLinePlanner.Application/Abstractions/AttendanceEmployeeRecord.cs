@@ -9,4 +9,6 @@ public sealed record AttendanceEmployeeRecord(
     string? EmployeeCode = null,
     string? EmploymentStatus = null,
     string? Department = null,
-    string? Shift = null);
+    string? Shift = null,
+    int? SourceDefaultDepartmentId = null,
+    bool? IsCurrentWorker = null);

@@ -35,23 +35,30 @@ BEGIN
         SourceUserId int NOT NULL PRIMARY KEY,
         BadgeNumber nvarchar(120) NULL,
         SourceName nvarchar(200) NULL,
-        DefaultDepartmentId int NULL,
+        SourceDefaultDepartmentId int NULL,
+        IsCurrentWorker bit NOT NULL,
         SourceRowHash binary(32) NOT NULL
     );
 
     BEGIN TRY
         SET @Sql = N'
-            INSERT #SourceWorkers (SourceUserId, BadgeNumber, SourceName, DefaultDepartmentId, SourceRowHash)
+            INSERT #SourceWorkers
+            (
+                SourceUserId, BadgeNumber, SourceName, SourceDefaultDepartmentId,
+                IsCurrentWorker, SourceRowHash
+            )
             SELECT
                 CONVERT(int, U.USERID),
                 NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(120), U.BADGENUMBER))), N''''),
                 NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(200), U.Name))), N''''),
                 TRY_CONVERT(int, U.DEFAULTDEPTID),
+                CONVERT(bit, CASE WHEN U.DEFAULTDEPTID IN (1, 4) THEN 1 ELSE 0 END),
                 HASHBYTES(''SHA2_256'', CONVERT(varbinary(8000), CONCAT(
                     N''USERID='', CONVERT(nvarchar(20), U.USERID),
                     N''|BADGE='', COALESCE(LTRIM(RTRIM(CONVERT(nvarchar(120), U.BADGENUMBER))), N''''),
                     N''|NAME='', COALESCE(LTRIM(RTRIM(CONVERT(nvarchar(200), U.Name))), N''''),
-                    N''|DEPT='', COALESCE(CONVERT(nvarchar(20), U.DEFAULTDEPTID), N'''')
+                    N''|DEPT='', COALESCE(CONVERT(nvarchar(20), U.DEFAULTDEPTID), N''''),
+                    N''|WORKER_STATUS_RULE=DEFAULTDEPTID_1_4''
                 )))
             FROM ' + @SourcePrefix + N'USERINFO AS U
             WHERE U.USERID IS NOT NULL;';
@@ -70,33 +77,60 @@ BEGIN
         SELECT @Changed = COUNT(*)
         FROM dbo.ZkWorkerSyncInbox AS Target
         INNER JOIN #SourceWorkers AS Source ON Source.SourceUserId = Target.SourceUserId
-        WHERE Target.SourceRowHash <> Source.SourceRowHash;
+        WHERE Target.SourceRowHash <> Source.SourceRowHash
+           OR Target.IsCurrentWorker <> Source.IsCurrentWorker
+           OR Target.IsCurrentEmployee <> Source.IsCurrentWorker
+           OR Target.SourceDefaultDepartmentId <> Source.SourceDefaultDepartmentId
+           OR (Target.SourceDefaultDepartmentId IS NULL AND Source.SourceDefaultDepartmentId IS NOT NULL)
+           OR (Target.SourceDefaultDepartmentId IS NOT NULL AND Source.SourceDefaultDepartmentId IS NULL);
 
         UPDATE Target WITH (UPDLOCK, ROWLOCK)
-        SET BadgeNumber = CASE WHEN Target.SourceRowHash <> Source.SourceRowHash THEN Source.BadgeNumber ELSE Target.BadgeNumber END,
-            SourceName = CASE WHEN Target.SourceRowHash <> Source.SourceRowHash THEN Source.SourceName ELSE Target.SourceName END,
-            DefaultDepartmentId = CASE WHEN Target.SourceRowHash <> Source.SourceRowHash THEN Source.DefaultDepartmentId ELSE Target.DefaultDepartmentId END,
-            IsCurrentEmployee = 1,
+        SET BadgeNumber = CASE WHEN Delta.IsChanged = 1 THEN Source.BadgeNumber ELSE Target.BadgeNumber END,
+            SourceName = CASE WHEN Delta.IsChanged = 1 THEN Source.SourceName ELSE Target.SourceName END,
+            SourceDefaultDepartmentId = Source.SourceDefaultDepartmentId,
+            IsCurrentWorker = Source.IsCurrentWorker,
+            DefaultDepartmentId = Source.SourceDefaultDepartmentId,
+            IsCurrentEmployee = Source.IsCurrentWorker,
             LastSeenAtUtc = @NowUtc,
             SourceRowHash = Source.SourceRowHash,
-            ProcessingStatus = CASE WHEN Target.SourceRowHash <> Source.SourceRowHash THEN 'Pending' ELSE Target.ProcessingStatus END,
-            AttemptCount = CASE WHEN Target.SourceRowHash <> Source.SourceRowHash THEN 0 ELSE Target.AttemptCount END,
-            LastError = CASE WHEN Target.SourceRowHash <> Source.SourceRowHash THEN NULL ELSE Target.LastError END,
-            ProcessingLeaseId = CASE WHEN Target.SourceRowHash <> Source.SourceRowHash THEN NULL ELSE Target.ProcessingLeaseId END,
-            ProcessingStartedAtUtc = CASE WHEN Target.SourceRowHash <> Source.SourceRowHash THEN NULL ELSE Target.ProcessingStartedAtUtc END,
-            ProcessedAtUtc = CASE WHEN Target.SourceRowHash <> Source.SourceRowHash THEN NULL ELSE Target.ProcessedAtUtc END,
+            ProcessingStatus = CASE WHEN Delta.IsChanged = 1 THEN 'Pending' ELSE Target.ProcessingStatus END,
+            AttemptCount = CASE WHEN Delta.IsChanged = 1 THEN 0 ELSE Target.AttemptCount END,
+            LastError = CASE WHEN Delta.IsChanged = 1 THEN NULL ELSE Target.LastError END,
+            ResolutionCode = CASE WHEN Delta.IsChanged = 1 THEN NULL ELSE Target.ResolutionCode END,
+            ResolutionDetails = CASE WHEN Delta.IsChanged = 1 THEN NULL ELSE Target.ResolutionDetails END,
+            ResolvedAtUtc = CASE WHEN Delta.IsChanged = 1 THEN NULL ELSE Target.ResolvedAtUtc END,
+            ProcessingLeaseId = CASE WHEN Delta.IsChanged = 1 THEN NULL ELSE Target.ProcessingLeaseId END,
+            ProcessingStartedAtUtc = CASE WHEN Delta.IsChanged = 1 THEN NULL ELSE Target.ProcessingStartedAtUtc END,
+            ProcessedAtUtc = CASE WHEN Delta.IsChanged = 1 THEN NULL ELSE Target.ProcessedAtUtc END,
             UpdatedAtUtc = @NowUtc
         FROM dbo.ZkWorkerSyncInbox AS Target
-        INNER JOIN #SourceWorkers AS Source ON Source.SourceUserId = Target.SourceUserId;
+        INNER JOIN #SourceWorkers AS Source ON Source.SourceUserId = Target.SourceUserId
+        CROSS APPLY
+        (
+            VALUES
+            (
+                CONVERT(bit, CASE
+                    WHEN Target.SourceRowHash <> Source.SourceRowHash
+                      OR Target.IsCurrentWorker <> Source.IsCurrentWorker
+                      OR Target.IsCurrentEmployee <> Source.IsCurrentWorker
+                      OR Target.SourceDefaultDepartmentId <> Source.SourceDefaultDepartmentId
+                      OR (Target.SourceDefaultDepartmentId IS NULL AND Source.SourceDefaultDepartmentId IS NOT NULL)
+                      OR (Target.SourceDefaultDepartmentId IS NOT NULL AND Source.SourceDefaultDepartmentId IS NULL)
+                    THEN 1 ELSE 0 END)
+            )
+        ) AS Delta(IsChanged);
 
         INSERT dbo.ZkWorkerSyncInbox
         (
-            SourceUserId, BadgeNumber, SourceName, DefaultDepartmentId, IsCurrentEmployee,
+            SourceUserId, BadgeNumber, SourceName, SourceDefaultDepartmentId, IsCurrentWorker,
+            DefaultDepartmentId, IsCurrentEmployee,
             FirstDiscoveredAtUtc, LastSeenAtUtc, SourceRowHash, ProcessingStatus,
             AttemptCount, CreatedAtUtc, UpdatedAtUtc
         )
         SELECT
-            Source.SourceUserId, Source.BadgeNumber, Source.SourceName, Source.DefaultDepartmentId, 1,
+            Source.SourceUserId, Source.BadgeNumber, Source.SourceName,
+            Source.SourceDefaultDepartmentId, Source.IsCurrentWorker,
+            Source.SourceDefaultDepartmentId, Source.IsCurrentWorker,
             @NowUtc, @NowUtc, Source.SourceRowHash, 'Pending', 0, @NowUtc, @NowUtc
         FROM #SourceWorkers AS Source
         WHERE NOT EXISTS

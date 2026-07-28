@@ -1,6 +1,7 @@
 using ProductionLinePlanner.Application.Abstractions;
 using ProductionLinePlanner.Application.Common;
 using ProductionLinePlanner.Domain.Entities;
+using ProductionLinePlanner.Domain.Enums;
 
 namespace ProductionLinePlanner.Application.Workers;
 
@@ -32,8 +33,8 @@ public interface IWorkerSyncPolicy
 
 /// <summary>
 /// Central ownership boundary for worker master synchronization. The attendance source may
-/// initialize a new local worker and reconcile its external attendance identifiers, but it never
-/// mutates planner-owned profile, employment, or configuration fields.
+/// initialize a new local worker, reconcile external attendance identifiers, and apply the explicit
+/// durable-staging current-worker signal. Planner-owned profile and configuration fields stay protected.
 /// </summary>
 public sealed class WorkerSyncPolicy : IWorkerSyncPolicy
 {
@@ -86,9 +87,19 @@ public sealed class WorkerSyncPolicy : IWorkerSyncPolicy
             (!string.Equals(Normalize(worker.AttendanceUserId), sourceAttendanceUserId, StringComparison.OrdinalIgnoreCase) ||
              !string.Equals(Normalize(worker.BadgeNumber), sourceBadge, StringComparison.OrdinalIgnoreCase) ||
              worker.LastExternalSyncAt is null);
+        var needsEmploymentUpdate = source.IsCurrentWorker switch
+        {
+            true => !worker.IsActive ||
+                    worker.EmploymentStatus != EmploymentStatus.Active ||
+                    worker.EmploymentEndDate is not null,
+            false => worker.IsActive || worker.EmploymentStatus != EmploymentStatus.LeftEmployment,
+            null => false
+        };
 
         return new WorkerSyncPolicyDecision(
-            needsExternalIdentityUpdate ? WorkerSyncActions.ExistingWorkerUpdated : WorkerSyncActions.ExistingWorkerUnchanged,
+            needsExternalIdentityUpdate || needsEmploymentUpdate
+                ? WorkerSyncActions.ExistingWorkerUpdated
+                : WorkerSyncActions.ExistingWorkerUnchanged,
             Protected,
             [],
             SourceObservedOnly);
@@ -105,7 +116,10 @@ public sealed class WorkerSyncPolicy : IWorkerSyncPolicy
             return false;
         }
 
-        return worker.SynchronizeAttendanceIdentity(attendanceUserId, badgeNumber, synchronizedAtUtc);
+        var identityChanged = worker.SynchronizeAttendanceIdentity(attendanceUserId, badgeNumber, synchronizedAtUtc);
+        var employmentChanged = source.IsCurrentWorker.HasValue &&
+                                worker.SynchronizeAttendanceEmployment(source.IsCurrentWorker.Value, synchronizedAtUtc);
+        return identityChanged || employmentChanged;
     }
 
     public Result<Worker> CreateNewWorker(AttendanceEmployeeRecord source, DateTime createdAtUtc)
@@ -124,13 +138,15 @@ public sealed class WorkerSyncPolicy : IWorkerSyncPolicy
         var sourceName = Normalize(source.Name);
         var initialLocalName = IsUsableInitialName(sourceName) ? sourceName! : employeeCode;
 
+        var isCurrentWorker = source.IsCurrentWorker ?? true;
         return Result<Worker>.Success(new Worker(
             id: Guid.NewGuid(),
             employeeCode: employeeCode,
             fullName: initialLocalName,
             attendanceUserId: attendanceUserId,
             badgeNumber: badgeNumber,
-            isActive: true,
+            isActive: isCurrentWorker,
+            employmentStatus: isCurrentWorker ? EmploymentStatus.Active : EmploymentStatus.LeftEmployment,
             attendanceDepartmentId: null,
             lastExternalSyncAt: createdAtUtc,
             createdAtUtc: createdAtUtc));

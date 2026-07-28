@@ -197,6 +197,13 @@ BEGIN
     ) AS Counts ON Counts.ProcessingStatus = Statuses.ProcessingStatus
     ORDER BY Statuses.ProcessingStatus;
 
+    SELECT IsCurrentWorker,
+           COUNT_BIG(*) AS WorkerCount,
+           MAX(LastSeenAtUtc) AS LatestSeenAtUtc
+    FROM dbo.ZkWorkerSyncInbox
+    GROUP BY IsCurrentWorker
+    ORDER BY IsCurrentWorker DESC;
+
     ;WITH Statuses(ProcessingStatus) AS
     (
         SELECT 'Pending' UNION ALL SELECT 'Processing' UNION ALL SELECT 'Processed' UNION ALL SELECT 'Skipped' UNION ALL SELECT 'Failed'
