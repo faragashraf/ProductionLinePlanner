@@ -2231,6 +2231,33 @@ workersApi.MapPatch("/{workerId:guid}/employment-status", async (
     .WithTags("Workers")
     .WithName("SetWorkerEmploymentStatus");
 
+workersApi.MapPut("/{workerId:guid}/organizational-department", async (
+    Guid workerId,
+    AssignWorkerDepartmentRequest request,
+    IWorkerDepartmentAssignmentEngine assignmentEngine,
+    ICurrentUserService currentUserService,
+    HttpContext httpContext,
+    CancellationToken cancellationToken) =>
+{
+    if (currentUserService.UserId is not { } actorUserId)
+        return ApiResponse.Failure("Unauthorized", "User context is required.");
+
+    var result = await assignmentEngine.AssignAsync(
+        workerId,
+        request.DepartmentId,
+        request.ConcurrencyToken,
+        actorUserId,
+        AuditRequestMetadata.From(httpContext),
+        cancellationToken);
+    return result.IsFailure
+        ? ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code))
+        : Results.Ok(ApiResponse.Success(result.Value!));
+})
+    .RequirePermission("workers.manage")
+    .RequirePermission("departments.manage")
+    .WithTags("Workers")
+    .WithName("AssignWorkerOrganizationalDepartment");
+
 workersApi.MapGet("/{workerId:guid}/current-assignment", async (
     Guid workerId,
     IAssignmentEngine assignmentEngine,
@@ -3757,7 +3784,7 @@ static int MapFailureStatusCode(string? code)
         "ValidationError" => StatusCodes.Status400BadRequest,
         "NotFound" => StatusCodes.Status404NotFound,
         "Unauthorized" or "InvalidToken" or "InvalidCredentials" => StatusCodes.Status401Unauthorized,
-        "Conflict" or "IdentityConflict" or "SourceObservedOnly" or "ExternalSourceReadOnly" => StatusCodes.Status409Conflict,
+        "Conflict" or "ConcurrencyConflict" or "IdentityConflict" or "SourceObservedOnly" or "ExternalSourceReadOnly" => StatusCodes.Status409Conflict,
         "AttendanceSyncInProgress" => StatusCodes.Status409Conflict,
         "BootstrapNotAllowed" => StatusCodes.Status409Conflict,
         "Forbidden" => StatusCodes.Status403Forbidden,

@@ -19,7 +19,8 @@ public sealed class ManufacturingDataChangeSaveChangesInterceptor(
     ICurrentUserService currentUserService,
     IManufacturingRealtimeCorrelationContext correlationContext,
     ManufacturingDataChangeTransactionCoordinator transactionCoordinator,
-    ILogger<ManufacturingDataChangeSaveChangesInterceptor> logger) : SaveChangesInterceptor
+    ILogger<ManufacturingDataChangeSaveChangesInterceptor> logger,
+    IManufacturingRealtimeChangeContext? changeContext = null) : SaveChangesInterceptor
 {
     private readonly ConcurrentDictionary<Guid, PendingChanges> pendingChanges = new();
 
@@ -101,6 +102,21 @@ public sealed class ManufacturingDataChangeSaveChangesInterceptor(
             }
 
             var representative = batch[0];
+            var dates = batch.SelectMany(change => change.AffectedAttendanceDates ?? [])
+                .AppendIfNotNull(batch.Select(change => change.ProductionDate))
+                .Distinct()
+                .OrderBy(date => date)
+                .ToArray();
+            var workerIds = batch.SelectMany(change => change.WorkerIds ?? [])
+                .AppendIfNotNull(batch.Select(change => change.WorkerId))
+                .Distinct()
+                .OrderBy(id => id)
+                .ToArray();
+            var departmentIds = batch.SelectMany(change => change.DepartmentIds ?? [])
+                .AppendIfNotNull(batch.Select(change => change.DepartmentId))
+                .Distinct()
+                .OrderBy(id => id)
+                .ToArray();
             result.Add(new ManufacturingDataChanged(
                 Guid.NewGuid(),
                 entityType,
@@ -108,7 +124,20 @@ public sealed class ManufacturingDataChangeSaveChangesInterceptor(
                 Guid.Empty,
                 batch.Max(change => change.OccurredAtUtc),
                 representative.ActorUserId,
-                representative.CorrelationId));
+                representative.CorrelationId,
+                DepartmentId: departmentIds.Length == 1 ? departmentIds[0] : null,
+                ProductionDate: dates.Length == 1 ? dates[0] : null,
+                WorkerId: workerIds.Length == 1 ? workerIds[0] : null,
+                Source: batch.Select(change => change.Source).Distinct(StringComparer.OrdinalIgnoreCase).Count() == 1
+                    ? representative.Source
+                    : "Application",
+                AffectedAttendanceDates: dates,
+                WorkerIds: workerIds,
+                DepartmentIds: departmentIds,
+                AddedAttendanceCount: batch.Sum(change => change.AddedAttendanceCount),
+                UpdatedAttendanceCount: batch.Sum(change => change.UpdatedAttendanceCount),
+                WorkerChangeKinds: batch.SelectMany(change => change.WorkerChangeKinds ?? []).Distinct(StringComparer.OrdinalIgnoreCase).Order().ToArray(),
+                AttendanceChangeKinds: batch.SelectMany(change => change.AttendanceChangeKinds ?? []).Distinct(StringComparer.OrdinalIgnoreCase).Order().ToArray()));
         }
 
         return result.ToArray();
@@ -177,11 +206,42 @@ public sealed class ManufacturingDataChangeSaveChangesInterceptor(
                 ManufacturingEntityType.AttendanceRecord,
                 entity.Id,
                 actorUserId,
-                workerId: entity.WorkerId),
-            Worker entity => Create(entry, ManufacturingEntityType.Worker, entity.Id, actorUserId),
+                productionDate: changeContext?.ProductionDate ?? DateOnly.FromDateTime(entity.AttendanceTimeUtc),
+                workerId: entity.WorkerId,
+                affectedAttendanceDates: [changeContext?.ProductionDate ?? DateOnly.FromDateTime(entity.AttendanceTimeUtc)],
+                workerIds: [entity.WorkerId],
+                addedAttendanceCount: entry.State == EntityState.Added ? 1 : 0,
+                updatedAttendanceCount: entry.State == EntityState.Modified ? 1 : 0,
+                attendanceChangeKinds: [entry.State == EntityState.Added ? "created" : "updated"]),
+            Worker entity => CreateWorkerChange(entry, entity, actorUserId),
             WorkerDefaultAssignment entity => CreateDefaultAssignmentChange(entry, entity, actorUserId),
             _ => null
         };
+    }
+
+    private ManufacturingDataChanged CreateWorkerChange(
+        Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry entry,
+        Worker entity,
+        Guid? actorUserId)
+    {
+        var departmentIds = entry.Properties
+            .Where(property => property.Metadata.Name == nameof(Worker.OrganizationalDepartmentId))
+            .SelectMany(property => new[] { property.OriginalValue as Guid?, property.CurrentValue as Guid? })
+            .Where(value => value.HasValue && value.Value != Guid.Empty)
+            .Select(value => value!.Value)
+            .Distinct()
+            .ToArray();
+
+        return Create(
+            entry,
+            ManufacturingEntityType.Worker,
+            entity.Id,
+            actorUserId,
+            departmentId: entity.OrganizationalDepartmentId,
+            workerId: entity.Id,
+            workerIds: [entity.Id],
+            departmentIds: departmentIds,
+            workerChangeKinds: WorkerChangeKinds(entry));
     }
 
     private ManufacturingDataChanged CreateDefaultAssignmentChange(
@@ -214,7 +274,14 @@ public sealed class ManufacturingDataChangeSaveChangesInterceptor(
         Guid? productModelId = null,
         Guid? subStageId = null,
         DateOnly? productionDate = null,
-        Guid? workerId = null) =>
+        Guid? workerId = null,
+        IReadOnlyList<DateOnly>? affectedAttendanceDates = null,
+        IReadOnlyList<Guid>? workerIds = null,
+        IReadOnlyList<Guid>? departmentIds = null,
+        int addedAttendanceCount = 0,
+        int updatedAttendanceCount = 0,
+        IReadOnlyList<string>? workerChangeKinds = null,
+        IReadOnlyList<string>? attendanceChangeKinds = null) =>
         new(
             Guid.NewGuid(),
             entityType,
@@ -230,7 +297,15 @@ public sealed class ManufacturingDataChangeSaveChangesInterceptor(
             productModelId,
             subStageId,
             productionDate,
-            workerId);
+            workerId,
+            changeContext?.Source ?? "Application",
+            affectedAttendanceDates,
+            workerIds,
+            departmentIds,
+            addedAttendanceCount,
+            updatedAttendanceCount,
+            workerChangeKinds,
+            attendanceChangeKinds);
 
     private static DefaultAssignmentLocation ResolveDefaultAssignmentLocation(DbContext? context, Guid subStageId)
     {
@@ -308,7 +383,8 @@ public sealed class ManufacturingDataChangeSaveChangesInterceptor(
         }
 
         if ((entityType == ManufacturingEntityType.ProductModelStage && entry.Properties.Any(property => property.IsModified && property.Metadata.Name is "ProductModelId" or "SubStageId")) ||
-            (entityType == ManufacturingEntityType.ProductionLine && entry.Properties.Any(property => property.IsModified && property.Metadata.Name == "DepartmentId")))
+            (entityType == ManufacturingEntityType.ProductionLine && entry.Properties.Any(property => property.IsModified && property.Metadata.Name == "DepartmentId")) ||
+            (entityType == ManufacturingEntityType.Worker && entry.Properties.Any(property => property.IsModified && property.Metadata.Name == nameof(Worker.OrganizationalDepartmentId))))
         {
             return ManufacturingChangeType.RelationshipChanged;
         }
@@ -318,9 +394,29 @@ public sealed class ManufacturingDataChangeSaveChangesInterceptor(
             : ManufacturingChangeType.Updated;
     }
 
-    private string? CorrelationId() => correlationContext.CorrelationId;
+    private static IReadOnlyList<string> WorkerChangeKinds(Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry entry)
+    {
+        if (entry.State == EntityState.Added) return ["created"];
+        if (entry.State == EntityState.Deleted) return ["deleted"];
+
+        var names = entry.Properties.Where(property => property.IsModified).Select(property => property.Metadata.Name).ToHashSet();
+        var kinds = new List<string>();
+        if (names.Overlaps([nameof(Worker.IsActive), nameof(Worker.EmploymentStatus), nameof(Worker.EmploymentEndDate)])) kinds.Add("employment-status");
+        if (names.Contains(nameof(Worker.OrganizationalDepartmentId))) kinds.Add("department-assignment");
+        if (names.Overlaps([nameof(Worker.AttendanceUserId), nameof(Worker.BadgeNumber), nameof(Worker.LastExternalSyncAt)])) kinds.Add("attendance-identity");
+        if (kinds.Count == 0) kinds.Add("profile");
+        return kinds;
+    }
+
+    private string? CorrelationId() => changeContext?.CorrelationId ?? correlationContext.CorrelationId;
 
     private sealed record DefaultAssignmentLocation(Guid? FactoryId, Guid? ProductionLineId, Guid? MainStageId);
 
     private sealed record PendingChanges(IReadOnlyList<ManufacturingDataChanged> Changes, DbTransaction? Transaction);
+}
+
+internal static class ManufacturingRealtimeEnumerableExtensions
+{
+    public static IEnumerable<T> AppendIfNotNull<T>(this IEnumerable<T> source, IEnumerable<T?> values) where T : struct =>
+        source.Concat(values.Where(value => value.HasValue).Select(value => value!.Value));
 }

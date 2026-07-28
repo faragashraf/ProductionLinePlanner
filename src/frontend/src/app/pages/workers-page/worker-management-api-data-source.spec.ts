@@ -1,6 +1,7 @@
 import { of, throwError } from 'rxjs';
 import { WorkerPageItem } from '../../shared/models/worker.model';
 import { WorkersApiService } from '../../core/services/workers-api.service';
+import { ManufacturingMasterDataApiService } from '../../core/services/manufacturing-master-data-api.service';
 import { WorkerManagementApiDataSource } from './worker-management-api-data-source';
 
 describe('WorkerManagementApiDataSource', () => {
@@ -11,7 +12,7 @@ describe('WorkerManagementApiDataSource', () => {
   };
 
   function createApi(): jasmine.SpyObj<WorkersApiService> {
-    const api = jasmine.createSpyObj<WorkersApiService>('WorkersApiService', ['loadWorkers', 'getWorker', 'updateWorker', 'setEmploymentStatus', 'uploadWorkerPhoto', 'deleteWorkerPhoto']);
+    const api = jasmine.createSpyObj<WorkersApiService>('WorkersApiService', ['loadWorkers', 'getWorker', 'updateWorker', 'setEmploymentStatus', 'assignOrganizationalDepartment', 'uploadWorkerPhoto', 'deleteWorkerPhoto']);
     api.loadWorkers.and.returnValue(of({ workers: [worker], hasBackendData: true, hasUsableBackendData: true, totalCount: 1, page: 1, pageSize: 6, totalPages: 1, supportsServerPagination: true }));
     api.getWorker.and.returnValue(of(worker));
     api.updateWorker.and.returnValue(of({ ...worker, fullName: 'اسم جديد' }));
@@ -48,5 +49,26 @@ describe('WorkerManagementApiDataSource', () => {
     let failure = '';
     source.loadPage({ page: 1, pageSize: 6, search: '', localEmploymentStatus: '' }).subscribe({ error: error => failure = error.message });
     expect(failure).toBe('network offline');
+  });
+
+  it('offers only active departments that belong to active factories', () => {
+    const api = createApi();
+    const masterData = jasmine.createSpyObj<ManufacturingMasterDataApiService>('ManufacturingMasterDataApiService', ['departments', 'factories']);
+    masterData.factories.and.returnValue(of([
+      { id: 'factory-active', name: 'مصنع نشط', code: 'F-1', isActive: true },
+      { id: 'factory-inactive', name: 'مصنع متوقف', code: 'F-2', isActive: false }
+    ]));
+    masterData.departments.and.returnValue(of([
+      { id: 'department-active', factoryId: 'factory-active', code: 'D-1', nameAr: 'قسم نشط', isActive: true },
+      { id: 'department-inactive', factoryId: 'factory-active', code: 'D-2', nameAr: 'قسم متوقف', isActive: false },
+      { id: 'department-inactive-factory', factoryId: 'factory-inactive', code: 'D-3', nameAr: 'قسم بمصنع متوقف', isActive: true }
+    ]));
+    const source = new WorkerManagementApiDataSource(api, undefined, masterData);
+
+    source.loadActiveDepartments().subscribe(departments => {
+      expect(departments.map(department => department.id)).toEqual(['department-active']);
+      expect(departments[0].searchLabel).toContain('مصنع نشط');
+    });
+    expect(masterData.departments).toHaveBeenCalledWith(undefined, false);
   });
 });

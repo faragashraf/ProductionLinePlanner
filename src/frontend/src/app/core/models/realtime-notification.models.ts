@@ -11,10 +11,14 @@ export function realtimeConnectionStatusLabel(status: RealtimeConnectionStatus):
 
 export type ManufacturingEntityType = 'Factory' | 'Department' | 'ProductionLine' | 'MainStage' | 'SubStage' | 'ProductModel' | 'ProductModelStage' | 'ProductionOrder' | 'StageProductionRecord' | 'AttendanceRecord' | 'Worker' | 'WorkerDefaultAssignment';
 export type ManufacturingChangeType = 'Created' | 'Updated' | 'Deleted' | 'Activated' | 'Deactivated' | 'Reordered' | 'RelationshipChanged' | 'permanent-assignment-created' | 'permanent-assignment-updated' | 'permanent-assignment-cancelled';
+export type WorkerChangeKind = 'created' | 'deleted' | 'employment-status' | 'department-assignment' | 'attendance-identity' | 'profile';
+export type AttendanceChangeKind = 'created' | 'updated';
 
 /** A small invalidation hint; screens refetch API data rather than accepting a pushed entity. */
 export interface ManufacturingDataChanged {
   eventId: string;
+  /** Logical event name; optional while older API instances remain in rotation. */
+  eventType?: 'manufacturing.attendance.changed' | 'manufacturing.workers.changed' | 'manufacturing.worker-department.changed' | 'manufacturing.data.changed' | string;
   entityType: ManufacturingEntityType;
   changeType: ManufacturingChangeType;
   entityId: string;
@@ -29,6 +33,15 @@ export interface ManufacturingDataChanged {
   subStageId: string | null;
   productionDate: string | null;
   workerId: string | null;
+  /** Optional during rolling deployment with an older API instance. */
+  source?: 'Application' | 'ZkTimeSync' | string;
+  affectedAttendanceDates?: string[];
+  workerIds?: string[];
+  departmentIds?: string[];
+  addedAttendanceCount?: number;
+  updatedAttendanceCount?: number;
+  workerChangeKinds?: WorkerChangeKind[];
+  attendanceChangeKinds?: AttendanceChangeKind[];
 }
 
 export interface NotificationSummary {

@@ -81,7 +81,10 @@ public sealed class DepartmentCatalogService(
         if (normalizedName is not null && string.IsNullOrWhiteSpace(normalizedName)) return Result<DepartmentDto>.Failure(new Error("ValidationError", "NameAr cannot be empty."));
         if (sequenceOrder is < 0) return Result<DepartmentDto>.Failure(new Error("ValidationError", "SequenceOrder must be zero or greater."));
         if (normalizedCode is not null && !string.Equals(normalizedCode, entity.Code, StringComparison.Ordinal)) return Result<DepartmentDto>.Failure(new Error("ValidationError", "لا يمكن تعديل الكود بعد إنشاء السجل."));
-        if (isActive is false && entity.IsActive && await dbContext.ProductionLines.AnyAsync(x => x.DepartmentId == entity.Id && x.IsActive, cancellationToken)) return Result<DepartmentDto>.Failure(new Error("Conflict", "لا يمكن تعطيل القسم لوجود خطوط إنتاج نشطة مرتبطة به."));
+        if (isActive is false && entity.IsActive &&
+            (await dbContext.ProductionLines.AnyAsync(x => x.DepartmentId == entity.Id && x.IsActive, cancellationToken) ||
+             await dbContext.Workers.AnyAsync(x => x.OrganizationalDepartmentId == entity.Id, cancellationToken)))
+            return Result<DepartmentDto>.Failure(new Error("Conflict", "لا يمكن تعطيل القسم لوجود خطوط إنتاج نشطة أو عاملين مرتبطين به."));
 
         var before = DepartmentAudit(entity);
         if (normalizedCode is not null || normalizedName is not null || nameEn is not null || sequenceOrder is not null)
@@ -104,6 +107,7 @@ public sealed class DepartmentCatalogService(
         var entity = await dbContext.Departments.FirstOrDefaultAsync(x => x.Id == departmentId, cancellationToken);
         if (entity is null) return Result.Failure(new Error("NotFound", "Department not found."));
         if (await dbContext.ProductionLines.AnyAsync(x => x.DepartmentId == departmentId, cancellationToken)) return Result.Failure(new Error("Conflict", "لا يمكن حذف القسم لوجود خطوط إنتاج مرتبطة به."));
+        if (await dbContext.Workers.AnyAsync(x => x.OrganizationalDepartmentId == departmentId, cancellationToken)) return Result.Failure(new Error("Conflict", "لا يمكن حذف القسم لوجود عاملين مرتبطين به."));
         await auditEngine.RecordAsync(actorUserId, AuditActionType.Delete, nameof(Department), entity.Id.ToString(), DepartmentAudit(entity), null, requestMeta, cancellationToken);
         dbContext.Departments.Remove(entity);
         await dbContext.SaveChangesAsync(cancellationToken);

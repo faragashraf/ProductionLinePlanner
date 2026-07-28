@@ -73,6 +73,7 @@ public static class DependencyInjection
 
         services.AddScoped<IManufacturingDataChangePublisher, NoopManufacturingDataChangePublisher>();
         services.AddScoped<IManufacturingRealtimeCorrelationContext, NoopManufacturingRealtimeCorrelationContext>();
+        services.AddScoped<IManufacturingRealtimeChangeContext, ManufacturingRealtimeChangeContext>();
         services.AddScoped<ManufacturingDataChangeTransactionCoordinator>();
         services.AddScoped<ManufacturingDataChangeSaveChangesInterceptor>();
         services.AddScoped<ManufacturingDataChangeTransactionInterceptor>();
@@ -139,6 +140,7 @@ public static class DependencyInjection
 
         services.AddWorkerSyncFoundation();
         services.AddScoped<IEmployeeMasterDataService, EmployeeMasterDataService>();
+        services.AddScoped<IWorkerDepartmentAssignmentEngine, WorkerDepartmentAssignmentEngine>();
         services.AddScoped<IDepartmentAdministrationService, DepartmentAdministrationService>();
         services.AddScoped<IDepartmentCatalogService, DepartmentCatalogService>();
         services.AddScoped<IProductionStageCatalogService, ProductionStageCatalogService>();

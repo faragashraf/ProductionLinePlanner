@@ -49,7 +49,15 @@ public sealed record ManufacturingDataChanged(
     Guid? ProductModelId = null,
     Guid? SubStageId = null,
     DateOnly? ProductionDate = null,
-    Guid? WorkerId = null);
+    Guid? WorkerId = null,
+    string Source = "Application",
+    IReadOnlyList<DateOnly>? AffectedAttendanceDates = null,
+    IReadOnlyList<Guid>? WorkerIds = null,
+    IReadOnlyList<Guid>? DepartmentIds = null,
+    int AddedAttendanceCount = 0,
+    int UpdatedAttendanceCount = 0,
+    IReadOnlyList<string>? WorkerChangeKinds = null,
+    IReadOnlyList<string>? AttendanceChangeKinds = null);
 
 public interface IManufacturingDataChangePublisher
 {
@@ -59,4 +67,13 @@ public interface IManufacturingDataChangePublisher
 public interface IManufacturingRealtimeCorrelationContext
 {
     string? CorrelationId { get; }
+}
+
+public interface IManufacturingRealtimeChangeContext
+{
+    string Source { get; }
+    string? CorrelationId { get; }
+    DateOnly? ProductionDate { get; }
+
+    IDisposable Begin(string source, string? correlationId = null, DateOnly? productionDate = null);
 }

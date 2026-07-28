@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@angular/core';
 import { Observable } from 'rxjs';
 import { WORKER_MANAGEMENT_DATA_SOURCE, WorkerManagementDataSource } from './worker-management.data-source';
-import { WorkerManagementPage, WorkerManagementProfile, WorkerManagementQuery } from './worker-management.models';
+import { WorkerDepartmentAssignmentResult, WorkerDepartmentOption, WorkerManagementPage, WorkerManagementProfile, WorkerManagementQuery } from './worker-management.models';
 import { WorkerManagementLocalUpdate } from './worker-management.data-source';
 
 @Injectable()
@@ -26,5 +26,13 @@ export class WorkerManagementFacade {
 
   deletePhoto(workerId: string): Observable<WorkerManagementProfile> {
     return this.dataSource.deletePhoto(workerId);
+  }
+
+  loadActiveDepartments(): Observable<WorkerDepartmentOption[]> {
+    return this.dataSource.loadActiveDepartments();
+  }
+
+  assignDepartment(workerId: string, departmentId: string, concurrencyToken: string): Observable<WorkerDepartmentAssignmentResult> {
+    return this.dataSource.assignDepartment(workerId, departmentId, concurrencyToken);
   }
 }

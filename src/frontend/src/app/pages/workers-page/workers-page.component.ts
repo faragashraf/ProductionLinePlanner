@@ -1,4 +1,6 @@
 import { Component, OnDestroy, OnInit, Optional } from '@angular/core';
+import { MenuItem, MessageService } from 'primeng/api';
+import { Menu } from 'primeng/menu';
 import { Router } from '@angular/router';
 import { PermissionService } from '../../core/services/permission.service';
 import { PERMISSIONS } from '../../core/config/permission-identifiers';
@@ -13,8 +15,10 @@ import {
   WorkerManagementPage,
   WorkerManagementProfile,
   WorkerManagementQuery,
-  WorkerSourceLinkStatus
+  WorkerSourceLinkStatus,
+  WorkerDepartmentOption
 } from './worker-management.models';
+import { ManufacturingDataChanged } from '../../core/models/realtime-notification.models';
 import {
   assignmentStatusPresentation,
   localProfileStatusPresentation,
@@ -64,18 +68,28 @@ export class WorkersPageComponent implements OnInit, OnDestroy {
   profileLoading = false;
   profileError = '';
   selectedProfile: WorkerManagementProfile | null = null;
+  departmentDialogVisible = false;
+  departmentOptionsLoading = false;
+  departmentSaving = false;
+  departmentDialogError = '';
+  departmentConflict = false;
+  selectedDepartmentId = '';
+  selectedDepartmentWorker: WorkerManagementListItem | null = null;
+  departmentOptions: WorkerDepartmentOption[] = [];
+  workerActionItems: MenuItem[] = [];
 
   constructor(
     private readonly facade: WorkerManagementFacade,
     private readonly permissionService: PermissionService,
     @Optional() private readonly manufacturingRealtime?: ManufacturingRealtimeService,
-    @Optional() private readonly router?: Router
+    @Optional() private readonly router?: Router,
+    @Optional() private readonly messageService?: MessageService
   ) {}
 
   ngOnInit(): void {
     this.restoreFilters();
     if (this.router?.url.includes('/manufacturing/employees')) {
-      this.stopRealtime = this.manufacturingRealtime?.watchScreen({ screen: 'employees', refresh: () => this.reload(this.page) });
+      this.stopRealtime = this.manufacturingRealtime?.watchScreen({ screen: 'employees', refresh: change => this.handleRealtimeChange(change) });
     }
     this.load$.pipe(
       switchMap(query => {
@@ -128,6 +142,15 @@ export class WorkersPageComponent implements OnInit, OnDestroy {
 
   get canViewAssignments(): boolean {
     return this.permissionService.hasPermission(PERMISSIONS.assignments.view);
+  }
+
+  get canAssignDepartment(): boolean {
+    return this.permissionService.hasAll([PERMISSIONS.workers.manage, PERMISSIONS.departments.manage]);
+  }
+
+  get departmentSaveDisabled(): boolean {
+    return this.departmentSaving || this.departmentOptionsLoading || this.departmentConflict || !this.selectedDepartmentId ||
+      this.selectedDepartmentId === this.selectedDepartmentWorker?.organizationalDepartmentId;
   }
 
   get isEmpty(): boolean {
@@ -199,6 +222,81 @@ export class WorkersPageComponent implements OnInit, OnDestroy {
     });
   }
 
+  openWorkerActions(event: Event, worker: WorkerManagementListItem, menu: Menu): void {
+    this.workerActionItems = [
+      {
+        label: 'فتح الملف',
+        icon: 'pi pi-folder-open',
+        command: () => this.openProfile(worker)
+      },
+      ...(this.canAssignDepartment ? [{
+        label: worker.organizationalDepartmentId ? 'تغيير القسم' : 'تعيين إلى قسم',
+        icon: 'pi pi-sitemap',
+        command: () => this.openDepartmentDialog(worker)
+      }] : [])
+    ];
+    menu.toggle(event);
+  }
+
+  openDepartmentDialog(worker: WorkerManagementListItem): void {
+    if (!this.canAssignDepartment) return;
+    this.selectedDepartmentWorker = worker;
+    this.selectedDepartmentId = worker.organizationalDepartmentId ?? '';
+    this.departmentDialogError = worker.organizationalDepartmentConcurrencyToken
+      ? ''
+      : 'تعذر بدء التعديل لأن نسخة بيانات العامل غير متاحة. أعد تحميل الصفحة.';
+    this.departmentConflict = !worker.organizationalDepartmentConcurrencyToken;
+    this.departmentDialogVisible = true;
+    this.departmentOptionsLoading = true;
+    this.facade.loadActiveDepartments().pipe(
+      finalize(() => this.departmentOptionsLoading = false),
+      takeUntil(this.destroy$)
+    ).subscribe({
+      next: departments => this.departmentOptions = departments,
+      error: error => this.departmentDialogError = error instanceof Error ? error.message : 'تعذر تحميل الأقسام النشطة.'
+    });
+  }
+
+  closeDepartmentDialog(): void {
+    if (this.departmentSaving) return;
+    this.departmentDialogVisible = false;
+    this.selectedDepartmentWorker = null;
+    this.selectedDepartmentId = '';
+    this.departmentDialogError = '';
+    this.departmentConflict = false;
+  }
+
+  saveDepartmentAssignment(): void {
+    const worker = this.selectedDepartmentWorker;
+    if (!worker || this.departmentSaveDisabled) return;
+    this.departmentSaving = true;
+    this.departmentDialogError = '';
+    this.facade.assignDepartment(worker.id, this.selectedDepartmentId, worker.organizationalDepartmentConcurrencyToken ?? '').pipe(
+      finalize(() => this.departmentSaving = false),
+      takeUntil(this.destroy$)
+    ).subscribe({
+      next: result => {
+        this.workers = this.workers.map(item => item.id !== result.workerId ? item : {
+          ...item,
+          organizationalDepartmentId: result.departmentId,
+          organizationalDepartmentName: result.departmentName,
+          organizationalFactoryName: result.factoryName,
+          organizationalDepartmentConcurrencyToken: result.concurrencyToken
+        });
+        this.departmentSaving = false;
+        this.closeDepartmentDialog();
+        this.messageService?.add({ severity: 'success', summary: 'تم تحديث القسم', detail: 'حُفظ التعيين التنظيمي داخل Dayoub فقط.' });
+      },
+      error: error => {
+        const status = (error as { status?: number })?.status;
+        if (status === 409) this.departmentConflict = true;
+        this.departmentDialogError = status === 409
+          ? 'تغيرت بيانات العامل أثناء التحرير. أغلق النافذة وافتحها مجددًا قبل الحفظ.'
+          : error instanceof Error ? error.message : 'تعذر حفظ القسم التنظيمي.';
+      }
+    });
+  }
+
   closeProfile(): void {
     this.profileViewOpen = false;
     this.profileLoading = false;
@@ -231,6 +329,17 @@ export class WorkersPageComponent implements OnInit, OnDestroy {
   private reload(page: number): void {
     this.page = Math.max(1, page);
     this.load$.next(this.currentQuery());
+  }
+
+  private handleRealtimeChange(change?: ManufacturingDataChanged): void {
+    if (change?.workerChangeKinds?.includes('department-assignment') && this.selectedDepartmentWorker) {
+      const affectedIds = new Set([change.workerId, change.entityId, ...(change.workerIds ?? [])].filter((id): id is string => !!id));
+      if (affectedIds.size === 0 || affectedIds.has(this.selectedDepartmentWorker.id)) {
+        this.departmentConflict = true;
+        this.departmentDialogError = 'غيّر مستخدم آخر قسم هذا العامل. احتفظنا بالنافذة مفتوحة ومنعنا الحفظ فوق التغيير.';
+      }
+    }
+    this.reload(this.page);
   }
 
   private currentQuery(): WorkerManagementQuery {

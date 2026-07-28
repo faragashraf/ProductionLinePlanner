@@ -148,6 +148,10 @@ describe('DailyProductionOperationsPageComponent unified preview', () => {
     component.ngOnInit();
     expect(watchConfig.matches?.(dailyChange({ entityType: 'Worker', productionDate: null, productionLineId: null, productModelId: null }))).toBeTrue();
     expect(watchConfig.matches?.(dailyChange({ entityType: 'AttendanceRecord', productionDate: null, productionLineId: null, productModelId: null }))).toBeTrue();
+    expect(watchConfig.matches?.(dailyChange({
+      entityType: 'AttendanceRecord', productionDate: '2026-07-20', affectedAttendanceDates: ['2026-07-20'],
+      productionLineId: null, productModelId: null
+    }))).toBeFalse();
     watchConfig.refresh();
 
     expect(production.loadDailyOperations).toHaveBeenCalledTimes(1);

@@ -85,6 +85,28 @@ export interface WorkerManagementListItem {
   factoryId: string | null;
   productionLineId: string | null;
   hasIdentityConflict: boolean;
+  organizationalDepartmentId?: string | null;
+  organizationalDepartmentName?: string | null;
+  organizationalFactoryName?: string | null;
+  organizationalDepartmentConcurrencyToken?: string;
+}
+
+export interface WorkerDepartmentOption {
+  id: string;
+  name: string;
+  code: string;
+  factoryId: string;
+  factoryName: string;
+  searchLabel: string;
+}
+
+export interface WorkerDepartmentAssignmentResult {
+  workerId: string;
+  departmentId: string;
+  departmentName: string;
+  factoryId: string;
+  factoryName: string;
+  concurrencyToken: string;
 }
 
 export interface WorkerManagementQuery {

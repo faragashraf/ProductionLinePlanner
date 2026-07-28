@@ -9,6 +9,14 @@ public sealed class SignalRManufacturingDataChangePublisher(
 {
     public async Task PublishAsync(ManufacturingDataChanged change, CancellationToken cancellationToken = default)
     {
+        if (change.EntityType == ManufacturingEntityType.AttendanceRecord &&
+            change.AddedAttendanceCount <= 0 &&
+            change.UpdatedAttendanceCount <= 0)
+        {
+            logger.LogDebug("Skipped empty manufacturing attendance notification {EventId}.", change.EventId);
+            return;
+        }
+
         var groups = ManufacturingRealtimeGroups.ForChange(change);
         if (groups.Count == 0) return;
 
