@@ -17,6 +17,46 @@ namespace ProductionLinePlanner.Tests;
 public sealed class AttendanceNotificationOutboxTests
 {
     [Theory]
+    [InlineData(WorkerAttendanceNotificationType.CheckIn, true)]
+    [InlineData(WorkerAttendanceNotificationType.CheckIn, false)]
+    [InlineData(WorkerAttendanceNotificationType.CheckOut, true)]
+    [InlineData(WorkerAttendanceNotificationType.CheckOut, false)]
+    public async Task Sql_datetime2_outbox_timestamps_are_normalized_to_utc_before_idempotent_publish(
+        WorkerAttendanceNotificationType type,
+        bool assigned)
+    {
+        await using var fixture = await Fixture.CreateAsync(
+            type,
+            enabled: true,
+            assigned: assigned,
+            simulateSqlDateTimeKinds: true);
+        var pending = await fixture.Db.AttendanceNotificationEvents.SingleAsync();
+        Assert.Equal(DateTimeKind.Unspecified, pending.AttendanceTimeUtc.Kind);
+        Assert.Equal(DateTimeKind.Unspecified, pending.CreatedAtUtc.Kind);
+
+        var first = await fixture.Processor.ProcessPendingAsync();
+        var second = await fixture.Processor.ProcessPendingAsync();
+
+        Assert.True(first.IsSuccess);
+        Assert.Equal(1, first.Value);
+        Assert.Equal(0, second.Value);
+        Assert.Equal(2, await fixture.Db.Notifications.CountAsync());
+        Assert.All(await fixture.Db.Notifications.ToArrayAsync(), notification =>
+        {
+            Assert.Equal(DateTimeKind.Utc, notification.CreatedAtUtc.Kind);
+            using var metadata = JsonDocument.Parse(notification.MetadataJson!);
+            Assert.EndsWith("Z", metadata.RootElement.GetProperty("attendanceTimeUtc").GetString());
+        });
+        Assert.All(fixture.Dispatcher.Deliveries, delivery =>
+            Assert.Equal(DateTimeKind.Utc, delivery.Notification.CreatedAtUtc.Kind));
+        Assert.NotNull(pending.ProcessedAtUtc);
+        Assert.Equal(DateTimeKind.Utc, pending.ProcessedAtUtc!.Value.Kind);
+        Assert.Equal(DateTimeKind.Utc, pending.LastAttemptAtUtc!.Value.Kind);
+        Assert.Null(pending.LastErrorCode);
+        Assert.Equal(1, pending.AttemptCount);
+    }
+
+    [Theory]
     [InlineData(WorkerAttendanceNotificationType.CheckIn, NotificationEventKeys.WorkerCheckedIn, "الحضور")]
     [InlineData(WorkerAttendanceNotificationType.CheckOut, NotificationEventKeys.WorkerCheckedOut, "الانصراف")]
     public async Task Assigned_attendance_is_persisted_for_every_active_user_before_live_delivery(
@@ -144,7 +184,8 @@ public sealed class AttendanceNotificationOutboxTests
             bool throwOnLiveDispatch = false,
             bool soundEnabled = true,
             bool browserEnabled = true,
-            bool multipleAssignments = false)
+            bool multipleAssignments = false,
+            bool simulateSqlDateTimeKinds = false)
         {
             var options = new DbContextOptionsBuilder<AppDbContext>()
                 .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
@@ -165,9 +206,13 @@ public sealed class AttendanceNotificationOutboxTests
                 Guid.NewGuid(), policy.Id, NotificationRecipientKind.AllActiveUsers,
                 null, null, null, null, false, 0));
             db.AddRange(userOne, userTwo, worker, record, policy);
-            db.AttendanceNotificationEvents.Add(new AttendanceNotificationEvent(
+            var attendanceEvent = new AttendanceNotificationEvent(
                 Guid.NewGuid(), record.Id, worker.Id, worker.FullName, worker.EmployeeCode,
-                type, attendanceTime, "test", $"attendance:{record.Id:D}:{type}"));
+                type, attendanceTime, "test", $"attendance:{record.Id:D}:{type}",
+                simulateSqlDateTimeKinds
+                    ? DateTime.SpecifyKind(attendanceTime.AddMinutes(-1), DateTimeKind.Unspecified)
+                    : null);
+            db.AttendanceNotificationEvents.Add(attendanceEvent);
 
             if (assigned)
             {
@@ -192,6 +237,15 @@ public sealed class AttendanceNotificationOutboxTests
                 }
             }
             await db.SaveChangesAsync();
+            if (simulateSqlDateTimeKinds)
+            {
+                typeof(AttendanceNotificationEvent)
+                    .GetProperty(nameof(AttendanceNotificationEvent.AttendanceTimeUtc))!
+                    .SetValue(attendanceEvent, DateTime.SpecifyKind(attendanceTime, DateTimeKind.Unspecified));
+                typeof(AttendanceNotificationEvent)
+                    .GetProperty(nameof(AttendanceNotificationEvent.CreatedAtUtc))!
+                    .SetValue(attendanceEvent, DateTime.SpecifyKind(attendanceEvent.CreatedAtUtc, DateTimeKind.Unspecified));
+            }
 
             var dispatcher = new RecordingDispatcher(db, throwOnLiveDispatch);
             var publisher = new NotificationPublisher(db, dispatcher, NullLogger<NotificationPublisher>.Instance);

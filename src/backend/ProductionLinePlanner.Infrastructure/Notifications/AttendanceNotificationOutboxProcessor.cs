@@ -46,10 +46,11 @@ public sealed class AttendanceNotificationOutboxProcessor(
             {
                 attendanceEvent.MarkFailed(result.Error?.Code ?? "AttendanceNotificationFailed", DateTime.UtcNow);
                 logger.LogWarning(
-                    "Attendance notification outbox processing failed. eventId={EventId}, idempotencyKey={IdempotencyKey}, errorCode={ErrorCode}",
+                    "Attendance notification outbox processing failed. eventId={EventId}, idempotencyKey={IdempotencyKey}, errorCode={ErrorCode}, errorMessage={ErrorMessage}",
                     attendanceEvent.Id,
                     attendanceEvent.IdempotencyKey,
-                    result.Error?.Code);
+                    result.Error?.Code,
+                    result.Error?.Message);
             }
 
             await dbContext.SaveChangesAsync(cancellationToken);
@@ -62,6 +63,14 @@ public sealed class AttendanceNotificationOutboxProcessor(
         AttendanceNotificationEvent attendanceEvent,
         CancellationToken cancellationToken)
     {
+        if (attendanceEvent.AttendanceTimeUtc.Kind == DateTimeKind.Local)
+            return Result.Failure(new Error("ValidationError", "AttendanceTimeUtc cannot be local."));
+        if (attendanceEvent.CreatedAtUtc.Kind == DateTimeKind.Local)
+            return Result.Failure(new Error("ValidationError", "CreatedAtUtc cannot be local."));
+
+        // SQL Server datetime2 preserves the UTC clock value but not DateTime.Kind.
+        var attendanceTimeUtc = NormalizeStoredUtc(attendanceEvent.AttendanceTimeUtc);
+        var createdAtUtc = NormalizeStoredUtc(attendanceEvent.CreatedAtUtc);
         var eventKey = attendanceEvent.AttendanceType == WorkerAttendanceNotificationType.CheckIn
             ? NotificationEventKeys.WorkerCheckedIn
             : NotificationEventKeys.WorkerCheckedOut;
@@ -75,8 +84,8 @@ public sealed class AttendanceNotificationOutboxProcessor(
         if (!policy.IsEnabled)
             return Result.Success();
 
-        var assignment = await ResolvePermanentAssignmentAsync(attendanceEvent, cancellationToken);
-        var localTime = TimeZoneInfo.ConvertTimeFromUtc(attendanceEvent.AttendanceTimeUtc, cairoTimeZoneProvider.TimeZone);
+        var assignment = await ResolvePermanentAssignmentAsync(attendanceEvent, attendanceTimeUtc, cancellationToken);
+        var localTime = TimeZoneInfo.ConvertTimeFromUtc(attendanceTimeUtc, cairoTimeZoneProvider.TimeZone);
         var assignmentText = assignment is null
             ? "العامل غير مسكن حاليًا."
             : $"التسكين الحالي: {StageLabel(assignment.StageName)}، {assignment.LineName}.";
@@ -120,7 +129,7 @@ public sealed class AttendanceNotificationOutboxProcessor(
             workerName = attendanceEvent.WorkerName,
             employeeCode = attendanceEvent.EmployeeCode,
             attendanceType = attendanceEvent.AttendanceType.ToString(),
-            attendanceTimeUtc = attendanceEvent.AttendanceTimeUtc,
+            attendanceTimeUtc,
             assignmentStatus = assignment is null ? "Unassigned" : "Assigned",
             stageId = assignment?.StageId,
             stageName = assignment?.StageName,
@@ -140,7 +149,7 @@ public sealed class AttendanceNotificationOutboxProcessor(
                     RelatedWorkerId: attendanceEvent.WorkerId,
                     RelatedEntityType: nameof(AttendanceRecord),
                     RelatedEntityId: attendanceEvent.AttendanceRecordId,
-                    CreatedAtUtc: attendanceEvent.CreatedAtUtc,
+                    CreatedAtUtc: createdAtUtc,
                     EventKey: evaluated.EventKey,
                     Severity: evaluated.Severity,
                     IsToastEnabled: evaluated.Toast.Enabled,
@@ -159,6 +168,7 @@ public sealed class AttendanceNotificationOutboxProcessor(
 
     private async Task<AssignmentSnapshot?> ResolvePermanentAssignmentAsync(
         AttendanceNotificationEvent attendanceEvent,
+        DateTime attendanceTimeUtc,
         CancellationToken cancellationToken)
     {
         var candidates = await (from assignment in dbContext.WorkerDefaultAssignments.AsNoTracking()
@@ -166,7 +176,7 @@ public sealed class AttendanceNotificationOutboxProcessor(
                                 join line in dbContext.ProductionLines.AsNoTracking() on assignment.ProductionLineId equals line.Id
                                 where assignment.WorkerId == attendanceEvent.WorkerId
                                       && assignment.IsActive
-                                      && assignment.AssignedAt <= attendanceEvent.AttendanceTimeUtc
+                                      && assignment.AssignedAt <= attendanceTimeUtc
                                       && stage.IsActive
                                       && line.IsActive
                                 orderby assignment.AssignedAt descending, stage.DefaultOrder, assignment.Id
@@ -205,6 +215,10 @@ public sealed class AttendanceNotificationOutboxProcessor(
         guid[8] = (byte)((guid[8] & 0x3f) | 0x80);
         return new Guid(guid);
     }
+
+    private static DateTime NormalizeStoredUtc(DateTime value) => value.Kind == DateTimeKind.Utc
+        ? value
+        : DateTime.SpecifyKind(value, DateTimeKind.Utc);
 
     private static string StageLabel(string stageName) =>
         stageName.StartsWith("مرحلة", StringComparison.Ordinal)
