@@ -1,5 +1,5 @@
 import { HttpErrorResponse } from '@angular/common/http';
-import { Component, OnDestroy, OnInit } from '@angular/core';
+import { Component, OnDestroy, OnInit, Optional } from '@angular/core';
 import { Observable, Subject, catchError, finalize, forkJoin, of, takeUntil } from 'rxjs';
 import { FactoryItem, ManufacturingMasterDataApiService, ModelStageItem, ProductModelItem, ProductionLineOption } from '../../core/services/manufacturing-master-data-api.service';
 import { ProductionOrder, ProductionCostRecordingApiService, WorkerOption } from '../../core/services/production-cost-recording-api.service';
@@ -10,6 +10,8 @@ import { PermissionService } from '../../core/services/permission.service';
 import { compensationModeLabel, financialStatusLabel, formatEgp, formatPercentage, isFinancialRow } from './reports-financial-presentation';
 import { ReportPresentationMode, ReportsWorkspaceFilters, ReportsWorkspaceResult, ReportsWorkspaceRow, ReportsWorkspaceViewOption } from './reports-workspace.models';
 import { ReportsWorkspaceStateService } from './reports-workspace-state.service';
+import { ManufacturingRealtimeService } from '../../core/services/manufacturing-realtime.service';
+import { ManufacturingDataChanged } from '../../core/models/realtime-notification.models';
 
 interface ReportsColumn {
   key: 'stage' | 'worker' | 'date' | 'status' | 'produced' | 'accepted' | 'rejected' | 'allocated' | 'records' | 'stages' | 'workers' | 'stageCost' | 'earnings' | 'unitPrice' | 'percentage' | 'compensation' | 'financialStatus';
@@ -56,6 +58,7 @@ export class ReportsWorkspacePageComponent implements OnInit, OnDestroy {
 
   private requestVersion = 0;
   private readonly destroy$ = new Subject<void>();
+  private stopRealtime?: () => void;
 
   constructor(
     private readonly quantitiesReports: ProductionQuantitiesReportApiService,
@@ -63,18 +66,25 @@ export class ReportsWorkspacePageComponent implements OnInit, OnDestroy {
     private readonly masterData: ManufacturingMasterDataApiService,
     private readonly production: ProductionCostRecordingApiService,
     private readonly state: ReportsWorkspaceStateService,
-    private readonly permissions: PermissionService
+    private readonly permissions: PermissionService,
+    @Optional() private readonly manufacturingRealtime?: ManufacturingRealtimeService
   ) {}
 
   ngOnInit(): void {
     const restored = this.state.restore(this.defaultFilters(), this.canUseFinancialMode);
     this.filters = restored.filters;
     this.presentationMode = restored.presentationMode;
+    this.stopRealtime = this.manufacturingRealtime?.watchScreen({
+      screen: 'reports',
+      matches: change => this.matchesRealtimeScope(change),
+      refresh: () => this.loadReport(true)
+    });
     this.loadLookups();
     if (this.filters.productModelId) this.loadStages(this.filters.productModelId);
   }
 
   ngOnDestroy(): void {
+    this.stopRealtime?.();
     this.destroy$.next();
     this.destroy$.complete();
   }
@@ -382,6 +392,15 @@ export class ReportsWorkspacePageComponent implements OnInit, OnDestroy {
 
   private persistState(): void {
     this.state.save(this.filters, this.presentationMode, this.canUseFinancialMode);
+  }
+
+  private matchesRealtimeScope(change: ManufacturingDataChanged): boolean {
+    if (!this.hasAppliedFilters || (change.entityType !== 'ProductionOrder' && change.entityType !== 'StageProductionRecord')) return false;
+    if (change.productionDate && (change.productionDate < this.filters.from || change.productionDate > this.filters.to)) return false;
+    if (this.filters.factoryId && change.factoryId && change.factoryId !== this.filters.factoryId) return false;
+    if (this.filters.productionLineId && change.productionLineId && change.productionLineId !== this.filters.productionLineId) return false;
+    if (this.filters.productModelId && change.productModelId && change.productModelId !== this.filters.productModelId) return false;
+    return true;
   }
 
   private defaultFilters(): ReportsWorkspaceFilters {

@@ -35,6 +35,16 @@ export interface WorkerEmploymentStatusUpdate {
   employmentStatus: 'Active' | 'Suspended' | 'LeftEmployment';
 }
 
+export interface WorkerDepartmentAssignmentResponse {
+  workerId: string;
+  departmentId: string;
+  departmentName: string;
+  factoryId: string;
+  factoryName: string;
+  concurrencyToken: string;
+  updatedAtUtc: string;
+}
+
 @Injectable({
   providedIn: 'root'
 })
@@ -123,6 +133,16 @@ export class WorkersApiService {
       );
   }
 
+  assignOrganizationalDepartment(workerId: string, departmentId: string, concurrencyToken: string, correlationId?: string): Observable<WorkerDepartmentAssignmentResponse> {
+    return this.http
+      .put<ApiResponse<WorkerDepartmentAssignmentResponse>>(
+        buildApiUrl(`/api/workers/${encodeURIComponent(workerId)}/organizational-department`),
+        { departmentId, concurrencyToken },
+        { headers: this.correlationHeaders(correlationId) }
+      )
+      .pipe(timeout(STANDARD_API_TIMEOUT_MS), map(response => this.extractPayload(response)));
+  }
+
   uploadWorkerPhoto(workerId: string, photo: File, correlationId?: string): Observable<void> {
     const form = new FormData();
     form.append('photo', photo, photo.name);
@@ -184,6 +204,11 @@ export class WorkersApiService {
     const attendanceUserId = this.pickString(safeRecord, ['attendanceUserId']);
     const badgeNumber = this.pickString(safeRecord, ['badgeNumber']);
     const defaultSubStageId = this.pickString(safeRecord, ['defaultSubStageId']);
+    const organizationalDepartmentId = this.pickString(safeRecord, ['organizationalDepartmentId']);
+    const organizationalDepartmentName = this.pickString(safeRecord, ['organizationalDepartmentName']);
+    const organizationalFactoryId = this.pickString(safeRecord, ['organizationalFactoryId']);
+    const organizationalFactoryName = this.pickString(safeRecord, ['organizationalFactoryName']);
+    const organizationalDepartmentConcurrencyToken = this.pickString(safeRecord, ['organizationalDepartmentConcurrencyToken']);
 
     return {
       id: this.pickString(safeRecord, ['id', 'workerId', '_id']),
@@ -200,7 +225,12 @@ export class WorkersApiService {
       ...(photoVersion ? { photoVersion } : {}),
       ...(attendanceUserId ? { attendanceUserId } : {}),
       ...(badgeNumber ? { badgeNumber } : {}),
-      ...(defaultSubStageId ? { defaultSubStageId } : {})
+      ...(defaultSubStageId ? { defaultSubStageId } : {}),
+      ...(organizationalDepartmentId ? { organizationalDepartmentId } : {}),
+      ...(organizationalDepartmentName ? { organizationalDepartmentName } : {}),
+      ...(organizationalFactoryId ? { organizationalFactoryId } : {}),
+      ...(organizationalFactoryName ? { organizationalFactoryName } : {}),
+      ...(organizationalDepartmentConcurrencyToken ? { organizationalDepartmentConcurrencyToken } : {})
     };
   }
 

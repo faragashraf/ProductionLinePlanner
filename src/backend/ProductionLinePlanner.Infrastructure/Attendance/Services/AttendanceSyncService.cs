@@ -11,6 +11,7 @@ using ProductionLinePlanner.Application.Services;
 using ProductionLinePlanner.Domain.Entities;
 using ProductionLinePlanner.Domain.Enums;
 using ProductionLinePlanner.Infrastructure.Data;
+using ProductionLinePlanner.Application.Realtime;
 
 namespace ProductionLinePlanner.Infrastructure.Attendance.Services;
 
@@ -26,6 +27,7 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
     private readonly ILogger<AttendanceSyncService> _logger;
     private readonly ICairoTimeZoneProvider _cairoTimeZoneProvider;
     private readonly IWorkerInitialSyncService _workerSyncService;
+    private readonly IManufacturingRealtimeChangeContext? _realtimeChangeContext;
 
     public AttendanceSyncService(
         AppDbContext appDbContext,
@@ -33,7 +35,8 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
         IOptions<AttendanceSourceOptions> sourceOptions,
         ILogger<AttendanceSyncService> logger,
         ICairoTimeZoneProvider cairoTimeZoneProvider,
-        IWorkerInitialSyncService workerSyncService)
+        IWorkerInitialSyncService workerSyncService,
+        IManufacturingRealtimeChangeContext? realtimeChangeContext = null)
     {
         _appDbContext = appDbContext;
         _attendanceSource = attendanceSource;
@@ -41,6 +44,7 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
         _logger = logger;
         _cairoTimeZoneProvider = cairoTimeZoneProvider;
         _workerSyncService = workerSyncService;
+        _realtimeChangeContext = realtimeChangeContext;
     }
 
     public async Task<Result<AttendanceWorkerStateDto[]>> GetTodayAttendanceAsync(
@@ -313,6 +317,7 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
         AttendanceSyncExecutionContext context,
         CancellationToken cancellationToken = default)
     {
+        using var realtimeScope = _realtimeChangeContext?.Begin("ZkTimeSync", context.CorrelationId, context.ProductionDate);
         var startedAtUtc = DateTime.UtcNow;
         var stopwatch = Stopwatch.StartNew();
         using var internalTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(Math.Max(1, _sourceOptions.SyncReadTimeoutSeconds)));

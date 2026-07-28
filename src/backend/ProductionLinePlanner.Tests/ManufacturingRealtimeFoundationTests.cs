@@ -29,6 +29,8 @@ public sealed class ManufacturingRealtimeFoundationTests
         Assert.Equal(ManufacturingChangeType.Updated, change.ChangeType);
         Assert.Equal(Guid.Empty, change.EntityId);
         Assert.Null(change.WorkerId);
+        Assert.Equal(50, change.WorkerIds?.Count);
+        Assert.Equal(["created"], change.WorkerChangeKinds);
     }
 
     [Fact]
@@ -42,8 +44,9 @@ public sealed class ManufacturingRealtimeFoundationTests
         db.Workers.AddRange(workers);
         await db.SaveChangesAsync();
         publisher.Changes.Clear();
-        db.AttendanceRecords.AddRange(workers.Select((worker, index) => new AttendanceRecord(
-            Guid.NewGuid(), worker.Id, DateTime.UtcNow.AddMinutes(index), AttendanceStatus.Present, "staging")));
+        var records = workers.Select((worker, index) => new AttendanceRecord(
+            Guid.NewGuid(), worker.Id, DateTime.UtcNow.AddMinutes(index), AttendanceStatus.Present, "staging")).ToArray();
+        db.AttendanceRecords.AddRange(records);
 
         await db.SaveChangesAsync();
 
@@ -51,11 +54,28 @@ public sealed class ManufacturingRealtimeFoundationTests
         Assert.Equal(ManufacturingEntityType.AttendanceRecord, change.EntityType);
         Assert.Equal(Guid.Empty, change.EntityId);
         Assert.Null(change.WorkerId);
+        Assert.Equal(20, change.AddedAttendanceCount);
+        Assert.Equal(0, change.UpdatedAttendanceCount);
+        Assert.Equal(20, change.WorkerIds?.Count);
+        Assert.Single(change.AffectedAttendanceDates ?? []);
+        Assert.Equal(["created"], change.AttendanceChangeKinds);
+        Assert.Equal("manufacturing.attendance.changed", ManufacturingDataChangedMessage.From(change).EventType);
         publisher.Changes.Clear();
 
         await db.SaveChangesAsync();
 
         Assert.Empty(publisher.Changes);
+
+        records[0].UpdateAttendanceStatus(
+            records[0].AttendanceTimeUtc,
+            AttendanceStatus.Absent,
+            "staging");
+        await db.SaveChangesAsync();
+
+        var updated = Assert.Single(publisher.Changes);
+        Assert.Equal(0, updated.AddedAttendanceCount);
+        Assert.Equal(1, updated.UpdatedAttendanceCount);
+        Assert.Equal(["updated"], updated.AttendanceChangeKinds);
     }
 
     [Fact]
@@ -133,7 +153,33 @@ public sealed class ManufacturingRealtimeFoundationTests
         Assert.Equal(line.Id, change.ProductionLineId);
         Assert.Equal(model.Id, change.ProductModelId);
         Assert.Equal(date, change.ProductionDate);
-        Assert.Equal(["manufacturing:daily-production-operations", "manufacturing:manufacturing-command-center"], ManufacturingRealtimeGroups.ForChange(change));
+        Assert.Equal(["manufacturing:daily-production-operations", "manufacturing:manufacturing-command-center", "manufacturing:reports"], ManufacturingRealtimeGroups.ForChange(change));
+    }
+
+    [Fact]
+    public async Task Worker_department_assignment_publishes_relationship_scope_for_old_and_new_departments()
+    {
+        var publisher = new RecordingPublisher();
+        await using var db = CreateDb(publisher, Guid.NewGuid());
+        var factory = new Factory(Guid.NewGuid(), "Factory", "F-001");
+        var oldDepartment = new Department(Guid.NewGuid(), factory.Id, "D-001", "Old", null, 1);
+        var newDepartment = new Department(Guid.NewGuid(), factory.Id, "D-002", "New", null, 2);
+        var worker = new Worker(Guid.NewGuid(), "W-001", "Worker", organizationalDepartmentId: oldDepartment.Id);
+        db.AddRange(factory, oldDepartment, newDepartment, worker);
+        await db.SaveChangesAsync();
+        publisher.Changes.Clear();
+
+        worker.AssignOrganizationalDepartment(newDepartment.Id);
+        await db.SaveChangesAsync();
+
+        var change = Assert.Single(publisher.Changes);
+        Assert.Equal(ManufacturingEntityType.Worker, change.EntityType);
+        Assert.Equal(ManufacturingChangeType.RelationshipChanged, change.ChangeType);
+        Assert.Equal(worker.Id, change.WorkerId);
+        Assert.Equal(new[] { oldDepartment.Id, newDepartment.Id }.OrderBy(id => id), change.DepartmentIds?.OrderBy(id => id));
+        Assert.Contains("department-assignment", change.WorkerChangeKinds ?? []);
+        Assert.Equal(["manufacturing:employees"], ManufacturingRealtimeGroups.ForChange(change));
+        Assert.Equal("manufacturing.worker-department.changed", ManufacturingDataChangedMessage.From(change).EventType);
     }
 
     [Fact]
@@ -201,6 +247,7 @@ public sealed class ManufacturingRealtimeFoundationTests
             ["manufacturing:line-staffing", "manufacturing:daily-production-operations", "manufacturing:manufacturing-command-center"],
             ManufacturingRealtimeGroups.ForChange(created));
         var browserMessage = ManufacturingDataChangedMessage.From(created);
+        Assert.Equal("manufacturing.data.changed", browserMessage.EventType);
         Assert.Equal("WorkerDefaultAssignment", browserMessage.EntityType);
         Assert.Equal("permanent-assignment-created", browserMessage.ChangeType);
         Assert.Equal(worker.Id, browserMessage.WorkerId);
@@ -365,10 +412,10 @@ public sealed class ManufacturingRealtimeFoundationTests
 
         Assert.Equal(["manufacturing:models", "manufacturing:manufacturing-command-center"], modelGroups);
         Assert.Equal(["manufacturing:factory-structure", "manufacturing:departments", "manufacturing:stages", "manufacturing:manufacturing-command-center"], departmentGroups);
-        Assert.Equal(["manufacturing:employees", "manufacturing:daily-production-operations", "manufacturing:manufacturing-command-center"], workerGroups);
-        Assert.Equal(["manufacturing:daily-production-operations", "manufacturing:manufacturing-command-center"], dailyGroups);
-        Assert.Equal(["manufacturing:daily-production-operations", "manufacturing:manufacturing-command-center"], attendanceGroups);
-        Assert.Equal(["manufacturing:daily-production-operations", "manufacturing:manufacturing-command-center"], stageRecordGroups);
+        Assert.Equal(["manufacturing:employees", "manufacturing:attendance-workforce", "manufacturing:line-staffing", "manufacturing:daily-production-operations", "manufacturing:manufacturing-command-center"], workerGroups);
+        Assert.Equal(["manufacturing:daily-production-operations", "manufacturing:manufacturing-command-center", "manufacturing:reports"], dailyGroups);
+        Assert.Equal(["manufacturing:attendance-workforce", "manufacturing:daily-production-operations", "manufacturing:manufacturing-command-center"], attendanceGroups);
+        Assert.Equal(["manufacturing:daily-production-operations", "manufacturing:manufacturing-command-center", "manufacturing:reports"], stageRecordGroups);
         Assert.True(ManufacturingRealtimeGroups.TryGetRequiredPermission("models", out var permission));
         Assert.Equal("models.view", permission);
         Assert.True(ManufacturingRealtimeGroups.TryGetRequiredPermission("employees", out permission));
@@ -379,7 +426,10 @@ public sealed class ManufacturingRealtimeFoundationTests
         Assert.Equal("assignments.view", permission);
         Assert.True(ManufacturingRealtimeGroups.TryGetRequiredPermission("manufacturing-command-center", out permission));
         Assert.Equal("production.view", permission);
-        Assert.False(ManufacturingRealtimeGroups.TryGetRequiredPermission("reports", out _));
+        Assert.True(ManufacturingRealtimeGroups.TryGetRequiredPermission("reports", out permission));
+        Assert.Equal("reports.production.view", permission);
+        Assert.True(ManufacturingRealtimeGroups.TryGetRequiredPermission("attendance-workforce", out permission));
+        Assert.Equal("attendance.view", permission);
     }
 
     private static AppDbContext CreateDb(IManufacturingDataChangePublisher publisher, Guid actorUserId)

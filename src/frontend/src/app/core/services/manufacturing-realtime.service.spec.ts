@@ -132,6 +132,60 @@ describe('ManufacturingRealtimeService', () => {
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
+  it('routes typed attendance and department changes without refreshing screens that do not consume the local department', async () => {
+    const attendance = jasmine.createSpy('attendance');
+    const employees = jasmine.createSpy('employees');
+    const departments = jasmine.createSpy('departments');
+    const staffing = jasmine.createSpy('staffing');
+    const models = jasmine.createSpy('models');
+    service.watchScreen({ screen: 'attendance-workforce', refresh: attendance });
+    service.watchScreen({ screen: 'employees', refresh: employees });
+    service.watchScreen({ screen: 'departments', refresh: departments });
+    service.watchScreen({ screen: 'line-staffing', refresh: staffing });
+    service.watchScreen({ screen: 'models', refresh: models });
+    realtime.status.next('connected');
+    await settle();
+
+    realtime.changes.next({
+      ...change('attendance', null, null, 'AttendanceRecord'),
+      source: 'ZkTimeSync', affectedAttendanceDates: ['2026-07-16'], workerIds: ['worker-1'],
+      addedAttendanceCount: 1, updatedAttendanceCount: 0, attendanceChangeKinds: ['created']
+    });
+    realtime.changes.next({
+      ...change('department', null, null, 'Worker'),
+      workerId: 'worker-1', workerIds: ['worker-1'], departmentIds: ['department-1', 'department-2'],
+      workerChangeKinds: ['department-assignment']
+    });
+    await waitForCoalescing();
+
+    expect(attendance).toHaveBeenCalledTimes(1);
+    expect(employees).toHaveBeenCalledTimes(1);
+    expect(departments).not.toHaveBeenCalled();
+    expect(staffing).not.toHaveBeenCalled();
+    expect(models).not.toHaveBeenCalled();
+  });
+
+  it('routes employment changes to worker-dependent operational screens', async () => {
+    const employees = jasmine.createSpy('employees');
+    const staffing = jasmine.createSpy('staffing');
+    const commandCenter = jasmine.createSpy('commandCenter');
+    service.watchScreen({ screen: 'employees', refresh: employees });
+    service.watchScreen({ screen: 'line-staffing', refresh: staffing });
+    service.watchScreen({ screen: 'manufacturing-command-center', refresh: commandCenter });
+    realtime.status.next('connected');
+    await settle();
+
+    realtime.changes.next({
+      ...change('employment-status', null, null, 'Worker'),
+      workerIds: ['worker-1'], workerChangeKinds: ['employment-status']
+    });
+    await waitForCoalescing();
+
+    expect(employees).toHaveBeenCalledTimes(1);
+    expect(staffing).toHaveBeenCalledTimes(1);
+    expect(commandCenter).toHaveBeenCalledTimes(1);
+  });
+
   function change(eventId: string, productionLineId: string | null = null, correlationId: string | null = null, entityType: ManufacturingDataChanged['entityType'] = 'ProductModel'): ManufacturingDataChanged {
     return {
       eventId, entityType, changeType: 'Updated', entityId: 'model-1', occurredAtUtc: new Date().toISOString(), actorUserId: null,
@@ -140,7 +194,7 @@ describe('ManufacturingRealtimeService', () => {
   }
 
   async function settle(): Promise<void> { await Promise.resolve(); await new Promise<void>(resolve => setTimeout(resolve, 0)); }
-  async function waitForCoalescing(): Promise<void> { await new Promise<void>(resolve => setTimeout(resolve, 180)); }
+  async function waitForCoalescing(): Promise<void> { await new Promise<void>(resolve => setTimeout(resolve, 430)); }
 
   function withGlobalCrypto(cryptoApi: Crypto, action: () => void): void {
     const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'crypto');

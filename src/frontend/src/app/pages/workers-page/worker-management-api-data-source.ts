@@ -1,5 +1,5 @@
 import { Injectable, Optional } from '@angular/core';
-import { Observable, map, of, switchMap, throwError } from 'rxjs';
+import { Observable, forkJoin, map, of, switchMap, throwError } from 'rxjs';
 import { WorkerPageItem } from '../../shared/models/worker.model';
 import {
   WorkerEmploymentStatusUpdate,
@@ -12,13 +12,16 @@ import {
   WorkerManagementPage,
   WorkerManagementProfile,
   WorkerManagementQuery,
-  WorkerSourceLinkStatus
+  WorkerSourceLinkStatus,
+  WorkerDepartmentOption,
+  WorkerDepartmentAssignmentResult
 } from './worker-management.models';
 import {
   WorkerManagementDataSource,
   WorkerManagementLocalUpdate
 } from './worker-management.data-source';
 import { ManufacturingRealtimeService } from '../../core/services/manufacturing-realtime.service';
+import { ManufacturingMasterDataApiService } from '../../core/services/manufacturing-master-data-api.service';
 
 /**
  * Runtime worker workspace source. It uses only Planner APIs backed by the
@@ -27,7 +30,11 @@ import { ManufacturingRealtimeService } from '../../core/services/manufacturing-
  */
 @Injectable()
 export class WorkerManagementApiDataSource implements WorkerManagementDataSource {
-  constructor(private readonly workersApi: WorkersApiService, @Optional() private readonly manufacturingRealtime?: ManufacturingRealtimeService) {}
+  constructor(
+    private readonly workersApi: WorkersApiService,
+    @Optional() private readonly manufacturingRealtime?: ManufacturingRealtimeService,
+    @Optional() private readonly masterDataApi?: ManufacturingMasterDataApiService
+  ) {}
 
   loadPage(query: WorkerManagementQuery): Observable<WorkerManagementPage> {
     return this.workersApi.loadWorkers({
@@ -109,8 +116,48 @@ export class WorkerManagementApiDataSource implements WorkerManagementDataSource
       localEmploymentStatus: this.toEmploymentStatus(worker.employmentStatus, worker.isActive),
       factoryId: null,
       productionLineId: null,
-      hasIdentityConflict: false
+      hasIdentityConflict: false,
+      organizationalDepartmentId: worker.organizationalDepartmentId ?? null,
+      organizationalDepartmentName: worker.organizationalDepartmentName ?? null,
+      organizationalFactoryName: worker.organizationalFactoryName ?? null,
+      organizationalDepartmentConcurrencyToken: worker.organizationalDepartmentConcurrencyToken ?? ''
     };
+  }
+
+  loadActiveDepartments(): Observable<WorkerDepartmentOption[]> {
+    if (!this.masterDataApi) return throwError(() => new Error('تعذر تحميل كتالوج الأقسام المحلية.'));
+    return forkJoin({
+      departments: this.masterDataApi.departments(undefined, false),
+      factories: this.masterDataApi.factories()
+    }).pipe(map(({ departments, factories }) => {
+      const activeFactories = new Map(factories
+        .filter(factory => factory.isActive)
+        .map(factory => [factory.id, factory.name]));
+      return departments
+        .filter(department => !!department.id && department.isActive !== false && !!department.factoryId && activeFactories.has(department.factoryId))
+        .map(department => {
+          const factoryName = activeFactories.get(department.factoryId!)!;
+          const name = department.nameAr || department.name || 'قسم غير محدد';
+          const code = department.code ?? '';
+          return {
+            id: department.id!, name, code, factoryId: department.factoryId!, factoryName,
+            searchLabel: [name, code, factoryName].filter(Boolean).join(' · ')
+          };
+        })
+        .sort((first, second) => first.factoryName.localeCompare(second.factoryName, 'ar') || first.name.localeCompare(second.name, 'ar'));
+    }));
+  }
+
+  assignDepartment(workerId: string, departmentId: string, concurrencyToken: string): Observable<WorkerDepartmentAssignmentResult> {
+    return this.workersApi.assignOrganizationalDepartment(workerId, departmentId, concurrencyToken, this.localCorrelation())
+      .pipe(map(result => ({
+        workerId: result.workerId,
+        departmentId: result.departmentId,
+        departmentName: result.departmentName,
+        factoryId: result.factoryId,
+        factoryName: result.factoryName,
+        concurrencyToken: result.concurrencyToken
+      })));
   }
 
   private toProfile(worker: WorkerPageItem): WorkerManagementProfile {

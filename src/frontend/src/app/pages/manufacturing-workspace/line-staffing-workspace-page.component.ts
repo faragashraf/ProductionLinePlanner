@@ -861,14 +861,30 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
   private subscribeToLineStaffingRealtime(): void {
     this.stopRealtime = this.manufacturingRealtime?.watchScreen({
       screen: 'line-staffing',
-      matches: change =>
-        change.entityType === 'WorkerDefaultAssignment' &&
-        !!this.selectedFactoryId &&
-        !!this.selectedProductionLineId &&
-        change.factoryId === this.selectedFactoryId &&
-        change.productionLineId === this.selectedProductionLineId,
-      refresh: change => this.handleLineStaffingRealtimeChange(change?.subStageId ?? ''),
+      matches: change => change.entityType === 'Worker'
+        ? this.hasCompleteContext
+        : change.entityType === 'WorkerDefaultAssignment' &&
+          !!this.selectedFactoryId &&
+          !!this.selectedProductionLineId &&
+          change.factoryId === this.selectedFactoryId &&
+          change.productionLineId === this.selectedProductionLineId,
+      refresh: change => change?.entityType === 'Worker'
+        ? this.handleWorkerRealtimeChange()
+        : this.handleLineStaffingRealtimeChange(change?.subStageId ?? ''),
     });
+  }
+
+  private handleWorkerRealtimeChange(): void {
+    if (this.hasUnsavedStaffingChanges()) {
+      this.hasPendingRemoteUpdate = true;
+      this.remoteUpdateMessage = 'تغيرت حالة عامل أو بياناته التنظيمية بواسطة مستخدم آخر. احتفظنا بتعديلاتك غير المحفوظة؛ راجعها ثم اضغط تحديث الآن.';
+      return;
+    }
+    if (this.planLoading) {
+      this.realtimeRefreshQueued = true;
+      return;
+    }
+    this.loadProductStages(true, true);
   }
 
   private handleLineStaffingRealtimeChange(subStageId: string): void {

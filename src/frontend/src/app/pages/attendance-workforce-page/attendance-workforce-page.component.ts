@@ -1,4 +1,4 @@
-import { Component, OnDestroy, OnInit } from '@angular/core';
+import { Component, OnDestroy, OnInit, Optional } from '@angular/core';
 import { TableLazyLoadEvent } from 'primeng/table';
 import { Subject, catchError, debounceTime, distinctUntilChanged, finalize, map, of, switchMap, takeUntil } from 'rxjs';
 import { PERMISSIONS } from '../../core/config/permission-identifiers';
@@ -6,6 +6,8 @@ import { AttendanceApiService } from '../../core/services/attendance-api.service
 import { AttendanceWorkforceApiService, WorkforceDetail, WorkforcePage, WorkforceQuery, WorkforceRow } from '../../core/services/attendance-workforce-api.service';
 import { PermissionService } from '../../core/services/permission.service';
 import { FactoryItem, MainStageOption, ManufacturingMasterDataApiService, ProductionLineOption, SubStageOption } from '../../core/services/manufacturing-master-data-api.service';
+import { ManufacturingRealtimeService } from '../../core/services/manufacturing-realtime.service';
+import { ManufacturingDataChanged } from '../../core/models/realtime-notification.models';
 
 type LoadRequest = WorkforceQuery & { force?: boolean };
 
@@ -17,6 +19,7 @@ export class AttendanceWorkforcePageComponent implements OnInit, OnDestroy {
   private readonly search$ = new Subject<string>();
   private readonly storageKey = 'plp.attendance-workforce.filters.v1';
   private loadSequence = 0;
+  private stopRealtime?: () => void;
   rows: WorkforceRow[] = [];
   summary: WorkforcePage['summary'] | null = null;
   selectedDate = this.cairoToday();
@@ -30,10 +33,19 @@ export class AttendanceWorkforcePageComponent implements OnInit, OnDestroy {
   detailErrors = new Map<string, string>();
   filtersCollapsed = true;
 
-  constructor(private readonly api: AttendanceWorkforceApiService, private readonly attendanceApi: AttendanceApiService, private readonly masterData: ManufacturingMasterDataApiService, readonly permissionService: PermissionService) {}
+  constructor(private readonly api: AttendanceWorkforceApiService, private readonly attendanceApi: AttendanceApiService, private readonly masterData: ManufacturingMasterDataApiService, readonly permissionService: PermissionService, @Optional() private readonly manufacturingRealtime?: ManufacturingRealtimeService) {}
 
   ngOnInit(): void {
     this.restoreFilters();
+    this.stopRealtime = this.manufacturingRealtime?.watchScreen({
+      screen: 'attendance-workforce',
+      matches: change => this.matchesRealtimeScope(change),
+      refresh: () => {
+        this.details.clear();
+        this.detailErrors.clear();
+        this.reload({ force: true });
+      }
+    });
     this.loadFactories();
     this.load$.pipe(
       map(request => ({ ...this.currentQuery(), ...request, page: Math.max(1, request.page ?? this.page), pageSize: Math.max(10, request.pageSize ?? this.pageSize) })),
@@ -64,7 +76,7 @@ export class AttendanceWorkforcePageComponent implements OnInit, OnDestroy {
     this.search$.pipe(debounceTime(300), distinctUntilChanged(), takeUntil(this.destroy$)).subscribe(search => this.reload({ search, page: 1 }));
     this.reload({ force: true });
   }
-  ngOnDestroy(): void { this.destroy$.next(); this.destroy$.complete(); }
+  ngOnDestroy(): void { this.stopRealtime?.(); this.destroy$.next(); this.destroy$.complete(); }
   get canSync(): boolean { return this.permissionService.has(PERMISSIONS.attendance.sync); }
   get isEmpty(): boolean { return this.hasLoaded && !this.isLoading && !this.hasError && this.rows.length === 0; }
   get activeFilterCount(): number { return [this.search, this.selectedFactoryId, this.selectedProductionLineId, this.selectedMainStageId, this.selectedSubStageId, this.attendanceFilter !== 'all' ? this.attendanceFilter : '', this.assignmentFilter !== 'all' ? this.assignmentFilter : '', this.operationalFilter].filter(Boolean).length; }
@@ -95,6 +107,15 @@ export class AttendanceWorkforcePageComponent implements OnInit, OnDestroy {
   private persistFilters(query: WorkforceQuery): void { localStorage.setItem(this.storageKey, JSON.stringify({ selectedDate: query.productionDate, search: query.search ?? '', factoryId: this.selectedFactoryId, productionLineId: this.selectedProductionLineId, mainStageId: this.selectedMainStageId, subStageId: this.selectedSubStageId, attendanceFilter: query.attendanceFilter ?? 'all', assignmentFilter: query.assignmentFilter ?? 'all', operationalFilter: query.operationalFilter ?? '' })); }
   private restoreFilters(): void { try { const value = JSON.parse(localStorage.getItem(this.storageKey) ?? '{}'); if (/^\d{4}-\d{2}-\d{2}$/.test(value.selectedDate)) this.selectedDate = value.selectedDate; this.search = typeof value.search === 'string' ? value.search : ''; this.selectedFactoryId = typeof value.factoryId === 'string' ? value.factoryId : ''; this.selectedProductionLineId = typeof value.productionLineId === 'string' ? value.productionLineId : ''; this.selectedMainStageId = typeof value.mainStageId === 'string' ? value.mainStageId : ''; this.selectedSubStageId = typeof value.subStageId === 'string' ? value.subStageId : ''; this.attendanceFilter = typeof value.attendanceFilter === 'string' ? value.attendanceFilter : 'all'; this.assignmentFilter = typeof value.assignmentFilter === 'string' ? value.assignmentFilter : 'all'; this.operationalFilter = typeof value.operationalFilter === 'string' ? value.operationalFilter : ''; } catch { localStorage.removeItem(this.storageKey); } }
   private loadFactories(): void { this.masterData.factories().pipe(takeUntil(this.destroy$)).subscribe({ next: factories => { this.factories = factories; if (!this.factories.some(factory => factory.id === this.selectedFactoryId)) { this.selectedFactoryId = ''; this.selectedProductionLineId = ''; this.selectedMainStageId = ''; this.selectedSubStageId = ''; return; } this.restoreStructuralOptions(); }, error: () => { this.factories = []; } }); }
+  private matchesRealtimeScope(change: ManufacturingDataChanged): boolean {
+    if (change.entityType === 'Worker') return true;
+    if (change.entityType !== 'AttendanceRecord') return false;
+    const dates = change.affectedAttendanceDates?.length ? change.affectedAttendanceDates : change.productionDate ? [change.productionDate] : [];
+    if (dates.length > 0 && !dates.includes(this.selectedDate)) return false;
+    if (this.selectedFactoryId && change.factoryId && change.factoryId !== this.selectedFactoryId) return false;
+    if (this.selectedProductionLineId && change.productionLineId && change.productionLineId !== this.selectedProductionLineId) return false;
+    return true;
+  }
   private restoreStructuralOptions(): void { this.masterData.allProductionLines().pipe(takeUntil(this.destroy$)).subscribe(lines => { this.productionLines = lines.filter(line => line.factoryId === this.selectedFactoryId); if (!this.productionLines.some(line => line.id === this.selectedProductionLineId)) { this.selectedProductionLineId = ''; this.selectedMainStageId = ''; this.selectedSubStageId = ''; return; } this.masterData.mainStagesForLine(this.selectedProductionLineId).pipe(takeUntil(this.destroy$)).subscribe(stages => { this.mainStages = stages; if (!this.mainStages.some(stage => stage.id === this.selectedMainStageId)) { this.selectedMainStageId = ''; this.selectedSubStageId = ''; return; } this.masterData.subStagesForMainStage(this.selectedMainStageId).pipe(takeUntil(this.destroy$)).subscribe(subStages => { this.subStages = subStages; if (!this.subStages.some(stage => stage.id === this.selectedSubStageId)) this.selectedSubStageId = ''; }); }); }); }
   private cairoToday(): string { const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date()); const value = (type: string) => parts.find(part => part.type === type)?.value ?? ''; return `${value('year')}-${value('month')}-${value('day')}`; }
 }

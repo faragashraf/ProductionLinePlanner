@@ -8,6 +8,7 @@ namespace ProductionLinePlanner.Api.Realtime;
 /// </summary>
 public sealed record ManufacturingDataChangedMessage(
     Guid EventId,
+    string EventType,
     string EntityType,
     string ChangeType,
     Guid EntityId,
@@ -21,10 +22,19 @@ public sealed record ManufacturingDataChangedMessage(
     Guid? ProductModelId,
     Guid? SubStageId,
     DateOnly? ProductionDate,
-    Guid? WorkerId)
+    Guid? WorkerId,
+    string Source,
+    IReadOnlyList<DateOnly> AffectedAttendanceDates,
+    IReadOnlyList<Guid> WorkerIds,
+    IReadOnlyList<Guid> DepartmentIds,
+    int AddedAttendanceCount,
+    int UpdatedAttendanceCount,
+    IReadOnlyList<string> WorkerChangeKinds,
+    IReadOnlyList<string> AttendanceChangeKinds)
 {
     public static ManufacturingDataChangedMessage From(ManufacturingDataChanged change) => new(
         change.EventId,
+        EventTypeValue(change),
         change.EntityType.ToString(),
         ChangeTypeValue(change.ChangeType),
         change.EntityId,
@@ -38,7 +48,25 @@ public sealed record ManufacturingDataChangedMessage(
         change.ProductModelId,
         change.SubStageId,
         change.ProductionDate,
-        change.WorkerId);
+        change.WorkerId,
+        change.Source,
+        change.AffectedAttendanceDates ?? [],
+        change.WorkerIds ?? [],
+        change.DepartmentIds ?? [],
+        change.AddedAttendanceCount,
+        change.UpdatedAttendanceCount,
+        change.WorkerChangeKinds ?? [],
+        change.AttendanceChangeKinds ?? []);
+
+    private static string EventTypeValue(ManufacturingDataChanged change) => change.EntityType switch
+    {
+        ManufacturingEntityType.AttendanceRecord => "manufacturing.attendance.changed",
+        ManufacturingEntityType.Worker when change.WorkerChangeKinds?.Contains(
+            "department-assignment",
+            StringComparer.OrdinalIgnoreCase) == true => "manufacturing.worker-department.changed",
+        ManufacturingEntityType.Worker => "manufacturing.workers.changed",
+        _ => "manufacturing.data.changed"
+    };
 
     private static string ChangeTypeValue(ManufacturingChangeType changeType) => changeType switch
     {

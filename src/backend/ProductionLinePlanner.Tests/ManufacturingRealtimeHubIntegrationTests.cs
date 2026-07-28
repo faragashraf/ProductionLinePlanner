@@ -48,8 +48,8 @@ public sealed class ManufacturingRealtimeHubIntegrationTests
         await fixture.Publisher.PublishAsync(change);
 
         var expected = ManufacturingDataChangedMessage.From(change);
-        Assert.Equal(expected, await receivedByA.Task.WaitAsync(TimeSpan.FromSeconds(5)));
-        Assert.Equal(expected, await receivedByB.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+        AssertEquivalent(expected, await receivedByA.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+        AssertEquivalent(expected, await receivedByB.Task.WaitAsync(TimeSpan.FromSeconds(5)));
         await Task.Delay(150);
         Assert.False(receivedByStages.Task.IsCompleted);
     }
@@ -72,7 +72,7 @@ public sealed class ManufacturingRealtimeHubIntegrationTests
         var change = Change();
         await fixture.Publisher.PublishAsync(change);
 
-        Assert.Equal(ManufacturingDataChangedMessage.From(change), await delivery.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+        AssertEquivalent(ManufacturingDataChangedMessage.From(change), await delivery.Task.WaitAsync(TimeSpan.FromSeconds(5)));
     }
 
     [Fact]
@@ -105,6 +105,29 @@ public sealed class ManufacturingRealtimeHubIntegrationTests
         Assert.Equal("Updated", delivered.ChangeType);
         Assert.Equal(date, delivered.ProductionDate);
         Assert.False(modelDelivery.Task.IsCompleted);
+    }
+
+    [Fact]
+    public async Task Attendance_change_with_zero_added_and_updated_counts_is_not_sent()
+    {
+        await using var fixture = await HubFixture.CreateAsync();
+        var userId = Guid.NewGuid();
+        fixture.Permissions.Set(userId, ["attendance.view"]);
+        await using var tab = fixture.CreateConnection(userId);
+        var delivery = DeliverySource();
+        tab.On<ManufacturingDataChangedMessage>("ManufacturingDataChanged", change => delivery.TrySetResult(change));
+        await tab.StartAsync();
+        await tab.InvokeAsync("JoinManufacturingScreen", "attendance-workforce");
+
+        await fixture.Publisher.PublishAsync(new ManufacturingDataChanged(
+            Guid.NewGuid(), ManufacturingEntityType.AttendanceRecord, ManufacturingChangeType.Updated,
+            Guid.NewGuid(), DateTime.UtcNow, null, null,
+            ProductionDate: new DateOnly(2026, 7, 21),
+            AddedAttendanceCount: 0,
+            UpdatedAttendanceCount: 0));
+
+        await Task.Delay(200);
+        Assert.False(delivery.Task.IsCompleted);
     }
 
     [Fact]
@@ -146,6 +169,25 @@ public sealed class ManufacturingRealtimeHubIntegrationTests
 
     private static TaskCompletionSource<ManufacturingDataChangedMessage> DeliverySource() =>
         new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    private static void AssertEquivalent(
+        ManufacturingDataChangedMessage expected,
+        ManufacturingDataChangedMessage actual)
+    {
+        Assert.Equal(expected with
+        {
+            AffectedAttendanceDates = actual.AffectedAttendanceDates,
+            WorkerIds = actual.WorkerIds,
+            DepartmentIds = actual.DepartmentIds,
+            WorkerChangeKinds = actual.WorkerChangeKinds,
+            AttendanceChangeKinds = actual.AttendanceChangeKinds
+        }, actual);
+        Assert.Equal(expected.AffectedAttendanceDates.ToArray(), actual.AffectedAttendanceDates.ToArray());
+        Assert.Equal(expected.WorkerIds.ToArray(), actual.WorkerIds.ToArray());
+        Assert.Equal(expected.DepartmentIds.ToArray(), actual.DepartmentIds.ToArray());
+        Assert.Equal(expected.WorkerChangeKinds.ToArray(), actual.WorkerChangeKinds.ToArray());
+        Assert.Equal(expected.AttendanceChangeKinds.ToArray(), actual.AttendanceChangeKinds.ToArray());
+    }
 
     private sealed class HubFixture : IAsyncDisposable
     {

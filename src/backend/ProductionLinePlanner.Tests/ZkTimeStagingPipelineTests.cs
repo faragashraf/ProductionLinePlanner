@@ -256,8 +256,13 @@ public sealed class ZkTimeStagingPipelineTests
 
         Assert.True(first.IsSuccess, first.Error?.Message);
         Assert.Equal(2, publisher.Changes.Count);
-        Assert.Single(publisher.Changes, change => change.EntityType == ManufacturingEntityType.Worker);
-        Assert.Single(publisher.Changes, change => change.EntityType == ManufacturingEntityType.AttendanceRecord);
+        var workerChange = Assert.Single(publisher.Changes, change => change.EntityType == ManufacturingEntityType.Worker);
+        var attendanceChange = Assert.Single(publisher.Changes, change => change.EntityType == ManufacturingEntityType.AttendanceRecord);
+        Assert.Equal("ZkTimeSync", workerChange.Source);
+        Assert.Equal("ZkTimeSync", attendanceChange.Source);
+        Assert.Equal(ProductionDate, attendanceChange.ProductionDate);
+        Assert.Equal(2, attendanceChange.AddedAttendanceCount);
+        Assert.Equal(0, attendanceChange.UpdatedAttendanceCount);
         publisher.Changes.Clear();
 
         var replay = await fixture.RunAsync();
@@ -334,12 +339,14 @@ public sealed class ZkTimeStagingPipelineTests
         private readonly SqliteConnection anchor;
         private readonly DbContextOptions<AppDbContext> options;
         private readonly AttendanceSourceOptions sourceOptions;
+        private readonly ManufacturingRealtimeChangeContext realtimeChangeContext;
 
-        private Fixture(SqliteConnection anchor, DbContextOptions<AppDbContext> options, FakeStagingSource source, int maximumAttempts)
+        private Fixture(SqliteConnection anchor, DbContextOptions<AppDbContext> options, FakeStagingSource source, int maximumAttempts, ManufacturingRealtimeChangeContext realtimeChangeContext)
         {
             this.anchor = anchor;
             this.options = options;
             Source = source;
+            this.realtimeChangeContext = realtimeChangeContext;
             sourceOptions = new AttendanceSourceOptions
             {
                 Mode = AttendanceSourceOptions.StagingMode,
@@ -359,6 +366,7 @@ public sealed class ZkTimeStagingPipelineTests
             await connection.OpenAsync();
             connection.CreateCollation("SQL_Latin1_General_CP1_CI_AS", StringComparer.OrdinalIgnoreCase.Compare);
             var optionsBuilder = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection);
+            var realtimeChangeContext = new ManufacturingRealtimeChangeContext();
             if (throwDuringAttendancePersistence)
             {
                 optionsBuilder.AddInterceptors(new ThrowOnAttendancePersistenceInterceptor());
@@ -374,7 +382,8 @@ public sealed class ZkTimeStagingPipelineTests
                         new CurrentUserStub(),
                         new CorrelationStub(),
                         coordinator,
-                        NullLogger<ManufacturingDataChangeSaveChangesInterceptor>.Instance),
+                        NullLogger<ManufacturingDataChangeSaveChangesInterceptor>.Instance,
+                        realtimeChangeContext),
                     new ManufacturingDataChangeTransactionInterceptor(coordinator));
             }
             var options = optionsBuilder.Options;
@@ -388,7 +397,7 @@ public sealed class ZkTimeStagingPipelineTests
                 await db.SaveChangesAsync();
             }
 
-            return new Fixture(connection, options, new FakeStagingSource(maximumAttempts), maximumAttempts);
+            return new Fixture(connection, options, new FakeStagingSource(maximumAttempts), maximumAttempts, realtimeChangeContext);
         }
 
         public AppDbContext CreateDbContext() => new(options);
@@ -402,14 +411,16 @@ public sealed class ZkTimeStagingPipelineTests
                 new WorkerSyncPolicy(),
                 new AuthoritativeWorkerSnapshotValidator(),
                 new RecordingAuditEngine(),
-                NullLogger<WorkerInitialSyncService>.Instance);
+                NullLogger<WorkerInitialSyncService>.Instance,
+                realtimeChangeContext);
             var attendanceSync = new AttendanceSyncService(
                 db,
                 Source,
                 Options.Create(sourceOptions),
                 NullLogger<AttendanceSyncService>.Instance,
                 TestCairoTimeZoneProvider.Instance,
-                workerSync);
+                workerSync,
+                realtimeChangeContext);
             return await attendanceSync.SyncForProductionDateAsync(ProductionDate);
         }
 

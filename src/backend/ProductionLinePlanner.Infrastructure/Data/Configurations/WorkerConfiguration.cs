@@ -21,6 +21,11 @@ public sealed class WorkerConfiguration : IEntityTypeConfiguration<Worker>
         builder.Property(x => x.EmploymentStatus).IsRequired();
         builder.Property(x => x.EmploymentEndDate);
         builder.Property(x => x.AttendanceDepartmentId);
+        builder.Property(x => x.OrganizationalDepartmentId);
+        builder.Property(x => x.OrganizationalDepartmentConcurrencyToken)
+            .IsRequired()
+            .HasDefaultValueSql("NEWSEQUENTIALID()")
+            .IsConcurrencyToken();
         builder.Property(x => x.PhotoReference).HasMaxLength(500);
         builder.Property(x => x.LastExternalSyncAt);
         builder.Property(x => x.IsActive).HasDefaultValue(true);
@@ -28,6 +33,12 @@ public sealed class WorkerConfiguration : IEntityTypeConfiguration<Worker>
         builder.Property(x => x.UpdatedAtUtc).IsRequired();
 
         builder.HasIndex(x => x.EmployeeCode).IsUnique();
+        builder.HasIndex(x => x.OrganizationalDepartmentId);
+
+        builder.HasOne(x => x.OrganizationalDepartment)
+            .WithMany()
+            .HasForeignKey(x => x.OrganizationalDepartmentId)
+            .OnDelete(DeleteBehavior.Restrict);
 
         builder.Ignore(x => x.DefaultAssignment);
 

@@ -28,7 +28,11 @@ public sealed class EmployeeMasterDataService(
         }
 
         var searchPattern = string.IsNullOrWhiteSpace(search) ? null : $"%{search.Trim()}%";
-        var query = dbContext.Workers.AsNoTracking().AsQueryable();
+        var query = dbContext.Workers
+            .AsNoTracking()
+            .Include(x => x.OrganizationalDepartment)
+                .ThenInclude(x => x!.Factory)
+            .AsQueryable();
         if (isActive.HasValue)
         {
             query = query.Where(x => x.IsActive == isActive.Value);
@@ -58,7 +62,10 @@ public sealed class EmployeeMasterDataService(
             return Result<WorkerDto>.Failure(new Error("ValidationError", "WorkerId is required."));
         }
 
-        var entity = await dbContext.Workers.FirstOrDefaultAsync(x => x.Id == workerId, cancellationToken);
+        var entity = await dbContext.Workers
+            .Include(x => x.OrganizationalDepartment)
+                .ThenInclude(x => x!.Factory)
+            .FirstOrDefaultAsync(x => x.Id == workerId, cancellationToken);
         if (entity is null)
         {
             return Result<WorkerDto>.Failure(new Error("NotFound", "Worker not found."));
@@ -90,7 +97,10 @@ public sealed class EmployeeMasterDataService(
             return Result<WorkerDto>.Failure(new Error("ValidationError", "No updatable fields were provided."));
         }
 
-        var entity = await dbContext.Workers.FirstOrDefaultAsync(x => x.Id == workerId, cancellationToken);
+        var entity = await dbContext.Workers
+            .Include(x => x.OrganizationalDepartment)
+                .ThenInclude(x => x!.Factory)
+            .FirstOrDefaultAsync(x => x.Id == workerId, cancellationToken);
         if (entity is null)
         {
             return Result<WorkerDto>.Failure(new Error("NotFound", "Worker not found."));
@@ -179,7 +189,10 @@ public sealed class EmployeeMasterDataService(
             return Result<WorkerDto>.Failure(new Error("ValidationError", "EmploymentStatus is invalid."));
         }
 
-        var entity = await dbContext.Workers.FirstOrDefaultAsync(x => x.Id == workerId, cancellationToken);
+        var entity = await dbContext.Workers
+            .Include(x => x.OrganizationalDepartment)
+                .ThenInclude(x => x!.Factory)
+            .FirstOrDefaultAsync(x => x.Id == workerId, cancellationToken);
         if (entity is null)
         {
             return Result<WorkerDto>.Failure(new Error("NotFound", "Worker not found."));
@@ -237,6 +250,11 @@ public sealed class EmployeeMasterDataService(
             Phone = worker.Phone,
             AttendanceDepartmentId = worker.AttendanceDepartmentId,
             LocalDepartmentName = worker.LocalDepartmentName,
+            OrganizationalDepartmentId = worker.OrganizationalDepartmentId,
+            OrganizationalDepartmentName = worker.OrganizationalDepartment?.NameAr,
+            OrganizationalFactoryId = worker.OrganizationalDepartment?.FactoryId,
+            OrganizationalFactoryName = worker.OrganizationalDepartment?.Factory?.Name,
+            OrganizationalDepartmentConcurrencyToken = worker.OrganizationalDepartmentConcurrencyToken,
             EmploymentStatus = worker.EmploymentStatus.ToString(),
             EmploymentEndDate = worker.EmploymentEndDate,
             // Only Planner-owned, hash-versioned references are browser-visible.

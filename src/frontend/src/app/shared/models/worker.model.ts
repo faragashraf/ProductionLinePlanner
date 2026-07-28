@@ -16,4 +16,9 @@ export interface WorkerPageItem {
   attendanceUserId?: string;
   badgeNumber?: string;
   defaultSubStageId?: string;
+  organizationalDepartmentId?: string;
+  organizationalDepartmentName?: string;
+  organizationalFactoryId?: string;
+  organizationalFactoryName?: string;
+  organizationalDepartmentConcurrencyToken?: string;
 }

@@ -9,6 +9,7 @@ using ProductionLinePlanner.Application.Workers;
 using ProductionLinePlanner.Domain.Entities;
 using ProductionLinePlanner.Domain.Enums;
 using ProductionLinePlanner.Infrastructure.Data;
+using ProductionLinePlanner.Application.Realtime;
 
 namespace ProductionLinePlanner.Infrastructure.BusinessEngines;
 
@@ -22,7 +23,8 @@ public sealed class WorkerInitialSyncService(
     IWorkerSyncPolicy workerSyncPolicy,
     IAuthoritativeWorkerSnapshotValidator snapshotValidator,
     IAuditEngine auditEngine,
-    ILogger<WorkerInitialSyncService> logger) : IWorkerInitialSyncService
+    ILogger<WorkerInitialSyncService> logger,
+    IManufacturingRealtimeChangeContext? realtimeChangeContext = null) : IWorkerInitialSyncService
 {
     public async Task<Result<WorkerActiveServiceSyncPreviewDto>> PreviewActiveServiceSyncAsync(
         CancellationToken cancellationToken = default)
@@ -65,6 +67,7 @@ public sealed class WorkerInitialSyncService(
         string? requestMeta,
         CancellationToken cancellationToken)
     {
+        using var realtimeScope = realtimeChangeContext?.Begin("ZkTimeSync");
         var startedAtUtc = DateTime.UtcNow;
         var sourceResult = await ReadSourceSnapshotAsync(claim: true, cancellationToken);
         if (sourceResult.IsFailure)

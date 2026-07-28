@@ -1626,11 +1626,18 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
         change.productModelId === this.selectedProductModelId;
     }
 
-    // Worker and attendance invalidations are intentionally batch-scoped. The
-    // current selection is preserved, while the existing unsaved-edit guard
-    // decides whether to reload immediately or show the remote-update notice.
-    if (change.entityType === 'Worker' || change.entityType === 'AttendanceRecord')
+    // Worker invalidations affect the active worker selector. Attendance is
+    // additionally constrained to the open production day when the API sends
+    // its additive date scope; missing dates remain compatible with older API
+    // instances during a rolling deployment.
+    if (change.entityType === 'Worker')
       return true;
+    if (change.entityType === 'AttendanceRecord') {
+      const dates = change.affectedAttendanceDates?.length
+        ? change.affectedAttendanceDates
+        : change.productionDate ? [change.productionDate] : [];
+      return dates.length === 0 || dates.includes(this.productionDate);
+    }
 
     if (change.entityType !== 'WorkerDefaultAssignment' || !change.subStageId)
       return false;

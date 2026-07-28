@@ -129,7 +129,77 @@
 }
 
 .worker-management-page__actions {
+  background: var(--plp-color-surface);
+  inset-inline-end: 0;
   min-inline-size: 7rem;
+  position: sticky;
+  z-index: 2;
+}
+
+th.worker-management-page__actions {
+  z-index: 3;
+}
+
+:host ::ng-deep .worker-management-page__action-menu-button {
+  inline-size: 100%;
+  min-block-size: 2.75rem;
+  padding-inline: var(--plp-space-8);
+}
+
+.worker-management-page__department,
+.worker-management-page__department-dialog,
+.worker-management-page__department-summary > div {
+  display: grid;
+  gap: var(--plp-space-4);
+}
+
+.worker-management-page__department small,
+.worker-management-page__department-dialog small,
+.worker-management-page__department-summary span {
+  color: var(--plp-color-text-subtle);
+  font-size: var(--plp-type-caption);
+}
+
+.worker-management-page__department-dialog {
+  gap: var(--plp-space-16);
+}
+
+.worker-management-page__department-dialog > label {
+  font-weight: var(--plp-font-weight-semibold);
+}
+
+.worker-management-page__department-summary {
+  align-items: center;
+  background: var(--plp-color-surface-soft);
+  border: var(--plp-border-muted);
+  border-radius: var(--plp-radius-md);
+  display: flex;
+  gap: var(--plp-space-12);
+  padding: var(--plp-space-12);
+}
+
+:host ::ng-deep .worker-management-page__department-select {
+  inline-size: 100%;
+  min-block-size: var(--plp-control-height-standard);
+}
+
+.worker-management-page__conflict {
+  align-items: flex-start;
+  background: var(--plp-color-danger-soft);
+  border-radius: var(--plp-radius-sm);
+  color: var(--plp-color-danger-strong);
+  display: flex;
+  gap: var(--plp-space-8);
+  margin: 0;
+  padding: var(--plp-space-12);
+}
+
+@media (max-width: 60rem) {
+  .worker-management-page__actions {
+    background: transparent;
+    min-inline-size: 0;
+    position: static;
+  }
 }
 
 .worker-management-page__row--conflict > td {

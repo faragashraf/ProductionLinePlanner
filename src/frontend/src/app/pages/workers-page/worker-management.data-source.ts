@@ -4,7 +4,9 @@ import {
   WorkerManagementPage,
   WorkerManagementProfile,
   WorkerManagementQuery,
-  WorkerLocalEmploymentStatus
+  WorkerLocalEmploymentStatus,
+  WorkerDepartmentOption,
+  WorkerDepartmentAssignmentResult
 } from './worker-management.models';
 
 export interface WorkerManagementLocalUpdate {
@@ -18,6 +20,8 @@ export interface WorkerManagementDataSource {
   saveLocalProfile(worker: WorkerManagementProfile, update: WorkerManagementLocalUpdate): Observable<WorkerManagementProfile>;
   uploadPhoto(workerId: string, photo: File): Observable<WorkerManagementProfile>;
   deletePhoto(workerId: string): Observable<WorkerManagementProfile>;
+  loadActiveDepartments(): Observable<WorkerDepartmentOption[]>;
+  assignDepartment(workerId: string, departmentId: string, concurrencyToken: string): Observable<WorkerDepartmentAssignmentResult>;
 }
 
 export const WORKER_MANAGEMENT_DATA_SOURCE = new InjectionToken<WorkerManagementDataSource>('WORKER_MANAGEMENT_DATA_SOURCE');

@@ -11,7 +11,8 @@ describe('WorkersPageComponent', () => {
     photoUrl: null, badgeNumber: 'B-1', employeeCode: 'EMP-1', assignmentLabel: 'لا يوجد تسكين افتراضي نشط',
     factoryLineLabel: 'لا يوجد تسكين حالي', sourceLinkStatus: 'linked', localProfileStatus: 'complete',
     assignmentStatus: 'unassigned', localEmploymentStatus: 'active', factoryId: null, productionLineId: null,
-    hasIdentityConflict: false
+    hasIdentityConflict: false, organizationalDepartmentId: null, organizationalDepartmentName: null,
+    organizationalFactoryName: null, organizationalDepartmentConcurrencyToken: 'token-1'
   };
   const profile: WorkerManagementProfile = {
     id: listItem.id,
@@ -26,11 +27,23 @@ describe('WorkersPageComponent', () => {
 
   beforeEach(() => {
     localStorage.clear();
-    facade = jasmine.createSpyObj<WorkerManagementFacade>('WorkerManagementFacade', ['loadWorkers', 'loadProfile']);
+    facade = jasmine.createSpyObj<WorkerManagementFacade>('WorkerManagementFacade', [
+      'loadWorkers', 'loadProfile', 'loadActiveDepartments', 'assignDepartment'
+    ]);
     facade.loadWorkers.and.returnValue(of(page));
     facade.loadProfile.and.returnValue(of(profile));
-    permissions = jasmine.createSpyObj<PermissionService>('PermissionService', ['hasPermission']);
+    facade.loadActiveDepartments.and.returnValue(of([{
+      id: 'department-1', name: 'قسم التشغيل', code: 'D-001', factoryId: 'factory-1',
+      factoryName: 'المصنع الرئيسي', searchLabel: 'قسم التشغيل · D-001 · المصنع الرئيسي'
+    }]));
+    facade.assignDepartment.and.returnValue(of({
+      workerId: listItem.id, departmentId: 'department-1', departmentName: 'قسم التشغيل',
+      factoryId: 'factory-1', factoryName: 'المصنع الرئيسي', concurrencyToken: 'token-2'
+    }));
+    permissions = jasmine.createSpyObj<PermissionService>('PermissionService', ['hasPermission', 'hasAll']);
     permissions.hasPermission.and.callFake(permission => permission === 'workers.manage' || permission === 'assignments.view');
+    permissions.hasAll.and.callFake(required =>
+      (Array.isArray(required) ? required : [required]).every(permission => permissions.hasPermission(permission)));
   });
 
   function createComponent(): WorkersPageComponent { return new WorkersPageComponent(facade, permissions); }
@@ -96,5 +109,92 @@ describe('WorkersPageComponent', () => {
     expect(facade.loadWorkers).toHaveBeenCalledWith(jasmine.objectContaining({ search: 'عامل', localEmploymentStatus: 'active', page: 2 }));
     component.ngOnDestroy();
     expect(stop).toHaveBeenCalled();
+  });
+
+  it('requires both existing management permissions and updates the row once after a valid department assignment', () => {
+    const component = createComponent();
+    component.ngOnInit();
+    component.openDepartmentDialog(listItem);
+    expect(component.departmentDialogVisible).toBeFalse();
+
+    permissions.hasPermission.and.callFake(permission =>
+      permission === 'workers.manage' || permission === 'departments.manage' || permission === 'assignments.view');
+    const messageService = { add: jasmine.createSpy('add') };
+    const permitted = new WorkersPageComponent(facade, permissions, undefined, undefined, messageService as never);
+    permitted.ngOnInit();
+    permitted.openDepartmentDialog(listItem);
+    expect(facade.loadActiveDepartments).toHaveBeenCalled();
+    expect(permitted.departmentSaveDisabled).toBeTrue();
+
+    permitted.selectedDepartmentId = 'department-1';
+    permitted.saveDepartmentAssignment();
+
+    expect(facade.assignDepartment).toHaveBeenCalledOnceWith(listItem.id, 'department-1', 'token-1');
+    expect(permitted.workers[0]).toEqual(jasmine.objectContaining({
+      organizationalDepartmentId: 'department-1',
+      organizationalDepartmentName: 'قسم التشغيل',
+      organizationalDepartmentConcurrencyToken: 'token-2'
+    }));
+    expect(permitted.departmentDialogVisible).toBeFalse();
+    expect(messageService.add).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps department assignment inside the authorized row action menu', () => {
+    const menu = { toggle: jasmine.createSpy('toggle') };
+    const component = createComponent();
+
+    component.openWorkerActions(new Event('click'), listItem, menu as never);
+    expect(component.workerActionItems.map(item => item.label)).toEqual(['فتح الملف']);
+
+    permissions.hasPermission.and.returnValue(true);
+    component.openWorkerActions(new Event('click'), listItem, menu as never);
+
+    expect(component.workerActionItems.map(item => item.label)).toEqual(['فتح الملف', 'تعيين إلى قسم']);
+    expect(menu.toggle).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps an open dialog and blocks saving when another client changes the same worker', () => {
+    permissions.hasPermission.and.returnValue(true);
+    let refresh: ((change: {
+      entityId: string; workerId: string; workerIds: string[]; workerChangeKinds: ['department-assignment'];
+    }) => void) | undefined;
+    const realtime = {
+      watchScreen: jasmine.createSpy('watchScreen').and.callFake((watch: { refresh: typeof refresh }) => {
+        refresh = watch.refresh;
+        return () => undefined;
+      })
+    };
+    const component = new WorkersPageComponent(facade, permissions, realtime as never, { url: '/manufacturing/employees' } as never);
+    component.ngOnInit();
+    component.openDepartmentDialog(listItem);
+    component.selectedDepartmentId = 'department-1';
+
+    refresh?.({
+      entityId: listItem.id,
+      workerId: listItem.id,
+      workerIds: [listItem.id],
+      workerChangeKinds: ['department-assignment']
+    });
+
+    expect(component.departmentDialogVisible).toBeTrue();
+    expect(component.departmentConflict).toBeTrue();
+    expect(component.departmentDialogError).toContain('مستخدم آخر');
+    component.saveDepartmentAssignment();
+    expect(facade.assignDepartment).not.toHaveBeenCalled();
+  });
+
+  it('turns an API concurrency response into a clear blocking conflict', () => {
+    permissions.hasPermission.and.returnValue(true);
+    facade.assignDepartment.and.returnValue(throwError(() => ({ status: 409 })));
+    const component = createComponent();
+    component.ngOnInit();
+    component.openDepartmentDialog(listItem);
+    component.selectedDepartmentId = 'department-1';
+
+    component.saveDepartmentAssignment();
+
+    expect(component.departmentConflict).toBeTrue();
+    expect(component.departmentDialogVisible).toBeTrue();
+    expect(component.departmentDialogError).toContain('أثناء التحرير');
   });
 });

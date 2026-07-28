@@ -19,7 +19,9 @@ public class Worker
         int? attendanceDepartmentId = null,
         string? photoReference = null,
         DateTime? lastExternalSyncAt = null,
-        DateTime? createdAtUtc = null)
+        DateTime? createdAtUtc = null,
+        Guid? organizationalDepartmentId = null,
+        Guid? organizationalDepartmentConcurrencyToken = null)
     {
         if (string.IsNullOrWhiteSpace(employeeCode))
             throw new ArgumentException("EmployeeCode is required.", nameof(employeeCode));
@@ -38,6 +40,8 @@ public class Worker
         AttendanceDepartmentId = attendanceDepartmentId;
         PhotoReference = string.IsNullOrWhiteSpace(photoReference) ? null : photoReference.Trim();
         LastExternalSyncAt = lastExternalSyncAt;
+        OrganizationalDepartmentId = organizationalDepartmentId;
+        OrganizationalDepartmentConcurrencyToken = organizationalDepartmentConcurrencyToken ?? Guid.NewGuid();
         CreatedAtUtc = createdAtUtc ?? DateTime.UtcNow;
         UpdatedAtUtc = CreatedAtUtc;
     }
@@ -56,6 +60,13 @@ public class Worker
     public EmploymentStatus EmploymentStatus { get; private set; }
     public DateTime? EmploymentEndDate { get; private set; }
     public int? AttendanceDepartmentId { get; private set; }
+    /// <summary>
+    /// Planner-owned organizational department. This is independent from the ZKTime
+    /// attendance department and from permanent production-stage staffing.
+    /// </summary>
+    public Guid? OrganizationalDepartmentId { get; private set; }
+    public Department? OrganizationalDepartment { get; private set; }
+    public Guid OrganizationalDepartmentConcurrencyToken { get; private set; }
     public string? PhotoReference { get; private set; }
     public DateTime? LastExternalSyncAt { get; private set; }
     public DateTime CreatedAtUtc { get; private set; }
@@ -75,6 +86,22 @@ public class Worker
     {
         LocalDepartmentName = string.IsNullOrWhiteSpace(departmentName) ? null : departmentName.Trim();
         UpdatedAtUtc = atUtc ?? DateTime.UtcNow;
+    }
+
+    public bool AssignOrganizationalDepartment(Guid departmentId, DateTime? atUtc = null)
+    {
+        if (departmentId == Guid.Empty)
+            throw new ArgumentException("Organizational department is required.", nameof(departmentId));
+
+        if (OrganizationalDepartmentId == departmentId)
+        {
+            return false;
+        }
+
+        OrganizationalDepartmentId = departmentId;
+        OrganizationalDepartmentConcurrencyToken = Guid.NewGuid();
+        UpdatedAtUtc = atUtc ?? DateTime.UtcNow;
+        return true;
     }
 
     public void SetPhotoReference(string? photoReference, DateTime? atUtc = null)

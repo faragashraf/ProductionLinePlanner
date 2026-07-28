@@ -1,12 +1,14 @@
 import { CommonModule } from '@angular/common';
 import { NgModule } from '@angular/core';
-import { ReactiveFormsModule } from '@angular/forms';
+import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { RouterModule, Routes } from '@angular/router';
 import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
 import { PaginatorModule } from 'primeng/paginator';
 import { RippleModule } from 'primeng/ripple';
 import { TableModule } from 'primeng/table';
+import { DropdownModule } from 'primeng/dropdown';
+import { MenuModule } from 'primeng/menu';
 import { PERMISSIONS } from '../../core/config/permission-identifiers';
 import { PermissionCanActivateGuard } from '../../core/guards/permission-can-activate.guard';
 import { PermissionCanMatchGuard } from '../../core/guards/permission-can-match.guard';
@@ -18,6 +20,7 @@ import { PlpProductPageHeaderComponent } from '../../shared/product/plp-page-hea
 import { PlpResponsiveTableDirective } from '../../shared/product/plp-responsive-table.directive';
 import { PlpSectionNavigationComponent } from '../../shared/product/plp-section-navigation.component';
 import { PlpProductToolbarComponent } from '../../shared/product/plp-toolbar.component';
+import { PlpDialogComponent } from '../../shared/product/plp-dialog.component';
 import { WORKER_MANAGEMENT_DATA_SOURCE } from './worker-management.data-source';
 import { WorkerManagementApiDataSource } from './worker-management-api-data-source';
 import { WorkerManagementFacade } from './worker-management.facade';
@@ -43,6 +46,7 @@ export const WORKERS_ROUTES: Routes = [
   imports: [
     CommonModule,
     ReactiveFormsModule,
+    FormsModule,
     RouterModule.forChild(WORKERS_ROUTES),
     SharedModule,
     ButtonModule,
@@ -50,13 +54,16 @@ export const WORKERS_ROUTES: Routes = [
     PaginatorModule,
     RippleModule,
     TableModule,
+    DropdownModule,
+    MenuModule,
     PlpProductEmptyStateComponent,
     PlpProductErrorStateComponent,
     PlpProductLoadingStateComponent,
     PlpProductPageHeaderComponent,
     PlpProductToolbarComponent,
     PlpResponsiveTableDirective,
-    PlpSectionNavigationComponent
+    PlpSectionNavigationComponent,
+    PlpDialogComponent
   ],
   providers: [
     WorkerManagementFacade,
