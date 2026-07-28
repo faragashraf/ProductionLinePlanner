@@ -37,7 +37,7 @@ describe('ManufacturingMasterDataPageComponent', () => {
     api = jasmine.createSpyObj<ManufacturingMasterDataApiService>('ManufacturingMasterDataApiService', [
       'factories', 'departments', 'allProductionLines', 'productionLinesForDepartment', 'operationalStages', 'createOperationalStage', 'updateOperationalStage',
       'stageDependencies', 'deactivateOperationalStage', 'deleteOperationalStage', 'models', 'modelSearchPage', 'searchSubStages', 'allSubStages', 'modelStages',
-      'createModel', 'updateModel', 'setModelActivation', 'deleteModel', 'modelDeleteEligibility', 'addModelStage', 'updateModelStage', 'deactivateModelStage'
+      'createModel', 'updateModel', 'setModelActivation', 'deleteModel', 'modelDeleteEligibility', 'addModelStage', 'updateModelStage', 'deactivateModelStage', 'copyModelStages'
     ]);
     api.factories.and.returnValue(of([factory]));
     api.departments.and.returnValue(of([department]));
@@ -62,6 +62,7 @@ describe('ManufacturingMasterDataPageComponent', () => {
     api.addModelStage.and.returnValue(of({ id: 'model-stage-1', subStageId: stage.id, stageOrder: 1, piecePrice: 1, standardSeconds: 20, compensationMode: 'SharedPercentage', isRequired: true, isActive: true }));
     api.updateModelStage.and.returnValue(of({ id: 'model-stage-1', subStageId: stage.id, stageOrder: 1, piecePrice: 1, standardSeconds: 20, compensationMode: 'SharedPercentage', isRequired: true, isActive: true }));
     api.deactivateModelStage.and.returnValue(of(void 0));
+    api.copyModelStages.and.returnValue(of({ isPreview: true, requestedCount: 1, addedCount: 1, skippedCount: 0, failedCount: 0, addedStageIds: [], plannedStages: [], skippedStages: [], failedStages: [], validationErrors: [] }));
     realtime = jasmine.createSpyObj<ManufacturingRealtimeService>('ManufacturingRealtimeService', ['watchScreen', 'registerLocalOperation']);
     realtime.watchScreen.and.returnValue(() => undefined);
     realtime.registerLocalOperation.and.returnValue('local-correlation');
@@ -975,5 +976,190 @@ describe('ManufacturingMasterDataPageComponent', () => {
     expect(actionButton.tagName).toBe('BUTTON');
     expect(actionButton.getAttribute('aria-haspopup')).toBe('menu');
     expect(actionButton.getAttribute('style')).toBeNull();
+  });
+
+  function prepareBulkCopyContext(): { relationship: any; targetLine: typeof line } {
+    const targetLine = { ...line, id: 'line-2', name: 'خط الهدف', lineCode: 'L2', sequenceOrder: 2 };
+    const relationship = {
+      id: 'model-stage-1', productModelId: firstModel.id, subStageId: stage.id, subStageCode: stage.code, subStageName: stage.name,
+      stageOrder: 1, piecePrice: 1.5, standardSeconds: 20, compensationMode: 'SharedPercentage' as const, isRequired: true, isActive: true
+    };
+    api.models.and.returnValue(of([firstModel, secondModel]));
+    (component as unknown as { mode: 'stages' | 'models' }).mode = 'models';
+    component.factories = [factory];
+    component.models = [firstModel, secondModel];
+    component.departments = [department];
+    component.lines = [line, targetLine];
+    component.selected = firstModel;
+    component.stages = [relationship];
+    (component as unknown as { availableStageCatalog: typeof stage[] }).availableStageCatalog = [stage];
+    component.selectModelStageFactory(factory.id);
+    component.selected = firstModel;
+    component.stages = [relationship];
+    component.selectModelStageDepartment(department.id);
+    component.selectModelStageProductionLine(line.id);
+    component.toggleModelStageSelection(relationship.id, true);
+    return { relationship, targetLine };
+  }
+
+  it('selects linked rows only and keeps the bulk-copy trigger disabled until a relationship is selected', () => {
+    const { relationship } = prepareBulkCopyContext();
+    component.selectedModelStageIds = new Set<string>();
+    fixture.detectChanges();
+
+    const trigger = fixture.nativeElement.querySelector('button[aria-label="نسخ مراحل الموديل المحددة"]') as HTMLButtonElement;
+    const checkboxes = fixture.nativeElement.querySelectorAll('.master-page__model-stages-table tbody input[type="checkbox"]');
+    const relationshipCheckbox = fixture.nativeElement.querySelector(`input[aria-label="تحديد المرحلة ${stage.name} للنسخ"]`) as HTMLInputElement;
+    expect(trigger.disabled).toBeTrue();
+    expect(checkboxes.length).toBe(2);
+
+    relationshipCheckbox.click();
+    fixture.detectChanges();
+    expect(trigger.disabled).toBeFalse();
+    expect(component.selectedModelStageRelationships.map(item => item.id)).toEqual([relationship.id]);
+  });
+
+  it('supports selecting all visible linked rows, removing one row, and clearing all', () => {
+    const { relationship } = prepareBulkCopyContext();
+    const secondStage = { ...stage, id: 'stage-2', code: 'STG002', name: 'خياطة' };
+    const secondRelationship = { ...relationship, id: 'model-stage-2', subStageId: secondStage.id, subStageCode: secondStage.code, subStageName: secondStage.name, stageOrder: 2 };
+    (component as unknown as { availableStageCatalog: typeof stage[] }).availableStageCatalog = [stage, secondStage];
+    component.stages = [relationship, secondRelationship];
+    component.selectedModelStageIds = new Set<string>();
+
+    component.toggleVisibleModelStageSelection(true);
+    expect(component.allVisibleModelStagesSelected).toBeTrue();
+    expect(component.selectedModelStageIds.size).toBe(2);
+
+    component.toggleModelStageSelection(relationship.id, false);
+    expect(component.selectedModelStageRelationships.map(item => item.id)).toEqual([secondRelationship.id]);
+    expect(component.allVisibleModelStagesSelected).toBeFalse();
+
+    component.toggleVisibleModelStageSelection(false);
+    expect(component.selectedModelStageIds.size).toBe(0);
+  });
+
+  it('previews then copies one selected relationship directly with the same stage and clears selection only after success', () => {
+    const { relationship } = prepareBulkCopyContext();
+    const preview = {
+      isPreview: true, requestedCount: 1, addedCount: 1, skippedCount: 0, failedCount: 0, addedStageIds: [],
+      plannedStages: [{ sourceProductModelStageId: relationship.id, subStageId: stage.id, subStageCode: stage.code, subStageName: stage.name, stageOrder: 1, targetStageOrder: 1, createsTargetStage: false, statusLabel: 'المرحلة موجودة على الخط الهدف وسترتبط بالموديل.' }],
+      skippedStages: [], failedStages: [], validationErrors: []
+    };
+    const saved = { ...preview, isPreview: false, addedStageIds: ['copied-relationship-id'] };
+    api.copyModelStages.and.returnValues(of(preview), of(saved));
+
+    component.openBulkCopyDialog();
+    component.setBulkCopyTargetModel(secondModel.id);
+    component.setBulkCopyTargetFactory(factory.id);
+    component.setBulkCopyTargetDepartment(department.id);
+    component.setBulkCopyTargetLine(line.id);
+    component.submitBulkCopyDialog();
+
+    expect(component.bulkCopyStep).toBe('confirm');
+    expect(api.copyModelStages.calls.mostRecent().args[1]).toEqual(jasmine.objectContaining({
+      sourceProductionLineId: line.id,
+      targetModelId: secondModel.id,
+      targetProductionLineId: line.id,
+      previewOnly: true,
+      sourceProductModelStageIds: [relationship.id]
+    }));
+
+    component.submitBulkCopyDialog();
+
+    expect(api.copyModelStages.calls.count()).toBe(2);
+    expect(api.copyModelStages.calls.mostRecent().args[1].previewOnly).toBeFalse();
+    expect(component.bulkCopyDialogVisible).toBeFalse();
+    expect(component.selectedModelStageIds.size).toBe(0);
+  });
+
+  it('shows duplicate skips in the preview and never treats the same model-line context as valid', () => {
+    const { relationship, targetLine } = prepareBulkCopyContext();
+    api.copyModelStages.and.returnValue(of({
+      isPreview: true, requestedCount: 1, addedCount: 0, skippedCount: 1, failedCount: 0, addedStageIds: [], plannedStages: [],
+      skippedStages: [{ sourceProductModelStageId: relationship.id, subStageId: stage.id, stageCode: stage.code, stageName: stage.name, reasonCode: 'AlreadyLinked', reason: 'المرحلة موجودة بالفعل ضمن الموديل الهدف وخط الإنتاج الهدف.' }],
+      failedStages: [],
+      validationErrors: []
+    }));
+    component.openBulkCopyDialog();
+    component.setBulkCopyTargetModel(firstModel.id);
+    component.setBulkCopyTargetFactory(factory.id);
+    component.setBulkCopyTargetDepartment(department.id);
+    component.setBulkCopyTargetLine(line.id);
+    expect(component.bulkCopyTargetSameAsSource).toBeTrue();
+    expect(component.bulkCopyCanPreview).toBeFalse();
+
+    component.setBulkCopyTargetModel(secondModel.id);
+    component.setBulkCopyTargetLine(targetLine.id);
+    component.submitBulkCopyDialog();
+
+    expect(component.bulkCopyPreview?.skippedCount).toBe(1);
+    expect(component.bulkCopyStep).toBe('confirm');
+  });
+
+  it('shows a target-line code conflict without per-row mapping and blocks confirmation', () => {
+    const { relationship, targetLine } = prepareBulkCopyContext();
+    api.copyModelStages.and.returnValue(of({
+      isPreview: true, requestedCount: 1, addedCount: 0, skippedCount: 0, failedCount: 1, addedStageIds: [], plannedStages: [],
+      skippedStages: [],
+      failedStages: [{ sourceProductModelStageId: relationship.id, subStageId: stage.id, stageCode: stage.code, stageName: stage.name, reasonCode: 'TargetStageCodeConflict', reason: 'يوجد على خط الإنتاج الهدف مرحلة أخرى بالكود STG001. لم يتم استبدالها أو تعديلها.' }],
+      validationErrors: []
+    }));
+    component.openBulkCopyDialog();
+    component.setBulkCopyTargetModel(secondModel.id);
+    component.setBulkCopyTargetFactory(factory.id);
+    component.setBulkCopyTargetDepartment(department.id);
+    component.setBulkCopyTargetLine(targetLine.id);
+
+    component.submitBulkCopyDialog();
+    fixture.detectChanges();
+
+    expect(component.bulkCopyStep).toBe('confirm');
+    expect(component.bulkCopyPreview?.failedStages[0].reasonCode).toBe('TargetStageCodeConflict');
+    expect(fixture.nativeElement.textContent).toContain('لم يتم استبدالها أو تعديلها.');
+    expect((fixture.nativeElement.querySelector('button[type="submit"]') as HTMLButtonElement | null)?.disabled).not.toBeFalse();
+    expect(fixture.nativeElement.querySelectorAll('.plp-bulk-operation__selected-stage select').length).toBe(0);
+  });
+
+  it('prevents duplicate preview submits while the first request is in progress', () => {
+    const { targetLine } = prepareBulkCopyContext();
+    const pending = new Subject<any>();
+    api.copyModelStages.and.returnValue(pending);
+    component.openBulkCopyDialog();
+    component.setBulkCopyTargetModel(secondModel.id);
+    component.setBulkCopyTargetFactory(factory.id);
+    component.setBulkCopyTargetDepartment(department.id);
+    component.setBulkCopyTargetLine(targetLine.id);
+
+    component.submitBulkCopyDialog();
+    component.submitBulkCopyDialog();
+
+    expect(api.copyModelStages.calls.count()).toBe(1);
+    expect(component.bulkCopyBusy).toBeTrue();
+    pending.complete();
+  });
+
+  it('keeps a single selected stage when the dialog is cancelled', () => {
+    const { relationship } = prepareBulkCopyContext();
+
+    component.openBulkCopyDialog();
+    component.closeBulkCopyDialog();
+
+    expect(component.bulkCopyDialogVisible).toBeFalse();
+    expect(component.selectedModelStageRelationships.map(item => item.id)).toEqual([relationship.id]);
+  });
+
+  it('renders a single responsive RTL dialog workspace without inline layout styles', () => {
+    prepareBulkCopyContext();
+    component.openBulkCopyDialog();
+    fixture.detectChanges();
+
+    const workspace = fixture.nativeElement.querySelector('.plp-bulk-operation') as HTMLElement;
+    expect(workspace).not.toBeNull();
+    expect(workspace.getAttribute('dir')).toBe('rtl');
+    expect(workspace.getAttribute('style')).toBeNull();
+    expect(fixture.nativeElement.querySelectorAll('.plp-bulk-operation').length).toBe(1);
+    expect(fixture.nativeElement.querySelectorAll('.plp-bulk-operation__selected-stage select').length).toBe(0);
+    expect(fixture.nativeElement.querySelectorAll('.master-page__model-stages-table').length).toBe(1);
   });
 });

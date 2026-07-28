@@ -2824,7 +2824,7 @@ productModelsApi.MapPost("/{modelId:guid}/stages/copy", async (
         return ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code));
     }
 
-    return Results.NoContent();
+    return Results.Ok(ApiResponse.Success(result.Value!));
 })
     .RequirePermission("models.manage")
     .WithTags("ProductModels")

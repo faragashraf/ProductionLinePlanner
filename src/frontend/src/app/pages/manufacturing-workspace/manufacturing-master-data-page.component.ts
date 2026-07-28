@@ -2,11 +2,13 @@ import { Component, OnDestroy, OnInit, Optional, ViewChild } from '@angular/core
 import { HttpErrorResponse } from '@angular/common/http';
 import { ActivatedRoute } from '@angular/router';
 import { FormBuilder, Validators } from '@angular/forms';
-import { MenuItem, TreeNode } from 'primeng/api';
+import { MenuItem, MessageService, TreeNode } from 'primeng/api';
 import { ContextMenu } from 'primeng/contextmenu';
 import { EMPTY, Subject, debounceTime, distinctUntilChanged, finalize, forkJoin, Observable, switchMap, takeUntil } from 'rxjs';
 import {
   DepartmentItem,
+  CopyModelStagesRequest,
+  CopyModelStagesSummary,
   ManufacturingMasterDataApiService,
   ModelStageItem,
   ProductModelItem,
@@ -105,6 +107,18 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
   availableStagesLoading = false;
   availableStagesError = '';
   readonly modelStageSavingIds = new Set<string>();
+  selectedModelStageIds = new Set<string>();
+  bulkCopyDialogVisible = false;
+  bulkCopyStep: 'configure' | 'confirm' = 'configure';
+  bulkCopyBusy = false;
+  bulkCopyError = '';
+  bulkCopyTargetFactoryId = '';
+  bulkCopyTargetModelId = '';
+  bulkCopyTargetModels: ProductModelItem[] = [];
+  bulkCopyTargetsLoading = false;
+  bulkCopyTargetDepartmentId = '';
+  bulkCopyTargetProductionLineId = '';
+  bulkCopyPreview: CopyModelStagesSummary | null = null;
   private availableStageCatalog: SubStageOption[] = [];
   availableStageOptions: SubStageOption[] = [];
   stageDropdownPanelStyle: Record<string, string> = {};
@@ -144,7 +158,7 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
   private contextModelDeleteEligibility: ProductModelDeleteEligibility | null = null;
   private stopRealtime?: () => void;
 
-  constructor(private readonly fb: FormBuilder, private readonly api: ManufacturingMasterDataApiService, route: ActivatedRoute, private readonly permissionService: PermissionService, @Optional() private readonly manufacturingRealtime?: ManufacturingRealtimeService) {
+  constructor(private readonly fb: FormBuilder, private readonly api: ManufacturingMasterDataApiService, route: ActivatedRoute, private readonly permissionService: PermissionService, @Optional() private readonly manufacturingRealtime?: ManufacturingRealtimeService, @Optional() private readonly messageService?: MessageService) {
     this.mode = route.snapshot.routeConfig?.path === 'models' ? 'models' : 'stages';
   }
 
@@ -262,6 +276,60 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
     if (this.modelStageRelationshipFilter === 'linked') return 'لا توجد مراحل مرتبطة بهذا الموديل على الخط المختار.';
     if (this.modelStageRelationshipFilter === 'unlinked') return 'لا توجد مراحل غير مرتبطة متاحة على الخط المختار.';
     return 'الخط المختار لا يحتوي مراحل.';
+  }
+  get selectableModelStageRows(): ModelStageAvailabilityRow[] {
+    return this.filteredAvailableModelStageRows.filter(row => !!row.relationship);
+  }
+  get selectedModelStageRelationships(): ModelStageItem[] {
+    const selectedIds = this.selectedModelStageIds;
+    return this.availableModelStageRows
+      .map(row => row.relationship)
+      .filter((relationship): relationship is ModelStageItem => !!relationship && selectedIds.has(relationship.id))
+      .sort((left, right) => left.stageOrder - right.stageOrder);
+  }
+  get allVisibleModelStagesSelected(): boolean {
+    return this.selectableModelStageRows.length > 0
+      && this.selectableModelStageRows.every(row => this.selectedModelStageIds.has(row.relationship!.id));
+  }
+  get bulkCopyTargetFactoryOptions(): { id: string; code: string; name: string; isActive: boolean }[] {
+    return this.modelStageFactoryOptions;
+  }
+  get bulkCopyTargetModelOptions(): ProductModelItem[] {
+    return [...this.bulkCopyTargetModels].sort((left, right) => left.code.localeCompare(right.code, 'ar'));
+  }
+  get bulkCopyTargetDepartmentOptions(): DepartmentItem[] {
+    return this.departments
+      .filter(department => department.isActive !== false && department.factoryId === this.bulkCopyTargetFactoryId)
+      .sort((left, right) => (left.sequenceOrder ?? 0) - (right.sequenceOrder ?? 0));
+  }
+  get bulkCopyTargetLineOptions(): ProductionLineOption[] {
+    return this.lines
+      .filter(line => line.isActive
+        && line.factoryId === this.bulkCopyTargetFactoryId
+        && line.departmentId === this.bulkCopyTargetDepartmentId)
+      .sort((left, right) => left.sequenceOrder - right.sequenceOrder || left.name.localeCompare(right.name, 'ar'));
+  }
+  get bulkCopyTargetSameAsSource(): boolean {
+    return this.bulkCopyTargetModelId === this.selected?.id
+      && this.bulkCopyTargetProductionLineId === this.selectedModelStageProductionLineId;
+  }
+  get bulkCopyCanPreview(): boolean {
+    return !!this.bulkCopyTargetFactoryId
+      && !!this.bulkCopyTargetModelId
+      && !!this.bulkCopyTargetDepartmentId
+      && !!this.bulkCopyTargetProductionLineId
+      && !this.bulkCopyTargetSameAsSource
+      && this.selectedModelStageRelationships.length > 0
+      && !this.bulkCopyTargetsLoading
+      && !this.bulkCopyBusy;
+  }
+  get bulkCopySourceLabel(): string {
+    return `${this.selected?.code ?? '—'} — ${this.lines.find(line => line.id === this.selectedModelStageProductionLineId)?.name ?? '—'}`;
+  }
+  get bulkCopyTargetLabel(): string {
+    const model = this.bulkCopyTargetModels.find(item => item.id === this.bulkCopyTargetModelId);
+    const line = this.lines.find(item => item.id === this.bulkCopyTargetProductionLineId);
+    return `${model?.code ?? '—'} — ${line?.name ?? '—'}`;
   }
   get hasModelStageContext(): boolean {
     return !!this.selectedModelStageFactoryId
@@ -397,11 +465,23 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
   onModelSearch(value: string): void { this.modelListSearch = value; this.modelPage = 1; this.modelListSearch$.next(value); }
   setModelStatusFilter(value: string): void { this.modelStatusFilter = value === 'active' || value === 'inactive' ? value : 'all'; this.loadModelPage(this.modelListSearch, 1); }
   setModelStageRelationshipFilter(value: string): void { this.modelStageRelationshipFilter = value === 'linked' || value === 'unlinked' ? value : 'all'; }
+  isModelStageSelected(stageId: string): boolean { return this.selectedModelStageIds.has(stageId); }
+  toggleModelStageSelection(stageId: string, selected: boolean): void {
+    const next = new Set(this.selectedModelStageIds);
+    selected ? next.add(stageId) : next.delete(stageId);
+    this.selectedModelStageIds = next;
+  }
+  toggleVisibleModelStageSelection(selected: boolean): void {
+    const next = new Set(this.selectedModelStageIds);
+    this.selectableModelStageRows.forEach(row => selected ? next.add(row.relationship!.id) : next.delete(row.relationship!.id));
+    this.selectedModelStageIds = next;
+  }
   clearModelFilters(): void { this.modelStatusFilter = 'all'; this.modelListSearch = ''; this.loadModelPage('', 1); }
   selectModelStageFactory(factoryId: string): void {
     this.selectedModelStageFactoryId = this.modelStageFactoryOptions.some(factory => factory.id === factoryId) ? factoryId : '';
     this.selectedModelStageDepartmentId = '';
     this.selectedModelStageProductionLineId = '';
+    this.clearModelStageSelection();
     this.rebuildAvailableStageOptions();
   }
   selectModelStageModel(modelId: string): void {
@@ -409,6 +489,7 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
     if (!model) {
       this.selected = null;
       this.stages = [];
+      this.clearModelStageSelection();
       this.rebuildAvailableStageOptions();
       return;
     }
@@ -418,24 +499,30 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
     const department = this.modelStageDepartmentOptions.find(item => item.id === departmentId);
     this.selectedModelStageDepartmentId = department?.id ?? '';
     this.selectedModelStageProductionLineId = '';
+    this.clearModelStageSelection();
     this.rebuildAvailableStageOptions();
   }
   selectModelStageProductionLine(productionLineId: string): void {
+    const previousLineId = this.selectedModelStageProductionLineId;
     this.selectedModelStageProductionLineId = this.modelStageLineOptions.some(line => line.id === productionLineId)
       ? productionLineId
       : '';
+    if (previousLineId !== this.selectedModelStageProductionLineId) this.clearModelStageSelection();
     this.rebuildAvailableStageOptions();
   }
   selectModelStageContextNode(node: TreeNode): void {
     const context = node.data as ModelStageContextNodeData | undefined;
     if (!context) return;
     this.selectedModelStageContextNode = node;
+    const previousModelId = this.selected?.id;
+    const previousLineId = this.selectedModelStageProductionLineId;
 
     if (context.contextType === 'factory') {
       this.selectModelStageFactory(context.factoryId);
       this.selected = null;
       this.stages = [];
       this.modelStageFormVisible = false;
+      this.clearModelStageSelection();
       return;
     }
 
@@ -446,6 +533,7 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
       this.selectedModelStageDepartmentId = '';
       this.selectedModelStageProductionLineId = '';
       this.modelStageFormVisible = false;
+      if (previousModelId !== context.modelId || previousLineId) this.clearModelStageSelection();
       this.rebuildAvailableStageOptions();
       return;
     }
@@ -454,11 +542,13 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
     if (context.contextType === 'department') {
       this.selectedModelStageProductionLineId = '';
       this.modelStageFormVisible = false;
+      if (previousModelId !== context.modelId || previousLineId) this.clearModelStageSelection();
       this.rebuildAvailableStageOptions();
       return;
     }
 
     this.selectedModelStageProductionLineId = context.productionLineId ?? '';
+    if (previousModelId !== context.modelId || previousLineId !== this.selectedModelStageProductionLineId) this.clearModelStageSelection();
     this.rebuildAvailableStageOptions();
   }
   onModelLazyLoad(event: { first?: number | null; rows?: number | null }): void { const page = Math.floor((event.first ?? 0) / (event.rows ?? this.modelPageSize)) + 1; if (page !== this.modelPage) this.loadModelPage(this.modelListSearch, page); }
@@ -649,6 +739,7 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
   }
   closeModelDeletionDialog(): void { this.modelDeleteDialogVisible = false; this.pendingModelDeletion = null; }
   select(item: ProductModelItem): void {
+    if (this.selected?.id !== item.id) this.clearModelStageSelection();
     this.selected = item;
     this.modelStageSearch = '';
     this.modelStagesLoading = true;
@@ -670,6 +761,136 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
       compensationMode: 'SharedPercentage',
       isRequired: true,
       isActive: true
+    });
+  }
+  openBulkCopyDialog(): void {
+    if (!this.canManageModels || !this.hasModelStageContext || this.selectedModelStageRelationships.length === 0) return;
+    this.bulkCopyStep = 'configure';
+    this.bulkCopyError = '';
+    this.bulkCopyPreview = null;
+    this.bulkCopyTargetFactoryId = this.selectedModelStageFactoryId;
+    this.bulkCopyTargetDepartmentId = this.selectedModelStageDepartmentId;
+    this.bulkCopyTargetProductionLineId = '';
+    this.bulkCopyTargetModelId = '';
+    this.bulkCopyTargetModels = [...this.models];
+    this.bulkCopyDialogVisible = true;
+    this.bulkCopyTargetsLoading = true;
+    this.api.models().pipe(finalize(() => this.bulkCopyTargetsLoading = false), takeUntil(this.destroy$)).subscribe({
+      next: models => this.bulkCopyTargetModels = models,
+      error: error => this.bulkCopyError = this.errorMessage(error)
+    });
+  }
+  closeBulkCopyDialog(): void {
+    if (this.bulkCopyBusy) return;
+    this.bulkCopyDialogVisible = false;
+    this.bulkCopyStep = 'configure';
+    this.bulkCopyPreview = null;
+    this.bulkCopyError = '';
+  }
+  setBulkCopyTargetFactory(factoryId: string): void {
+    this.bulkCopyTargetFactoryId = this.bulkCopyTargetFactoryOptions.some(factory => factory.id === factoryId) ? factoryId : '';
+    this.bulkCopyTargetDepartmentId = '';
+    this.bulkCopyTargetProductionLineId = '';
+    this.resetBulkCopyPreview();
+  }
+  setBulkCopyTargetModel(modelId: string): void {
+    this.bulkCopyTargetModelId = this.bulkCopyTargetModelOptions.some(model => model.id === modelId) ? modelId : '';
+    this.resetBulkCopyPreview();
+  }
+  setBulkCopyTargetDepartment(departmentId: string): void {
+    this.bulkCopyTargetDepartmentId = this.bulkCopyTargetDepartmentOptions.some(department => department.id === departmentId) ? departmentId : '';
+    this.bulkCopyTargetProductionLineId = '';
+    this.resetBulkCopyPreview();
+  }
+  setBulkCopyTargetLine(productionLineId: string): void {
+    this.bulkCopyTargetProductionLineId = this.bulkCopyTargetLineOptions.some(line => line.id === productionLineId) ? productionLineId : '';
+    this.resetBulkCopyPreview();
+  }
+  submitBulkCopyDialog(): void {
+    if (this.bulkCopyBusy) return;
+    if (this.bulkCopyStep === 'confirm') {
+      this.executeBulkCopy();
+      return;
+    }
+    if (!this.bulkCopyCanPreview) return;
+    this.bulkCopyBusy = true;
+    this.bulkCopyError = '';
+    this.api.copyModelStages(
+      this.selected!.id,
+      this.buildBulkCopyRequest(true),
+      this.localCorrelation('models')
+    ).pipe(finalize(() => this.bulkCopyBusy = false), takeUntil(this.destroy$)).subscribe({
+      next: summary => {
+        this.bulkCopyPreview = summary;
+        this.bulkCopyStep = 'confirm';
+        if (summary.failedCount > 0 || summary.validationErrors.length > 0) {
+          this.bulkCopyError = summary.validationErrors.join(' ')
+            || summary.failedStages.map(stage => stage.reason).join(' ')
+            || 'توجد مراحل لا يمكن نسخها إلى السياق الهدف.';
+          return;
+        }
+      },
+      error: error => this.bulkCopyError = this.errorMessage(error)
+    });
+  }
+  returnToBulkCopyConfiguration(): void {
+    if (this.bulkCopyBusy) return;
+    this.bulkCopyStep = 'configure';
+    this.bulkCopyPreview = null;
+    this.bulkCopyError = '';
+  }
+  private executeBulkCopy(): void {
+    if (!this.bulkCopyPreview || this.bulkCopyBusy || !this.selected) return;
+    const sourceModelId = this.selected.id;
+    const targetModelId = this.bulkCopyTargetModelId;
+    this.bulkCopyBusy = true;
+    this.bulkCopyError = '';
+    this.api.copyModelStages(
+      sourceModelId,
+      this.buildBulkCopyRequest(false),
+      this.localCorrelation('models')
+    ).pipe(finalize(() => this.bulkCopyBusy = false), takeUntil(this.destroy$)).subscribe({
+      next: summary => {
+        if (summary.failedCount > 0 || summary.validationErrors.length > 0) {
+          this.bulkCopyError = summary.validationErrors.join(' ') || 'تعذر نسخ بعض المراحل.';
+          return;
+        }
+        this.messageService?.add({
+          severity: summary.failedCount > 0 ? 'warn' : 'success',
+          summary: 'اكتمل نسخ المراحل',
+          detail: `تم نسخ ${summary.addedCount} مرحلة، وتم تخطي ${summary.skippedCount} مرحلة، وفشلت ${summary.failedCount} مرحلة.`
+        });
+        this.selectedModelStageIds = new Set<string>();
+        this.bulkCopyDialogVisible = false;
+        this.bulkCopyPreview = null;
+        this.bulkCopyStep = 'configure';
+        if (this.selected?.id === targetModelId) this.reloadSelectedModelStages(targetModelId);
+      },
+      error: error => this.bulkCopyError = this.errorMessage(error)
+    });
+  }
+  private buildBulkCopyRequest(previewOnly: boolean): CopyModelStagesRequest {
+    return {
+      sourceProductionLineId: this.selectedModelStageProductionLineId,
+      targetModelId: this.bulkCopyTargetModelId,
+      targetProductionLineId: this.bulkCopyTargetProductionLineId,
+      sourceProductModelStageIds: this.selectedModelStageRelationships.map(stage => stage.id),
+      previewOnly
+    };
+  }
+  private resetBulkCopyPreview(): void {
+    this.bulkCopyPreview = null;
+    this.bulkCopyError = '';
+  }
+  private reloadSelectedModelStages(modelId: string): void {
+    this.modelStagesLoading = true;
+    this.api.modelStages(modelId).pipe(finalize(() => this.modelStagesLoading = false), takeUntil(this.destroy$)).subscribe({
+      next: stages => {
+        if (this.selected?.id !== modelId) return;
+        this.stages = [...stages].sort((left, right) => left.stageOrder - right.stageOrder);
+        this.rebuildAvailableStageOptions();
+      },
+      error: error => this.setError(error)
     });
   }
   saveModelStage(): void { if (!this.selected || this.modelStageForm.invalid) return; const value = this.modelStageForm.getRawValue(); if (this.stages.some(item => item.subStageId === value.subStageId && item.id !== this.editModelStageId) || this.stages.some(item => item.stageOrder === value.stageOrder && item.id !== this.editModelStageId)) { this.error = 'لا يمكن تكرار المرحلة أو ترتيبها داخل الموديل.'; return; } const correlationId = this.localCorrelation('models'); this.save(this.editModelStageId ? this.api.updateModelStage(this.selected.id, this.editModelStageId, value, correlationId) : this.api.addModelStage(this.selected.id, value, correlationId), item => { this.stages = this.upsert(this.stages, item, 'stageOrder'); this.rebuildAvailableStageOptions(); this.editModelStageId = ''; this.modelStageFormVisible = false; }); }
@@ -829,7 +1050,12 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
     this.selectedModelStageProductionLineId = '';
     this.selectedModelStageContextNode = this.modelStageContextNodes.find(node => node.data?.factoryId === this.selectedModelStageFactoryId) ?? null;
     this.modelStageFormVisible = false;
+    this.clearModelStageSelection();
     this.rebuildAvailableStageOptions();
+  }
+  private clearModelStageSelection(): void {
+    this.selectedModelStageIds = new Set<string>();
+    if (this.bulkCopyDialogVisible) this.closeBulkCopyDialog();
   }
   private departmentIdForStage(stage: SubStageOption): string | null {
     return stage.departmentId ?? this.lines.find(line => line.id === stage.productionLineId)?.departmentId ?? null;
@@ -851,26 +1077,25 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
   private upsert<T extends { id: string }>(items: readonly T[], item: T, sortKey?: keyof T): T[] { const next = items.some(candidate => candidate.id === item.id) ? items.map(candidate => candidate.id === item.id ? item : candidate) : [...items, item]; return sortKey ? [...next].sort((left, right) => Number(left[sortKey]) - Number(right[sortKey])) : next; }
   trackByModelStageId(_index: number, item: ModelStageItem): string { return item.id; }
   private setError(error: unknown): void {
+    this.error = this.errorMessage(error);
+  }
+  private errorMessage(error: unknown): string {
     if (error instanceof HttpErrorResponse) {
       const message = error.error?.error?.message ?? error.error?.message;
       if (typeof message === 'string' && message.trim()) {
-        this.error = message;
-        return;
+        return message;
       }
       if (error.status === 404) {
-        this.error = 'تعذر تحديث مرحلة الموديل لأن العلاقة لم تعد موجودة. حدّث البيانات ثم حاول مرة أخرى.';
-        return;
+        return 'تعذر تحديث مرحلة الموديل لأن العلاقة لم تعد موجودة. حدّث البيانات ثم حاول مرة أخرى.';
       }
       if (error.status === 409) {
-        this.error = 'تعذر تحديث مرحلة الموديل بسبب تعارض مع تعديل متزامن. حدّث البيانات ثم حاول مرة أخرى.';
-        return;
+        return 'تعذر تحديث مرحلة الموديل بسبب تعارض مع تعديل متزامن. حدّث البيانات ثم حاول مرة أخرى.';
       }
       if (error.status === 0) {
-        this.error = 'تعذر الاتصال بالخادم أثناء تحديث مرحلة الموديل. لم تتغير الحالة المعروضة.';
-        return;
+        return 'تعذر الاتصال بالخادم أثناء تحديث مرحلة الموديل. لم تتغير الحالة المعروضة.';
       }
     }
-    this.error = error instanceof Error ? error.message : 'تعذر تحميل أو حفظ البيانات.';
+    return error instanceof Error ? error.message : 'تعذر تحميل أو حفظ البيانات.';
   }
   private refreshModelsFromRealtime(): void {
     this.loadModelPage(this.modelListSearch, this.modelPage);

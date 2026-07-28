@@ -21,7 +21,7 @@ describe('ManufacturingMasterDataApiService', () => {
     http.expectOne(request => request.url.endsWith('/api/main-stages')).flush(page([{ id: 'main-1' }]));
     http.expectOne(request => request.url.endsWith('/api/stages')).flush(page([{ id: 'sub-1', defaultOrder: 4 }]));
     http.expectOne(request => request.url.endsWith('/api/production-lines')).flush(page([{ id: 'line-1' }]));
-    http.expectOne(request => request.url.endsWith('/api/product-models?includeInactive=true')).flush(page([{ id: 'model-1', isActive: false }]));
+    http.expectOne(request => request.url.endsWith('/api/product-models?includeInactive=true&pageSize=200')).flush(page([{ id: 'model-1', isActive: false }]));
     expect(values).toEqual([[{ id: 'main-1' }], [{ id: 'sub-1', defaultOrder: 4, sequenceOrder: 4 }], [{ id: 'line-1' }], [{ id: 'model-1', isActive: false }]]);
   });
 
@@ -108,6 +108,24 @@ describe('ManufacturingMasterDataApiService', () => {
     const request = http.expectOne(item => item.method === 'POST' && item.url.endsWith('/api/product-models'));
     expect(request.request.headers.get('X-Manufacturing-Realtime-Correlation-Id')).toBe('11111111-1111-1111-1111-111111111111');
     request.flush({ success: true, data: { id: 'model-1', code: 'RT-1', name: 'موديل لحظي', isActive: true } });
+  });
+
+  it('posts the authoritative model-stage copy preview to the existing copy endpoint', () => {
+    const payload = {
+      sourceProductionLineId: 'line-source',
+      targetModelId: 'model-target',
+      targetProductionLineId: 'line-target',
+      sourceProductModelStageIds: ['relationship-source'],
+      previewOnly: true
+    };
+    let summary: unknown;
+
+    service.copyModelStages('model-source', payload).subscribe(value => summary = value);
+
+    const request = http.expectOne(item => item.method === 'POST' && item.url.endsWith('/api/product-models/model-source/stages/copy'));
+    expect(request.request.body).toEqual(payload);
+    request.flush({ success: true, data: { isPreview: true, requestedCount: 1, addedCount: 1, skippedCount: 0, failedCount: 0, addedStageIds: [], plannedStages: [], skippedStages: [], failedStages: [], validationErrors: [] } });
+    expect(summary).toEqual(jasmine.objectContaining({ isPreview: true, requestedCount: 1, addedCount: 1 }));
   });
 
   it('treats 204 delete responses for factory, department, and line as successful void completions', () => {

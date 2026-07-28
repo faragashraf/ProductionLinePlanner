@@ -88,7 +88,12 @@ public sealed class ManufacturingDataChangeSaveChangesInterceptor(
 
     private static ManufacturingDataChanged[] CoalesceBatchInvalidations(IReadOnlyCollection<ManufacturingDataChanged> changes)
     {
-        var batchTypes = new[] { ManufacturingEntityType.Worker, ManufacturingEntityType.AttendanceRecord };
+        var batchTypes = new[]
+        {
+            ManufacturingEntityType.Worker,
+            ManufacturingEntityType.AttendanceRecord,
+            ManufacturingEntityType.ProductModelStage
+        };
         var result = changes.Where(change => !batchTypes.Contains(change.EntityType)).ToList();
 
         foreach (var entityType in batchTypes)

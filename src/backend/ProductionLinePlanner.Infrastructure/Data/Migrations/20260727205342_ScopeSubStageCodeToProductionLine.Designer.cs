@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using ProductionLinePlanner.Infrastructure.Data;
 
@@ -11,9 +12,11 @@ using ProductionLinePlanner.Infrastructure.Data;
 namespace ProductionLinePlanner.Infrastructure.Data.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260727205342_ScopeSubStageCodeToProductionLine")]
+    partial class ScopeSubStageCodeToProductionLine
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1398,15 +1401,6 @@ namespace ProductionLinePlanner.Infrastructure.Data.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 
-                    b.Property<Guid>("OrganizationalDepartmentConcurrencyToken")
-                        .ValueGeneratedOnAdd()
-                        .IsConcurrencyToken()
-                        .HasColumnType("uniqueidentifier")
-                        .HasDefaultValueSql("NEWSEQUENTIALID()");
-
-                    b.Property<Guid?>("OrganizationalDepartmentId")
-                        .HasColumnType("uniqueidentifier");
-
                     b.Property<string>("Phone")
                         .HasMaxLength(40)
                         .HasColumnType("nvarchar(40)");
@@ -1422,8 +1416,6 @@ namespace ProductionLinePlanner.Infrastructure.Data.Migrations
 
                     b.HasIndex("EmployeeCode")
                         .IsUnique();
-
-                    b.HasIndex("OrganizationalDepartmentId");
 
                     b.ToTable("Workers", (string)null);
                 });
@@ -1931,16 +1923,6 @@ namespace ProductionLinePlanner.Infrastructure.Data.Migrations
                     b.Navigation("AppUser");
 
                     b.Navigation("Permission");
-                });
-
-            modelBuilder.Entity("ProductionLinePlanner.Domain.Entities.Worker", b =>
-                {
-                    b.HasOne("ProductionLinePlanner.Domain.Entities.Department", "OrganizationalDepartment")
-                        .WithMany()
-                        .HasForeignKey("OrganizationalDepartmentId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.Navigation("OrganizationalDepartment");
                 });
 
             modelBuilder.Entity("ProductionLinePlanner.Domain.Entities.WorkerDefaultAssignment", b =>
