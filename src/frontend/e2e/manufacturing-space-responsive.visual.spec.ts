@@ -161,8 +161,8 @@ async function preparePage(page: Page): Promise<PageDiagnostics> {
     else if (pathname.endsWith('/api/factories')) data = { items: [factory] };
     else if (pathname.endsWith('/api/departments')) data = { items: [department] };
     else if (pathname.endsWith('/api/production-lines')) data = { items: [line] };
-    else if (pathname.includes('/api/production-lines/') && pathname.endsWith('/main-stages')) data = { items: [{ id: 'main-stage-1', productionLineId: line.id, name: 'المرحلة الرئيسية', sequenceOrder: 1, isCritical: false, isActive: true }] };
-    else if (pathname.includes('/api/main-stages/') && pathname.endsWith('/sub-stages')) data = { items: [{ id: subStageIds[0], mainStageId: 'main-stage-1', productionLineId: line.id, factoryId: factory.id, departmentId: department.id, name: stages[0].stageName, code: stages[0].stageCode, capacity: 6, defaultOrder: 1, isActive: true }] };
+    else if (pathname.includes('/api/departments/') && pathname.endsWith('/main-stages')) data = { items: [{ id: 'main-stage-1', departmentId: department.id, name: 'المرحلة الرئيسية', sequenceOrder: 1, isCritical: false, isActive: true }] };
+    else if (pathname.includes('/api/main-stages/') && pathname.endsWith('/sub-stages')) data = { items: [{ id: subStageIds[0], mainStageId: 'main-stage-1', mainStageName: 'المرحلة الرئيسية', factoryId: factory.id, departmentId: department.id, name: stages[0].stageName, code: stages[0].stageCode, capacity: 6, defaultOrder: 1, isActive: true }] };
     else if (pathname.endsWith('/api/product-models')) data = { items: [model], totalCount: 1, pageNumber: 1, pageSize: 50 };
     else if (pathname.endsWith('/api/production/lookups/models')) data = { items: [model] };
     else if (pathname.endsWith('/api/production/orders') || pathname.endsWith('/api/production/records')) data = [];

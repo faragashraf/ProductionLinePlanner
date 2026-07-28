@@ -18,8 +18,8 @@ describe('AttendanceWorkforcePageComponent', () => {
     api.getDetail.and.returnValue(of({ workerId: row.workerId, productionDate: '2026-07-19', attendanceRecords: [], assignments: [] }));
     const attendance = jasmine.createSpyObj<AttendanceApiService>('AttendanceApiService', ['syncForProductionDate']);
     attendance.syncForProductionDate.and.returnValue(of({ syncDateUtc: '2026-07-19T00:00:00Z', sourceUsersCount: 1, sourceCheckInsCount: 1, matchedWorkersCount: 1, unmatchedSourceUsersCount: 0, workersWithoutAttendanceCount: 0, insertedRecords: 1, updatedRecords: 0, skippedRecords: 0 }));
-    const master = jasmine.createSpyObj<ManufacturingMasterDataApiService>('ManufacturingMasterDataApiService', ['factories', 'allProductionLines', 'mainStagesForLine', 'subStagesForMainStage']);
-    master.factories.and.returnValue(of([])); master.allProductionLines.and.returnValue(of([])); master.mainStagesForLine.and.returnValue(of([])); master.subStagesForMainStage.and.returnValue(of([]));
+    const master = jasmine.createSpyObj<ManufacturingMasterDataApiService>('ManufacturingMasterDataApiService', ['factories', 'allProductionLines', 'mainStagesForDepartment', 'subStagesForMainStage']);
+    master.factories.and.returnValue(of([])); master.allProductionLines.and.returnValue(of([])); master.mainStagesForDepartment.and.returnValue(of([])); master.subStagesForMainStage.and.returnValue(of([]));
     const permissions = jasmine.createSpyObj<PermissionService>('PermissionService', ['has']);
     permissions.has.and.returnValue(canSync);
     return new AttendanceWorkforcePageComponent(api, attendance, master, permissions);

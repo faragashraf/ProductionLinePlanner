@@ -7,6 +7,7 @@
 .factory-structure-tree-view ::ng-deep .p-treenode-content:not(.p-treenode-selectable) { cursor: default; }
 .factory-structure-tree-view ::ng-deep .p-treenode { padding-block: .05rem; padding-inline: 0; }
 .factory-structure-tree-view ::ng-deep .p-treenode-children { padding: 0; }
+.factory-structure-tree-view ::ng-deep .p-treenode-leaf > .p-treenode-content > .p-tree-toggler { display: none; }
 .factory-structure-tree-view ::ng-deep .p-treenode-content:has(.factory-structure-node--department) { padding-inline-start: 1.5rem; }
 .factory-structure-tree-view ::ng-deep .p-treenode-content:has(.factory-structure-node--line) { padding-inline-start: 3rem; }
 .factory-structure-tree-view ::ng-deep .p-treenode:not(.p-treenode-expanded) > .p-treenode-content .p-tree-toggler-icon { transform: rotate(180deg); }

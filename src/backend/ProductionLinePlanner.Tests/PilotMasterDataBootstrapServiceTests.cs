@@ -126,17 +126,19 @@ public sealed class PilotMasterDataBootstrapServiceTests
     }
 
     [Fact]
-    public async Task Bootstrap_allows_the_same_stage_code_owned_by_another_production_line()
+    public async Task Bootstrap_allows_the_same_stage_code_owned_by_another_department()
     {
         await using var fixture = await BootstrapFixture.CreateAsync(includeWorker: true);
         var otherFactory = new Factory(Guid.NewGuid(), "Other factory", "OTHER");
-        var otherLine = new ProductionLine(Guid.NewGuid(), otherFactory.Id, "Other line", 1, "OTHER-LINE");
-        var otherMainStage = new MainStage(Guid.NewGuid(), otherLine.Id, "Other group", 1);
+        var otherDepartment = new Department(Guid.NewGuid(), otherFactory.Id, "OTHER", "قسم آخر", "Other", 1);
+        var otherLine = new ProductionLine(Guid.NewGuid(), otherFactory.Id, "Other line", 1, "OTHER-LINE", departmentId: otherDepartment.Id);
+        var otherMainStage = new MainStage(Guid.NewGuid(), otherDepartment.Id, "Other group", 1);
         fixture.Db.AddRange(
             otherFactory,
+            otherDepartment,
             otherLine,
             otherMainStage,
-            new SubStage(Guid.NewGuid(), otherMainStage.Id, "Other stage", "STG001", 1, 1, productionLineId: otherLine.Id));
+            new SubStage(Guid.NewGuid(), otherMainStage.Id, "Other stage", "STG001", 1, 1, departmentId: otherMainStage.DepartmentId));
         await fixture.Db.SaveChangesAsync();
         var input = fixture.CreateInput(salary: 100m);
 
@@ -149,7 +151,7 @@ public sealed class PilotMasterDataBootstrapServiceTests
             .Where(stage => stage.Code == "STG001")
             .ToArrayAsync();
         Assert.Equal(2, matchingStages.Length);
-        Assert.Equal(2, matchingStages.Select(stage => stage.ProductionLineId).Distinct().Count());
+        Assert.Equal(2, matchingStages.Select(stage => stage.DepartmentId).Distinct().Count());
     }
 
     [Fact]

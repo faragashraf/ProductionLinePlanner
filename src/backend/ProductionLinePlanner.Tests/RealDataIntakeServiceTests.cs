@@ -131,21 +131,22 @@ public sealed class RealDataIntakeServiceTests
             await db.Database.EnsureCreatedAsync();
             var actor = Guid.NewGuid();
             var factory = new Factory(Guid.NewGuid(), "المصنع الرئيسي", "MAIN");
-            var line = new ProductionLine(Guid.NewGuid(), factory.Id, "خط الخياطه", 1, "SEW");
-            var main = new MainStage(Guid.NewGuid(), line.Id, "الخياطة", 1);
+            var department = new Department(Guid.NewGuid(), factory.Id, "SEW", "الخياطة", "Sewing", 1);
+            var line = new ProductionLine(Guid.NewGuid(), factory.Id, "خط الخياطه", 1, "SEW", departmentId: department.Id);
+            var main = new MainStage(Guid.NewGuid(), department.Id, "الخياطة", 1);
             var firstStage = new SubStage(Guid.NewGuid(), main.Id, "إستلام / 1", "STG001", 0, 1);
             var product = new ProductModel(Guid.NewGuid(), "GEROMAN", "جرومان");
-            var firstMapping = new ProductModelStage(Guid.NewGuid(), product.Id, firstStage.Id, 1, 1.25m, 18m, CompensationMode.FullRatePerWorker);
+            var firstMapping = new ProductModelStage(Guid.NewGuid(), product.Id, line.Id, firstStage.Id, 1, 1.25m, 18m, CompensationMode.FullRatePerWorker);
             var worker = new Worker(Guid.NewGuid(), "1001", "عامل اختبار", "1");
-            db.AddRange(factory, line, main, firstStage, product, firstMapping, worker);
+            db.AddRange(factory, department, line, main, firstStage, product, firstMapping, worker);
             for (var number = 2; number <= requiredStageCount; number++)
             {
                 var stageName = number == 2 ? "تشطيب / 1" : $"مرحلة / {number}";
                 var stage = new SubStage(Guid.NewGuid(), main.Id, stageName, $"STG{number:000}", 0, number);
-                db.AddRange(stage, new ProductModelStage(Guid.NewGuid(), product.Id, stage.Id, number, 1m, null, CompensationMode.FullRatePerWorker));
+                db.AddRange(stage, new ProductModelStage(Guid.NewGuid(), product.Id, line.Id, stage.Id, number, 1m, null, CompensationMode.FullRatePerWorker));
             }
             await db.SaveChangesAsync();
-            db.Add(new WorkerDefaultAssignment(Guid.NewGuid(), worker.Id, firstStage.Id, actor, new DateTime(2026, 7, 1, 0, 0, 0, DateTimeKind.Utc), "Pilot"));
+            db.Add(new WorkerDefaultAssignment(Guid.NewGuid(), worker.Id, firstStage.Id, actor, new DateTime(2026, 7, 1, 0, 0, 0, DateTimeKind.Utc), "Pilot", productionLineId: line.Id));
             db.Add(new AttendanceRecord(Guid.NewGuid(), worker.Id, new DateTime(2026, 7, 13, 8, 0, 0, DateTimeKind.Utc), AttendanceStatus.Present, "test", sourceRawId: "1:pilot", attendanceUserId: "1"));
             await db.SaveChangesAsync();
             var audit = new AuditEngine(db);

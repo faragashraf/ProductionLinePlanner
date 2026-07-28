@@ -1,7 +1,7 @@
 <section class="page-frame master-page" [attr.aria-busy]="loading || saving" dir="rtl">
   <plp-page-header
     [title]="mode === 'stages' ? 'مراحل الإنتاج' : 'الموديلات وإعدادات المراحل'"
-    [description]="mode === 'stages' ? 'إدارة كتالوج مراحل الإنتاج حسب المصنع والقسم وخط الإنتاج.' : 'إعداد رحلة الموديل وترتيب مراحلها وسعرها وزمنها.'"
+    [description]="mode === 'stages' ? 'إدارة كتالوج مراحل الإنتاج الذي يملكه كل قسم.' : 'اختيار مراحل الموديل من كتالوج القسم وترتيبها وتسعيرها.'"
     [compact]="true"
   ></plp-page-header>
   <p class="master-page__error" *ngIf="error">{{ error }}</p>
@@ -25,13 +25,13 @@
         <p-overlayPanel #stageStructureFilterOverlay styleClass="sf-o" appendTo="body">
           <section class="sf-p" dir="rtl">
             <label for="stageStructureFilterSearch">بحث في الشجرة
-              <input id="stageStructureFilterSearch" pInputText type="search" [value]="stageTreeSearch" (input)="onStageFilterSearch($any($event.target).value)" placeholder="ابحث باسم أو كود المصنع أو القسم أو الخط">
+              <input id="stageStructureFilterSearch" pInputText type="search" [value]="stageTreeSearch" (input)="onStageFilterSearch($any($event.target).value)" placeholder="ابحث باسم أو كود المصنع أو القسم">
             </label>
             <button pButton type="button" class="p-button-text p-button-sm" label="مسح البحث" *ngIf="stageTreeSearch" (click)="clearStageFilterSearch()"></button>
             <app-factory-structure-tree-view
               [nodes]="visibleStageFilterTreeNodes"
               [(selectedNode)]="selectedStageFilterNode"
-              [selectableTypes]="['line']"
+              [selectableTypes]="['department']"
               [showActions]="false"
               [loading]="loading"
               (nodeSelect)="selectStageFilterNode($event); stageStructureFilterOverlay.hide()"
@@ -44,21 +44,21 @@
       </p-card>
 
       <p-card header="مراحل الإنتاج">
-        <plp-expandable-form title="مرحلة" [summary]="stageFiltersForm.controls.productionLineId.value ? stageResultCount + ' مرحلة' : 'اختر خط الإنتاج أولًا'" openLabel="إضافة مرحلة" [canExpand]="!!stageFiltersForm.controls.productionLineId.value" [expanded]="stageFormVisible" [saving]="saving" [error]="error" (expandedChange)="$event ? openStageForm() : closeStageForm()">
+        <plp-expandable-form title="مرحلة فرعية" [summary]="stageFiltersForm.controls.departmentId.value ? stageResultCount + ' مرحلة' : 'اختر القسم أولًا'" openLabel="إضافة مرحلة" [canExpand]="!!stageFiltersForm.controls.departmentId.value" [expanded]="stageFormVisible" [saving]="saving" [error]="error" (expandedChange)="$event ? openStageForm() : closeStageForm()">
           <form [formGroup]="stageEditForm" (ngSubmit)="saveOperationalStage()" class="master-page__form">
             <label>المصنع<select formControlName="factoryId" [disabled]="!!editStageId" (change)="selectStageEditFactory($any($event.target).value)"><option value="">اختر المصنع</option><option *ngFor="let factory of factories" [value]="factory.id">{{ factory.code }} — {{ factory.name }}</option></select></label>
             <label>القسم<select formControlName="departmentId" [disabled]="!!editStageId || !stageEditForm.controls.factoryId.value" (change)="selectStageEditDepartment($any($event.target).value)"><option value="">اختر القسم</option><option *ngFor="let department of activeStageEditDepartments" [value]="department.id">{{ department.code }} — {{ department.nameAr || department.name }}</option></select></label>
-            <label>خط الإنتاج<select formControlName="productionLineId" [disabled]="!!editStageId || !stageEditForm.controls.departmentId.value" (change)="selectStageEditLine($any($event.target).value)"><option value="">اختر خط الإنتاج</option><option *ngFor="let line of activeStageEditLines" [value]="line.id">{{ line.lineCode || '—' }} — {{ line.name }}</option></select></label>
             <label>اسم المرحلة<input pInputText formControlName="name"></label>
             <label *ngIf="editStageId">الكود<input pInputText [value]="selectedStage?.code || ''" readonly aria-label="كود المرحلة للقراءة فقط"></label>
             <label>السعة<input type="number" formControlName="capacity"></label>
             <button pButton type="submit" [label]="editStageId ? 'تحديث المرحلة' : 'إضافة مرحلة'" [disabled]="saving"></button>
           </form>
         </plp-expandable-form>
-        <p-table plpResponsiveTable="scroll" plpTablePagination [plpPaginationPageSize]="10" [plpPaginationResetKey]="stageFilterResetKey" [plpStickyActions]="true" [value]="filteredOperationalStages" dataKey="id" responsiveLayout="scroll">
-          <ng-template pTemplate="header"><tr><th>الكود</th><th>الاسم</th><th>خط الإنتاج</th><th>القسم</th><th>الحالة</th><th>الإجراءات</th></tr></ng-template>
-          <ng-template pTemplate="body" let-stage><tr [class.master-page__inactive-row]="!stage.isActive"><td><span class="plp-code">{{ stage.code }}</span></td><td>{{ stage.name }}</td><td>{{ stage.productionLineName || '—' }}</td><td>{{ stage.departmentNameAr || 'غير مرتبط' }}</td><td><plp-status-badge [status]="stage.isActive ? 'ready' : 'warning'" [label]="stageStatusLabel(stage.isActive)" [compact]="true"></plp-status-badge></td><td><button pButton type="button" icon="pi pi-pencil" class="p-button-text" aria-label="تعديل المرحلة" title="تعديل المرحلة" (click)="editOperationalStage(stage)"></button><button pButton type="button" [icon]="stage.isActive ? 'pi pi-ban' : 'pi pi-check'" class="p-button-text" [attr.aria-label]="stage.isActive ? 'تعطيل المرحلة' : 'تفعيل المرحلة'" [title]="stage.isActive ? 'تعطيل المرحلة' : 'تفعيل المرحلة'" (click)="setOperationalStageActive(stage)"></button><button pButton type="button" icon="pi pi-trash" class="p-button-text p-button-danger" aria-label="حذف المرحلة" title="حذف المرحلة" (click)="openDependencyDialog(stage, 'delete')"></button></td></tr></ng-template>
-          <ng-template pTemplate="emptymessage"><tr><td colspan="6" class="master-page__empty">{{ stageEmptyMessage }}</td></tr></ng-template>
+        <p-table plpResponsiveTable="scroll" plpTablePagination [plpPaginationPageSize]="10" [plpPaginationResetKey]="stageFilterResetKey" [plpStickyActions]="true" [value]="filteredOperationalStages" dataKey="id" responsiveLayout="scroll" rowGroupMode="subheader" groupRowsBy="mainStageId">
+          <ng-template pTemplate="header"><tr><th>الكود</th><th>اسم المرحلة</th><th>القسم</th><th>الحالة</th><th>الإجراءات</th></tr></ng-template>
+          <ng-template pTemplate="groupheader" let-stage><tr class="master-page__stage-group"><td colspan="5"><i class="pi pi-sitemap" aria-hidden="true"></i><strong>{{ stage.mainStageName || 'المجموعة الرئيسية' }}</strong><small>{{ stage.departmentNameAr || 'القسم المحدد' }}</small></td></tr></ng-template>
+          <ng-template pTemplate="body" let-stage><tr [class.master-page__inactive-row]="!stage.isActive"><td><span class="plp-code">{{ stage.code }}</span></td><td>{{ stage.name }}</td><td>{{ stage.departmentNameAr || 'غير مرتبط' }}</td><td><plp-status-badge [status]="stage.isActive ? 'ready' : 'warning'" [label]="stageStatusLabel(stage.isActive)" [compact]="true"></plp-status-badge></td><td><button pButton type="button" icon="pi pi-pencil" class="p-button-text" aria-label="تعديل المرحلة" title="تعديل المرحلة" (click)="editOperationalStage(stage)"></button><button pButton type="button" [icon]="stage.isActive ? 'pi pi-ban' : 'pi pi-check'" class="p-button-text" [attr.aria-label]="stage.isActive ? 'تعطيل المرحلة' : 'تفعيل المرحلة'" [title]="stage.isActive ? 'تعطيل المرحلة' : 'تفعيل المرحلة'" (click)="setOperationalStageActive(stage)"></button><button pButton type="button" icon="pi pi-trash" class="p-button-text p-button-danger" aria-label="حذف المرحلة" title="حذف المرحلة" (click)="openDependencyDialog(stage, 'delete')"></button></td></tr></ng-template>
+          <ng-template pTemplate="emptymessage"><tr><td colspan="5" class="master-page__empty">{{ stageEmptyMessage }}</td></tr></ng-template>
         </p-table>
       </p-card>
 
@@ -75,12 +75,12 @@
               <i [class]="expanded ? 'pi pi-chevron-down' : 'pi pi-chevron-left'" aria-hidden="true"></i>
             </ng-template>
             <ng-template pTemplate="default" let-node>
-              <span class="master-page__context-node" [class.master-page__context-node--factory]="node.data.contextType === 'factory'" [class.master-page__context-node--model]="node.data.contextType === 'model'" [class.master-page__context-node--department]="node.data.contextType === 'department'" [class.master-page__context-node--line]="node.data.contextType === 'line'" (contextmenu)="openModelContextMenu($event, node)"><i [class]="node.data.contextType === 'factory' ? 'pi pi-building' : node.data.contextType === 'model' ? 'pi pi-box' : node.data.contextType === 'department' ? 'pi pi-sitemap' : 'pi pi-cog'" aria-hidden="true"></i><span>{{ node.label }}</span><button *ngIf="hasModelContextActions(node)" pButton type="button" icon="pi pi-ellipsis-v" class="p-button-rounded p-button-text p-button-sm p-button-icon-only master-page__model-context-action" pTooltip="إجراءات الموديل" aria-label="إجراءات الموديل" aria-haspopup="menu" [disabled]="saving" (click)="openModelContextMenu($event, node)"></button></span>
+              <span class="master-page__context-node" [class.master-page__context-node--factory]="node.data.contextType === 'factory'" [class.master-page__context-node--model]="node.data.contextType === 'model'" [class.master-page__context-node--department]="node.data.contextType === 'department'" [class.master-page__context-node--line]="node.data.contextType === 'line'" (contextmenu)="openModelContextMenu($event, node)"><i [class]="node.data.contextType === 'factory' ? 'pi pi-building' : node.data.contextType === 'model' ? 'pi pi-box' : node.data.contextType === 'department' ? 'pi pi-sitemap' : 'pi pi-directions'" aria-hidden="true"></i><span>{{ node.label }}</span><button *ngIf="hasModelContextActions(node)" pButton type="button" icon="pi pi-ellipsis-v" class="p-button-rounded p-button-text p-button-sm p-button-icon-only master-page__model-context-action" pTooltip="إجراءات الموديل" aria-label="إجراءات الموديل" aria-haspopup="menu" [disabled]="saving" (click)="openModelContextMenu($event, node)"></button></span>
             </ng-template>
           </p-tree>
         </section>
 
-        <p class="master-page__model-context-note">هذه الفلاتر للعرض والاختيار فقط؛ لا تغيّر ملكية الموديل ولا علاقات مراحله في الخطوط الأخرى.</p>
+        <p class="master-page__model-context-note">القسم يملك كتالوج المراحل، بينما يحتفظ كل خط إنتاج باختيارات وإعدادات مراحل مستقلة لكل موديل. اختر خط إنتاج لعرض العلاقات.</p>
         <p class="master-page__model-breadcrumb" *ngIf="hasModelStageContext">{{ modelStageContextBreadcrumb }}</p>
         <p class="master-page__error" *ngIf="error">{{ error }}</p>
 
@@ -104,13 +104,15 @@
 
         <p class="master-page__empty" *ngIf="modelStageContextMessage">{{ modelStageContextMessage }}</p>
         <p class="master-page__loading" *ngIf="hasModelStageContext && modelStagesLoading">جارٍ تحميل مراحل الموديل.</p>
-        <section *ngIf="hasModelStageContext && !modelStagesLoading" class="plp-filter-toolbar" aria-label="فلتر حالة مراحل الخط">
-          <strong>عرض مراحل الخط</strong>
+        <section *ngIf="hasModelStageContext && !modelStagesLoading" class="plp-filter-toolbar" aria-label="فلتر حالة مراحل خط الإنتاج">
+          <strong>كتالوج القسم وعلاقات الخط</strong>
           <div class="plp-action-group" role="group" aria-label="حالة ارتباط المرحلة بالموديل">
             <button pButton type="button" class="p-button-sm" [class.p-button-outlined]="modelStageRelationshipFilter !== 'all'" label="الكل" [attr.aria-pressed]="modelStageRelationshipFilter === 'all'" (click)="setModelStageRelationshipFilter('all')"></button>
             <button pButton type="button" class="p-button-sm" [class.p-button-outlined]="modelStageRelationshipFilter !== 'linked'" label="المرتبطة" [attr.aria-pressed]="modelStageRelationshipFilter === 'linked'" (click)="setModelStageRelationshipFilter('linked')"></button>
             <button pButton type="button" class="p-button-sm" [class.p-button-outlined]="modelStageRelationshipFilter !== 'unlinked'" label="غير المرتبطة" [attr.aria-pressed]="modelStageRelationshipFilter === 'unlinked'" (click)="setModelStageRelationshipFilter('unlinked')"></button>
           </div>
+          <label class="sf-s"><span class="sf-l">البحث باسم أو كود المرحلة</span><input pInputText type="search" [value]="modelStageSearch" (input)="onModelStageSearch($any($event.target).value)" placeholder="ابحث باسم أو كود المرحلة"></label>
+          <button *ngIf="modelStageSearch" pButton type="button" icon="pi pi-times" class="p-button-text p-button-sm p-button-icon-only" aria-label="مسح بحث مراحل الموديل" pTooltip="مسح البحث" (click)="clearModelStageSearch()"></button>
           <plp-status-badge status="info" [label]="'النتائج: ' + filteredAvailableModelStageRows.length" [compact]="true"></plp-status-badge>
           <button pButton type="button" class="p-button-sm plp-bulk-operation-trigger" icon="pi pi-copy" [label]="selectedModelStageIds.size ? 'نسخ المحدد (' + selectedModelStageIds.size + ')' : 'نسخ المحدد'" [disabled]="!canManageModels || selectedModelStageIds.size === 0 || saving" pTooltip="حدد مرحلة مرتبطة واحدة على الأقل" aria-label="نسخ مراحل الموديل المحددة" (click)="openBulkCopyDialog()"></button>
         </section>
@@ -120,20 +122,20 @@
           <ng-template pTemplate="emptymessage"><tr><td colspan="8" class="master-page__empty">{{ modelStageFilterEmptyMessage }}</td></tr></ng-template>
         </p-table>
       </p-card>
-      <plp-dialog [visible]="bulkCopyDialogVisible" title="نسخ مراحل محددة" subtitle="انقل إعدادات مراحل مختارة إلى موديل وخط آخر دون تعديل المراحل الحالية." size="wide" [saving]="bulkCopyBusy" successMessage="" [error]="bulkCopyError" [saveDisabled]="bulkCopyStep === 'configure' ? !bulkCopyCanPreview : !bulkCopyPreview || bulkCopyPreview.failedCount > 0" [saveLabel]="bulkCopyStep === 'configure' ? 'مراجعة النسخ' : 'تأكيد النسخ'" cancelLabel="إلغاء" (save)="submitBulkCopyDialog()" (cancel)="closeBulkCopyDialog()" (visibleChange)="!$event && closeBulkCopyDialog()">
+      <plp-dialog [visible]="bulkCopyDialogVisible" title="نسخ مراحل محددة" subtitle="انسخ إعدادات مراحل مختارة إلى موديل وخط إنتاج آخر دون تعديل الارتباطات الحالية." size="wide" [saving]="bulkCopyBusy" successMessage="" [error]="bulkCopyError" [saveDisabled]="bulkCopyStep === 'configure' ? !bulkCopyCanPreview : !bulkCopyPreview || bulkCopyPreview.failedCount > 0" [saveLabel]="bulkCopyStep === 'configure' ? 'مراجعة النسخ' : 'تأكيد النسخ'" cancelLabel="إلغاء" (save)="submitBulkCopyDialog()" (cancel)="closeBulkCopyDialog()" (visibleChange)="!$event && closeBulkCopyDialog()">
         <section class="plp-bulk-operation" dir="rtl">
           <div class="plp-bulk-operation__context"><span>المصدر</span><strong>{{ bulkCopySourceLabel }}</strong><plp-status-badge status="info" [label]="selectedModelStageRelationships.length + ' مرحلة محددة'" [compact]="true"></plp-status-badge></div>
           <ng-container *ngIf="bulkCopyStep === 'configure'; else bulkCopyConfirmation">
             <p class="master-page__loading" *ngIf="bulkCopyTargetsLoading">جارٍ تحميل كتالوج الموديلات الهدف.</p>
             <div class="plp-bulk-operation__target" aria-label="اختيار سياق النسخ الهدف">
-              <label>الموديل الهدف<select [value]="bulkCopyTargetModelId" [disabled]="bulkCopyBusy || bulkCopyTargetsLoading" (change)="setBulkCopyTargetModel($any($event.target).value)"><option value="">اختر الموديل</option><option *ngFor="let model of bulkCopyTargetModelOptions" [value]="model.id">{{ model.code }} — {{ model.name }}{{ model.isActive ? '' : ' (معطل)' }}</option></select></label>
               <label>المصنع الهدف<select [value]="bulkCopyTargetFactoryId" [disabled]="bulkCopyBusy" (change)="setBulkCopyTargetFactory($any($event.target).value)"><option value="">اختر المصنع</option><option *ngFor="let factory of bulkCopyTargetFactoryOptions" [value]="factory.id">{{ factory.code }} — {{ factory.name }}</option></select></label>
+              <label>الموديل الهدف<select [value]="bulkCopyTargetModelId" [disabled]="bulkCopyBusy || bulkCopyTargetsLoading" (change)="setBulkCopyTargetModel($any($event.target).value)"><option value="">اختر الموديل</option><option *ngFor="let model of bulkCopyTargetModelOptions" [value]="model.id">{{ model.code }} — {{ model.name }}{{ model.isActive ? '' : ' (معطل)' }}</option></select></label>
               <label>القسم الهدف<select [value]="bulkCopyTargetDepartmentId" [disabled]="bulkCopyBusy || !bulkCopyTargetFactoryId" (change)="setBulkCopyTargetDepartment($any($event.target).value)"><option value="">اختر القسم</option><option *ngFor="let department of bulkCopyTargetDepartmentOptions" [value]="department.id">{{ department.code }} — {{ department.nameAr || department.name }}</option></select></label>
-              <label>خط الإنتاج الهدف<select [value]="bulkCopyTargetProductionLineId" [disabled]="bulkCopyBusy || !bulkCopyTargetDepartmentId" (change)="setBulkCopyTargetLine($any($event.target).value)"><option value="">اختر الخط</option><option *ngFor="let line of bulkCopyTargetLineOptions" [value]="line.id">{{ line.lineCode || '—' }} — {{ line.name }}</option></select></label>
+              <label>خط الإنتاج الهدف<select [value]="bulkCopyTargetProductionLineId" [disabled]="bulkCopyBusy || !bulkCopyTargetDepartmentId" (change)="setBulkCopyTargetLine($any($event.target).value)"><option value="">اختر خط الإنتاج</option><option *ngFor="let line of bulkCopyTargetLineOptions" [value]="line.id">{{ line.lineCode || '—' }} — {{ line.name }}</option></select></label>
             </div>
-            <p class="plp-bulk-operation__warning" role="alert" *ngIf="bulkCopyTargetSameAsSource">لا يمكن اختيار نفس الموديل والخط كمصدر وهدف.</p>
+            <p class="plp-bulk-operation__warning" role="alert" *ngIf="bulkCopyTargetSameAsSource">لا يمكن اختيار نفس الموديل وخط الإنتاج كمصدر وهدف.</p>
             <section class="plp-bulk-operation__selected-stages" aria-label="المراحل المختارة للنسخ">
-              <header><div><strong>المراحل المختارة</strong><p>ستُنسخ المرحلة نفسها إلى الخط الهدف عند الحاجة، ثم تُربط بالموديل بإعداداتها التشغيلية دون اختيار مرحلة مقابلة.</p></div></header>
+              <header><div><strong>المراحل المختارة</strong><p>سيُنشأ تعريف المرحلة في كتالوج القسم الهدف عند الحاجة، ثم يُربط بالموديل بإعداداته التشغيلية دون تعديل المصدر.</p></div></header>
               <div class="plp-bulk-operation__selected-stage" *ngFor="let source of selectedModelStageRelationships">
                 <div><span class="plp-code">{{ source.subStageCode || linkedStageCode(source) }}</span><strong>{{ source.subStageName || linkedStageName(source) }}</strong></div>
                 <small>الترتيب {{ source.stageOrder }} · {{ source.piecePrice | number:'1.2-4' }} · {{ source.standardSeconds ?? '—' }} ث</small>

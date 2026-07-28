@@ -19,8 +19,9 @@ public sealed class AssignmentEngineCoverageTests
         var now = new DateTime(2026, 7, 19, 9, 0, 0, DateTimeKind.Utc);
         var actorId = Guid.NewGuid();
         var factory = new Factory(Guid.NewGuid(), "Factory", "FAC");
-        var line = new ProductionLine(Guid.NewGuid(), factory.Id, "Line", 1);
-        var mainStage = new MainStage(Guid.NewGuid(), line.Id, "Main", 1);
+        var department = new Department(Guid.NewGuid(), factory.Id, "OPS", "التشغيل", "Operations", 1);
+        var line = new ProductionLine(Guid.NewGuid(), factory.Id, "Line", 1, departmentId: department.Id);
+        var mainStage = new MainStage(Guid.NewGuid(), department.Id, "Main", 1);
         var covered = new SubStage(Guid.NewGuid(), mainStage.Id, "Covered", "COV", 2, 1);
         var partial = new SubStage(Guid.NewGuid(), mainStage.Id, "Partial", "PAR", 2, 2);
         var empty = new SubStage(Guid.NewGuid(), mainStage.Id, "Empty", "EMP", 1, 3);
@@ -30,12 +31,12 @@ public sealed class AssignmentEngineCoverageTests
         var workerThree = new Worker(Guid.NewGuid(), "W3", "Worker Three");
         var workerFour = new Worker(Guid.NewGuid(), "W4", "Worker Four");
 
-        db.AddRange(factory, line, mainStage, covered, partial, empty, undefined, workerOne, workerTwo, workerThree, workerFour);
+        db.AddRange(factory, department, line, mainStage, covered, partial, empty, undefined, workerOne, workerTwo, workerThree, workerFour);
         db.AddRange(
-            new WorkerDefaultAssignment(Guid.NewGuid(), workerOne.Id, covered.Id, actorId, now.AddDays(-2)),
-            new WorkerDefaultAssignment(Guid.NewGuid(), workerTwo.Id, partial.Id, actorId, now.AddDays(-2)),
-            new WorkerDefaultAssignment(Guid.NewGuid(), workerThree.Id, partial.Id, actorId, now.AddDays(-2)),
-            new WorkerDefaultAssignment(Guid.NewGuid(), workerFour.Id, undefined.Id, actorId, now.AddDays(-2)),
+            new WorkerDefaultAssignment(Guid.NewGuid(), workerOne.Id, covered.Id, actorId, now.AddDays(-2), productionLineId: line.Id),
+            new WorkerDefaultAssignment(Guid.NewGuid(), workerTwo.Id, partial.Id, actorId, now.AddDays(-2), productionLineId: line.Id),
+            new WorkerDefaultAssignment(Guid.NewGuid(), workerThree.Id, partial.Id, actorId, now.AddDays(-2), productionLineId: line.Id),
+            new WorkerDefaultAssignment(Guid.NewGuid(), workerFour.Id, undefined.Id, actorId, now.AddDays(-2), productionLineId: line.Id),
             new WorkerTemporaryAssignment(Guid.NewGuid(), workerThree.Id, partial.Id, covered.Id, now.AddHours(-1), now.AddHours(1), actorId, "Temporary coverage", status: "Active"));
         await db.SaveChangesAsync();
 
@@ -70,7 +71,8 @@ public sealed class AssignmentEngineCoverageTests
         Assert.Null(undefinedSummary.AssignmentCoveragePercent);
         Assert.Equal("RequirementNotDefined", undefinedSummary.StaffingStatus);
         Assert.All(summaries, summary => Assert.Equal(4, summary.MainStageDistinctWorkersCount));
-        Assert.All(summaries, summary => Assert.Equal(4, summary.ProductionLineDistinctWorkersCount));
+        Assert.All(summaries, summary => Assert.Equal(4, summary.DepartmentDistinctWorkersCount));
+        Assert.All(summaries, summary => Assert.Equal(4, Assert.Single(summary.ProductionLines).ProductionLineDistinctWorkersCount));
         Assert.All(summaries, summary => Assert.Equal(4, summary.FactoryDistinctWorkersCount));
     }
 
@@ -79,8 +81,8 @@ public sealed class AssignmentEngineCoverageTests
     {
         await using var fixture = await CoverageFixture.CreateAsync(1);
         fixture.Db.AddRange(
-            new WorkerDefaultAssignment(Guid.NewGuid(), fixture.Workers[0].Id, fixture.StageA.Id, fixture.ActorId, fixture.Now.AddDays(-1)),
-            new WorkerDefaultAssignment(Guid.NewGuid(), fixture.Workers[0].Id, fixture.StageB.Id, fixture.ActorId, fixture.Now.AddDays(-1)));
+            new WorkerDefaultAssignment(Guid.NewGuid(), fixture.Workers[0].Id, fixture.StageA.Id, fixture.ActorId, fixture.Now.AddDays(-1), productionLineId: fixture.ProductionLineId),
+            new WorkerDefaultAssignment(Guid.NewGuid(), fixture.Workers[0].Id, fixture.StageB.Id, fixture.ActorId, fixture.Now.AddDays(-1), productionLineId: fixture.ProductionLineId));
         await fixture.Db.SaveChangesAsync();
 
         var summaries = (await fixture.Engine.GetActiveSubStageAssignmentCoverageAsync(fixture.Now)).Value!;
@@ -88,7 +90,8 @@ public sealed class AssignmentEngineCoverageTests
         Assert.Equal(1, summaries.Single(item => item.SubStageId == fixture.StageA.Id).AssignedWorkersCount);
         Assert.Equal(1, summaries.Single(item => item.SubStageId == fixture.StageB.Id).AssignedWorkersCount);
         Assert.All(summaries, summary => Assert.Equal(1, summary.MainStageDistinctWorkersCount));
-        Assert.All(summaries, summary => Assert.Equal(1, summary.ProductionLineDistinctWorkersCount));
+        Assert.All(summaries, summary => Assert.Equal(1, summary.DepartmentDistinctWorkersCount));
+        Assert.All(summaries, summary => Assert.Equal(1, Assert.Single(summary.ProductionLines).ProductionLineDistinctWorkersCount));
         Assert.All(summaries, summary => Assert.Equal(1, summary.FactoryDistinctWorkersCount));
     }
 
@@ -97,14 +100,15 @@ public sealed class AssignmentEngineCoverageTests
     {
         await using var fixture = await CoverageFixture.CreateAsync(2);
         fixture.Db.AddRange(
-            new WorkerDefaultAssignment(Guid.NewGuid(), fixture.Workers[0].Id, fixture.StageA.Id, fixture.ActorId, fixture.Now.AddDays(-1)),
-            new WorkerDefaultAssignment(Guid.NewGuid(), fixture.Workers[1].Id, fixture.StageB.Id, fixture.ActorId, fixture.Now.AddDays(-1)));
+            new WorkerDefaultAssignment(Guid.NewGuid(), fixture.Workers[0].Id, fixture.StageA.Id, fixture.ActorId, fixture.Now.AddDays(-1), productionLineId: fixture.ProductionLineId),
+            new WorkerDefaultAssignment(Guid.NewGuid(), fixture.Workers[1].Id, fixture.StageB.Id, fixture.ActorId, fixture.Now.AddDays(-1), productionLineId: fixture.ProductionLineId));
         await fixture.Db.SaveChangesAsync();
 
         var summaries = (await fixture.Engine.GetActiveSubStageAssignmentCoverageAsync(fixture.Now)).Value!;
 
         Assert.All(summaries, summary => Assert.Equal(2, summary.MainStageDistinctWorkersCount));
-        Assert.All(summaries, summary => Assert.Equal(2, summary.ProductionLineDistinctWorkersCount));
+        Assert.All(summaries, summary => Assert.Equal(2, summary.DepartmentDistinctWorkersCount));
+        Assert.All(summaries, summary => Assert.Equal(2, Assert.Single(summary.ProductionLines).ProductionLineDistinctWorkersCount));
         Assert.All(summaries, summary => Assert.Equal(2, summary.FactoryDistinctWorkersCount));
     }
 
@@ -113,7 +117,7 @@ public sealed class AssignmentEngineCoverageTests
     {
         await using var fixture = await CoverageFixture.CreateAsync(1);
         fixture.Db.AddRange(
-            new WorkerDefaultAssignment(Guid.NewGuid(), fixture.Workers[0].Id, fixture.StageA.Id, fixture.ActorId, fixture.Now.AddDays(-1)),
+            new WorkerDefaultAssignment(Guid.NewGuid(), fixture.Workers[0].Id, fixture.StageA.Id, fixture.ActorId, fixture.Now.AddDays(-1), productionLineId: fixture.ProductionLineId),
             new WorkerTemporaryAssignment(
                 Guid.NewGuid(), fixture.Workers[0].Id, null, fixture.StageA.Id,
                 fixture.Now.AddHours(-1), fixture.Now.AddHours(1), fixture.ActorId, "Additional participation",
@@ -125,7 +129,8 @@ public sealed class AssignmentEngineCoverageTests
 
         Assert.Equal(1, stage.AssignedWorkersCount);
         Assert.Equal(1, stage.MainStageDistinctWorkersCount);
-        Assert.Equal(1, stage.ProductionLineDistinctWorkersCount);
+        Assert.Equal(1, stage.DepartmentDistinctWorkersCount);
+        Assert.Equal(1, Assert.Single(stage.ProductionLines).ProductionLineDistinctWorkersCount);
         Assert.Equal(1, stage.FactoryDistinctWorkersCount);
     }
 
@@ -138,7 +143,8 @@ public sealed class AssignmentEngineCoverageTests
 
         Assert.All(summaries, summary => Assert.Equal(0, summary.AssignedWorkersCount));
         Assert.All(summaries, summary => Assert.Equal(0, summary.MainStageDistinctWorkersCount));
-        Assert.All(summaries, summary => Assert.Equal(0, summary.ProductionLineDistinctWorkersCount));
+        Assert.All(summaries, summary => Assert.Equal(0, summary.DepartmentDistinctWorkersCount));
+        Assert.All(summaries, summary => Assert.Equal(0, Assert.Single(summary.ProductionLines).ProductionLineDistinctWorkersCount));
         Assert.All(summaries, summary => Assert.Equal(0, summary.FactoryDistinctWorkersCount));
     }
 
@@ -148,6 +154,7 @@ public sealed class AssignmentEngineCoverageTests
             AppDbContext db,
             AssignmentEngine engine,
             Guid actorId,
+            Guid productionLineId,
             DateTime now,
             SubStage stageA,
             SubStage stageB,
@@ -156,6 +163,7 @@ public sealed class AssignmentEngineCoverageTests
             Db = db;
             Engine = engine;
             ActorId = actorId;
+            ProductionLineId = productionLineId;
             Now = now;
             StageA = stageA;
             StageB = stageB;
@@ -165,6 +173,7 @@ public sealed class AssignmentEngineCoverageTests
         public AppDbContext Db { get; }
         public AssignmentEngine Engine { get; }
         public Guid ActorId { get; }
+        public Guid ProductionLineId { get; }
         public DateTime Now { get; }
         public SubStage StageA { get; }
         public SubStage StageB { get; }
@@ -176,14 +185,15 @@ public sealed class AssignmentEngineCoverageTests
                 .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
                 .Options);
             var factory = new Factory(Guid.NewGuid(), "Factory", "FAC");
-            var line = new ProductionLine(Guid.NewGuid(), factory.Id, "Line", 1);
-            var mainStage = new MainStage(Guid.NewGuid(), line.Id, "Main", 1);
+            var department = new Department(Guid.NewGuid(), factory.Id, "OPS", "التشغيل", "Operations", 1);
+            var line = new ProductionLine(Guid.NewGuid(), factory.Id, "Line", 1, departmentId: department.Id);
+            var mainStage = new MainStage(Guid.NewGuid(), department.Id, "Main", 1);
             var stageA = new SubStage(Guid.NewGuid(), mainStage.Id, "Stage A", "A", 1, 1);
             var stageB = new SubStage(Guid.NewGuid(), mainStage.Id, "Stage B", "B", 1, 2);
             var workers = Enumerable.Range(1, workerCount)
                 .Select(index => new Worker(Guid.NewGuid(), $"W{index}", $"Worker {index}"))
                 .ToArray();
-            db.AddRange(factory, line, mainStage, stageA, stageB);
+            db.AddRange(factory, department, line, mainStage, stageA, stageB);
             db.Workers.AddRange(workers);
             await db.SaveChangesAsync();
 
@@ -191,6 +201,7 @@ public sealed class AssignmentEngineCoverageTests
                 db,
                 new AssignmentEngine(db, new RecordingAuditEngine()),
                 Guid.NewGuid(),
+                line.Id,
                 new DateTime(2026, 7, 19, 9, 0, 0, DateTimeKind.Utc),
                 stageA,
                 stageB,

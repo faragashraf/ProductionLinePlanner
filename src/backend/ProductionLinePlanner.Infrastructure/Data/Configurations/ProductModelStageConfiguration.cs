@@ -19,6 +19,7 @@ public sealed class ProductModelStageConfiguration : IEntityTypeConfiguration<Pr
 
         builder.Property(x => x.Id).ValueGeneratedNever();
         builder.Property(x => x.ProductModelId).IsRequired();
+        builder.Property(x => x.ProductionLineId).IsRequired();
         builder.Property(x => x.SubStageId).IsRequired();
         builder.Property(x => x.StageOrder).IsRequired();
         builder.Property(x => x.PiecePrice).HasColumnType("decimal(18,2)").IsRequired();
@@ -30,8 +31,8 @@ public sealed class ProductModelStageConfiguration : IEntityTypeConfiguration<Pr
         builder.Property(x => x.CreatedAtUtc).IsRequired();
         builder.Property(x => x.UpdatedAtUtc).IsRequired();
 
-        builder.HasIndex(x => new { x.ProductModelId, x.SubStageId }).IsUnique();
-        builder.HasIndex(x => new { x.ProductModelId, x.StageOrder }).IsUnique();
+        builder.HasIndex(x => new { x.ProductModelId, x.ProductionLineId, x.SubStageId }).IsUnique();
+        builder.HasIndex(x => new { x.ProductModelId, x.ProductionLineId, x.StageOrder }).IsUnique();
 
         builder.HasOne(x => x.ProductModel)
             .WithMany(x => x.Stages)
@@ -42,5 +43,12 @@ public sealed class ProductModelStageConfiguration : IEntityTypeConfiguration<Pr
             .WithMany()
             .HasForeignKey(x => x.SubStageId)
             .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(x => x.ProductionLine)
+            .WithMany()
+            .HasForeignKey(x => x.ProductionLineId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.ToTable(table => table.HasTrigger("TR_ProductModelStages_DepartmentGuard"));
     }
 }

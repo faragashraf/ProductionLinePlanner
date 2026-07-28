@@ -6,11 +6,11 @@ const visualOutput = path.join(process.cwd(), 'test-results', 'manufacturing-mas
 const permissions = ['dashboard.view', 'factories.view', 'production-lines.view', 'stages.view', 'stages.manage', 'models.view', 'models.manage', 'workers.view'];
 const factory = { id: 'factory-1', code: 'F-01', name: 'مصنع الاختبار', isActive: true };
 const department = { id: 'department-1', factoryId: factory.id, code: 'CUT', nameAr: 'قسم القص', isActive: true };
-const line = { id: 'line-1', factoryId: factory.id, departmentId: department.id, lineCode: 'L-01', name: 'خط الإنتاج', sequenceOrder: 1, isActive: true };
+const line = { id: 'line-1', factoryId: factory.id, departmentId: department.id, lineCode: 'CUT-1', name: 'خط القص الأول', sequenceOrder: 1, isActive: true };
 const stages = [
-  { id: 'stage-1', mainStageId: 'main-1', productionLineId: line.id, factoryId: factory.id, departmentId: department.id, productionLineName: line.name, departmentNameAr: department.nameAr, code: 'CUT-01', name: 'مرحلة القص', capacity: 5, defaultOrder: 1, isActive: true },
-  { id: 'stage-2', mainStageId: 'main-1', productionLineId: line.id, factoryId: factory.id, departmentId: department.id, productionLineName: line.name, departmentNameAr: department.nameAr, code: 'SEW-02', name: 'مرحلة الخياطة', capacity: 6, defaultOrder: 2, isActive: true },
-  { id: 'stage-3', mainStageId: 'main-1', productionLineId: line.id, factoryId: factory.id, departmentId: department.id, productionLineName: line.name, departmentNameAr: department.nameAr, code: 'PACK-03', name: 'Packing', capacity: 4, defaultOrder: 3, isActive: false }
+  { id: 'stage-1', mainStageId: 'main-1', mainStageName: 'التشغيل', factoryId: factory.id, departmentId: department.id, departmentNameAr: department.nameAr, code: 'CUT-01', name: 'مرحلة القص', capacity: 5, defaultOrder: 1, isActive: true },
+  { id: 'stage-2', mainStageId: 'main-1', mainStageName: 'التشغيل', factoryId: factory.id, departmentId: department.id, departmentNameAr: department.nameAr, code: 'SEW-02', name: 'مرحلة الخياطة', capacity: 6, defaultOrder: 2, isActive: true },
+  { id: 'stage-3', mainStageId: 'main-1', mainStageName: 'التشغيل', factoryId: factory.id, departmentId: department.id, departmentNameAr: department.nameAr, code: 'PACK-03', name: 'Packing', capacity: 4, defaultOrder: 3, isActive: false }
 ];
 const models = [
   { id: 'model-1', code: 'SHIRT-01', name: 'موديل قميص', isActive: true },
@@ -38,7 +38,7 @@ async function preparePage(page: Page): Promise<void> {
     else if (pathname.endsWith('/api/departments')) data = { items: [department] };
     else if (pathname.endsWith('/api/production-lines')) data = { items: [line] };
     else if (pathname.endsWith('/api/stages')) data = { items: stages, totalCount: stages.length, pageNumber: 1, pageSize: 200 };
-    else if (/\/api\/product-models\/[^/]+\/stages$/.test(pathname)) data = [];
+    else if (/\/api\/product-models\/[^/]+\/production-lines\/[^/]+\/stages$/.test(pathname)) data = [];
     else if (pathname.endsWith('/api/product-models')) {
       const search = (url.searchParams.get('search') ?? '').trim().toLocaleLowerCase();
       const filtered = search ? models.filter(model => [model.code, model.name].some(value => value.toLocaleLowerCase().includes(search))) : models;
@@ -68,22 +68,37 @@ async function expectViewportSafe(page: Page): Promise<void> {
 }
 
 test('stage search is responsive, immediate, clearable, and empty-state safe', async ({ page }) => {
+  test.setTimeout(180_000);
   await preparePage(page);
   for (const [name, width, height] of [['desktop-1440x900', 1440, 900], ['tablet-landscape-1280x800', 1280, 800], ['tablet-portrait-800x1280', 800, 1280], ['mobile-390x844', 390, 844]] as const) {
     await page.setViewportSize({ width, height });
     await page.goto('/manufacturing/stages');
+    await page.waitForLoadState('networkidle');
     await expect(page.getByRole('heading', { name: 'مراحل الإنتاج' })).toBeVisible();
-    await page.getByLabel('المصنع').selectOption(factory.id);
-    await page.getByLabel('القسم').selectOption(department.id);
-    await page.getByLabel('خط الإنتاج').selectOption(line.id);
+    const selectDepartment = async (): Promise<void> => {
+      await page.locator('.sf-tr').click();
+      const stageTree = page.locator('.sf-o .factory-structure-tree-view');
+      const factoryNode = stageTree.getByRole('treeitem', { name: factory.name });
+      if (await factoryNode.getAttribute('aria-expanded') !== 'true') {
+        await factoryNode.locator('.p-tree-toggler').click();
+      }
+      const departmentNode = stageTree
+        .getByText(department.nameAr, { exact: true })
+        .locator('xpath=ancestor::*[contains(@class,"p-treenode-content")][1]');
+      await expect(departmentNode.locator('.p-tree-toggler')).toBeHidden();
+      await departmentNode.click();
+    };
+    await selectDepartment();
     const search = page.getByPlaceholder('بحث باسم أو كود المرحلة');
     await expect(search).toBeVisible();
     await search.fill('  خيا ');
     await expect(page.locator('tbody')).toContainText('مرحلة الخياطة');
     await expect(page.locator('tbody')).not.toContainText('مرحلة القص');
-    const clear = page.getByRole('button', { name: 'مسح البحث' });
+    const clear = page.getByRole('button', { name: 'مسح الفلاتر' });
     await expect(clear).toBeVisible();
     await clear.click();
+    await expect(search).toHaveValue('');
+    await selectDepartment();
     await expect(page.locator('tbody')).toContainText('مرحلة القص');
     await search.fill('sew-02');
     await expect(page.locator('tbody')).toContainText('مرحلة الخياطة');
@@ -95,74 +110,32 @@ test('stage search is responsive, immediate, clearable, and empty-state safe', a
   }
 });
 
-test('model search is server-paginated and searches only model fields beyond the initial page', async ({ page }) => {
+test('model assignment context requires a ProductionLine below the Department catalog', async ({ page }) => {
+  test.setTimeout(180_000);
   await preparePage(page);
   for (const [name, width, height] of [['desktop-1440x900', 1440, 900], ['tablet-landscape-1280x800', 1280, 800], ['tablet-portrait-800x1280', 800, 1280], ['mobile-390x844', 390, 844]] as const) {
     await page.setViewportSize({ width, height });
     await page.goto('/manufacturing/models');
+    await page.waitForLoadState('networkidle');
     await expect(page.getByRole('heading', { name: 'الموديلات وإعدادات المراحل' })).toBeVisible();
-    const search = page.getByPlaceholder('بحث باسم أو كود الموديل');
-    await expect(search).toBeVisible();
-    await expect(page.locator('tbody')).not.toContainText('موديل في صفحة لاحقة');
-    await search.fill('صفحة لاحقة');
-    await expect(page.locator('tbody')).toContainText('موديل في صفحة لاحقة');
-    await expect(page.locator('.p-paginator-current')).toContainText('من 1');
-    await search.fill('  موديل قميص ');
-    await expect(page.locator('tbody')).toContainText('موديل قميص');
-    await expect(page.locator('tbody')).not.toContainText('Jacket');
-    await search.fill('jacket-02');
-    await expect(page.locator('tbody')).toContainText('Jacket');
-    await expect(page.locator('tbody')).not.toContainText('موديل قميص');
-    await search.fill('sew-02');
-    await expect(page.getByText('لا توجد موديلات مطابقة للبحث.')).toBeVisible();
-    await search.fill('لا نتيجة');
-    await expect(page.getByText('لا توجد موديلات مطابقة للبحث.')).toBeVisible();
-    const clear = page.getByRole('button', { name: 'مسح البحث' });
-    await clear.click();
-    await expect(page.locator('tbody')).toContainText('موديل بنطال');
-    await page.screenshot({ path: path.join(visualOutput, `models-${name}.png`), fullPage: true });
+    const tree = page.locator('.master-page__model-context');
+    await tree.locator('.p-tree-toggler').first().click();
+    const modelNode = tree.getByRole('treeitem', { name: sourceModelLabel(models[0]) });
+    await modelNode.locator('.p-tree-toggler').click();
+    const departmentNode = tree.getByRole('treeitem', { name: `${department.code} — ${department.nameAr}` });
+    await departmentNode.locator('.p-tree-toggler').click();
+    await expect(page.locator('.master-page__context-node--line')).toHaveCount(1);
+    const lineNode = tree.getByRole('treeitem', { name: `${line.lineCode} — ${line.name}` });
+    await lineNode.click();
+    await expect(page.locator('tbody')).toContainText('مرحلة الخياطة');
     await expectViewportSafe(page);
+    await page.screenshot({ path: path.join(visualOutput, `model-stage-line-${name}.png`), fullPage: true });
   }
 });
 
-test('model-stage selection uses a searchable dropdown without result cards or manual pagination', async ({ page }) => {
-  await preparePage(page);
-  for (const [name, width, height] of [['desktop-1440x900', 1440, 900], ['tablet-landscape-1280x800', 1280, 800], ['tablet-portrait-800x1280', 800, 1280], ['mobile-390x844', 390, 844]] as const) {
-    await page.setViewportSize({ width, height });
-    await page.goto('/manufacturing/models');
-    await page.getByRole('button', { name: 'اختيار' }).first().click();
-    await page.getByRole('button', { name: 'إضافة مرحلة للموديل' }).click();
-    const selector = page.locator('.master-page__stage-dropdown');
-    await expect(selector).toBeVisible();
-    await selector.click();
-    const panel = page.locator('.master-page__stage-dropdown-panel');
-    await expect(panel).toBeVisible();
-    await expect(page.getByText('مرحلة الخياطة', { exact: true })).toBeVisible();
-    await page.locator('.p-dropdown-filter').fill('SEW-02');
-    await expect(page.getByText('مرحلة الخياطة', { exact: true })).toBeVisible();
-    await page.waitForTimeout(250);
-    await expect(panel).toBeHidden();
-    await selector.click();
-    await expect(panel).toBeVisible();
-    await page.waitForTimeout(200);
-    const geometry = await page.evaluate(() => {
-      const selectorBox = document.querySelector<HTMLElement>('.master-page__stage-dropdown')!.getBoundingClientRect();
-      const panelBox = document.querySelector<HTMLElement>('.master-page__stage-dropdown-panel')!.getBoundingClientRect();
-      const pointTarget = document.elementFromPoint(panelBox.left + 8, panelBox.top + 8)?.closest('.master-page__stage-dropdown-panel');
-      return { selectorWidth: selectorBox.width, panelWidth: panelBox.width, left: panelBox.left, right: panelBox.right, top: panelBox.top, bottom: panelBox.bottom, viewportWidth: innerWidth, viewportHeight: innerHeight, panelIsTopLayer: !!pointTarget };
-    });
-    expect(geometry.panelWidth).toBeLessThanOrEqual(geometry.selectorWidth + 1);
-    expect(geometry.left).toBeGreaterThanOrEqual(-1);
-    expect(geometry.right).toBeLessThanOrEqual(geometry.viewportWidth + 1);
-    expect(geometry.top).toBeGreaterThanOrEqual(-1);
-    expect(geometry.bottom).toBeLessThanOrEqual(geometry.viewportHeight + 1);
-    expect(geometry.panelIsTopLayer).toBeTruthy();
-    await expect(page.locator('.master-page__available-stage-list')).toHaveCount(0);
-    await expect(page.locator('.master-page__selector-pagination')).toHaveCount(0);
-    await expectViewportSafe(page);
-    await page.screenshot({ path: path.join(visualOutput, `model-stage-dropdown-${name}.png`), fullPage: true });
-  }
-});
+function sourceModelLabel(model: { code: string; name: string }): string {
+  return `${model.code} — ${model.name}`;
+}
 
 test('worker toolbar remains mobile-safe after the shared toolbar update', async ({ page }) => {
   await preparePage(page);

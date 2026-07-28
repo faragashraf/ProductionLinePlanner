@@ -14,14 +14,17 @@
   font-size: var(--plp-font-size-xxs);
   font-weight: 700;
   line-height: 1;
-  white-space: normal;
+  white-space: nowrap;
   text-align: center;
   color: var(--plp-color-text);
 }
 
 .plp-status-badge span {
   min-width: 0;
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  overflow-wrap: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .plp-status-badge--present {

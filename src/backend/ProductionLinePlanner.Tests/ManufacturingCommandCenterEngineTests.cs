@@ -44,7 +44,10 @@ public sealed class ManufacturingCommandCenterEngineTests
         Assert.Equal(1, data.DataQuality.ModelStagesWithoutStandardTime);
         Assert.Equal(1, data.DataQuality.ActiveJourneyStagesWithoutPresentWorker);
         Assert.Equal(1, data.DataQuality.ActiveModelsWithoutJourney);
-        Assert.Contains(data.Factories.SelectMany(factory => factory.Departments).SelectMany(department => department.Lines), line => line.ReadinessStatus == "JourneyNotConfigured");
+        var unconfiguredLine = Assert.Single(
+            data.Factories.SelectMany(factory => factory.Departments).SelectMany(department => department.Lines),
+            line => line.ReadinessStatus == "JourneyNotConfigured");
+        Assert.Equal("Line C", unconfiguredLine.Name);
     }
 
     [Fact]
@@ -194,26 +197,26 @@ public sealed class ManufacturingCommandCenterEngineTests
             var lineA = new ProductionLine(Guid.NewGuid(), factory.Id, "Line A", 1, "A", createdAtUtc: now, departmentId: department.Id);
             var lineB = new ProductionLine(Guid.NewGuid(), factory.Id, "Line B", 2, "B", createdAtUtc: now, departmentId: department.Id);
             var lineC = new ProductionLine(Guid.NewGuid(), factory.Id, "Line C", 3, "C", createdAtUtc: now, departmentId: department.Id);
-            var mainA = new MainStage(Guid.NewGuid(), lineA.Id, "Main A", 1, createdAtUtc: now);
-            var mainB = new MainStage(Guid.NewGuid(), lineB.Id, "Main B", 1, createdAtUtc: now);
-            var mainC = new MainStage(Guid.NewGuid(), lineC.Id, "Main C", 1, createdAtUtc: now);
+            var mainA = new MainStage(Guid.NewGuid(), department.Id, "Main A", 1, createdAtUtc: now);
+            var mainB = new MainStage(Guid.NewGuid(), department.Id, "Main B", 2, createdAtUtc: now);
+            var mainC = new MainStage(Guid.NewGuid(), department.Id, "Main C", 3, createdAtUtc: now);
             var subA1 = new SubStage(Guid.NewGuid(), mainA.Id, "Stage A1", "A1", 2, 1, createdAtUtc: now);
             var subA2 = new SubStage(Guid.NewGuid(), mainA.Id, "Stage A2", "A2", 1, 2, createdAtUtc: now);
             var subB = new SubStage(Guid.NewGuid(), mainB.Id, "Stage B", "B1", 1, 1, createdAtUtc: now);
             var subC = new SubStage(Guid.NewGuid(), mainC.Id, "Stage C", "C1", 1, 1, createdAtUtc: now);
             var model = new ProductModel(Guid.NewGuid(), "M-1", "Model 1", createdAtUtc: now);
             var orphanModel = new ProductModel(Guid.NewGuid(), "M-ORPHAN", "Orphan", createdAtUtc: now);
-            var stageA1 = new ProductModelStage(Guid.NewGuid(), model.Id, subA1.Id, 1, 0m, null, CompensationMode.SharedPercentage, createdAtUtc: now);
-            var stageA2 = new ProductModelStage(Guid.NewGuid(), model.Id, subA2.Id, 2, 2m, 10m, CompensationMode.SharedPercentage, createdAtUtc: now);
-            var stageB = new ProductModelStage(Guid.NewGuid(), model.Id, subB.Id, 3, 1m, 10m, CompensationMode.SharedPercentage, createdAtUtc: now);
+            var stageA1 = new ProductModelStage(Guid.NewGuid(), model.Id, lineA.Id, subA1.Id, 1, 0m, null, CompensationMode.SharedPercentage, createdAtUtc: now);
+            var stageA2 = new ProductModelStage(Guid.NewGuid(), model.Id, lineA.Id, subA2.Id, 2, 2m, 10m, CompensationMode.SharedPercentage, createdAtUtc: now);
+            var stageB = new ProductModelStage(Guid.NewGuid(), model.Id, lineB.Id, subB.Id, 3, 1m, 10m, CompensationMode.SharedPercentage, createdAtUtc: now);
             var assignedPresent = new Worker(Guid.NewGuid(), "W-1", "Present assigned", createdAtUtc: now);
             var unassignedPresent = new Worker(Guid.NewGuid(), "W-2", "Present unassigned", createdAtUtc: now);
             var assignedAbsent = new Worker(Guid.NewGuid(), "W-3", "Assigned absent", createdAtUtc: now);
             db.AddRange(factory, department, lineA, lineB, lineC, mainA, mainB, mainC, subA1, subA2, subB, subC, model, orphanModel, stageA1, stageA2, stageB, assignedPresent, unassignedPresent, assignedAbsent);
             db.AddRange(
-                new WorkerDefaultAssignment(Guid.NewGuid(), assignedPresent.Id, subA1.Id, actor, now),
-                new WorkerDefaultAssignment(Guid.NewGuid(), assignedPresent.Id, subB.Id, actor, now),
-                new WorkerDefaultAssignment(Guid.NewGuid(), assignedAbsent.Id, subA1.Id, actor, now));
+                new WorkerDefaultAssignment(Guid.NewGuid(), assignedPresent.Id, subA1.Id, actor, now, productionLineId: lineA.Id),
+                new WorkerDefaultAssignment(Guid.NewGuid(), assignedPresent.Id, subB.Id, actor, now, productionLineId: lineB.Id),
+                new WorkerDefaultAssignment(Guid.NewGuid(), assignedAbsent.Id, subA1.Id, actor, now, productionLineId: lineA.Id));
 
             var draft = new ProductionOrder(Guid.NewGuid(), "DLY-A", model.Id, lineA.Id, date, 100m, null, actor, now);
             draft.MarkDailyOperation("DailyProductionOperations/test-a", now);

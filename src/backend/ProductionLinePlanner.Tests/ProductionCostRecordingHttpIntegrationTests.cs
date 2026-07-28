@@ -416,7 +416,7 @@ public sealed class ProductionCostRecordingHttpIntegrationTests
         Assert.Equal(HttpStatusCode.OK, models.StatusCode);
         Assert.Single((await DataAsync(models)).GetProperty("items").EnumerateArray());
         Assert.Equal(HttpStatusCode.OK, (await fixture.SendAsync(HttpMethod.Get, "/api/production/lookups/workers", permissions: ["production.record"])).StatusCode);
-        Assert.Equal(HttpStatusCode.OK, (await fixture.SendAsync(HttpMethod.Get, $"/api/production/lookups/models/{fixture.ModelId}/stages", permissions: ["production.record"])).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await fixture.SendAsync(HttpMethod.Get, $"/api/production/lookups/models/{fixture.ModelId}/production-lines/{fixture.LineId}/stages", permissions: ["production.record"])).StatusCode);
 
         var order = await fixture.SendAsync(HttpMethod.Post, "/api/production/orders", new { orderNumber = "LOOKUP-DRAFT", productModelId = fixture.ModelId, productionLineId = fixture.LineId, productionDate = "2026-07-13", plannedQuantity = 10m }, ["production.record"]);
         var orderId = (await DataAsync(order)).GetProperty("id").GetGuid();
@@ -667,11 +667,11 @@ public sealed class ProductionCostRecordingHttpIntegrationTests
             await using (var scope = app.Services.CreateAsyncScope())
             {
                 var db = scope.ServiceProvider.GetRequiredService<AppDbContext>(); await db.Database.EnsureCreatedAsync();
-                var factory = new Factory(Guid.NewGuid(), "Integration Factory", "INT"); var line = new ProductionLine(Guid.NewGuid(), factory.Id, "Integration Line", 1); var main = new MainStage(Guid.NewGuid(), line.Id, "Main", 1); var sub = new SubStage(Guid.NewGuid(), main.Id, "Sew", "SEW", 1, 1);
-                var model = new ProductModel(Guid.NewGuid(), "HTTP-500", "HTTP 500"); var stage = new ProductModelStage(Guid.NewGuid(), model.Id, sub.Id, 1, piecePrice, 17m, CompensationMode.SharedPercentage);
+                var factory = new Factory(Guid.NewGuid(), "Integration Factory", "INT"); var department = new Department(Guid.NewGuid(), factory.Id, "OPS", "التشغيل", "Operations", 1); var line = new ProductionLine(Guid.NewGuid(), factory.Id, "Integration Line", 1, departmentId: department.Id); var main = new MainStage(Guid.NewGuid(), department.Id, "Main", 1); var sub = new SubStage(Guid.NewGuid(), main.Id, "Sew", "SEW", 1, 1);
+                var model = new ProductModel(Guid.NewGuid(), "HTTP-500", "HTTP 500"); var stage = new ProductModelStage(Guid.NewGuid(), model.Id, line.Id, sub.Id, 1, piecePrice, 17m, CompensationMode.SharedPercentage);
                 var workerA = new Worker(Guid.NewGuid(), "A", "Worker A"); var workerB = new Worker(Guid.NewGuid(), "B", "Worker B"); var user = new AppUser(userId, "Integration User", "integration@example.test", "hash");
-                db.AddRange(factory, line, main, sub, model, stage, workerA, workerB, user); await db.SaveChangesAsync();
-                db.AddRange(new WorkerDefaultAssignment(Guid.NewGuid(), workerA.Id, sub.Id, userId, DateTime.UtcNow.AddMinutes(-1), "Integration assignment"), new WorkerDefaultAssignment(Guid.NewGuid(), workerB.Id, sub.Id, userId, DateTime.UtcNow.AddMinutes(-1), "Integration assignment"));
+                db.AddRange(factory, department, line, main, sub, model, stage, workerA, workerB, user); await db.SaveChangesAsync();
+                db.AddRange(new WorkerDefaultAssignment(Guid.NewGuid(), workerA.Id, sub.Id, userId, DateTime.UtcNow.AddMinutes(-1), "Integration assignment", productionLineId: line.Id), new WorkerDefaultAssignment(Guid.NewGuid(), workerB.Id, sub.Id, userId, DateTime.UtcNow.AddMinutes(-1), "Integration assignment", productionLineId: line.Id));
                 await db.SaveChangesAsync(); factoryId = factory.Id; modelId = model.Id; lineId = line.Id; modelStageId = stage.Id; workerAId = workerA.Id; workerBId = workerB.Id;
             }
             return new ProductionHttpFixture(connection, app, app.GetTestClient(), userId, factoryId, modelId, lineId, modelStageId, workerAId, workerBId);

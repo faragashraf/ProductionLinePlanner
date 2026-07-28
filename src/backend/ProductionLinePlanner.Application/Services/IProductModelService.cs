@@ -34,10 +34,11 @@ public interface IProductModelService
 
     Task<Result<ProductModelDeleteEligibilityDto>> GetModelDeleteEligibilityAsync(Guid modelId, CancellationToken cancellationToken = default);
 
-    Task<Result<ProductModelStageDto[]>> GetModelStagesAsync(Guid modelId, CancellationToken cancellationToken = default);
+    Task<Result<ProductModelStageDto[]>> GetModelStagesAsync(Guid modelId, Guid productionLineId, CancellationToken cancellationToken = default);
 
     Task<Result<ProductModelStageDto>> AddModelStageAsync(
         Guid modelId,
+        Guid productionLineId,
         UpsertProductModelStageRequest request,
         Guid actorUserId,
         string? requestMeta = null,
@@ -45,6 +46,7 @@ public interface IProductModelService
 
     Task<Result<ProductModelStageDto>> UpdateModelStageAsync(
         Guid modelId,
+        Guid productionLineId,
         Guid modelStageId,
         UpsertProductModelStageRequest request,
         Guid actorUserId,
@@ -53,6 +55,7 @@ public interface IProductModelService
 
     Task<Result> DeactivateModelStageAsync(
         Guid modelId,
+        Guid productionLineId,
         Guid modelStageId,
         Guid actorUserId,
         string? requestMeta = null,

@@ -13,7 +13,7 @@ public class SubStage
         int defaultOrder,
         bool isActive = true,
         DateTime? createdAtUtc = null,
-        Guid productionLineId = default)
+        Guid departmentId = default)
     {
         if (mainStageId == Guid.Empty)
             throw new ArgumentException("MainStageId is required.", nameof(mainStageId));
@@ -28,7 +28,7 @@ public class SubStage
 
         Id = id;
         MainStageId = mainStageId;
-        ProductionLineId = productionLineId;
+        DepartmentId = departmentId;
         Name = name.Trim();
         Code = code.Trim();
         Capacity = capacity;
@@ -41,8 +41,11 @@ public class SubStage
     public Guid Id { get; init; }
     public Guid MainStageId { get; init; }
     public MainStage? MainStage { get; set; }
-    public Guid ProductionLineId { get; private set; }
-    public ProductionLine? ProductionLine { get; private set; }
+    /// <summary>
+    /// Integrity key used to enforce department-scoped stage-code uniqueness and
+    /// a composite FK to MainStage. Ownership is still navigated through MainStage.
+    /// </summary>
+    public Guid DepartmentId { get; private set; }
     public string Name { get; private set; } = string.Empty;
     public string Code { get; private set; } = string.Empty;
     public int Capacity { get; private set; }
@@ -61,18 +64,17 @@ public class SubStage
     public List<WorkerDefaultAssignment> DefaultAssignments { get; } = [];
 
     /// <summary>
-    /// Establishes the direct operational-line relation. It is intentionally
-    /// immutable once set, because the owning MainStage remains the source of
-    /// truth for the hierarchy.
+    /// Binds the integrity key to the owning MainStage department. The composite
+    /// database FK prevents this value from diverging from MainStage.DepartmentId.
     /// </summary>
-    public void SetProductionLine(Guid productionLineId)
+    public void SetDepartment(Guid departmentId)
     {
-        if (productionLineId == Guid.Empty)
-            throw new ArgumentException("ProductionLineId is required.", nameof(productionLineId));
-        if (ProductionLineId != Guid.Empty && ProductionLineId != productionLineId)
-            throw new InvalidOperationException("A stage cannot be moved to a different production line.");
+        if (departmentId == Guid.Empty)
+            throw new ArgumentException("DepartmentId is required.", nameof(departmentId));
+        if (DepartmentId != Guid.Empty && DepartmentId != departmentId)
+            throw new InvalidOperationException("A stage cannot be moved to a different department.");
 
-        ProductionLineId = productionLineId;
+        DepartmentId = departmentId;
     }
 
     public void UpdateCapacity(int capacity, DateTime? atUtc = null)

@@ -749,19 +749,21 @@ export class ProductionCostRecordingPageComponent implements OnInit, OnDestroy {
     this.clearProductReadiness();
     this.clearOrderDraft();
     if (!productionLineId) return;
+    const departmentId = this.productionLines.find(line => line.id === productionLineId)?.departmentId;
+    if (!departmentId) {
+      this.handleError(new Error('خط الإنتاج المحدد غير مرتبط بقسم.'), 'تعذر تحديد كتالوج مراحل القسم.');
+      return;
+    }
 
     const version = ++this.hierarchyRequestVersion;
     this.loadingMainStages = true;
     this.masterData
-      .mainStagesForLine(productionLineId)
+      .mainStagesForDepartment(departmentId)
       .pipe(finalize(() => (this.loadingMainStages = false)))
       .subscribe({
         next: (stages) => {
           if (version === this.hierarchyRequestVersion)
-            this.mainStages = stages.filter(
-              (stage) =>
-                stage.isActive && stage.productionLineId === productionLineId,
-            );
+            this.mainStages = stages.filter((stage) => stage.isActive);
         },
         error: (error) =>
           this.handleError(error, 'تعذر تحميل المراحل الرئيسية للخط المحدد.'),
@@ -911,7 +913,7 @@ export class ProductionCostRecordingPageComponent implements OnInit, OnDestroy {
     if (!this.selectedSubStageId) return;
 
     const version = ++this.stageRequestVersion;
-    this.api.listModelStages(order.productModelId).subscribe({
+    this.api.listModelStages(order.productModelId, order.productionLineId).subscribe({
       next: (stages) => {
         if (version === this.stageRequestVersion) {
           this.modelStages = stages.filter(
@@ -1175,6 +1177,7 @@ export class ProductionCostRecordingPageComponent implements OnInit, OnDestroy {
     if (worker.assignmentType !== 'Default') return;
     const request = this.assignments.removeDefaultAssignment(
       worker.workerId,
+      this.selectedProductionLineId,
       this.selectedSubStageId,
       reason,
     );
@@ -1817,6 +1820,7 @@ export class ProductionCostRecordingPageComponent implements OnInit, OnDestroy {
   ) {
     return this.assignments.createDefaultAssignment({
       workerId: worker.workerId,
+      productionLineId: this.selectedProductionLineId,
       subStageId: this.selectedSubStageId,
       ...(reason ? { reason } : {}),
     });
@@ -1884,8 +1888,12 @@ export class ProductionCostRecordingPageComponent implements OnInit, OnDestroy {
 
               this.selectedProductionLineId = line.id;
               this.loadingMainStages = true;
+              if (!line.departmentId) {
+                this.markRouteContextUnavailable('خط الإنتاج المحدد غير مرتبط بقسم نشط.');
+                return;
+              }
               this.masterData
-                .mainStagesForLine(line.id)
+                .mainStagesForDepartment(line.departmentId)
                 .pipe(
                   finalize(() => {
                     if (this.isCurrentRouteContextRestore(version))
@@ -1896,10 +1904,7 @@ export class ProductionCostRecordingPageComponent implements OnInit, OnDestroy {
                   next: (mainStages) => {
                     if (!this.isCurrentRouteContextRestore(version)) return;
 
-                    this.mainStages = mainStages.filter(
-                      (stage) =>
-                        stage.isActive && stage.productionLineId === line.id,
-                    );
+                    this.mainStages = mainStages.filter((stage) => stage.isActive);
                     const mainStage = this.mainStages.find(
                       (item) => item.id === context.mainStageId,
                     );
@@ -2034,7 +2039,7 @@ export class ProductionCostRecordingPageComponent implements OnInit, OnDestroy {
       lines: this.masterData.allProductionLines(),
       mainStages: this.masterData.allMainStages(),
       subStages: this.masterData.allSubStages(),
-      modelStages: this.api.listModelStages(order.productModelId),
+      modelStages: this.api.listModelStages(order.productModelId, order.productionLineId ?? ''),
     }).subscribe({
       next: (context) => {
         if (version !== this.draftRestoreRequestVersion) return;
@@ -2052,11 +2057,9 @@ export class ProductionCostRecordingPageComponent implements OnInit, OnDestroy {
           context.mainStages.find(
             (candidate) => candidate.id === subStage.mainStageId,
           );
-        const line =
-          mainStage &&
-          context.lines.find(
-            (candidate) => candidate.id === mainStage.productionLineId,
-          );
+        const line = context.lines.find(
+          (candidate) => candidate.id === order.productionLineId,
+        );
         const factory =
           line &&
           context.factories.find(
@@ -2073,7 +2076,8 @@ export class ProductionCostRecordingPageComponent implements OnInit, OnDestroy {
           mainStage.isActive &&
           line.isActive &&
           factory.isActive &&
-          order.productionLineId === line.id;
+          !!line.departmentId &&
+          mainStage.departmentId === line.departmentId;
 
         if (
           !validContext ||
@@ -2097,7 +2101,7 @@ export class ProductionCostRecordingPageComponent implements OnInit, OnDestroy {
         this.selectedProductionLineId = line.id;
         this.mainStages = context.mainStages.filter(
           (candidate) =>
-            candidate.productionLineId === line.id && candidate.isActive,
+            candidate.departmentId === line.departmentId && candidate.isActive,
         );
         this.selectedMainStageId = mainStage.id;
         this.subStages = context.subStages.filter(

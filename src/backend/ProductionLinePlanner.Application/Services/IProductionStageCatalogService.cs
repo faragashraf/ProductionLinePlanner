@@ -6,7 +6,7 @@ namespace ProductionLinePlanner.Application.Services;
 public interface IProductionStageCatalogService
 {
     Task<PagedResult<MainStageDto>> GetMainStagesAsync(
-        Guid? productionLineId,
+        Guid? departmentId,
         string? search,
         bool? isActive = true,
         int page = 1,
@@ -28,7 +28,6 @@ public interface IProductionStageCatalogService
     Task<PagedResult<SubStageDto>> GetOperationalStagesAsync(
         Guid? factoryId,
         Guid? departmentId,
-        Guid? productionLineId,
         string? name,
         string? code,
         bool? isActive,
@@ -37,7 +36,7 @@ public interface IProductionStageCatalogService
         CancellationToken cancellationToken = default);
 
     Task<Result<SubStageDto>> CreateOperationalStageAsync(
-        Guid productionLineId,
+        Guid departmentId,
         string name,
         int capacity,
         bool isActive,
@@ -46,7 +45,7 @@ public interface IProductionStageCatalogService
         CancellationToken cancellationToken = default);
 
     Task<Result<MainStageDto>> CreateMainStageAsync(
-        Guid productionLineId,
+        Guid departmentId,
         string name,
         bool isCritical,
         int sequenceOrder,

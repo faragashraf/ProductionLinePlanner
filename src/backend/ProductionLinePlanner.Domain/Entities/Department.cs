@@ -47,6 +47,7 @@ public class Department
     public DateTime UpdatedAtUtc { get; private set; }
 
     public List<ProductionLine> ProductionLines { get; } = [];
+    public List<MainStage> MainStages { get; } = [];
 
     public void Update(string nameAr, string? nameEn, int sequenceOrder, DateTime? atUtc = null)
     {

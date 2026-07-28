@@ -43,6 +43,7 @@ public sealed class PilotMasterDataResetService(
             SubStages = await db.SubStages.AsNoTracking().CountAsync(cancellationToken),
             MainStages = await db.MainStages.AsNoTracking().CountAsync(cancellationToken),
             ProductionLines = await db.ProductionLines.AsNoTracking().CountAsync(cancellationToken),
+            Departments = await db.Departments.AsNoTracking().CountAsync(cancellationToken),
             Factories = await db.Factories.AsNoTracking().CountAsync(cancellationToken),
             WorkersPreserved = await db.Workers.AsNoTracking().CountAsync(cancellationToken),
             AttendanceRecordsPreserved = await db.AttendanceRecords.AsNoTracking().CountAsync(cancellationToken),
@@ -110,6 +111,7 @@ public sealed class PilotMasterDataResetService(
             db.RemoveRange(await db.SubStages.ToListAsync(cancellationToken));
             db.RemoveRange(await db.MainStages.ToListAsync(cancellationToken));
             db.RemoveRange(await db.ProductionLines.ToListAsync(cancellationToken));
+            db.RemoveRange(await db.Departments.ToListAsync(cancellationToken));
             db.RemoveRange(await db.Factories.ToListAsync(cancellationToken));
 
             await audit.RecordAsync(
@@ -132,6 +134,7 @@ public sealed class PilotMasterDataResetService(
                     preview.SubStages,
                     preview.MainStages,
                     preview.ProductionLines,
+                    preview.Departments,
                     preview.Factories,
                     preview.WorkersPreserved,
                     preview.UsersPreserved,

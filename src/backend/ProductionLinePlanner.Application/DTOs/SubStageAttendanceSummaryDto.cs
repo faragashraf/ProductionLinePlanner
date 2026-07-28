@@ -17,10 +17,25 @@ public sealed record SubStageAttendanceSummaryDto(
     public int MainStageDistinctAssignedWorkersCount { get; init; }
     public int MainStageDistinctPresentWorkersCount { get; init; }
     public int MainStageDistinctAbsentWorkersCount { get; init; }
-    public int ProductionLineDistinctAssignedWorkersCount { get; init; }
-    public int ProductionLineDistinctPresentWorkersCount { get; init; }
-    public int ProductionLineDistinctAbsentWorkersCount { get; init; }
+    public int DepartmentDistinctAssignedWorkersCount { get; init; }
+    public int DepartmentDistinctPresentWorkersCount { get; init; }
+    public int DepartmentDistinctAbsentWorkersCount { get; init; }
     public int FactoryDistinctAssignedWorkersCount { get; init; }
     public int FactoryDistinctPresentWorkersCount { get; init; }
     public int FactoryDistinctAbsentWorkersCount { get; init; }
+    public IReadOnlyCollection<ProductionLineAttendanceSummaryDto> ProductionLines { get; init; } = [];
 }
+
+public sealed record ProductionLineAttendanceSummaryDto(
+    Guid ProductionLineId,
+    int AssignedWorkersCount,
+    int PresentAssignedWorkersCount,
+    int AbsentAssignedWorkersCount,
+    string AttendanceDataStatus,
+    string AttendanceStatus,
+    int MainStageDistinctAssignedWorkersCount,
+    int MainStageDistinctPresentWorkersCount,
+    int MainStageDistinctAbsentWorkersCount,
+    int ProductionLineDistinctAssignedWorkersCount,
+    int ProductionLineDistinctPresentWorkersCount,
+    int ProductionLineDistinctAbsentWorkersCount);

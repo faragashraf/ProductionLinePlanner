@@ -27,8 +27,8 @@ describe('FactoryMapApiService', () => {
     service.loadFactoryMapData().subscribe((value) => result = value);
 
     http.expectOne(buildApiUrl('/api/factories?pageSize=200')).flush({ success: true, data: { items: [{ id: 'factory-1', name: 'مصنع 1' }] } });
-    http.expectOne(buildApiUrl('/api/production-lines?pageSize=200')).flush({ success: true, data: { items: [{ id: 'line-1', factoryId: 'factory-1', name: 'خط 1' }] } });
-    http.expectOne(buildApiUrl('/api/main-stages?isActive=true&pageSize=200')).flush({ success: true, data: { items: [{ id: 'main-1', productionLineId: 'line-1', name: 'تجهيز' }] } });
+    http.expectOne(buildApiUrl('/api/production-lines?pageSize=200')).flush({ success: true, data: { items: [{ id: 'line-1', factoryId: 'factory-1', departmentId: 'department-1', name: 'خط 1' }] } });
+    http.expectOne(buildApiUrl('/api/main-stages?isActive=true&pageSize=200')).flush({ success: true, data: { items: [{ id: 'main-1', departmentId: 'department-1', name: 'تجهيز' }] } });
     http.expectOne(buildApiUrl('/api/sub-stages?isActive=true&pageSize=200')).flush({ success: true, data: { items: [{ id: 'sub-1', mainStageId: 'main-1', name: 'فحص', capacity: 2 }] } });
     http.expectOne(buildApiUrl('/api/factory-structure/sub-stages/staffing-coverage')).flush({ success: true, data: [{ subStageId: 'sub-1', assignedWorkersCount: 2, requiredWorkersCount: 2, hasAuthoritativeRequiredWorkerCount: true, assignmentCoveragePercent: 100, staffingStatus: 'Staffed' }] });
     http.expectOne(buildApiUrl('/api/factory-structure/sub-stages/attendance-summary')).flush({ success: true, data: [{ subStageId: 'sub-1', assignedWorkersCount: 2, presentAssignedWorkersCount: 1, absentAssignedWorkersCount: 1, attendanceDataStatus: 'Complete', attendanceStatus: 'PartiallyPresent' }] });
@@ -67,8 +67,8 @@ describe('FactoryMapApiService', () => {
     service.loadFactoryMapData().subscribe((value) => result = value);
 
     http.expectOne(buildApiUrl('/api/factories?pageSize=200')).flush({ success: true, data: { items: [{ id: 'factory-1', name: 'مصنع 1' }] } });
-    http.expectOne(buildApiUrl('/api/production-lines?pageSize=200')).flush({ success: true, data: { items: [{ id: 'line-1', factoryId: 'factory-1', name: 'خط 1' }] } });
-    http.expectOne(buildApiUrl('/api/main-stages?isActive=true&pageSize=200')).flush({ success: true, data: { items: [{ id: 'main-1', productionLineId: 'line-1', name: 'تجهيز' }] } });
+    http.expectOne(buildApiUrl('/api/production-lines?pageSize=200')).flush({ success: true, data: { items: [{ id: 'line-1', factoryId: 'factory-1', departmentId: 'department-1', name: 'خط 1' }] } });
+    http.expectOne(buildApiUrl('/api/main-stages?isActive=true&pageSize=200')).flush({ success: true, data: { items: [{ id: 'main-1', departmentId: 'department-1', name: 'تجهيز' }] } });
     http.expectOne(buildApiUrl('/api/sub-stages?isActive=true&pageSize=200')).flush({ success: true, data: { items: [{ id: 'sub-1', mainStageId: 'main-1', name: 'فحص', capacity: 0 }] } });
     http.expectOne(buildApiUrl('/api/factory-structure/sub-stages/staffing-coverage')).flush({ success: true, data: [{ subStageId: 'sub-1', assignedWorkersCount: 1, requiredWorkersCount: null, hasAuthoritativeRequiredWorkerCount: false, assignmentCoveragePercent: null, staffingStatus: 'RequirementNotDefined' }] });
     http.expectOne(buildApiUrl('/api/factory-structure/sub-stages/attendance-summary')).flush({ success: true, data: [{ subStageId: 'sub-1', assignedWorkersCount: 1, presentAssignedWorkersCount: 0, absentAssignedWorkersCount: 1, attendanceDataStatus: 'Complete', attendanceStatus: 'AllAbsent' }] });
@@ -86,8 +86,8 @@ describe('FactoryMapApiService', () => {
     service.loadFactoryMapData().subscribe((value) => result = value);
 
     http.expectOne(buildApiUrl('/api/factories?pageSize=200')).flush({ success: true, data: { items: [{ id: 'factory-1', name: 'مصنع 1' }] } });
-    http.expectOne(buildApiUrl('/api/production-lines?pageSize=200')).flush({ success: true, data: { items: [{ id: 'line-1', factoryId: 'factory-1', name: 'خط 1' }] } });
-    http.expectOne(buildApiUrl('/api/main-stages?isActive=true&pageSize=200')).flush({ success: true, data: { items: [{ id: 'main-1', productionLineId: 'line-1', name: 'تجهيز' }] } });
+    http.expectOne(buildApiUrl('/api/production-lines?pageSize=200')).flush({ success: true, data: { items: [{ id: 'line-1', factoryId: 'factory-1', departmentId: 'department-1', name: 'خط 1' }] } });
+    http.expectOne(buildApiUrl('/api/main-stages?isActive=true&pageSize=200')).flush({ success: true, data: { items: [{ id: 'main-1', departmentId: 'department-1', name: 'تجهيز' }] } });
     http.expectOne(buildApiUrl('/api/sub-stages?isActive=true&pageSize=200')).flush({ success: true, data: { items: [{ id: 'sub-1', mainStageId: 'main-1', name: 'فحص', capacity: 1 }] } });
     const coverageRequest = http.expectOne(buildApiUrl('/api/factory-structure/sub-stages/staffing-coverage'));
     const attendanceRequest = http.expectOne(buildApiUrl('/api/factory-structure/sub-stages/attendance-summary'));
@@ -106,8 +106,8 @@ describe('FactoryMapApiService', () => {
     service.loadFactoryMapData().subscribe((value) => result = value);
 
     http.expectOne(buildApiUrl('/api/factories?pageSize=200')).flush({ success: true, data: { items: [{ id: 'factory-1', name: 'مصنع 1' }] } });
-    http.expectOne(buildApiUrl('/api/production-lines?pageSize=200')).flush({ success: true, data: { items: [{ id: 'line-1', factoryId: 'factory-1', name: 'خط 1' }] } });
-    http.expectOne(buildApiUrl('/api/main-stages?isActive=true&pageSize=200')).flush({ success: true, data: { items: [{ id: 'main-1', productionLineId: 'line-1', name: 'تجهيز' }] } });
+    http.expectOne(buildApiUrl('/api/production-lines?pageSize=200')).flush({ success: true, data: { items: [{ id: 'line-1', factoryId: 'factory-1', departmentId: 'department-1', name: 'خط 1' }] } });
+    http.expectOne(buildApiUrl('/api/main-stages?isActive=true&pageSize=200')).flush({ success: true, data: { items: [{ id: 'main-1', departmentId: 'department-1', name: 'تجهيز' }] } });
     http.expectOne(buildApiUrl('/api/sub-stages?isActive=true&pageSize=200')).flush({ success: true, data: { items: [{ id: 'sub-1', mainStageId: 'main-1', name: 'فحص' }] } });
     http.expectOne(buildApiUrl('/api/factory-structure/sub-stages/staffing-coverage')).flush({ success: true, data: [{ subStageId: 'sub-1', assignedWorkersCount: 1, requiredWorkersCount: 1, hasAuthoritativeRequiredWorkerCount: true, assignmentCoveragePercent: 100, staffingStatus: 'Staffed' }] });
 
@@ -120,8 +120,8 @@ describe('FactoryMapApiService', () => {
     service.loadFactoryMapData().subscribe(value => result = value);
 
     http.expectOne(buildApiUrl('/api/factories?pageSize=200')).flush({ success: true, data: { items: [{ id: 'factory-1', name: 'مصنع 1' }] } });
-    http.expectOne(buildApiUrl('/api/production-lines?pageSize=200')).flush({ success: true, data: { items: [{ id: 'line-1', factoryId: 'factory-1', name: 'خط 1' }] } });
-    http.expectOne(buildApiUrl('/api/main-stages?isActive=true&pageSize=200')).flush({ success: true, data: { items: [{ id: 'main-1', productionLineId: 'line-1', name: 'تجهيز' }] } });
+    http.expectOne(buildApiUrl('/api/production-lines?pageSize=200')).flush({ success: true, data: { items: [{ id: 'line-1', factoryId: 'factory-1', departmentId: 'department-1', name: 'خط 1' }] } });
+    http.expectOne(buildApiUrl('/api/main-stages?isActive=true&pageSize=200')).flush({ success: true, data: { items: [{ id: 'main-1', departmentId: 'department-1', name: 'تجهيز' }] } });
     http.expectOne(buildApiUrl('/api/sub-stages?isActive=true&pageSize=200')).flush({ success: true, data: { items: [{ id: 'sub-1', mainStageId: 'main-1', name: 'فحص' }, { id: 'sub-2', mainStageId: 'main-1', name: 'تجميع' }] } });
     http.expectOne(buildApiUrl('/api/factory-structure/sub-stages/staffing-coverage')).flush({ success: true, data: [
       { subStageId: 'sub-1', assignedWorkersCount: 1, requiredWorkersCount: 1, hasAuthoritativeRequiredWorkerCount: true, assignmentCoveragePercent: 100, staffingStatus: 'Staffed', mainStageDistinctWorkersCount: 1, productionLineDistinctWorkersCount: 1, factoryDistinctWorkersCount: 1 },

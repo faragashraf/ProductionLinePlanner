@@ -41,6 +41,7 @@ public sealed class AssignmentRecommendationEngine : IAssignmentRecommendationEn
     }
 
     public async Task<Result<AssignmentRecommendationResultDto>> GetRecommendationsAsync(
+        Guid productionLineId,
         Guid subStageId,
         Guid actorUserId,
         string? requestMeta = null,
@@ -52,9 +53,9 @@ public sealed class AssignmentRecommendationEngine : IAssignmentRecommendationEn
             return Result<AssignmentRecommendationResultDto>.Failure(new Error("Unauthorized", "User context is required."));
         }
 
-        if (subStageId == Guid.Empty)
+        if (productionLineId == Guid.Empty || subStageId == Guid.Empty)
         {
-            return Result<AssignmentRecommendationResultDto>.Failure(new Error("ValidationError", "SubStageId is required."));
+            return Result<AssignmentRecommendationResultDto>.Failure(new Error("ValidationError", "ProductionLineId and SubStageId are required."));
         }
 
         if (topCandidates <= 0)
@@ -78,7 +79,7 @@ public sealed class AssignmentRecommendationEngine : IAssignmentRecommendationEn
                                         ss.Capacity,
                                         MainStageId = ms.Id,
                                         ms.IsCritical,
-                                        ms.ProductionLineId
+                                        ss.DepartmentId
                                     })
             .FirstOrDefaultAsync(cancellationToken);
 
@@ -86,6 +87,10 @@ public sealed class AssignmentRecommendationEngine : IAssignmentRecommendationEn
         {
             return Result<AssignmentRecommendationResultDto>.Failure(new Error("NotFound", "Sub-stage not found."));
         }
+        var lineIsValid = await _dbContext.ProductionLines.AsNoTracking()
+            .AnyAsync(line => line.Id == productionLineId && line.IsActive && line.DepartmentId == targetSubStage.DepartmentId, cancellationToken);
+        if (!lineIsValid)
+            return Result<AssignmentRecommendationResultDto>.Failure(new Error("ValidationError", "المرحلة لا تتبع قسم خط الإنتاج المحدد."));
 
         var activeWorkers = await _dbContext.Workers
             .AsNoTracking()
@@ -122,7 +127,7 @@ public sealed class AssignmentRecommendationEngine : IAssignmentRecommendationEn
                                            defaultAssignment.WorkerId,
                                            defaultAssignment.SubStageId,
                                            defaultAssignment.AssignedAt,
-                                           ms.ProductionLineId))
+                                           defaultAssignment.ProductionLineId))
             .ToListAsync(cancellationToken);
 
         var defaultProfileByWorker = defaultAssignments
@@ -211,7 +216,7 @@ public sealed class AssignmentRecommendationEngine : IAssignmentRecommendationEn
                 riskWarnings.Add("Worker is late and may impact immediate readiness.");
             }
 
-            if (candidate.DefaultProfile.ProductionLineId == targetSubStage.ProductionLineId)
+            if (candidate.DefaultProfile.ProductionLineId == productionLineId)
             {
                 score += SameLineScore;
                 reasons.Add("Worker is currently assigned on the same production line.");

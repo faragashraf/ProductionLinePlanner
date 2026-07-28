@@ -221,16 +221,17 @@ public sealed class ManufacturingRealtimeFoundationTests
         var actor = Guid.NewGuid();
         await using var db = CreateDb(publisher, actor);
         var factory = new Factory(Guid.NewGuid(), "Factory", "F-001");
-        var line = new ProductionLine(Guid.NewGuid(), factory.Id, "Line", 1, "L-001");
-        var mainStage = new MainStage(Guid.NewGuid(), line.Id, "Main stage", 1);
-        var subStage = new SubStage(Guid.NewGuid(), mainStage.Id, "Sub stage", "S-001", 1, 1, productionLineId: line.Id);
+        var department = new Department(Guid.NewGuid(), factory.Id, "OPS", "التشغيل", "Operations", 1);
+        var line = new ProductionLine(Guid.NewGuid(), factory.Id, "Line", 1, "L-001", departmentId: department.Id);
+        var mainStage = new MainStage(Guid.NewGuid(), department.Id, "Main stage", 1);
+        var subStage = new SubStage(Guid.NewGuid(), mainStage.Id, "Sub stage", "S-001", 1, 1, departmentId: mainStage.DepartmentId);
         var worker = new Worker(Guid.NewGuid(), "W-001", "Worker");
-        db.AddRange(factory, line, mainStage, subStage, worker);
+        db.AddRange(factory, department, line, mainStage, subStage, worker);
         await db.SaveChangesAsync();
         publisher.Changes.Clear();
         db.ChangeTracker.Clear();
 
-        var assignment = new WorkerDefaultAssignment(Guid.NewGuid(), worker.Id, subStage.Id, actor, DateTime.UtcNow);
+        var assignment = new WorkerDefaultAssignment(Guid.NewGuid(), worker.Id, subStage.Id, actor, DateTime.UtcNow, productionLineId: line.Id);
         db.WorkerDefaultAssignments.Add(assignment);
         await db.SaveChangesAsync();
 
@@ -283,7 +284,7 @@ public sealed class ManufacturingRealtimeFoundationTests
             .AddInterceptors(realtimeInterceptor, new ThrowOnSavingPermanentAssignmentInterceptor())
             .Options;
         await using var db = new AppDbContext(options);
-        db.WorkerDefaultAssignments.Add(new WorkerDefaultAssignment(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), actor, DateTime.UtcNow));
+        db.WorkerDefaultAssignments.Add(new WorkerDefaultAssignment(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), actor, DateTime.UtcNow, productionLineId: Guid.NewGuid()));
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => db.SaveChangesAsync());
 
@@ -301,19 +302,20 @@ public sealed class ManufacturingRealtimeFoundationTests
         await db.Database.EnsureCreatedAsync();
         var actor = Guid.NewGuid();
         var factory = new Factory(Guid.NewGuid(), "Factory", "F-001");
-        var line = new ProductionLine(Guid.NewGuid(), factory.Id, "Line", 1, "L-001");
-        var mainStage = new MainStage(Guid.NewGuid(), line.Id, "Main stage", 1);
-        var subStage = new SubStage(Guid.NewGuid(), mainStage.Id, "Sub stage", "S-001", 1, 1, productionLineId: line.Id);
+        var department = new Department(Guid.NewGuid(), factory.Id, "OPS", "التشغيل", "Operations", 1);
+        var line = new ProductionLine(Guid.NewGuid(), factory.Id, "Line", 1, "L-001", departmentId: department.Id);
+        var mainStage = new MainStage(Guid.NewGuid(), department.Id, "Main stage", 1);
+        var subStage = new SubStage(Guid.NewGuid(), mainStage.Id, "Sub stage", "S-001", 1, 1, departmentId: mainStage.DepartmentId);
         var worker = new Worker(Guid.NewGuid(), "W-001", "Worker");
-        db.AddRange(factory, line, mainStage, subStage, worker);
+        db.AddRange(factory, department, line, mainStage, subStage, worker);
         await db.SaveChangesAsync();
         publisher.Changes.Clear();
 
-        db.WorkerDefaultAssignments.Add(new WorkerDefaultAssignment(Guid.NewGuid(), worker.Id, subStage.Id, actor, DateTime.UtcNow));
+        db.WorkerDefaultAssignments.Add(new WorkerDefaultAssignment(Guid.NewGuid(), worker.Id, subStage.Id, actor, DateTime.UtcNow, productionLineId: line.Id));
         await db.SaveChangesAsync();
         publisher.Changes.Clear();
 
-        db.WorkerDefaultAssignments.Add(new WorkerDefaultAssignment(Guid.NewGuid(), worker.Id, subStage.Id, actor, DateTime.UtcNow));
+        db.WorkerDefaultAssignments.Add(new WorkerDefaultAssignment(Guid.NewGuid(), worker.Id, subStage.Id, actor, DateTime.UtcNow, productionLineId: line.Id));
         await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync());
 
         Assert.Empty(publisher.Changes);

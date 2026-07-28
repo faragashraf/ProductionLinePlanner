@@ -106,11 +106,12 @@ public sealed class PilotMasterDataResetServiceTests
             actor.AssignRole(role);
             var worker = new Worker(Guid.NewGuid(), "1001", "Projected worker", "zk-1001", attendanceDepartmentId: 41);
             var factory = new Factory(Guid.NewGuid(), "Test factory", "TEST", createdAtUtc: now);
-            var line = new ProductionLine(Guid.NewGuid(), factory.Id, "Test line", 0, "TEST-LINE", createdAtUtc: now);
-            var main = new MainStage(Guid.NewGuid(), line.Id, "Test main", 0, createdAtUtc: now);
+            var department = new Department(Guid.NewGuid(), factory.Id, "OPS", "التشغيل", "Operations", 0, createdAtUtc: now);
+            var line = new ProductionLine(Guid.NewGuid(), factory.Id, "Test line", 0, "TEST-LINE", createdAtUtc: now, departmentId: department.Id);
+            var main = new MainStage(Guid.NewGuid(), department.Id, "Test main", 0, createdAtUtc: now);
             var stage = new SubStage(Guid.NewGuid(), main.Id, "Test stage", "TEST-STG", 0, 1, createdAtUtc: now);
             var product = new ProductModel(Guid.NewGuid(), "TEST-PRODUCT", "Test product", createdAtUtc: now);
-            var mapping = new ProductModelStage(Guid.NewGuid(), product.Id, stage.Id, 1, 1m, null, CompensationMode.SharedPercentage, createdAtUtc: now);
+            var mapping = new ProductModelStage(Guid.NewGuid(), product.Id, line.Id, stage.Id, 1, 1m, null, CompensationMode.SharedPercentage, createdAtUtc: now);
             var order = new ProductionOrder(Guid.NewGuid(), "TEST-ORDER", product.Id, line.Id, DateOnly.FromDateTime(now), 10m, null, actorId, now);
             var record = new StageProductionRecord(Guid.NewGuid(), order.Id, mapping.Id, DateOnly.FromDateTime(now), 10m, 10m, 0m,
                 stage.Code, stage.Name, 1m, null, CompensationMode.SharedPercentage, product.Code, product.Name,
@@ -120,8 +121,8 @@ public sealed class PilotMasterDataResetServiceTests
                 StageProductionRecord = record
             };
 
-            db.AddRange(actor, worker, factory, line, main, stage, product, mapping, order, record, allocation,
-                new WorkerDefaultAssignment(Guid.NewGuid(), worker.Id, stage.Id, actorId, now),
+            db.AddRange(actor, worker, factory, department, line, main, stage, product, mapping, order, record, allocation,
+                new WorkerDefaultAssignment(Guid.NewGuid(), worker.Id, stage.Id, actorId, now, productionLineId: line.Id),
                 new AssignmentTimelineEntry(Guid.NewGuid(), worker.Id, null, stage.Id, "Default", "Assign", null, now, null, actorId, false),
                 new StageReadinessSnapshot(Guid.NewGuid(), "SubStage", stage.Id, 1, 1, 0, 0, 0, now),
                 new WorkerSalaryHistory(Guid.NewGuid(), worker.Id, 100m, "EGP", now, null, null, actorId, actorId, now));

@@ -18,11 +18,11 @@ namespace ProductionLinePlanner.Tests;
 public sealed class ProductModelStageBulkCopyTests
 {
     [Fact]
-    public async Task Copies_selected_stages_with_same_substage_ids_and_preserves_operational_values()
+    public async Task Copies_selected_stages_into_target_department_and_preserves_operational_values()
     {
         await using var fixture = await BulkCopyFixture.CreateAsync();
         fixture.Db.ProductModelStages.Add(new ProductModelStage(
-            Guid.NewGuid(), fixture.TargetModel.Id, fixture.TargetStages[2].Id, 2, 9m, 90m,
+            Guid.NewGuid(), fixture.TargetModel.Id, fixture.TargetLine.Id, fixture.TargetStages[2].Id, 2, 9m, 90m,
             CompensationMode.FixedAmount));
         await fixture.Db.SaveChangesAsync();
         fixture.ResetObservations();
@@ -38,9 +38,14 @@ public sealed class ProductModelStageBulkCopyTests
         Assert.Equal(0, result.Value.SkippedCount);
         Assert.Equal([3, 4], result.Value.PlannedStages.Select(stage => stage.StageOrder));
 
+        var sourceCodes = fixture.SourceStages.Select(stage => stage.Code).ToArray();
         var copied = await fixture.Db.ProductModelStages.AsNoTracking()
-            .Where(stage => stage.ProductModelId == fixture.TargetModel.Id &&
-                new[] { fixture.SourceStages[0].Id, fixture.SourceStages[1].Id }.Contains(stage.SubStageId))
+            .Include(stage => stage.SubStage)
+            .Where(stage => stage.ProductModelId == fixture.TargetModel.Id
+                && stage.ProductionLineId == fixture.TargetLine.Id
+                && stage.SubStage != null
+                && stage.SubStage.DepartmentId == fixture.TargetDepartment.Id
+                && sourceCodes.Contains(stage.SubStage.Code))
             .OrderBy(stage => stage.StageOrder)
             .ToArrayAsync();
         Assert.Equal(2, copied.Length);
@@ -51,15 +56,24 @@ public sealed class ProductModelStageBulkCopyTests
         Assert.Equal(fixture.SourceRelations[0].IsActive, copied[0].IsActive);
         Assert.Equal(fixture.SourceRelations[0].EffectiveFrom, copied[0].EffectiveFrom);
         Assert.NotEqual(fixture.SourceRelations[0].Id, copied[0].Id);
-        Assert.Single(fixture.Publisher.Changes, change => change.EntityType == ManufacturingEntityType.ProductModelStage);
+        Assert.Equal(2, fixture.Publisher.Changes.Count(change => change.EntityType == ManufacturingEntityType.ProductModelStage && change.ProductionLineId == fixture.TargetLine.Id));
     }
 
     [Fact]
     public async Task Preview_and_repeated_execution_skip_existing_relationship_without_duplicates()
     {
         await using var fixture = await BulkCopyFixture.CreateAsync();
+        var targetMainStageId = await fixture.Db.MainStages
+            .Where(stage => stage.DepartmentId == fixture.TargetDepartment.Id)
+            .Select(stage => stage.Id)
+            .SingleAsync();
+        var equivalentTargetStage = new SubStage(
+            Guid.NewGuid(), targetMainStageId, fixture.SourceStages[0].Name, fixture.SourceStages[0].Code,
+            fixture.SourceStages[0].Capacity, 4, fixture.SourceStages[0].IsActive,
+            departmentId: fixture.TargetDepartment.Id);
+        fixture.Db.SubStages.Add(equivalentTargetStage);
         fixture.Db.ProductModelStages.Add(new ProductModelStage(
-            Guid.NewGuid(), fixture.TargetModel.Id, fixture.SourceStages[0].Id, 9, 1m, null,
+            Guid.NewGuid(), fixture.TargetModel.Id, fixture.TargetLine.Id, equivalentTargetStage.Id, 9, 1m, null,
             CompensationMode.FixedAmount));
         await fixture.Db.SaveChangesAsync();
         fixture.ResetObservations();
@@ -80,7 +94,10 @@ public sealed class ProductModelStageBulkCopyTests
         Assert.Equal(2, second.Value!.SkippedCount);
         Assert.Equal(2, await fixture.Db.ProductModelStages.CountAsync(stage =>
             stage.ProductModelId == fixture.TargetModel.Id &&
-            new[] { fixture.SourceStages[0].Id, fixture.SourceStages[1].Id }.Contains(stage.SubStageId)));
+            stage.ProductionLineId == fixture.TargetLine.Id &&
+            stage.SubStage != null
+            && stage.SubStage.DepartmentId == fixture.TargetDepartment.Id
+            && new[] { fixture.SourceStages[0].Code, fixture.SourceStages[1].Code }.Contains(stage.SubStage.Code)));
     }
 
     [Fact]
@@ -90,6 +107,8 @@ public sealed class ProductModelStageBulkCopyTests
         var sameContext = fixture.Request(fixture.SourceRelations[0].Id) with
         {
             TargetModelId = fixture.SourceModel.Id,
+            TargetFactoryId = fixture.Factory.Id,
+            TargetDepartmentId = fixture.SourceDepartment.Id,
             TargetProductionLineId = fixture.SourceLine.Id
         };
 
@@ -125,39 +144,22 @@ public sealed class ProductModelStageBulkCopyTests
     }
 
     [Fact]
-    public async Task Same_model_different_line_creates_a_new_catalog_stage_and_relationship()
+    public async Task Same_model_can_have_independent_assignments_on_lines_in_different_departments()
     {
         await using var fixture = await BulkCopyFixture.CreateAsync();
 
         var result = await fixture.Service.CopyModelStagesAsync(
             fixture.SourceModel.Id,
-            fixture.RequestForTarget(fixture.SourceModel.Id, fixture.TargetLine.Id, fixture.SourceRelations[0].Id),
+            fixture.RequestForTarget(fixture.SourceModel.Id, fixture.TargetDepartment.Id, fixture.SourceRelations[0].Id),
             fixture.ActorUserId);
 
         Assert.True(result.IsSuccess);
-        Assert.Equal(0, result.Value!.FailedCount);
-        Assert.Equal(1, result.Value.AddedCount);
-        Assert.Equal(0, result.Value.SkippedCount);
-
-        var copiedStage = await fixture.Db.SubStages.AsNoTracking().SingleAsync(stage =>
-            stage.ProductionLineId == fixture.TargetLine.Id && stage.Code == fixture.SourceStages[0].Code);
-        Assert.NotEqual(fixture.SourceStages[0].Id, copiedStage.Id);
-        Assert.Equal(fixture.SourceStages[0].Name, copiedStage.Name);
-        Assert.Equal(fixture.SourceStages[0].Capacity, copiedStage.Capacity);
-        Assert.Equal(fixture.SourceStages[0].IsActive, copiedStage.IsActive);
-
-        var copiedRelationship = await fixture.Db.ProductModelStages.AsNoTracking().SingleAsync(stage =>
-            stage.ProductModelId == fixture.SourceModel.Id && stage.SubStageId == copiedStage.Id);
-        Assert.Equal(fixture.SourceRelations[0].PiecePrice, copiedRelationship.PiecePrice);
-        Assert.Equal(fixture.SourceRelations[0].StandardSeconds, copiedRelationship.StandardSeconds);
-        Assert.Equal(fixture.SourceRelations[0].CompensationMode, copiedRelationship.CompensationMode);
-        Assert.Equal(fixture.SourceRelations[0].IsRequired, copiedRelationship.IsRequired);
-        Assert.Equal(fixture.SourceRelations[0].IsActive, copiedRelationship.IsActive);
-        Assert.Equal(fixture.SourceRelations[0].EffectiveFrom, copiedRelationship.EffectiveFrom);
-        Assert.True(await fixture.Db.ProductModelStages.AnyAsync(stage => stage.Id == fixture.SourceRelations[0].Id));
-        Assert.Single(fixture.Audit.Entries);
-        Assert.Contains(fixture.Publisher.Changes, change => change.EntityType == ManufacturingEntityType.SubStage);
-        Assert.Contains(fixture.Publisher.Changes, change => change.EntityType == ManufacturingEntityType.ProductModelStage);
+        Assert.Equal(1, result.Value!.AddedCount);
+        Assert.True(await fixture.Db.ProductModelStages.AsNoTracking().AnyAsync(stage =>
+            stage.ProductModelId == fixture.SourceModel.Id
+            && stage.ProductionLineId == fixture.TargetLine.Id
+            && stage.SubStage != null
+            && stage.SubStage.DepartmentId == fixture.TargetDepartment.Id));
     }
 
     [Fact]
@@ -167,7 +169,7 @@ public sealed class ProductModelStageBulkCopyTests
 
         var result = await fixture.Service.CopyModelStagesAsync(
             fixture.SourceModel.Id,
-            fixture.RequestForTarget(fixture.TargetModel.Id, fixture.TargetLine.Id, fixture.SourceRelations[0].Id),
+            fixture.RequestForTarget(fixture.TargetModel.Id, fixture.TargetDepartment.Id, fixture.SourceRelations[0].Id),
             fixture.ActorUserId);
 
         Assert.True(result.IsSuccess);
@@ -177,10 +179,10 @@ public sealed class ProductModelStageBulkCopyTests
         Assert.Contains("ستُنشأ", plan.StatusLabel);
 
         var copiedStage = await fixture.Db.SubStages.AsNoTracking().SingleAsync(stage =>
-            stage.ProductionLineId == fixture.TargetLine.Id && stage.Code == fixture.SourceStages[0].Code);
+            stage.DepartmentId == fixture.TargetDepartment.Id && stage.Code == fixture.SourceStages[0].Code);
         Assert.NotEqual(fixture.SourceStages[0].Id, copiedStage.Id);
         Assert.True(await fixture.Db.ProductModelStages.AsNoTracking().AnyAsync(stage =>
-            stage.ProductModelId == fixture.TargetModel.Id && stage.SubStageId == copiedStage.Id));
+            stage.ProductModelId == fixture.TargetModel.Id && stage.ProductionLineId == fixture.TargetLine.Id && stage.SubStageId == copiedStage.Id));
     }
 
     [Fact]
@@ -190,38 +192,38 @@ public sealed class ProductModelStageBulkCopyTests
 
         var sourceOnlyPreview = await fixture.Service.CopyModelStagesAsync(
             fixture.SourceModel.Id,
-            fixture.RequestForTarget(fixture.SourceModel.Id, fixture.TargetLine.Id, fixture.SourceRelations[0].Id) with { PreviewOnly = true },
+            fixture.RequestForTarget(fixture.TargetModel.Id, fixture.TargetDepartment.Id, fixture.SourceRelations[0].Id) with { PreviewOnly = true },
             fixture.ActorUserId);
         Assert.Equal(1, sourceOnlyPreview.Value!.AddedCount);
         Assert.Empty(sourceOnlyPreview.Value.SkippedStages);
 
         var targetMainStageId = await fixture.Db.MainStages
-            .Where(stage => stage.ProductionLineId == fixture.TargetLine.Id)
+            .Where(stage => stage.DepartmentId == fixture.TargetDepartment.Id)
             .Select(stage => stage.Id)
             .SingleAsync();
         var equivalentTargetStage = new SubStage(
             Guid.NewGuid(), targetMainStageId, fixture.SourceStages[0].Name, fixture.SourceStages[0].Code,
             fixture.SourceStages[0].Capacity, 4, fixture.SourceStages[0].IsActive,
-            productionLineId: fixture.TargetLine.Id);
+            departmentId: fixture.TargetDepartment.Id);
         fixture.Db.SubStages.Add(equivalentTargetStage);
         fixture.Db.ProductModelStages.Add(new ProductModelStage(
-            Guid.NewGuid(), fixture.TargetModel.Id, equivalentTargetStage.Id, 1, 1m, 10m,
+            Guid.NewGuid(), fixture.TargetModel.Id, fixture.TargetLine.Id, equivalentTargetStage.Id, 1, 1m, 10m,
             CompensationMode.FixedAmount));
         await fixture.Db.SaveChangesAsync();
         fixture.ResetObservations();
 
         var result = await fixture.Service.CopyModelStagesAsync(
             fixture.SourceModel.Id,
-            fixture.RequestForTarget(fixture.TargetModel.Id, fixture.TargetLine.Id, fixture.SourceRelations[0].Id),
+            fixture.RequestForTarget(fixture.TargetModel.Id, fixture.TargetDepartment.Id, fixture.SourceRelations[0].Id),
             fixture.ActorUserId);
 
         Assert.True(result.IsSuccess);
         Assert.Equal(0, result.Value!.AddedCount);
         var skipped = Assert.Single(result.Value.SkippedStages);
         Assert.Equal("AlreadyLinked", skipped.ReasonCode);
-        Assert.Contains("الموديل الهدف وخط الإنتاج الهدف", skipped.Reason);
+        Assert.Contains("الموديل وخط الإنتاج الهدف", skipped.Reason);
         Assert.Equal(1, await fixture.Db.SubStages.CountAsync(stage =>
-            stage.ProductionLineId == fixture.TargetLine.Id && stage.Code == fixture.SourceStages[0].Code));
+            stage.DepartmentId == fixture.TargetDepartment.Id && stage.Code == fixture.SourceStages[0].Code));
     }
 
     [Fact]
@@ -229,29 +231,29 @@ public sealed class ProductModelStageBulkCopyTests
     {
         await using var fixture = await BulkCopyFixture.CreateAsync();
         var targetMainStageId = await fixture.Db.MainStages
-            .Where(stage => stage.ProductionLineId == fixture.TargetLine.Id)
+            .Where(stage => stage.DepartmentId == fixture.TargetDepartment.Id)
             .Select(stage => stage.Id)
             .SingleAsync();
         var equivalentTargetStage = new SubStage(
             Guid.NewGuid(), targetMainStageId, fixture.SourceStages[0].Name, fixture.SourceStages[0].Code,
             fixture.SourceStages[0].Capacity, 4, fixture.SourceStages[0].IsActive,
-            productionLineId: fixture.TargetLine.Id);
+            departmentId: fixture.TargetDepartment.Id);
         fixture.Db.SubStages.Add(equivalentTargetStage);
         await fixture.Db.SaveChangesAsync();
         fixture.ResetObservations();
 
         var result = await fixture.Service.CopyModelStagesAsync(
             fixture.SourceModel.Id,
-            fixture.RequestForTarget(fixture.TargetModel.Id, fixture.TargetLine.Id, fixture.SourceRelations[0].Id),
+            fixture.RequestForTarget(fixture.TargetModel.Id, fixture.TargetDepartment.Id, fixture.SourceRelations[0].Id),
             fixture.ActorUserId);
 
         Assert.True(result.IsSuccess);
         Assert.Equal(1, result.Value!.AddedCount);
         Assert.False(Assert.Single(result.Value.PlannedStages).CreatesTargetStage);
         Assert.True(await fixture.Db.ProductModelStages.AnyAsync(stage =>
-            stage.ProductModelId == fixture.TargetModel.Id && stage.SubStageId == equivalentTargetStage.Id));
+            stage.ProductModelId == fixture.TargetModel.Id && stage.ProductionLineId == fixture.TargetLine.Id && stage.SubStageId == equivalentTargetStage.Id));
         Assert.Equal(1, await fixture.Db.SubStages.CountAsync(stage =>
-            stage.ProductionLineId == fixture.TargetLine.Id && stage.Code == fixture.SourceStages[0].Code));
+            stage.DepartmentId == fixture.TargetDepartment.Id && stage.Code == fixture.SourceStages[0].Code));
     }
 
     [Fact]
@@ -259,18 +261,18 @@ public sealed class ProductModelStageBulkCopyTests
     {
         await using var fixture = await BulkCopyFixture.CreateAsync();
         var targetMainStageId = await fixture.Db.MainStages
-            .Where(stage => stage.ProductionLineId == fixture.TargetLine.Id)
+            .Where(stage => stage.DepartmentId == fixture.TargetDepartment.Id)
             .Select(stage => stage.Id)
             .SingleAsync();
         var conflictingStage = new SubStage(
             Guid.NewGuid(), targetMainStageId, "مرحلة مختلفة", fixture.SourceStages[0].Code,
-            fixture.SourceStages[0].Capacity, 4, true, productionLineId: fixture.TargetLine.Id);
+            fixture.SourceStages[0].Capacity, 4, true, departmentId: fixture.TargetDepartment.Id);
         fixture.Db.SubStages.Add(conflictingStage);
         await fixture.Db.SaveChangesAsync();
         fixture.ResetObservations();
         var request = fixture.RequestForTarget(
             fixture.TargetModel.Id,
-            fixture.TargetLine.Id,
+            fixture.TargetDepartment.Id,
             fixture.SourceRelations[0].Id,
             fixture.SourceRelations[1].Id);
 
@@ -291,7 +293,7 @@ public sealed class ProductModelStageBulkCopyTests
         Assert.Equal(1, execution.Value!.FailedCount);
         Assert.Equal(0, execution.Value.AddedCount);
         Assert.False(await fixture.Db.SubStages.AnyAsync(stage =>
-            stage.ProductionLineId == fixture.TargetLine.Id && stage.Code == fixture.SourceStages[1].Code));
+            stage.DepartmentId == fixture.TargetDepartment.Id && stage.Code == fixture.SourceStages[1].Code));
         Assert.Empty(await fixture.Db.ProductModelStages.Where(stage => stage.ProductModelId == fixture.TargetModel.Id).ToArrayAsync());
         Assert.Equal("مرحلة مختلفة", (await fixture.Db.SubStages.SingleAsync(stage => stage.Id == conflictingStage.Id)).Name);
         Assert.Empty(fixture.Audit.Entries);
@@ -308,7 +310,7 @@ public sealed class ProductModelStageBulkCopyTests
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Service.CopyModelStagesAsync(
             fixture.SourceModel.Id,
-            fixture.RequestForTarget(fixture.TargetModel.Id, fixture.TargetLine.Id, fixture.SourceRelations[0].Id, fixture.SourceRelations[1].Id),
+            fixture.RequestForTarget(fixture.TargetModel.Id, fixture.TargetDepartment.Id, fixture.SourceRelations[0].Id, fixture.SourceRelations[1].Id),
             fixture.ActorUserId));
 
         fixture.Db.ChangeTracker.Clear();
@@ -316,7 +318,7 @@ public sealed class ProductModelStageBulkCopyTests
             .Where(stage => stage.ProductModelId == fixture.TargetModel.Id)
             .ToArrayAsync());
         Assert.False(await fixture.Db.SubStages.AsNoTracking().AnyAsync(stage =>
-            stage.ProductionLineId == fixture.TargetLine.Id
+            stage.DepartmentId == fixture.TargetDepartment.Id
             && new[] { fixture.SourceStages[0].Code, fixture.SourceStages[1].Code }.Contains(stage.Code)));
         Assert.Empty(fixture.Publisher.Changes);
     }
@@ -356,7 +358,8 @@ public sealed class ProductModelStageBulkCopyTests
             RecordingAuditEngine audit,
             RecordingPublisher publisher,
             Factory factory,
-            Department department,
+            Department sourceDepartment,
+            Department targetDepartment,
             ProductionLine sourceLine,
             ProductionLine targetLine,
             ProductModel sourceModel,
@@ -370,7 +373,8 @@ public sealed class ProductModelStageBulkCopyTests
             Audit = audit;
             Publisher = publisher;
             Factory = factory;
-            Department = department;
+            SourceDepartment = sourceDepartment;
+            TargetDepartment = targetDepartment;
             SourceLine = sourceLine;
             TargetLine = targetLine;
             SourceModel = sourceModel;
@@ -387,7 +391,8 @@ public sealed class ProductModelStageBulkCopyTests
         public RecordingPublisher Publisher { get; }
         public ProductModelService Service { get; }
         public Factory Factory { get; }
-        public Department Department { get; }
+        public Department SourceDepartment { get; }
+        public Department TargetDepartment { get; }
         public ProductionLine SourceLine { get; }
         public ProductionLine TargetLine { get; }
         public ProductModel SourceModel { get; }
@@ -425,50 +430,55 @@ public sealed class ProductModelStageBulkCopyTests
             await db.Database.EnsureCreatedAsync();
 
             var factory = new Factory(Guid.NewGuid(), "Factory", "F-1");
-            var department = new Department(Guid.NewGuid(), factory.Id, "D-1", "قسم", null, 1);
-            var sourceLine = new ProductionLine(Guid.NewGuid(), factory.Id, "Source", 1, "L-1", departmentId: department.Id);
-            var targetLine = new ProductionLine(Guid.NewGuid(), factory.Id, "Target", 2, "L-2", departmentId: department.Id);
-            var sourceMain = new MainStage(Guid.NewGuid(), sourceLine.Id, "Source main", 1);
-            var targetMain = new MainStage(Guid.NewGuid(), targetLine.Id, "Target main", 1);
+            var sourceDepartment = new Department(Guid.NewGuid(), factory.Id, "D-1", "قسم المصدر", null, 1);
+            var targetDepartment = new Department(Guid.NewGuid(), factory.Id, "D-2", "قسم الهدف", null, 2);
+            var sourceLine = new ProductionLine(Guid.NewGuid(), factory.Id, "Source", 1, "L-1", departmentId: sourceDepartment.Id);
+            var targetLine = new ProductionLine(Guid.NewGuid(), factory.Id, "Target", 2, "L-2", departmentId: targetDepartment.Id);
+            var sourceMain = new MainStage(Guid.NewGuid(), sourceDepartment.Id, "Source main", 1);
+            var targetMain = new MainStage(Guid.NewGuid(), targetDepartment.Id, "Target main", 1);
             var sourceStages = new[]
             {
-                new SubStage(Guid.NewGuid(), sourceMain.Id, "Source one", "SRC-1", 10, 1, productionLineId: sourceLine.Id),
-                new SubStage(Guid.NewGuid(), sourceMain.Id, "Source two", "SRC-2", 10, 2, productionLineId: sourceLine.Id)
+                new SubStage(Guid.NewGuid(), sourceMain.Id, "Source one", "SRC-1", 10, 1, departmentId: sourceDepartment.Id),
+                new SubStage(Guid.NewGuid(), sourceMain.Id, "Source two", "SRC-2", 10, 2, departmentId: sourceDepartment.Id)
             };
             var targetStages = new[]
             {
-                new SubStage(Guid.NewGuid(), targetMain.Id, "Target one", "TGT-1", 10, 1, productionLineId: targetLine.Id),
-                new SubStage(Guid.NewGuid(), targetMain.Id, "Target two", "TGT-2", 10, 2, productionLineId: targetLine.Id),
-                new SubStage(Guid.NewGuid(), targetMain.Id, "Existing", "TGT-3", 10, 3, productionLineId: targetLine.Id)
+                new SubStage(Guid.NewGuid(), targetMain.Id, "Target one", "TGT-1", 10, 1, departmentId: targetDepartment.Id),
+                new SubStage(Guid.NewGuid(), targetMain.Id, "Target two", "TGT-2", 10, 2, departmentId: targetDepartment.Id),
+                new SubStage(Guid.NewGuid(), targetMain.Id, "Existing", "TGT-3", 10, 3, departmentId: targetDepartment.Id)
             };
             var sourceModel = new ProductModel(Guid.NewGuid(), "SOURCE", "Source model");
             var targetModel = new ProductModel(Guid.NewGuid(), "TARGET", "Target model");
             var effectiveFrom = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
             var sourceRelations = new[]
             {
-                new ProductModelStage(Guid.NewGuid(), sourceModel.Id, sourceStages[0].Id, 1, 1.25m, 12.5m, CompensationMode.SharedPercentage, true, true, effectiveFrom),
-                new ProductModelStage(Guid.NewGuid(), sourceModel.Id, sourceStages[1].Id, 2, 2.50m, 25m, CompensationMode.FullRatePerWorker, false, false)
+                new ProductModelStage(Guid.NewGuid(), sourceModel.Id, sourceLine.Id, sourceStages[0].Id, 1, 1.25m, 12.5m, CompensationMode.SharedPercentage, true, true, effectiveFrom),
+                new ProductModelStage(Guid.NewGuid(), sourceModel.Id, sourceLine.Id, sourceStages[1].Id, 2, 2.50m, 25m, CompensationMode.FullRatePerWorker, false, false)
             };
-            db.AddRange(factory, department, sourceLine, targetLine, sourceMain, targetMain, sourceModel, targetModel);
+            db.AddRange(factory, sourceDepartment, targetDepartment, sourceLine, targetLine, sourceMain, targetMain, sourceModel, targetModel);
             db.SubStages.AddRange(sourceStages.Concat(targetStages));
             db.ProductModelStages.AddRange(sourceRelations);
             await db.SaveChangesAsync();
             publisher.Changes.Clear();
             var audit = new RecordingAuditEngine();
-            return new BulkCopyFixture(connection, db, audit, publisher, factory, department, sourceLine, targetLine, sourceModel, targetModel, sourceStages, targetStages, sourceRelations);
+            return new BulkCopyFixture(connection, db, audit, publisher, factory, sourceDepartment, targetDepartment, sourceLine, targetLine, sourceModel, targetModel, sourceStages, targetStages, sourceRelations);
         }
 
         public CopyProductModelStagesRequest Request(params Guid[] sourceProductModelStageIds) =>
-            RequestForLine(SourceLine.Id, sourceProductModelStageIds);
+            RequestForDepartment(TargetDepartment.Id, sourceProductModelStageIds);
 
-        public CopyProductModelStagesRequest RequestForLine(Guid targetProductionLineId, params Guid[] sourceProductModelStageIds) =>
-            RequestForTarget(TargetModel.Id, targetProductionLineId, sourceProductModelStageIds);
+        public CopyProductModelStagesRequest RequestForDepartment(Guid targetDepartmentId, params Guid[] sourceProductModelStageIds) =>
+            RequestForTarget(TargetModel.Id, targetDepartmentId, sourceProductModelStageIds);
 
-        public CopyProductModelStagesRequest RequestForTarget(Guid targetModelId, Guid targetProductionLineId, params Guid[] sourceProductModelStageIds) => new()
+        public CopyProductModelStagesRequest RequestForTarget(Guid targetModelId, Guid targetDepartmentId, params Guid[] sourceProductModelStageIds) => new()
         {
+            SourceFactoryId = Factory.Id,
+            SourceDepartmentId = SourceDepartment.Id,
             SourceProductionLineId = SourceLine.Id,
             TargetModelId = targetModelId,
-            TargetProductionLineId = targetProductionLineId,
+            TargetFactoryId = Factory.Id,
+            TargetDepartmentId = targetDepartmentId,
+            TargetProductionLineId = targetDepartmentId == SourceDepartment.Id ? SourceLine.Id : TargetLine.Id,
             SourceProductModelStageIds = sourceProductModelStageIds
         };
 

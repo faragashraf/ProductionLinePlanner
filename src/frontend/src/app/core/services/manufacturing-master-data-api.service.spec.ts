@@ -87,19 +87,19 @@ describe('ManufacturingMasterDataApiService', () => {
     expect(lines).toEqual([{ id: 'line-1', factoryId: 'factory-1', departmentId: 'department-1', name: 'خط الخياطة', sequenceOrder: 1, isActive: true }]);
   });
 
-  it('loads operational stages through the factory, department, line, and status filters', () => {
+  it('loads operational stages through the factory, department, and status filters without a line parameter', () => {
     let stages: unknown[] = [];
-    service.operationalStages({ factoryId: 'factory-1', departmentId: 'department-1', productionLineId: 'line-1', isActive: false, includeInactive: true }).subscribe(value => stages = value);
+    service.operationalStages({ factoryId: 'factory-1', departmentId: 'department-1', isActive: false, includeInactive: true }).subscribe(value => stages = value);
 
     const request = http.expectOne(item => item.method === 'GET' && item.urlWithParams.includes('/api/stages?'));
     expect(request.request.urlWithParams).toContain('factoryId=factory-1');
     expect(request.request.urlWithParams).toContain('departmentId=department-1');
-    expect(request.request.urlWithParams).toContain('productionLineId=line-1');
+    expect(request.request.urlWithParams).not.toContain('productionLineId');
     expect(request.request.urlWithParams).toContain('isActive=false');
     expect(request.request.urlWithParams).toContain('includeInactive=true');
-    request.flush({ success: true, data: { items: [{ id: 'stage-1', mainStageId: 'legacy-group', productionLineId: 'line-1', name: 'تجهيز', code: 'STG001', capacity: 2, defaultOrder: 1, isActive: false }], totalCount: 1, pageNumber: 1, pageSize: 200 } });
+    request.flush({ success: true, data: { items: [{ id: 'stage-1', mainStageId: 'legacy-group', departmentId: 'department-1', name: 'تجهيز', code: 'STG001', capacity: 2, defaultOrder: 1, isActive: false }], totalCount: 1, pageNumber: 1, pageSize: 200 } });
 
-    expect(stages).toEqual([{ id: 'stage-1', mainStageId: 'legacy-group', productionLineId: 'line-1', name: 'تجهيز', code: 'STG001', capacity: 2, defaultOrder: 1, sequenceOrder: 1, isActive: false }]);
+    expect(stages).toEqual([{ id: 'stage-1', mainStageId: 'legacy-group', departmentId: 'department-1', name: 'تجهيز', code: 'STG001', capacity: 2, defaultOrder: 1, sequenceOrder: 1, isActive: false }]);
   });
 
   it('sends the local realtime correlation only with manufacturing mutations', () => {
@@ -112,17 +112,21 @@ describe('ManufacturingMasterDataApiService', () => {
 
   it('posts the authoritative model-stage copy preview to the existing copy endpoint', () => {
     const payload = {
+      sourceFactoryId: 'factory-source',
+      sourceDepartmentId: 'department-source',
       sourceProductionLineId: 'line-source',
       targetModelId: 'model-target',
+      targetFactoryId: 'factory-target',
+      targetDepartmentId: 'department-target',
       targetProductionLineId: 'line-target',
       sourceProductModelStageIds: ['relationship-source'],
       previewOnly: true
     };
     let summary: unknown;
 
-    service.copyModelStages('model-source', payload).subscribe(value => summary = value);
+    service.copyModelStages('model-source', 'line-source', payload).subscribe(value => summary = value);
 
-    const request = http.expectOne(item => item.method === 'POST' && item.url.endsWith('/api/product-models/model-source/stages/copy'));
+    const request = http.expectOne(item => item.method === 'POST' && item.url.endsWith('/api/product-models/model-source/production-lines/line-source/stages/copy'));
     expect(request.request.body).toEqual(payload);
     request.flush({ success: true, data: { isPreview: true, requestedCount: 1, addedCount: 1, skippedCount: 0, failedCount: 0, addedStageIds: [], plannedStages: [], skippedStages: [], failedStages: [], validationErrors: [] } });
     expect(summary).toEqual(jasmine.objectContaining({ isPreview: true, requestedCount: 1, addedCount: 1 }));

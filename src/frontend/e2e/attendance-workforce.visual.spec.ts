@@ -52,8 +52,8 @@ async function prepareWorkforce(page: Page, requests: { workforce: number; detai
     }
     else if (pathname.endsWith('/api/attendance/workforce/workers/worker-1/details')) { requests.details += 1; data = { workerId: 'worker-1', productionDate: '2026-07-19', attendanceRecords: [], assignments: [assignment] }; }
     else if (pathname.endsWith('/api/factories')) data = { items: [{ id: 'factory-1', name: 'شالنجر', code: 'CH', isActive: true }] };
-    else if (pathname.endsWith('/api/production-lines')) data = { items: [{ id: 'line-1', factoryId: 'factory-1', name: 'خط الخياطة', sequenceOrder: 1, isActive: true }] };
-    else if (pathname.includes('/main-stages')) data = { items: [{ id: 'main-1', productionLineId: 'line-1', name: 'الخياطة', sequenceOrder: 1, isCritical: false, isActive: true }] };
+    else if (pathname.endsWith('/api/production-lines')) data = { items: [{ id: 'line-1', factoryId: 'factory-1', departmentId: 'department-1', name: 'خط الخياطة', sequenceOrder: 1, isActive: true }] };
+    else if (pathname.includes('/main-stages')) data = { items: [{ id: 'main-1', departmentId: 'department-1', name: 'الخياطة', sequenceOrder: 1, isCritical: false, isActive: true }] };
     else if (pathname.includes('/sub-stages')) data = { items: [{ id: 'sub-1', mainStageId: 'main-1', name: 'علام وصلة اللسان', code: 'SUB-1', capacity: 1, defaultOrder: 1, isActive: true }] };
     else if (pathname.includes('/sync/production-date/')) data = { syncDateUtc: '2026-07-19T00:00:00Z', sourceUsersCount: 1, sourceCheckInsCount: 1, matchedWorkersCount: 1, unmatchedSourceUsersCount: 0, workersWithoutAttendanceCount: 0, insertedRecords: 1, updatedRecords: 0, skippedRecords: 0 };
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data, error: null }) });

@@ -47,7 +47,7 @@ public sealed class WorkerInitialSyncServiceTests
             [Source(name: "External Replacement", departmentId: 99, employmentStatus: "LeftEmployment", department: "External", shift: "Night")],
             [worker]);
         var salary = new WorkerSalaryHistory(Guid.NewGuid(), worker.Id, 9000m, "EGP", DateTime.UtcNow.AddMonths(-1));
-        var assignment = new WorkerDefaultAssignment(Guid.NewGuid(), worker.Id, Guid.NewGuid(), Guid.NewGuid(), DateTime.UtcNow.AddDays(-5));
+        var assignment = new WorkerDefaultAssignment(Guid.NewGuid(), worker.Id, Guid.NewGuid(), Guid.NewGuid(), DateTime.UtcNow.AddDays(-5), productionLineId: Guid.NewGuid());
         var history = new StageProductionWorkerAllocation(Guid.NewGuid(), worker.Id, worker.EmployeeCode, "Historical local name", 100m, null, "history");
         fixture.Db.WorkerSalaryHistories.Add(salary);
         fixture.Db.WorkerDefaultAssignments.Add(assignment);

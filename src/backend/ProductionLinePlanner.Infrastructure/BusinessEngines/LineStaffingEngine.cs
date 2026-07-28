@@ -38,11 +38,15 @@ public sealed class LineStaffingEngine(AppDbContext dbContext) : ILineStaffingEn
         var line = await dbContext.ProductionLines
             .AsNoTracking()
             .Where(candidate => candidate.Id == productionLineId && candidate.FactoryId == factoryId && candidate.IsActive)
-            .Select(candidate => new { candidate.Id, candidate.Name })
+            .Select(candidate => new { candidate.Id, candidate.Name, candidate.DepartmentId })
             .SingleOrDefaultAsync(cancellationToken);
         if (line is null)
         {
             return Result<LineStaffingPlanDto>.Failure(new Error("NotFound", "Active production line was not found in the selected factory."));
+        }
+        if (line.DepartmentId is null)
+        {
+            return Result<LineStaffingPlanDto>.Failure(new Error("ValidationError", "يجب ربط خط الإنتاج بقسم قبل تحميل التسكين."));
         }
 
         var product = await dbContext.ProductModels
@@ -58,12 +62,13 @@ public sealed class LineStaffingEngine(AppDbContext dbContext) : ILineStaffingEn
         var stages = await dbContext.ProductModelStages
             .AsNoTracking()
             .Where(stage => stage.ProductModelId == productModelId
+                            && stage.ProductionLineId == productionLineId
                             && stage.IsActive
                             && stage.SubStage != null
                             && stage.SubStage.IsActive
                             && stage.SubStage.MainStage != null
                             && stage.SubStage.MainStage.IsActive
-                            && stage.SubStage.MainStage.ProductionLineId == productionLineId)
+                            && stage.SubStage.DepartmentId == line.DepartmentId.Value)
             .OrderBy(stage => stage.StageOrder)
             .Select(stage => new StageRow(
                 stage.Id,
@@ -86,7 +91,7 @@ public sealed class LineStaffingEngine(AppDbContext dbContext) : ILineStaffingEn
 
         var defaultCounts = await dbContext.WorkerDefaultAssignments
             .AsNoTracking()
-            .Where(assignment => assignment.IsActive && stages.Select(stage => stage.SubStageId).Contains(assignment.SubStageId))
+            .Where(assignment => assignment.IsActive && assignment.ProductionLineId == productionLineId && stages.Select(stage => stage.SubStageId).Contains(assignment.SubStageId))
             .GroupBy(assignment => assignment.SubStageId)
             .Select(group => new { SubStageId = group.Key, Count = group.Count() })
             .ToDictionaryAsync(item => item.SubStageId, item => item.Count, cancellationToken);

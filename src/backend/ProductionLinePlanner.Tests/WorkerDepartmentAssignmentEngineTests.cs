@@ -148,8 +148,8 @@ public sealed class WorkerDepartmentAssignmentEngineTests
             var department = new Department(Guid.NewGuid(), factory.Id, "D-001", "قسم التشغيل", null, 1, departmentActive);
             var worker = new Worker(Guid.NewGuid(), "W-001", "اسم محلي", "zk-1", "B-1", attendanceDepartmentId: 7);
             worker.SetLocalDepartmentName("Planner import label");
-            var stage = new SubStage(Guid.NewGuid(), Guid.NewGuid(), "Stage", "S-001", 1, 1, productionLineId: Guid.NewGuid());
-            var assignment = new WorkerDefaultAssignment(Guid.NewGuid(), worker.Id, stage.Id, actor, DateTime.UtcNow);
+            var stage = new SubStage(Guid.NewGuid(), Guid.NewGuid(), "Stage", "S-001", 1, 1, departmentId: Guid.NewGuid());
+            var assignment = new WorkerDefaultAssignment(Guid.NewGuid(), worker.Id, stage.Id, actor, DateTime.UtcNow, productionLineId: Guid.NewGuid());
             db.AddRange(factory, department, worker, assignment);
             await db.SaveChangesAsync();
             db.ChangeTracker.Clear();

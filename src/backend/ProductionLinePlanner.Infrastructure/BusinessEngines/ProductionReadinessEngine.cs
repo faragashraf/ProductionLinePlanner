@@ -41,15 +41,25 @@ public sealed class ProductionReadinessEngine(
             return Result<ProductProductionReadinessDto>.Failure(new Error("NotFound", "Active product model was not found."));
         }
 
+        var departmentId = await dbContext.ProductionLines.AsNoTracking()
+            .Where(line => line.Id == productionLineId && line.IsActive)
+            .Select(line => line.DepartmentId)
+            .SingleOrDefaultAsync(cancellationToken);
+        if (departmentId is null)
+        {
+            return Result<ProductProductionReadinessDto>.Failure(new Error("ValidationError", "خط الإنتاج غير نشط أو غير مرتبط بقسم."));
+        }
+
         var stageRows = await dbContext.ProductModelStages
             .AsNoTracking()
             .Where(stage => stage.ProductModelId == productModelId
+                            && stage.ProductionLineId == productionLineId
                             && stage.IsActive
                             && stage.SubStage != null
                             && stage.SubStage.IsActive
                             && stage.SubStage.MainStage != null
                             && stage.SubStage.MainStage.IsActive
-                            && stage.SubStage.MainStage.ProductionLineId == productionLineId)
+                            && stage.SubStage.DepartmentId == departmentId.Value)
             .OrderBy(stage => stage.StageOrder)
             .Select(stage => new StageRow(
                 stage.Id,
@@ -83,7 +93,7 @@ public sealed class ProductionReadinessEngine(
 
         var assignments = assignmentsResult.Value!;
         var attendance = attendanceResult.Value!;
-        var stageReadiness = stageRows.Select(stage => ToStageReadiness(stage, assignments, attendance)).ToArray();
+        var stageReadiness = stageRows.Select(stage => ToStageReadiness(stage, productionLineId, assignments, attendance)).ToArray();
         var readyStages = stageReadiness.Count(stage => stage.Status == "Ready");
         var withoutWorkers = stageReadiness.Count(stage => stage.Status == "NeedsAssignment");
         var withoutAttendance = stageReadiness.Count(stage => stage.Status == "AttendanceUnavailable");
@@ -123,11 +133,12 @@ public sealed class ProductionReadinessEngine(
 
     private static ProductStageReadinessDto ToStageReadiness(
         StageRow stage,
+        Guid productionLineId,
         IReadOnlyDictionary<Guid, WorkerAssignmentState> assignments,
         IReadOnlyDictionary<Guid, AttendanceStatusRecord> attendance)
     {
         var assignedWorkerIds = assignments.Values
-            .Where(assignment => assignment.EffectiveSubStageId == stage.SubStageId)
+            .Where(assignment => assignment.EffectiveSubStageId == stage.SubStageId && assignment.ProductionLineId == productionLineId)
             .Select(assignment => assignment.WorkerId)
             .Distinct()
             .ToArray();

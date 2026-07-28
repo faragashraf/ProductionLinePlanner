@@ -480,7 +480,7 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
         this.selectedProductModelId,
         this.productionDate
       ),
-      modelStages: this.masterData.modelStages(this.selectedProductModelId)
+      modelStages: this.masterData.modelStages(this.selectedProductModelId, this.selectedProductionLineId)
     })
       .pipe(finalize(() => {
         if (version === this.operationsRequestVersion) {

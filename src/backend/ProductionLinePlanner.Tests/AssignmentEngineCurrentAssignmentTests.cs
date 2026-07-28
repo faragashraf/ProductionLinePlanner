@@ -23,7 +23,8 @@ public sealed class AssignmentEngineCurrentAssignmentTests
             fixture.Worker.Id,
             fixture.DefaultSubStage.Id,
             fixture.ActorId,
-            asOfUtc.AddDays(-3));
+            asOfUtc.AddDays(-3),
+            productionLineId: fixture.ProductionLineId);
         var expiredTemporary = new WorkerTemporaryAssignment(
             Guid.NewGuid(),
             fixture.Worker.Id,
@@ -79,7 +80,7 @@ public sealed class AssignmentEngineCurrentAssignmentTests
         var actorId = Guid.NewGuid();
         await using var db = new AppDbContext(options);
         db.AddRange(
-            new WorkerDefaultAssignment(Guid.NewGuid(), workerId, Guid.NewGuid(), actorId, asOfUtc.AddDays(-1)),
+            new WorkerDefaultAssignment(Guid.NewGuid(), workerId, Guid.NewGuid(), actorId, asOfUtc.AddDays(-1), productionLineId: Guid.NewGuid()),
             new WorkerTemporaryAssignment(Guid.NewGuid(), workerId, Guid.NewGuid(), Guid.NewGuid(), asOfUtc.AddHours(-3), asOfUtc.AddHours(-1), actorId, "Expired temporary", status: "Active"));
         await db.SaveChangesAsync();
         saveInterceptor.ThrowOnSave = true;
@@ -101,7 +102,8 @@ public sealed class AssignmentEngineCurrentAssignmentTests
             fixture.Worker.Id,
             fixture.DefaultSubStage.Id,
             fixture.ActorId,
-            asOfUtc.AddDays(-3)));
+            asOfUtc.AddDays(-3),
+            productionLineId: fixture.ProductionLineId));
         fixture.Db.WorkerTemporaryAssignments.Add(new WorkerTemporaryAssignment(
             Guid.NewGuid(),
             fixture.Worker.Id,
@@ -162,24 +164,24 @@ public sealed class AssignmentEngineCurrentAssignmentTests
     {
         await using var fixture = AssignmentFixture.Create();
         fixture.Db.WorkerDefaultAssignments.Add(new WorkerDefaultAssignment(
-            Guid.NewGuid(), fixture.Worker.Id, fixture.DefaultSubStage.Id, fixture.ActorId, DateTime.UtcNow));
+            Guid.NewGuid(), fixture.Worker.Id, fixture.DefaultSubStage.Id, fixture.ActorId, DateTime.UtcNow, productionLineId: fixture.ProductionLineId));
         await fixture.Db.SaveChangesAsync();
 
         var additionalParticipation = await fixture.Engine.CreateOrUpdateDefaultAssignmentAsync(
-            new CreateDefaultAssignmentRequest { WorkerId = fixture.Worker.Id, SubStageId = fixture.TemporarySubStage.Id },
+            new CreateDefaultAssignmentRequest { WorkerId = fixture.Worker.Id, ProductionLineId = fixture.ProductionLineId, SubStageId = fixture.TemporarySubStage.Id },
             fixture.ActorId);
         Assert.True(additionalParticipation.IsSuccess);
         Assert.Equal(2, await fixture.Db.WorkerDefaultAssignments.CountAsync(x => x.WorkerId == fixture.Worker.Id && x.IsActive));
 
         var duplicate = await fixture.Engine.CreateOrUpdateDefaultAssignmentAsync(
-            new CreateDefaultAssignmentRequest { WorkerId = fixture.Worker.Id, SubStageId = fixture.TemporarySubStage.Id },
+            new CreateDefaultAssignmentRequest { WorkerId = fixture.Worker.Id, ProductionLineId = fixture.ProductionLineId, SubStageId = fixture.TemporarySubStage.Id },
             fixture.ActorId);
         Assert.True(duplicate.IsFailure);
         Assert.Equal("Conflict", duplicate.Error?.Code);
 
-        var missingRemovalReason = await fixture.Engine.RemoveDefaultAssignmentAsync(fixture.Worker.Id, fixture.TemporarySubStage.Id, "", fixture.ActorId);
+        var missingRemovalReason = await fixture.Engine.RemoveDefaultAssignmentAsync(fixture.Worker.Id, fixture.ProductionLineId, fixture.TemporarySubStage.Id, "", fixture.ActorId);
         Assert.True(missingRemovalReason.IsFailure);
-        var removed = await fixture.Engine.RemoveDefaultAssignmentAsync(fixture.Worker.Id, fixture.TemporarySubStage.Id, "Shift completed", fixture.ActorId);
+        var removed = await fixture.Engine.RemoveDefaultAssignmentAsync(fixture.Worker.Id, fixture.ProductionLineId, fixture.TemporarySubStage.Id, "Shift completed", fixture.ActorId);
         Assert.True(removed.IsSuccess);
         var remaining = await fixture.Db.WorkerDefaultAssignments.Where(x => x.WorkerId == fixture.Worker.Id && x.IsActive).ToListAsync();
         Assert.Single(remaining);
@@ -193,10 +195,10 @@ public sealed class AssignmentEngineCurrentAssignmentTests
         await using var fixture = AssignmentFixture.Create();
 
         var first = await fixture.Engine.CreateOrUpdateDefaultAssignmentAsync(
-            new CreateDefaultAssignmentRequest { WorkerId = fixture.Worker.Id, SubStageId = fixture.DefaultSubStage.Id },
+            new CreateDefaultAssignmentRequest { WorkerId = fixture.Worker.Id, ProductionLineId = fixture.ProductionLineId, SubStageId = fixture.DefaultSubStage.Id },
             fixture.ActorId);
         var additional = await fixture.Engine.CreateOrUpdateDefaultAssignmentAsync(
-            new CreateDefaultAssignmentRequest { WorkerId = fixture.Worker.Id, SubStageId = fixture.TemporarySubStage.Id },
+            new CreateDefaultAssignmentRequest { WorkerId = fixture.Worker.Id, ProductionLineId = fixture.ProductionLineId, SubStageId = fixture.TemporarySubStage.Id },
             fixture.ActorId);
 
         Assert.True(first.IsSuccess);
@@ -212,15 +214,17 @@ public sealed class AssignmentEngineCurrentAssignmentTests
         var now = DateTime.UtcNow;
         fixture.Db.AddRange(
             otherWorker,
-            new WorkerDefaultAssignment(Guid.NewGuid(), fixture.Worker.Id, fixture.DefaultSubStage.Id, fixture.ActorId, now.AddMinutes(-2)),
-            new WorkerDefaultAssignment(Guid.NewGuid(), fixture.Worker.Id, fixture.TemporarySubStage.Id, fixture.ActorId, now.AddMinutes(-1)));
+            new WorkerDefaultAssignment(Guid.NewGuid(), fixture.Worker.Id, fixture.DefaultSubStage.Id, fixture.ActorId, now.AddMinutes(-2), productionLineId: fixture.ProductionLineId),
+            new WorkerDefaultAssignment(Guid.NewGuid(), fixture.Worker.Id, fixture.TemporarySubStage.Id, fixture.ActorId, now.AddMinutes(-1), productionLineId: fixture.ProductionLineId));
         await fixture.Db.SaveChangesAsync();
 
         var duplicateRequest = await fixture.Engine.UpdateStageDefaultAssignmentsAsync(
+            fixture.ProductionLineId,
             fixture.DefaultSubStage.Id,
             [otherWorker.Id, otherWorker.Id],
             fixture.ActorId);
         var result = await fixture.Engine.UpdateStageDefaultAssignmentsAsync(
+            fixture.ProductionLineId,
             fixture.DefaultSubStage.Id,
             [otherWorker.Id],
             fixture.ActorId);
@@ -311,7 +315,7 @@ public sealed class AssignmentEngineCurrentAssignmentTests
         var assignedAt = DateTime.UtcNow.AddMinutes(-5);
         await using (var seed = new AppDbContext(options))
         {
-            seed.WorkerDefaultAssignments.Add(new WorkerDefaultAssignment(Guid.NewGuid(), workerId, subStageId, actorId, assignedAt));
+            seed.WorkerDefaultAssignments.Add(new WorkerDefaultAssignment(Guid.NewGuid(), workerId, subStageId, actorId, assignedAt, productionLineId: Guid.NewGuid()));
             await seed.SaveChangesAsync();
         }
 
@@ -328,11 +332,12 @@ public sealed class AssignmentEngineCurrentAssignmentTests
 
     private sealed class AssignmentFixture : IAsyncDisposable
     {
-        private AssignmentFixture(AppDbContext db, AssignmentEngine engine, Guid actorId, Worker worker, SubStage defaultSubStage, SubStage temporarySubStage)
+        private AssignmentFixture(AppDbContext db, AssignmentEngine engine, Guid actorId, Guid productionLineId, Worker worker, SubStage defaultSubStage, SubStage temporarySubStage)
         {
             Db = db;
             Engine = engine;
             ActorId = actorId;
+            ProductionLineId = productionLineId;
             Worker = worker;
             DefaultSubStage = defaultSubStage;
             TemporarySubStage = temporarySubStage;
@@ -341,6 +346,7 @@ public sealed class AssignmentEngineCurrentAssignmentTests
         public AppDbContext Db { get; }
         public AssignmentEngine Engine { get; }
         public Guid ActorId { get; }
+        public Guid ProductionLineId { get; }
         public Worker Worker { get; }
         public SubStage DefaultSubStage { get; }
         public SubStage TemporarySubStage { get; }
@@ -353,20 +359,22 @@ public sealed class AssignmentEngineCurrentAssignmentTests
             var engine = new AssignmentEngine(db, new NoopAuditEngine());
             var actorId = Guid.NewGuid();
             var factory = new Factory(Guid.NewGuid(), "Factory", "FAC");
-            var line = new ProductionLine(Guid.NewGuid(), factory.Id, "Line", 1);
-            var mainStage = new MainStage(Guid.NewGuid(), line.Id, "Main", 1);
-            var defaultSubStage = new SubStage(Guid.NewGuid(), mainStage.Id, "Default", "DEF", 1, 1);
-            var temporarySubStage = new SubStage(Guid.NewGuid(), mainStage.Id, "Temporary", "TMP", 1, 2);
+            var department = new Department(Guid.NewGuid(), factory.Id, "OPS", "التشغيل", null, 1);
+            var line = new ProductionLine(Guid.NewGuid(), factory.Id, "Line", 1, departmentId: department.Id);
+            var mainStage = new MainStage(Guid.NewGuid(), department.Id, "Main", 1);
+            var defaultSubStage = new SubStage(Guid.NewGuid(), mainStage.Id, "Default", "DEF", 1, 1, departmentId: department.Id);
+            var temporarySubStage = new SubStage(Guid.NewGuid(), mainStage.Id, "Temporary", "TMP", 1, 2, departmentId: department.Id);
             var worker = new Worker(Guid.NewGuid(), "W-1", "Worker One");
 
             db.Factories.Add(factory);
+            db.Departments.Add(department);
             db.ProductionLines.Add(line);
             db.MainStages.Add(mainStage);
             db.SubStages.AddRange(defaultSubStage, temporarySubStage);
             db.Workers.Add(worker);
             db.SaveChanges();
 
-            return new AssignmentFixture(db, engine, actorId, worker, defaultSubStage, temporarySubStage);
+            return new AssignmentFixture(db, engine, actorId, line.Id, worker, defaultSubStage, temporarySubStage);
         }
 
         public ValueTask DisposeAsync() => Db.DisposeAsync();

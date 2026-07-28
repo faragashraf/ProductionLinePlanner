@@ -14,6 +14,7 @@ public sealed class WorkerDefaultAssignmentConfiguration : IEntityTypeConfigurat
         builder.Property(x => x.Id).ValueGeneratedNever();
         builder.Property(x => x.WorkerId).IsRequired();
         builder.Property(x => x.SubStageId).IsRequired();
+        builder.Property(x => x.ProductionLineId).IsRequired();
         builder.Property(x => x.AssignedAt).IsRequired();
         builder.Property(x => x.AssignedByUserId).IsRequired();
         builder.Property(x => x.IsActive).HasDefaultValue(true);
@@ -26,7 +27,8 @@ public sealed class WorkerDefaultAssignmentConfiguration : IEntityTypeConfigurat
 
         // A worker can participate in multiple stages.  The active uniqueness
         // boundary is one worker per stage, not one worker for all stages.
-        builder.HasIndex(x => new { x.WorkerId, x.SubStageId }).IsUnique().HasFilter("[IsActive] = 1");
+        builder.HasIndex(x => new { x.WorkerId, x.ProductionLineId, x.SubStageId }).IsUnique().HasFilter("[IsActive] = 1");
+        builder.HasIndex(x => new { x.ProductionLineId, x.SubStageId });
 
         builder.HasOne(x => x.Worker)
             .WithMany(x => x.DefaultAssignmentHistory)
@@ -36,6 +38,11 @@ public sealed class WorkerDefaultAssignmentConfiguration : IEntityTypeConfigurat
         builder.HasOne(x => x.SubStage)
             .WithMany(x => x.DefaultAssignments)
             .HasForeignKey(x => x.SubStageId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(x => x.ProductionLine)
+            .WithMany()
+            .HasForeignKey(x => x.ProductionLineId)
             .OnDelete(DeleteBehavior.Restrict);
     }
 }

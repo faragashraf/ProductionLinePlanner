@@ -46,8 +46,6 @@ public class ProductionLine
     public DateTime CreatedAtUtc { get; private set; }
     public DateTime UpdatedAtUtc { get; private set; }
 
-    public List<MainStage> MainStages { get; } = [];
-
     public void SetSequenceOrder(int sequenceOrder, DateTime? atUtc = null)
     {
         if (sequenceOrder < 0)

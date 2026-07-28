@@ -723,12 +723,14 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
     const removeRequest = correlationId
       ? this.assignments.removeDefaultAssignment(
           worker.workerId,
+          this.selectedProductionLineId,
           subStageId,
           reason,
           correlationId,
         )
       : this.assignments.removeDefaultAssignment(
           worker.workerId,
+          this.selectedProductionLineId,
           subStageId,
           reason,
         );
@@ -762,11 +764,13 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
     const correlationId = this.manufacturingRealtime?.registerLocalOperation('line-staffing');
     const updateRequest = correlationId
       ? this.assignments.updateStageDefaultAssignments(
+          this.selectedProductionLineId,
           stage.subStageId,
           [...this.selectedDefaultWorkerIds],
           correlationId,
         )
       : this.assignments.updateStageDefaultAssignments(
+          this.selectedProductionLineId,
           stage.subStageId,
           [...this.selectedDefaultWorkerIds],
         );

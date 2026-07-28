@@ -2,6 +2,14 @@ namespace ProductionLinePlanner.Application.DTOs;
 
 public sealed class CopyProductModelStagesSummaryDto
 {
+    public Guid SourceFactoryId { get; init; }
+    public Guid SourceDepartmentId { get; init; }
+    public Guid SourceProductionLineId { get; init; }
+    public Guid SourceProductModelId { get; init; }
+    public Guid TargetFactoryId { get; init; }
+    public Guid TargetDepartmentId { get; init; }
+    public Guid TargetProductionLineId { get; init; }
+    public Guid TargetProductModelId { get; init; }
     public bool IsPreview { get; init; }
     public int RequestedCount { get; init; }
     public int AddedCount { get; init; }
@@ -18,6 +26,8 @@ public sealed class CopyProductModelStagePlanDto
 {
     public Guid SourceProductModelStageId { get; init; }
     public Guid SubStageId { get; init; }
+    public Guid DepartmentId { get; init; }
+    public Guid ProductionLineId { get; init; }
     public string SubStageCode { get; init; } = string.Empty;
     public string SubStageName { get; init; } = string.Empty;
     public int StageOrder { get; init; }

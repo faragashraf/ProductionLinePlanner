@@ -4,7 +4,6 @@ const environment = {
   storageState: process.env['PLP_REALTIME_E2E_STORAGE_STATE'],
   stageFactoryId: process.env['PLP_REALTIME_E2E_STAGE_FACTORY_ID'],
   stageDepartmentId: process.env['PLP_REALTIME_E2E_STAGE_DEPARTMENT_ID'],
-  stageProductionLineId: process.env['PLP_REALTIME_E2E_STAGE_PRODUCTION_LINE_ID'],
   stageName: process.env['PLP_REALTIME_E2E_STAGE_NAME'],
   workerName: process.env['PLP_REALTIME_E2E_WORKER_NAME']
 };
@@ -93,7 +92,6 @@ async function authenticatedContext(browser: Browser): Promise<BrowserContext> {
 async function configureStageContext(page: Page): Promise<void> {
   await page.getByLabel('المصنع').selectOption(environment.stageFactoryId!);
   await page.getByLabel('القسم').selectOption(environment.stageDepartmentId!);
-  await page.getByLabel('خط الإنتاج').selectOption(environment.stageProductionLineId!);
 }
 
 async function findWorker(page: Page, workerName: string): Promise<void> {

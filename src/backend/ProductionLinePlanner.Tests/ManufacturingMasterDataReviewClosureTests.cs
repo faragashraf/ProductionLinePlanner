@@ -22,7 +22,7 @@ public sealed class ManufacturingMasterDataReviewClosureTests
         await using var fixture = await ProductModelFixture.CreateAsync();
         var codeOnlyModel = new ProductModel(Guid.NewGuid(), "CODE-ONLY", "اسم لا يطابق الكود");
         fixture.DbContext.ProductModelStages.Add(
-            new ProductModelStage(Guid.NewGuid(), fixture.Model.Id, fixture.SubStages[0].Id, 1, 1m, null, CompensationMode.FixedAmount));
+            new ProductModelStage(Guid.NewGuid(), fixture.Model.Id, fixture.Line.Id, fixture.SubStages[0].Id, 1, 1m, null, CompensationMode.FixedAmount));
         fixture.DbContext.ProductModels.Add(codeOnlyModel);
         await fixture.DbContext.SaveChangesAsync();
 
@@ -216,6 +216,7 @@ public sealed class ManufacturingMasterDataReviewClosureTests
 
         var updated = await fixture.Service.UpdateModelStageAsync(
             fixture.Model.Id,
+            fixture.Line.Id,
             stage.Id,
             new UpsertProductModelStageRequest { PiecePrice = 8m },
             fixture.ActorUserId);
@@ -226,6 +227,7 @@ public sealed class ManufacturingMasterDataReviewClosureTests
 
         var cleared = await fixture.Service.UpdateModelStageAsync(
             fixture.Model.Id,
+            fixture.Line.Id,
             stage.Id,
             new UpsertProductModelStageRequest { HasStandardSeconds = true, HasEffectiveFrom = true },
             fixture.ActorUserId);
@@ -243,6 +245,7 @@ public sealed class ManufacturingMasterDataReviewClosureTests
 
         var result = await fixture.Service.UpdateModelStageAsync(
             fixture.Model.Id,
+            fixture.Line.Id,
             stage.Id,
             new UpsertProductModelStageRequest { StandardSeconds = 0m, HasStandardSeconds = true },
             fixture.ActorUserId);
@@ -260,6 +263,7 @@ public sealed class ManufacturingMasterDataReviewClosureTests
         var otherRelationship = new ProductModelStage(
             Guid.NewGuid(),
             otherModel.Id,
+            fixture.Line.Id,
             fixture.SubStages[0].Id,
             1,
             5m,
@@ -271,6 +275,7 @@ public sealed class ManufacturingMasterDataReviewClosureTests
 
         var deactivated = await fixture.Service.UpdateModelStageAsync(
             fixture.Model.Id,
+            fixture.Line.Id,
             firstRelationship.Id,
             new UpsertProductModelStageRequest { IsActive = false },
             fixture.ActorUserId);
@@ -283,6 +288,7 @@ public sealed class ManufacturingMasterDataReviewClosureTests
 
         var reactivated = await fixture.Service.UpdateModelStageAsync(
             fixture.Model.Id,
+            fixture.Line.Id,
             firstRelationship.Id,
             new UpsertProductModelStageRequest { IsActive = true },
             fixture.ActorUserId);
@@ -302,6 +308,7 @@ public sealed class ManufacturingMasterDataReviewClosureTests
         var otherRelationship = new ProductModelStage(
             Guid.NewGuid(),
             otherModel.Id,
+            fixture.Line.Id,
             fixture.SubStages[0].Id,
             1,
             5m,
@@ -313,6 +320,7 @@ public sealed class ManufacturingMasterDataReviewClosureTests
 
         var result = await fixture.Service.UpdateModelStageAsync(
             fixture.Model.Id,
+            fixture.Line.Id,
             otherRelationship.Id,
             new UpsertProductModelStageRequest { IsActive = false },
             fixture.ActorUserId);
@@ -331,6 +339,7 @@ public sealed class ManufacturingMasterDataReviewClosureTests
 
         var add = await fixture.Service.AddModelStageAsync(
             fixture.Model.Id,
+            fixture.Line.Id,
             new UpsertProductModelStageRequest
             {
                 SubStageId = fixture.SubStages[2].Id,
@@ -420,16 +429,18 @@ public sealed class ManufacturingMasterDataReviewClosureTests
 
     private sealed class ProductModelFixture : IAsyncDisposable
     {
-        private ProductModelFixture(AppDbContext dbContext, ProductModel model, SubStage[] subStages)
+        private ProductModelFixture(AppDbContext dbContext, ProductModel model, ProductionLine line, SubStage[] subStages)
         {
             DbContext = dbContext;
             Model = model;
+            Line = line;
             SubStages = subStages;
             Service = new ProductModelService(dbContext, new RecordingAuditEngine());
         }
 
         public AppDbContext DbContext { get; }
         public ProductModel Model { get; }
+        public ProductionLine Line { get; }
         public SubStage[] SubStages { get; }
         public ProductModelService Service { get; }
         public Guid ActorUserId { get; } = Guid.NewGuid();
@@ -443,22 +454,25 @@ public sealed class ManufacturingMasterDataReviewClosureTests
         {
             var dbContext = CreateContext();
             var model = new ProductModel(Guid.NewGuid(), "MODEL", "Model");
-            var mainStageId = Guid.NewGuid();
+            var factory = new Factory(Guid.NewGuid(), "Factory", "FAC");
+            var department = new Department(Guid.NewGuid(), factory.Id, "OPS", "التشغيل", "Operations", 1);
+            var line = new ProductionLine(Guid.NewGuid(), factory.Id, "Line", 1, departmentId: department.Id);
+            var mainStage = new MainStage(Guid.NewGuid(), department.Id, "Main", 1);
             var subStages = new[]
             {
-                new SubStage(Guid.NewGuid(), mainStageId, "Cut", "CUT", 1, 1),
-                new SubStage(Guid.NewGuid(), mainStageId, "Sew", "SEW", 1, 2),
-                new SubStage(Guid.NewGuid(), mainStageId, "Pack", "PACK", 1, 3)
+                new SubStage(Guid.NewGuid(), mainStage.Id, "Cut", "CUT", 1, 1, departmentId: department.Id),
+                new SubStage(Guid.NewGuid(), mainStage.Id, "Sew", "SEW", 1, 2, departmentId: department.Id),
+                new SubStage(Guid.NewGuid(), mainStage.Id, "Pack", "PACK", 1, 3, departmentId: department.Id)
             };
-            dbContext.ProductModels.Add(model);
+            dbContext.AddRange(factory, department, line, mainStage, model);
             dbContext.SubStages.AddRange(subStages);
             await dbContext.SaveChangesAsync();
-            return new ProductModelFixture(dbContext, model, subStages);
+            return new ProductModelFixture(dbContext, model, line, subStages);
         }
 
         public ProductModelStage AddStage(int order, decimal piecePrice, decimal? standardSeconds, DateTime? effectiveFrom, bool isActive = true)
         {
-            var stage = new ProductModelStage(Guid.NewGuid(), Model.Id, SubStages[0].Id, order, piecePrice, standardSeconds, CompensationMode.FixedAmount, isActive: isActive, effectiveFrom: effectiveFrom);
+            var stage = new ProductModelStage(Guid.NewGuid(), Model.Id, Line.Id, SubStages[0].Id, order, piecePrice, standardSeconds, CompensationMode.FixedAmount, isActive: isActive, effectiveFrom: effectiveFrom);
             DbContext.ProductModelStages.Add(stage);
             DbContext.SaveChanges();
             return stage;
