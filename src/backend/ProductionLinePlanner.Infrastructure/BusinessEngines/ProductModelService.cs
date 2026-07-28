@@ -330,11 +330,11 @@ public sealed class ProductModelService(
         return Result<ProductModelDeleteEligibilityDto>.Success(new ProductModelDeleteEligibilityDto(modelId, canDelete, canDelete ? "يمكن حذف الموديل من الكتالوج التشغيلي." : $"لا يمكن حذف الموديل لأنه مرتبط بـ {string.Join(" و", blockers)}."));
     }
 
-    public async Task<Result<ProductModelStageDto[]>> GetModelStagesAsync(Guid modelId, CancellationToken cancellationToken = default)
+    public async Task<Result<ProductModelStageDto[]>> GetModelStagesAsync(Guid modelId, Guid productionLineId, CancellationToken cancellationToken = default)
     {
-        if (modelId == Guid.Empty)
+        if (modelId == Guid.Empty || productionLineId == Guid.Empty)
         {
-            return Result<ProductModelStageDto[]>.Failure(new Error("ValidationError", "ModelId is required."));
+            return Result<ProductModelStageDto[]>.Failure(new Error("ValidationError", "ModelId and ProductionLineId are required."));
         }
 
         var exists = await dbContext.ProductModels.AnyAsync(x => x.Id == modelId, cancellationToken);
@@ -343,16 +343,24 @@ public sealed class ProductModelService(
             return Result<ProductModelStageDto[]>.Failure(new Error("NotFound", "Model not found."));
         }
 
+        var lineExists = await dbContext.ProductionLines.AnyAsync(x => x.Id == productionLineId, cancellationToken);
+        if (!lineExists)
+        {
+            return Result<ProductModelStageDto[]>.Failure(new Error("NotFound", "Production line not found."));
+        }
+
         var items = await dbContext.ProductModelStages
             .AsNoTracking()
-            .Where(x => x.ProductModelId == modelId)
+            .Where(x => x.ProductModelId == modelId && x.ProductionLineId == productionLineId)
             .Include(x => x.SubStage)
             .OrderBy(x => x.StageOrder)
             .Select(x => new ProductModelStageDto
             {
                 Id = x.Id,
                 ProductModelId = x.ProductModelId,
+                ProductionLineId = x.ProductionLineId,
                 SubStageId = x.SubStageId,
+                DepartmentId = x.SubStage != null ? x.SubStage.DepartmentId : Guid.Empty,
                 SubStageCode = x.SubStage != null ? x.SubStage.Code : string.Empty,
                 SubStageName = x.SubStage != null ? x.SubStage.Name : string.Empty,
                 StageOrder = x.StageOrder,
@@ -372,6 +380,7 @@ public sealed class ProductModelService(
 
     public async Task<Result<ProductModelStageDto>> AddModelStageAsync(
         Guid modelId,
+        Guid productionLineId,
         UpsertProductModelStageRequest request,
         Guid actorUserId,
         string? requestMeta = null,
@@ -382,9 +391,9 @@ public sealed class ProductModelService(
             return Result<ProductModelStageDto>.Failure(new Error("Unauthorized", "User context is required."));
         }
 
-        if (modelId == Guid.Empty)
+        if (modelId == Guid.Empty || productionLineId == Guid.Empty)
         {
-            return Result<ProductModelStageDto>.Failure(new Error("ValidationError", "ModelId is required."));
+            return Result<ProductModelStageDto>.Failure(new Error("ValidationError", "ModelId and ProductionLineId are required."));
         }
 
         if (request.SubStageId is null)
@@ -428,16 +437,28 @@ public sealed class ProductModelService(
             return Result<ProductModelStageDto>.Failure(new Error("NotFound", "Model not found."));
         }
 
-        var subStageExists = await dbContext.SubStages.AnyAsync(
-            x => x.Id == request.SubStageId.Value && x.IsActive,
-            cancellationToken);
-        if (!subStageExists)
+        var lineDepartmentId = await dbContext.ProductionLines
+            .Where(x => x.Id == productionLineId && x.IsActive)
+            .Select(x => x.DepartmentId)
+            .SingleOrDefaultAsync(cancellationToken);
+        if (!lineDepartmentId.HasValue)
+        {
+            return Result<ProductModelStageDto>.Failure(new Error("NotFound", "Active production line with a department was not found."));
+        }
+
+        var subStageDepartmentId = await dbContext.SubStages
+            .Where(x => x.Id == request.SubStageId.Value && x.IsActive)
+            .Select(x => (Guid?)x.DepartmentId)
+            .SingleOrDefaultAsync(cancellationToken);
+        if (!subStageDepartmentId.HasValue)
         {
             return Result<ProductModelStageDto>.Failure(new Error("NotFound", "Sub stage not found."));
         }
+        if (subStageDepartmentId.Value != lineDepartmentId.Value)
+            return Result<ProductModelStageDto>.Failure(new Error("ValidationError", "SubStage must belong to the selected production line department."));
 
         var duplicateSubStage = await dbContext.ProductModelStages.AnyAsync(
-            x => x.ProductModelId == modelId && x.SubStageId == request.SubStageId.Value,
+            x => x.ProductModelId == modelId && x.ProductionLineId == productionLineId && x.SubStageId == request.SubStageId.Value,
             cancellationToken);
         if (duplicateSubStage)
         {
@@ -445,7 +466,7 @@ public sealed class ProductModelService(
         }
 
         var duplicateOrder = await dbContext.ProductModelStages.AnyAsync(
-            x => x.ProductModelId == modelId && x.StageOrder == request.StageOrder.Value,
+            x => x.ProductModelId == modelId && x.ProductionLineId == productionLineId && x.StageOrder == request.StageOrder.Value,
             cancellationToken);
         if (duplicateOrder)
         {
@@ -455,6 +476,7 @@ public sealed class ProductModelService(
         var entity = new ProductModelStage(
             id: Guid.NewGuid(),
             productModelId: modelId,
+            productionLineId: productionLineId,
             subStageId: request.SubStageId.Value,
             stageOrder: request.StageOrder.Value,
             piecePrice: request.PiecePrice.Value,
@@ -472,7 +494,7 @@ public sealed class ProductModelService(
             nameof(ProductModelStage),
             entity.Id.ToString(),
             before: null,
-            after: new { entity.Id, entity.ProductModelId, entity.SubStageId, entity.StageOrder, entity.PiecePrice, entity.StandardSeconds, entity.CompensationMode, entity.IsRequired, entity.IsActive },
+            after: new { entity.Id, entity.ProductModelId, entity.ProductionLineId, DepartmentId = lineDepartmentId.Value, entity.SubStageId, entity.StageOrder, entity.PiecePrice, entity.StandardSeconds, entity.CompensationMode, entity.IsRequired, entity.IsActive, entity.EffectiveFrom },
             requestMeta: requestMeta);
         await dbContext.SaveChangesAsync(cancellationToken);
 
@@ -480,7 +502,9 @@ public sealed class ProductModelService(
         {
             Id = entity.Id,
             ProductModelId = entity.ProductModelId,
+            ProductionLineId = entity.ProductionLineId,
             SubStageId = entity.SubStageId,
+            DepartmentId = subStage.DepartmentId,
             SubStageCode = subStage.Code,
             SubStageName = subStage.Name,
             StageOrder = entity.StageOrder,
@@ -497,6 +521,7 @@ public sealed class ProductModelService(
 
     public async Task<Result<ProductModelStageDto>> UpdateModelStageAsync(
         Guid modelId,
+        Guid productionLineId,
         Guid modelStageId,
         UpsertProductModelStageRequest request,
         Guid actorUserId,
@@ -508,9 +533,9 @@ public sealed class ProductModelService(
             return Result<ProductModelStageDto>.Failure(new Error("Unauthorized", "User context is required."));
         }
 
-        if (modelId == Guid.Empty || modelStageId == Guid.Empty)
+        if (modelId == Guid.Empty || productionLineId == Guid.Empty || modelStageId == Guid.Empty)
         {
-            return Result<ProductModelStageDto>.Failure(new Error("ValidationError", "ModelId and ModelStageId are required."));
+            return Result<ProductModelStageDto>.Failure(new Error("ValidationError", "ModelId, ProductionLineId and ModelStageId are required."));
         }
 
         if (request.SubStageId is null && request.StageOrder is null && request.PiecePrice is null &&
@@ -521,17 +546,29 @@ public sealed class ProductModelService(
         }
 
         var entity = await dbContext.ProductModelStages
-            .FirstOrDefaultAsync(x => x.Id == modelStageId && x.ProductModelId == modelId, cancellationToken);
+            .FirstOrDefaultAsync(x => x.Id == modelStageId && x.ProductModelId == modelId && x.ProductionLineId == productionLineId, cancellationToken);
         if (entity is null)
         {
             return Result<ProductModelStageDto>.Failure(new Error("NotFound", "Product model stage not found."));
         }
 
         var subStageId = request.SubStageId ?? entity.SubStageId;
-        if (request.SubStageId is not null && await dbContext.SubStages.AnyAsync(x => x.Id == request.SubStageId && x.IsActive, cancellationToken) is false)
+        var lineDepartmentId = await dbContext.ProductionLines
+            .Where(x => x.Id == productionLineId && x.IsActive)
+            .Select(x => x.DepartmentId)
+            .SingleOrDefaultAsync(cancellationToken);
+        if (!lineDepartmentId.HasValue)
+            return Result<ProductModelStageDto>.Failure(new Error("NotFound", "Active production line with a department was not found."));
+
+        var requestedDepartmentId = request.SubStageId is null
+            ? null
+            : await dbContext.SubStages.Where(x => x.Id == request.SubStageId && x.IsActive).Select(x => (Guid?)x.DepartmentId).SingleOrDefaultAsync(cancellationToken);
+        if (request.SubStageId is not null && !requestedDepartmentId.HasValue)
         {
             return Result<ProductModelStageDto>.Failure(new Error("NotFound", "Sub stage not found."));
         }
+        if (requestedDepartmentId.HasValue && requestedDepartmentId.Value != lineDepartmentId.Value)
+            return Result<ProductModelStageDto>.Failure(new Error("ValidationError", "SubStage must belong to the selected production line department."));
 
         var stageOrder = request.StageOrder ?? entity.StageOrder;
         if (request.StageOrder is not null && request.StageOrder.Value <= 0)
@@ -552,7 +589,7 @@ public sealed class ProductModelService(
         if (request.SubStageId is not null && request.SubStageId.Value != entity.SubStageId)
         {
             var duplicate = await dbContext.ProductModelStages.AnyAsync(
-                x => x.Id != entity.Id && x.ProductModelId == modelId && x.SubStageId == request.SubStageId.Value,
+                x => x.Id != entity.Id && x.ProductModelId == modelId && x.ProductionLineId == productionLineId && x.SubStageId == request.SubStageId.Value,
                 cancellationToken);
             if (duplicate)
             {
@@ -563,7 +600,7 @@ public sealed class ProductModelService(
         if (request.StageOrder is not null)
         {
             var duplicateOrder = await dbContext.ProductModelStages.AnyAsync(
-                x => x.Id != entity.Id && x.ProductModelId == modelId && x.StageOrder == stageOrder,
+                x => x.Id != entity.Id && x.ProductModelId == modelId && x.ProductionLineId == productionLineId && x.StageOrder == stageOrder,
                 cancellationToken);
             if (duplicateOrder)
             {
@@ -571,7 +608,7 @@ public sealed class ProductModelService(
             }
         }
 
-        var before = new { entity.Id, entity.SubStageId, entity.StageOrder, entity.PiecePrice, entity.StandardSeconds, entity.CompensationMode, entity.IsRequired, entity.IsActive };
+        var before = new { entity.Id, entity.ProductModelId, entity.ProductionLineId, DepartmentId = lineDepartmentId.Value, entity.SubStageId, entity.StageOrder, entity.PiecePrice, entity.StandardSeconds, entity.CompensationMode, entity.IsRequired, entity.IsActive, entity.EffectiveFrom };
         entity.Update(
             subStageId,
             stageOrder,
@@ -591,7 +628,7 @@ public sealed class ProductModelService(
             nameof(ProductModelStage),
             entity.Id.ToString(),
             before: before,
-            after: new { entity.Id, entity.SubStageId, entity.StageOrder, entity.PiecePrice, entity.StandardSeconds, entity.CompensationMode, entity.IsRequired, entity.IsActive },
+            after: new { entity.Id, entity.ProductModelId, entity.ProductionLineId, DepartmentId = lineDepartmentId.Value, entity.SubStageId, entity.StageOrder, entity.PiecePrice, entity.StandardSeconds, entity.CompensationMode, entity.IsRequired, entity.IsActive, entity.EffectiveFrom },
             requestMeta: requestMeta);
         await dbContext.SaveChangesAsync(cancellationToken);
 
@@ -599,7 +636,9 @@ public sealed class ProductModelService(
         {
             Id = entity.Id,
             ProductModelId = entity.ProductModelId,
+            ProductionLineId = entity.ProductionLineId,
             SubStageId = entity.SubStageId,
+            DepartmentId = subStage.DepartmentId,
             SubStageCode = subStage.Code,
             SubStageName = subStage.Name,
             StageOrder = entity.StageOrder,
@@ -616,6 +655,7 @@ public sealed class ProductModelService(
 
     public async Task<Result> DeactivateModelStageAsync(
         Guid modelId,
+        Guid productionLineId,
         Guid modelStageId,
         Guid actorUserId,
         string? requestMeta = null,
@@ -626,13 +666,13 @@ public sealed class ProductModelService(
             return Result.Failure(new Error("Unauthorized", "User context is required."));
         }
 
-        if (modelId == Guid.Empty || modelStageId == Guid.Empty)
+        if (modelId == Guid.Empty || productionLineId == Guid.Empty || modelStageId == Guid.Empty)
         {
-            return Result.Failure(new Error("ValidationError", "ModelId and ModelStageId are required."));
+            return Result.Failure(new Error("ValidationError", "ModelId, ProductionLineId and ModelStageId are required."));
         }
 
         var entity = await dbContext.ProductModelStages
-            .FirstOrDefaultAsync(x => x.Id == modelStageId && x.ProductModelId == modelId, cancellationToken);
+            .FirstOrDefaultAsync(x => x.Id == modelStageId && x.ProductModelId == modelId && x.ProductionLineId == productionLineId, cancellationToken);
         if (entity is null)
         {
             return Result.Failure(new Error("NotFound", "Product model stage not found."));
@@ -643,7 +683,7 @@ public sealed class ProductModelService(
             return Result.Success();
         }
 
-        var before = new { entity.Id, entity.IsActive };
+        var before = new { entity.Id, entity.ProductModelId, entity.ProductionLineId, entity.SubStageId, entity.IsActive };
         entity.Deactivate(DateTime.UtcNow);
         await auditEngine.RecordAsync(
             actorUserId,
@@ -651,7 +691,7 @@ public sealed class ProductModelService(
             nameof(ProductModelStage),
             entity.Id.ToString(),
             before: before,
-            after: new { entity.Id, entity.IsActive },
+            after: new { entity.Id, entity.ProductModelId, entity.ProductionLineId, entity.SubStageId, entity.IsActive },
             requestMeta: requestMeta);
         await dbContext.SaveChangesAsync(cancellationToken);
 
@@ -670,14 +710,14 @@ public sealed class ProductModelService(
             return Result<CopyProductModelStagesSummaryDto>.Failure(new Error("Unauthorized", "User context is required."));
         }
 
-        if (sourceModelId == Guid.Empty || request.SourceProductionLineId == Guid.Empty)
+        if (sourceModelId == Guid.Empty || request.SourceFactoryId == Guid.Empty || request.SourceDepartmentId == Guid.Empty || request.SourceProductionLineId == Guid.Empty)
         {
-            return Result<CopyProductModelStagesSummaryDto>.Failure(new Error("ValidationError", "Source model and production line are required."));
+            return Result<CopyProductModelStagesSummaryDto>.Failure(new Error("ValidationError", "Source factory, department, production line and model are required."));
         }
 
-        if (request.TargetModelId == Guid.Empty || request.TargetProductionLineId == Guid.Empty)
+        if (request.TargetModelId == Guid.Empty || request.TargetFactoryId == Guid.Empty || request.TargetDepartmentId == Guid.Empty || request.TargetProductionLineId == Guid.Empty)
         {
-            return Result<CopyProductModelStagesSummaryDto>.Failure(new Error("ValidationError", "Target model and production line are required."));
+            return Result<CopyProductModelStagesSummaryDto>.Failure(new Error("ValidationError", "Target factory, department, production line and model are required."));
         }
 
         if (sourceModelId == request.TargetModelId && request.SourceProductionLineId == request.TargetProductionLineId)
@@ -714,13 +754,23 @@ public sealed class ProductModelService(
         var existingLines = await dbContext.ProductionLines
             .AsNoTracking()
             .Where(line => lineIds.Contains(line.Id))
-            .Select(line => new { line.Id, line.IsActive })
+            .Select(line => new { line.Id, line.FactoryId, line.DepartmentId, line.IsActive })
             .ToArrayAsync(cancellationToken);
         if (existingLines.Length != lineIds.Length)
         {
             return Result<CopyProductModelStagesSummaryDto>.Failure(new Error("NotFound", "Source or target production line was not found."));
         }
-        if (existingLines.Single(line => line.Id == request.TargetProductionLineId).IsActive == false)
+        var sourceLine = existingLines.Single(line => line.Id == request.SourceProductionLineId);
+        var targetLine = existingLines.Single(line => line.Id == request.TargetProductionLineId);
+        if (sourceLine.FactoryId != request.SourceFactoryId || sourceLine.DepartmentId != request.SourceDepartmentId)
+        {
+            return Result<CopyProductModelStagesSummaryDto>.Failure(new Error("ValidationError", "Source factory, department and production line context is inconsistent."));
+        }
+        if (targetLine.FactoryId != request.TargetFactoryId || targetLine.DepartmentId != request.TargetDepartmentId)
+        {
+            return Result<CopyProductModelStagesSummaryDto>.Failure(new Error("ValidationError", "Target factory, department and production line context is inconsistent."));
+        }
+        if (!targetLine.IsActive)
         {
             return Result<CopyProductModelStagesSummaryDto>.Failure(new Error("ValidationError", "Target production line must be active."));
         }
@@ -733,23 +783,22 @@ public sealed class ProductModelService(
             .ToDictionaryAsync(stage => stage.Id, cancellationToken);
         var targetStages = await dbContext.SubStages
             .AsNoTracking()
-            .Where(stage => stage.ProductionLineId == request.TargetProductionLineId)
+            .Where(stage => stage.DepartmentId == request.TargetDepartmentId)
             .ToArrayAsync(cancellationToken);
         var targetRelations = await dbContext.ProductModelStages
             .AsNoTracking()
             .Where(stage => stage.ProductModelId == request.TargetModelId
-                && stage.SubStage != null
-                && stage.SubStage.ProductionLineId == request.TargetProductionLineId)
+                && stage.ProductionLineId == request.TargetProductionLineId)
             .Select(stage => new { stage.SubStageId, stage.StageOrder })
             .ToArrayAsync(cancellationToken);
         var targetModelStageOrders = await dbContext.ProductModelStages
             .AsNoTracking()
-            .Where(stage => stage.ProductModelId == request.TargetModelId)
+            .Where(stage => stage.ProductModelId == request.TargetModelId && stage.ProductionLineId == request.TargetProductionLineId)
             .Select(stage => stage.StageOrder)
             .ToArrayAsync(cancellationToken);
         var targetGroups = await dbContext.MainStages
             .AsNoTracking()
-            .Where(stage => stage.ProductionLineId == request.TargetProductionLineId)
+            .Where(stage => stage.DepartmentId == request.TargetDepartmentId)
             .OrderBy(stage => stage.SequenceOrder)
             .ThenBy(stage => stage.Name)
             .ThenBy(stage => stage.Id)
@@ -766,7 +815,8 @@ public sealed class ProductModelService(
         {
             if (!sourceStages.TryGetValue(sourceProductModelStageId, out var sourceStage)
                 || sourceStage.ProductModelId != sourceModelId
-                || sourceStage.SubStage?.ProductionLineId != request.SourceProductionLineId)
+                || sourceStage.ProductionLineId != request.SourceProductionLineId
+                || sourceStage.SubStage?.DepartmentId != request.SourceDepartmentId)
             {
                 validationErrors.Add($"علاقة مرحلة المصدر {sourceProductModelStageId} لا تنتمي إلى سياق المصدر المختار.");
                 continue;
@@ -779,6 +829,14 @@ public sealed class ProductModelService(
         {
             return Result<CopyProductModelStagesSummaryDto>.Success(new CopyProductModelStagesSummaryDto
             {
+                SourceFactoryId = request.SourceFactoryId,
+                SourceDepartmentId = request.SourceDepartmentId,
+                SourceProductionLineId = request.SourceProductionLineId,
+                SourceProductModelId = sourceModelId,
+                TargetFactoryId = request.TargetFactoryId,
+                TargetDepartmentId = request.TargetDepartmentId,
+                TargetProductionLineId = request.TargetProductionLineId,
+                TargetProductModelId = request.TargetModelId,
                 IsPreview = request.PreviewOnly,
                 RequestedCount = request.SourceProductModelStageIds.Length,
                 FailedCount = validationErrors.Count,
@@ -809,7 +867,7 @@ public sealed class ProductModelService(
                     StageCode = sourceCatalogStage.Code,
                     StageName = sourceCatalogStage.Name,
                     ReasonCode = "TargetStageCodeConflict",
-                    Reason = $"يوجد على خط الإنتاج الهدف مرحلة أخرى بالكود {sourceCatalogStage.Code}. لم يتم استبدالها أو تعديلها."
+                    Reason = $"يوجد في القسم الهدف مرحلة أخرى بالكود {sourceCatalogStage.Code}. لم يتم استبدالها أو تعديلها."
                 });
                 continue;
             }
@@ -819,7 +877,7 @@ public sealed class ProductModelService(
                 skipped.Add(CreateSkippedStage(
                     sourceStage,
                     "AlreadyLinked",
-                    "المرحلة موجودة بالفعل ضمن الموديل الهدف وخط الإنتاج الهدف."));
+                    "المرحلة موجودة بالفعل ضمن الموديل وخط الإنتاج الهدف."));
                 continue;
             }
 
@@ -862,6 +920,8 @@ public sealed class ProductModelService(
         if (request.PreviewOnly)
         {
             return Result<CopyProductModelStagesSummaryDto>.Success(BuildCopySummary(
+                sourceModelId,
+                request,
                 true,
                 request.SourceProductModelStageIds.Length,
                 plans,
@@ -873,6 +933,8 @@ public sealed class ProductModelService(
         if (failed.Count > 0)
         {
             return Result<CopyProductModelStagesSummaryDto>.Success(BuildCopySummary(
+                sourceModelId,
+                request,
                 false,
                 request.SourceProductModelStageIds.Length,
                 [],
@@ -888,7 +950,7 @@ public sealed class ProductModelService(
             var nextGroupOrder = targetGroups.Length == 0 ? 1 : targetGroups.Max(group => group.SequenceOrder) + 1;
             createdTargetGroup = new MainStage(
                 targetGroupId,
-                request.TargetProductionLineId,
+                request.TargetDepartmentId,
                 "Internal operational stage group",
                 nextGroupOrder,
                 createdAtUtc: createdAtUtc);
@@ -906,13 +968,14 @@ public sealed class ProductModelService(
                 plan.TargetStageOrder,
                 plan.Candidate.SourceStage.SubStage.IsActive,
                 createdAtUtc,
-                request.TargetProductionLineId))
+                request.TargetDepartmentId))
             .ToArray();
         dbContext.SubStages.AddRange(addedSubStages);
 
         var addedEntities = plans.Select(plan => new ProductModelStage(
             id: Guid.NewGuid(),
             productModelId: request.TargetModelId,
+            productionLineId: request.TargetProductionLineId,
             subStageId: plan.ResultSubStageId,
             stageOrder: plan.StageOrder,
             piecePrice: plan.Candidate.SourceStage.PiecePrice,
@@ -934,7 +997,11 @@ public sealed class ProductModelService(
             {
                 SourceModelId = sourceModelId,
                 TargetModelId = request.TargetModelId,
+                request.SourceFactoryId,
+                request.SourceDepartmentId,
                 request.SourceProductionLineId,
+                request.TargetFactoryId,
+                request.TargetDepartmentId,
                 request.TargetProductionLineId,
                 RequestedCount = request.SourceProductModelStageIds.Length,
                 AddedCount = addedEntities.Length,
@@ -952,6 +1019,8 @@ public sealed class ProductModelService(
 
         return Result<CopyProductModelStagesSummaryDto>.Success(
             BuildCopySummary(
+                sourceModelId,
+                request,
                 false,
                 request.SourceProductModelStageIds.Length,
                 plans,
@@ -979,6 +1048,8 @@ public sealed class ProductModelService(
     }
 
     private static CopyProductModelStagesSummaryDto BuildCopySummary(
+        Guid sourceModelId,
+        CopyProductModelStagesRequest request,
         bool isPreview,
         int requestedCount,
         IReadOnlyList<CopyPlan> plans,
@@ -987,6 +1058,14 @@ public sealed class ProductModelService(
         Guid[] addedStageIds) =>
         new()
         {
+            SourceFactoryId = request.SourceFactoryId,
+            SourceDepartmentId = request.SourceDepartmentId,
+            SourceProductionLineId = request.SourceProductionLineId,
+            SourceProductModelId = sourceModelId,
+            TargetFactoryId = request.TargetFactoryId,
+            TargetDepartmentId = request.TargetDepartmentId,
+            TargetProductionLineId = request.TargetProductionLineId,
+            TargetProductModelId = request.TargetModelId,
             IsPreview = isPreview,
             RequestedCount = requestedCount,
             AddedCount = plans.Count,
@@ -997,14 +1076,16 @@ public sealed class ProductModelService(
             {
                 SourceProductModelStageId = plan.Candidate.SourceStage.Id,
                 SubStageId = plan.Candidate.SourceStage.SubStageId,
+                DepartmentId = plan.Candidate.SourceStage.SubStage?.DepartmentId ?? Guid.Empty,
+                ProductionLineId = request.TargetProductionLineId,
                 SubStageCode = plan.Candidate.SourceStage.SubStage?.Code ?? string.Empty,
                 SubStageName = plan.Candidate.SourceStage.SubStage?.Name ?? string.Empty,
                 StageOrder = plan.StageOrder,
                 TargetStageOrder = plan.TargetStageOrder,
                 CreatesTargetStage = plan.Candidate.ExistingTargetStage is null,
                 StatusLabel = plan.Candidate.ExistingTargetStage is null
-                    ? "ستُنشأ على الخط الهدف ثم ترتبط بالموديل."
-                    : "المرحلة موجودة على الخط الهدف وسترتبط بالموديل."
+                    ? "ستُنشأ في القسم الهدف ثم ترتبط بالموديل."
+                    : "المرحلة موجودة في القسم الهدف وسترتبط بالموديل."
             }).ToArray(),
             SkippedStages = skipped.ToArray(),
             FailedStages = failed.ToArray()

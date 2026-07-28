@@ -108,7 +108,7 @@ export class FactoryMapApiService {
     attendanceSummaryBySubStageId: Map<string, RawRecord>,
     attendanceSummaryAvailability: AttendanceSummaryAvailability
   ): FactoryLayout {
-    const mainStageMap = this.groupByParentId(mainStages, ['lineId', 'productionLineId', 'parentLineId']);
+    const mainStageMap = this.groupByParentId(mainStages, ['departmentId', 'parentDepartmentId']);
     const subStageByMainMap = this.groupByParentId(subStages, ['mainStageId', 'parentMainStageId', 'parentId']);
     const lines = productionLines.map((line, index) => this.mapLine(
       line,
@@ -159,7 +159,8 @@ export class FactoryMapApiService {
   ): ProductionLineLayout {
     const id = this.resolveString(lineRecord, ['id', 'lineId', 'productionLineId', '_id'], `line-${index + 1}`);
     const name = this.resolveString(lineRecord, ['name', 'lineName', 'title'], `الخط ${index + 1}`);
-    const stages = (mainStageMap.get(id) ?? []).map((stage, stageIndex) => this.mapMainStage(
+    const departmentId = this.resolveString(lineRecord, ['departmentId']);
+    const stages = (mainStageMap.get(departmentId) ?? []).map((stage, stageIndex) => this.mapMainStage(
       stage,
       stageIndex,
       id,
@@ -167,21 +168,23 @@ export class FactoryMapApiService {
       subStageByMainMap,
       staffingCoverageBySubStageId,
       attendanceSummaryBySubStageId,
-      attendanceSummaryAvailability
+      attendanceSummaryAvailability,
+      id
     ));
     const subStageIds = stages.flatMap(stage => stage.subStages.map(subStage => subStage.id));
     const summary = this.summarizeNodes(stages, this.hierarchySummaryOverride(
       subStageIds,
       staffingCoverageBySubStageId,
       attendanceSummaryBySubStageId,
-      'productionLine'
+      'productionLine',
+      id
     ));
     const activeStage = stages[0];
 
     return {
       id,
       type: 'line',
-      departmentId: this.resolveString(lineRecord, ['departmentId']) || null,
+      departmentId: departmentId || null,
       departmentName: this.resolveString(lineRecord, ['departmentNameAr', 'departmentName', 'department']) || null,
       name,
       status: this.statusFor(summary.staffingStatus, summary.readinessPercent),
@@ -213,7 +216,8 @@ export class FactoryMapApiService {
     subStageByMainMap: Map<string, RawRecord[]>,
     staffingCoverageBySubStageId: Map<string, RawRecord>,
     attendanceSummaryBySubStageId: Map<string, RawRecord>,
-    attendanceSummaryAvailability: AttendanceSummaryAvailability
+    attendanceSummaryAvailability: AttendanceSummaryAvailability,
+    productionLineId: string
   ): MainStageLayout {
     const id = this.resolveString(stageRecord, ['id', 'mainStageId', 'stageId', '_id'], `${lineId}-stage-${index + 1}`);
     const subStages = (subStageByMainMap.get(id) ?? []).map((subStage, subStageIndex) =>
@@ -222,14 +226,16 @@ export class FactoryMapApiService {
         `${id}-sub-${subStageIndex + 1}`,
         staffingCoverageBySubStageId,
         attendanceSummaryBySubStageId,
-        attendanceSummaryAvailability
+        attendanceSummaryAvailability,
+        productionLineId
       )
     );
     const summary = this.summarizeNodes(subStages, this.hierarchySummaryOverride(
       subStages.map(subStage => subStage.id),
       staffingCoverageBySubStageId,
       attendanceSummaryBySubStageId,
-      'mainStage'
+      'mainStage',
+      productionLineId
     ));
 
     return {
@@ -259,28 +265,35 @@ export class FactoryMapApiService {
     fallbackId: string,
     staffingCoverageBySubStageId: Map<string, RawRecord>,
     attendanceSummaryBySubStageId: Map<string, RawRecord>,
-    attendanceSummaryAvailability: AttendanceSummaryAvailability
+    attendanceSummaryAvailability: AttendanceSummaryAvailability,
+    productionLineId: string
   ): SubStageLayout {
     const id = this.resolveString(subStageRecord, ['id', 'subStageId', '_id'], fallbackId);
-    const coverage = staffingCoverageBySubStageId.get(id);
-    const staffingSummaryAvailable = !!coverage;
+    const coverageRoot = staffingCoverageBySubStageId.get(id);
+    const coverage = coverageRoot
+      ? this.productionLineBreakdown(coverageRoot, productionLineId) ?? coverageRoot
+      : undefined;
+    const staffingSummaryAvailable = !!coverageRoot && !!coverage;
     const workerRequirementDefined = staffingSummaryAvailable && this.toBoolean(
-      this.pickFirst(coverage!, ['hasAuthoritativeRequiredWorkerCount']),
+      this.pickFirst(coverageRoot!, ['hasAuthoritativeRequiredWorkerCount']),
       false
     );
     const workersCurrent = staffingSummaryAvailable
       ? this.toNumber(this.pickFirst(coverage!, ['assignedWorkersCount']), 0)
       : 0;
     const workersRequired = workerRequirementDefined
-      ? this.toNumber(this.pickFirst(coverage!, ['requiredWorkersCount']), 0)
+      ? this.toNumber(this.pickFirst(coverageRoot!, ['requiredWorkersCount']), 0)
       : 0;
     const staffingStatus = staffingSummaryAvailable
-      ? this.toStaffingStatus(this.pickFirst(coverage!, ['staffingStatus']), workersCurrent, workersRequired, workerRequirementDefined)
+      ? this.toStaffingStatus(undefined, workersCurrent, workersRequired, workerRequirementDefined)
       : 'RequirementNotDefined';
     const readinessPercent = workerRequirementDefined
-      ? this.toPercent(this.pickFirst(coverage!, ['assignmentCoveragePercent']), workersCurrent, workersRequired)
+      ? this.toPercent(undefined, workersCurrent, workersRequired)
       : 0;
-    const attendance = attendanceSummaryBySubStageId.get(id);
+    const attendanceRoot = attendanceSummaryBySubStageId.get(id);
+    const attendance = attendanceRoot
+      ? this.productionLineBreakdown(attendanceRoot, productionLineId) ?? attendanceRoot
+      : undefined;
     const attendanceSummaryAvailable = attendanceSummaryAvailability === 'available' && !!attendance;
     const attendanceStatus = attendanceSummaryAvailability === 'not-authorized'
       ? 'NotAuthorized'
@@ -366,8 +379,20 @@ export class FactoryMapApiService {
     subStageIds: string[],
     staffingCoverageBySubStageId: Map<string, RawRecord>,
     attendanceSummaryBySubStageId: Map<string, RawRecord>,
-    scope: 'mainStage' | 'productionLine' | 'factory'
+    scope: 'mainStage' | 'productionLine' | 'factory',
+    productionLineId?: string
   ): HierarchySummaryOverride {
+    if (productionLineId) {
+      const staffingKey = scope === 'mainStage'
+        ? 'mainStageDistinctWorkersCount'
+        : 'productionLineDistinctWorkersCount';
+      const attendancePrefix = scope === 'mainStage' ? 'mainStageDistinct' : 'productionLineDistinct';
+      return {
+        workersCurrent: this.firstProductionLineAggregateNumber(subStageIds, staffingCoverageBySubStageId, productionLineId, staffingKey),
+        presentAssignedWorkers: this.firstProductionLineAggregateNumber(subStageIds, attendanceSummaryBySubStageId, productionLineId, `${attendancePrefix}PresentWorkersCount`),
+        absentAssignedWorkers: this.firstProductionLineAggregateNumber(subStageIds, attendanceSummaryBySubStageId, productionLineId, `${attendancePrefix}AbsentWorkersCount`)
+      };
+    }
     const staffingKey = `${scope}DistinctWorkersCount`;
     const attendancePrefix = `${scope}Distinct`;
     return {
@@ -375,6 +400,30 @@ export class FactoryMapApiService {
       presentAssignedWorkers: this.firstAggregateNumber(subStageIds, attendanceSummaryBySubStageId, `${attendancePrefix}PresentWorkersCount`),
       absentAssignedWorkers: this.firstAggregateNumber(subStageIds, attendanceSummaryBySubStageId, `${attendancePrefix}AbsentWorkersCount`)
     };
+  }
+
+  private firstProductionLineAggregateNumber(
+    ids: string[],
+    records: Map<string, RawRecord>,
+    productionLineId: string,
+    key: string
+  ): number | undefined {
+    for (const id of ids) {
+      const record = records.get(id);
+      if (!record) continue;
+      const breakdown = this.productionLineBreakdown(record, productionLineId) ?? record;
+      const value = this.pickFirst(breakdown, [key]);
+      if (typeof value === 'number' && Number.isFinite(value)) return value;
+    }
+    return undefined;
+  }
+
+  private productionLineBreakdown(record: RawRecord, productionLineId: string): RawRecord | undefined {
+    const items = this.pickFirst(record, ['productionLines']);
+    if (!Array.isArray(items)) return undefined;
+    return items
+      .map((item) => this.normalizeObject(item))
+      .find((item) => this.resolveString(item, ['productionLineId', 'lineId']) === productionLineId);
   }
 
   private firstAggregateNumber(ids: string[], records: Map<string, RawRecord>, key: string): number | undefined {

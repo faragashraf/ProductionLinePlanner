@@ -6,7 +6,8 @@ public sealed record AssignmentNotificationDispatchRequest(
     Guid? FromSubStageId,
     Guid? ToSubStageId,
     Guid AssignmentId,
-    string AssignmentType);
+    string AssignmentType,
+    Guid? ProductionLineId = null);
 
 /// <summary>
 /// Bridges successful assignment writes to the existing notification-policy platform.

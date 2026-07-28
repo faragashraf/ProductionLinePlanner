@@ -23,7 +23,7 @@ public sealed class AssignmentNotificationDispatchTests
         await using var fixture = await Fixture.CreateAsync(enabled: true, includeActor: true, includeOtherRecipient: true);
 
         var result = await fixture.Engine.CreateOrUpdateDefaultAssignmentAsync(
-            new CreateDefaultAssignmentRequest { WorkerId = fixture.Worker.Id, SubStageId = fixture.Stage.Id },
+            new CreateDefaultAssignmentRequest { WorkerId = fixture.Worker.Id, ProductionLineId = fixture.ProductionLineId, SubStageId = fixture.Stage.Id },
             fixture.Actor.Id);
 
         Assert.True(result.IsSuccess);
@@ -70,7 +70,7 @@ public sealed class AssignmentNotificationDispatchTests
         await using var fixture = await Fixture.CreateAsync(enabled: false, includeActor: true, includeOtherRecipient: false);
 
         var result = await fixture.Engine.CreateOrUpdateDefaultAssignmentAsync(
-            new CreateDefaultAssignmentRequest { WorkerId = fixture.Worker.Id, SubStageId = fixture.Stage.Id },
+            new CreateDefaultAssignmentRequest { WorkerId = fixture.Worker.Id, ProductionLineId = fixture.ProductionLineId, SubStageId = fixture.Stage.Id },
             fixture.Actor.Id);
 
         Assert.True(result.IsSuccess);
@@ -84,7 +84,7 @@ public sealed class AssignmentNotificationDispatchTests
         await using var fixture = await Fixture.CreateAsync(enabled: true, includeActor: false, includeOtherRecipient: true);
 
         var result = await fixture.Engine.CreateOrUpdateDefaultAssignmentAsync(
-            new CreateDefaultAssignmentRequest { WorkerId = fixture.Worker.Id, SubStageId = fixture.Stage.Id },
+            new CreateDefaultAssignmentRequest { WorkerId = fixture.Worker.Id, ProductionLineId = fixture.ProductionLineId, SubStageId = fixture.Stage.Id },
             fixture.Actor.Id);
 
         Assert.True(result.IsSuccess);
@@ -95,7 +95,7 @@ public sealed class AssignmentNotificationDispatchTests
 
     private sealed class Fixture : IAsyncDisposable
     {
-        private Fixture(AppDbContext db, AssignmentEngine engine, RecordingLiveDispatcher liveDispatcher, AppUser actor, AppUser otherRecipient, Worker worker, SubStage stage)
+        private Fixture(AppDbContext db, AssignmentEngine engine, RecordingLiveDispatcher liveDispatcher, AppUser actor, AppUser otherRecipient, Worker worker, SubStage stage, Guid productionLineId)
         {
             Db = db;
             Engine = engine;
@@ -104,6 +104,7 @@ public sealed class AssignmentNotificationDispatchTests
             OtherRecipient = otherRecipient;
             Worker = worker;
             Stage = stage;
+            ProductionLineId = productionLineId;
         }
 
         public AppDbContext Db { get; }
@@ -113,6 +114,7 @@ public sealed class AssignmentNotificationDispatchTests
         public AppUser OtherRecipient { get; }
         public Worker Worker { get; }
         public SubStage Stage { get; }
+        public Guid ProductionLineId { get; }
 
         public static async Task<Fixture> CreateAsync(bool enabled, bool includeActor, bool includeOtherRecipient)
         {
@@ -123,16 +125,17 @@ public sealed class AssignmentNotificationDispatchTests
             var otherRecipient = new AppUser(Guid.NewGuid(), "Other recipient", "assignment-recipient@test.local", "hash");
             var worker = new Worker(Guid.NewGuid(), "W-1", "Worker One");
             var factory = new Factory(Guid.NewGuid(), "Factory", "FAC");
-            var line = new ProductionLine(Guid.NewGuid(), factory.Id, "Line", 1);
-            var group = new MainStage(Guid.NewGuid(), line.Id, "Legacy", 1);
-            var stage = new SubStage(Guid.NewGuid(), group.Id, "Assembly", "STG001", 1, 1, productionLineId: line.Id);
+            var department = new Department(Guid.NewGuid(), factory.Id, "OPS", "التشغيل", "Operations", 1);
+            var line = new ProductionLine(Guid.NewGuid(), factory.Id, "Line", 1, departmentId: department.Id);
+            var group = new MainStage(Guid.NewGuid(), department.Id, "Legacy", 1);
+            var stage = new SubStage(Guid.NewGuid(), group.Id, "Assembly", "STG001", 1, 1, departmentId: group.DepartmentId);
             var policy = new NotificationPolicy(Guid.NewGuid(), NotificationEventKeys.AssignmentChanged, enabled, NotificationSeverity.Warning, true, true, false, null, "تسكين العامل", "تم تسكين {WorkerName} في {LineName} بواسطة {ActorName}.");
             var sortOrder = 1;
             if (includeActor)
                 policy.RecipientRules.Add(new NotificationPolicyRecipientRule(Guid.NewGuid(), policy.Id, NotificationRecipientKind.Creator, null, null, null, null, false, sortOrder++));
             if (includeOtherRecipient)
                 policy.RecipientRules.Add(new NotificationPolicyRecipientRule(Guid.NewGuid(), policy.Id, NotificationRecipientKind.User, otherRecipient.Id, null, null, null, false, sortOrder));
-            db.AddRange(actor, otherRecipient, worker, factory, line, group, stage, policy);
+            db.AddRange(actor, otherRecipient, worker, factory, department, line, group, stage, policy);
             await db.SaveChangesAsync();
 
             var liveDispatcher = new RecordingLiveDispatcher();
@@ -140,7 +143,7 @@ public sealed class AssignmentNotificationDispatchTests
             var recipientResolver = new NotificationRecipientResolver(db, new NoopPermissionService());
             var policyEngine = new NotificationPolicyEngine(new CodeNotificationEventCatalog(), new NotificationTemplateResolver(), recipientResolver);
             var dispatcher = new AssignmentNotificationDispatcher(db, policyEngine, publisher, NullLogger<AssignmentNotificationDispatcher>.Instance);
-            return new Fixture(db, new AssignmentEngine(db, new AuditEngine(db), dispatcher), liveDispatcher, actor, otherRecipient, worker, stage);
+            return new Fixture(db, new AssignmentEngine(db, new AuditEngine(db), dispatcher), liveDispatcher, actor, otherRecipient, worker, stage, line.Id);
         }
 
         public async ValueTask DisposeAsync() => await Db.DisposeAsync();

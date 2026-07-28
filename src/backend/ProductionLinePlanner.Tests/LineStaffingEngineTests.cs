@@ -76,7 +76,7 @@ public sealed class LineStaffingEngineTests
         await using var fixture = await StaffingFixture.CreateAsync();
         fixture.Db.WorkerDefaultAssignments.Add(new WorkerDefaultAssignment(
             Guid.NewGuid(), fixture.TemporarilyMovedWorker.Id, fixture.TemporarySubStage.Id, Guid.NewGuid(),
-            new DateTime(2026, 7, 10, 9, 0, 0, DateTimeKind.Utc)));
+            new DateTime(2026, 7, 10, 9, 0, 0, DateTimeKind.Utc), productionLineId: fixture.Line.Id));
         await fixture.Db.SaveChangesAsync();
 
         var result = await fixture.Engine.GetLineStaffingPlanAsync(
@@ -167,8 +167,9 @@ public sealed class LineStaffingEngineTests
             var actorId = Guid.NewGuid();
             var referenceDate = new DateOnly(2026, 7, 13);
             var factory = new Factory(Guid.NewGuid(), "Factory", "FAC");
-            var line = new ProductionLine(Guid.NewGuid(), factory.Id, "Line", 1);
-            var mainStage = new MainStage(Guid.NewGuid(), line.Id, "Main", 1);
+            var department = new Department(Guid.NewGuid(), factory.Id, "OPS", "التشغيل", "Operations", 1);
+            var line = new ProductionLine(Guid.NewGuid(), factory.Id, "Line", 1, departmentId: department.Id);
+            var mainStage = new MainStage(Guid.NewGuid(), department.Id, "Main", 1);
             var defaultSubStage = new SubStage(Guid.NewGuid(), mainStage.Id, "Default", "DEF", 1, 1);
             var temporarySubStage = new SubStage(Guid.NewGuid(), mainStage.Id, "Temporary", "TMP", 1, 2);
             var model = new ProductModel(Guid.NewGuid(), "MODEL", "Model");
@@ -179,13 +180,13 @@ public sealed class LineStaffingEngineTests
             var inactive = new Worker(Guid.NewGuid(), "103", "Inactive worker");
             inactive.Suspend();
 
-            db.AddRange(factory, line, mainStage, defaultSubStage, temporarySubStage, model, moved, defaultWorker, former, inactive);
+            db.AddRange(factory, department, line, mainStage, defaultSubStage, temporarySubStage, model, moved, defaultWorker, former, inactive);
             db.ProductModelStages.AddRange(
-                new ProductModelStage(Guid.NewGuid(), model.Id, defaultSubStage.Id, 1, .38m, 10m, CompensationMode.SharedPercentage),
-                new ProductModelStage(Guid.NewGuid(), model.Id, temporarySubStage.Id, 2, .38m, 10m, CompensationMode.SharedPercentage));
+                new ProductModelStage(Guid.NewGuid(), model.Id, line.Id, defaultSubStage.Id, 1, .38m, 10m, CompensationMode.SharedPercentage),
+                new ProductModelStage(Guid.NewGuid(), model.Id, line.Id, temporarySubStage.Id, 2, .38m, 10m, CompensationMode.SharedPercentage));
             db.WorkerDefaultAssignments.AddRange(
-                new WorkerDefaultAssignment(Guid.NewGuid(), moved.Id, defaultSubStage.Id, actorId, new DateTime(2026, 7, 10, 8, 0, 0, DateTimeKind.Utc)),
-                new WorkerDefaultAssignment(Guid.NewGuid(), defaultWorker.Id, defaultSubStage.Id, actorId, new DateTime(2026, 7, 10, 8, 0, 0, DateTimeKind.Utc)));
+                new WorkerDefaultAssignment(Guid.NewGuid(), moved.Id, defaultSubStage.Id, actorId, new DateTime(2026, 7, 10, 8, 0, 0, DateTimeKind.Utc), productionLineId: line.Id),
+                new WorkerDefaultAssignment(Guid.NewGuid(), defaultWorker.Id, defaultSubStage.Id, actorId, new DateTime(2026, 7, 10, 8, 0, 0, DateTimeKind.Utc), productionLineId: line.Id));
             db.WorkerTemporaryAssignments.Add(new WorkerTemporaryAssignment(
                 Guid.NewGuid(), moved.Id, defaultSubStage.Id, temporarySubStage.Id,
                 new DateTime(2026, 7, 12, 0, 0, 0, DateTimeKind.Utc),

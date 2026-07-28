@@ -44,8 +44,8 @@ public sealed class Structure001HierarchyTests
         var factory = new Factory(Guid.NewGuid(), "Factory", "FAC");
         var department = new Department(Guid.NewGuid(), factory.Id, "CUT", "القص", null, 1);
         var line = new ProductionLine(Guid.NewGuid(), factory.Id, "Line", 1, departmentId: department.Id);
-        var mainStage = new MainStage(Guid.NewGuid(), line.Id, "Main", 1);
-        var subStage = new SubStage(Guid.NewGuid(), mainStage.Id, "Sew", "SEW", 1, 1, productionLineId: line.Id);
+        var mainStage = new MainStage(Guid.NewGuid(), department.Id, "Main", 1);
+        var subStage = new SubStage(Guid.NewGuid(), mainStage.Id, "Sew", "SEW", 1, 1, departmentId: mainStage.DepartmentId);
         db.AddRange(factory, department, line, mainStage, subStage);
         await db.SaveChangesAsync();
         var actor = Guid.NewGuid();
@@ -67,66 +67,66 @@ public sealed class Structure001HierarchyTests
     }
 
     [Fact]
-    public async Task Operational_stage_uses_line_group_and_next_legacy_stage_code()
+    public async Task Operational_stage_uses_department_group_and_next_legacy_stage_code()
     {
         await using var db = CreateDb();
         var factory = new Factory(Guid.NewGuid(), "Factory", "FAC");
         var department = new Department(Guid.NewGuid(), factory.Id, "CUT", "القص", null, 1);
         var line = new ProductionLine(Guid.NewGuid(), factory.Id, "Line", 1, departmentId: department.Id);
-        var group = new MainStage(Guid.NewGuid(), line.Id, "Grouping", 1);
-        var legacy = new SubStage(Guid.NewGuid(), group.Id, "Legacy", "STG099", 0, 1, productionLineId: line.Id);
+        var group = new MainStage(Guid.NewGuid(), department.Id, "Grouping", 1);
+        var legacy = new SubStage(Guid.NewGuid(), group.Id, "Legacy", "STG099", 0, 1, departmentId: group.DepartmentId);
         db.AddRange(factory, department, line, group, legacy);
         await db.SaveChangesAsync();
 
         var service = new ProductionStageCatalogService(db, new AuditEngine(db), new StageDependencyInspector(db));
-        var result = await service.CreateOperationalStageAsync(line.Id, "Operational", 4, true, Guid.NewGuid());
+        var result = await service.CreateOperationalStageAsync(department.Id, "Operational", 4, true, Guid.NewGuid());
 
         Assert.True(result.IsSuccess);
         Assert.Equal(group.Id, result.Value!.MainStageId);
-        Assert.Equal(line.Id, result.Value.ProductionLineId);
+        Assert.Equal(department.Id, result.Value.DepartmentId);
         Assert.Equal("STG100", result.Value.Code);
         Assert.Equal(2, result.Value.DefaultOrder);
     }
 
     [Fact]
-    public async Task Operational_stage_uses_one_deterministic_legacy_group_when_the_line_has_multiple_groups()
+    public async Task Operational_stage_uses_one_deterministic_group_when_the_department_has_multiple_groups()
     {
         await using var db = CreateDb();
         var factory = new Factory(Guid.NewGuid(), "Factory", "FAC");
-        var line = new ProductionLine(Guid.NewGuid(), factory.Id, "Line", 1);
-        var first = new MainStage(Guid.NewGuid(), line.Id, "First", 1);
-        var second = new MainStage(Guid.NewGuid(), line.Id, "Second", 2);
-        db.AddRange(factory, line, second, first);
+        var department = new Department(Guid.NewGuid(), factory.Id, "OPS", "التشغيل", null, 1);
+        var first = new MainStage(Guid.NewGuid(), department.Id, "First", 1);
+        var second = new MainStage(Guid.NewGuid(), department.Id, "Second", 2);
+        db.AddRange(factory, department, second, first);
         await db.SaveChangesAsync();
 
         var result = await new ProductionStageCatalogService(db, new AuditEngine(db), new StageDependencyInspector(db))
-            .CreateOperationalStageAsync(line.Id, "Operational", 1, true, Guid.NewGuid());
+            .CreateOperationalStageAsync(department.Id, "Operational", 1, true, Guid.NewGuid());
 
         Assert.True(result.IsSuccess);
         Assert.Equal(first.Id, result.Value!.MainStageId);
-        Assert.Equal(line.Id, result.Value.ProductionLineId);
+        Assert.Equal(department.Id, result.Value.DepartmentId);
     }
 
     [Fact]
-    public async Task Operational_stage_creates_one_internal_legacy_group_only_when_the_line_has_no_active_group()
+    public async Task Operational_stage_creates_one_internal_group_only_when_the_department_has_no_active_group()
     {
         await using var db = CreateDb();
         var factory = new Factory(Guid.NewGuid(), "Factory", "FAC");
-        var line = new ProductionLine(Guid.NewGuid(), factory.Id, "Line", 1);
-        db.AddRange(factory, line);
+        var department = new Department(Guid.NewGuid(), factory.Id, "OPS", "التشغيل", null, 1);
+        db.AddRange(factory, department);
         await db.SaveChangesAsync();
         var service = new ProductionStageCatalogService(db, new AuditEngine(db), new StageDependencyInspector(db));
 
-        var first = await service.CreateOperationalStageAsync(line.Id, "First", 1, true, Guid.NewGuid());
-        var second = await service.CreateOperationalStageAsync(line.Id, "Second", 1, true, Guid.NewGuid());
+        var first = await service.CreateOperationalStageAsync(department.Id, "First", 1, true, Guid.NewGuid());
+        var second = await service.CreateOperationalStageAsync(department.Id, "Second", 1, true, Guid.NewGuid());
 
         Assert.True(first.IsSuccess);
         Assert.True(second.IsSuccess);
-        var groups = await db.MainStages.Where(item => item.ProductionLineId == line.Id).ToArrayAsync();
+        var groups = await db.MainStages.Where(item => item.DepartmentId == department.Id).ToArrayAsync();
         Assert.Single(groups);
         Assert.Equal(groups[0].Id, first.Value!.MainStageId);
         Assert.Equal(groups[0].Id, second.Value!.MainStageId);
-        Assert.All(await db.SubStages.Where(item => item.ProductionLineId == line.Id).ToArrayAsync(), item => Assert.Equal(line.Id, item.ProductionLineId));
+        Assert.All(await db.SubStages.Where(item => item.DepartmentId == department.Id).ToArrayAsync(), item => Assert.Equal(department.Id, item.DepartmentId));
         Assert.Equal(1, first.Value.DefaultOrder);
         Assert.Equal(2, second.Value.DefaultOrder);
     }
@@ -136,33 +136,33 @@ public sealed class Structure001HierarchyTests
     {
         await using var db = CreateDb();
         var factory = new Factory(Guid.NewGuid(), "Factory", "FAC");
-        var line = new ProductionLine(Guid.NewGuid(), factory.Id, "Line", 1);
-        var group = new MainStage(Guid.NewGuid(), line.Id, "Grouping", 1);
-        var active = new SubStage(Guid.NewGuid(), group.Id, "Active", "STG001", 0, 2, productionLineId: line.Id);
-        var inactive = new SubStage(Guid.NewGuid(), group.Id, "Inactive", "STG002", 0, 7, isActive: false, productionLineId: line.Id);
-        db.AddRange(factory, line, group, active, inactive);
+        var department = new Department(Guid.NewGuid(), factory.Id, "OPS", "التشغيل", null, 1);
+        var group = new MainStage(Guid.NewGuid(), department.Id, "Grouping", 1);
+        var active = new SubStage(Guid.NewGuid(), group.Id, "Active", "STG001", 0, 2, departmentId: group.DepartmentId);
+        var inactive = new SubStage(Guid.NewGuid(), group.Id, "Inactive", "STG002", 0, 7, isActive: false, departmentId: group.DepartmentId);
+        db.AddRange(factory, department, group, active, inactive);
         await db.SaveChangesAsync();
 
         var result = await new ProductionStageCatalogService(db, new AuditEngine(db), new StageDependencyInspector(db))
-            .CreateOperationalStageAsync(line.Id, "Operational", 1, true, Guid.NewGuid());
+            .CreateOperationalStageAsync(department.Id, "Operational", 1, true, Guid.NewGuid());
 
         Assert.True(result.IsSuccess);
         Assert.Equal(8, result.Value!.DefaultOrder);
     }
 
     [Fact]
-    public async Task Operational_stage_allocates_independent_orders_for_different_lines()
+    public async Task Operational_stage_allocates_independent_orders_for_different_departments()
     {
         await using var db = CreateDb();
         var factory = new Factory(Guid.NewGuid(), "Factory", "FAC");
-        var firstLine = new ProductionLine(Guid.NewGuid(), factory.Id, "First", 1);
-        var secondLine = new ProductionLine(Guid.NewGuid(), factory.Id, "Second", 2);
-        db.AddRange(factory, firstLine, secondLine);
+        var firstDepartment = new Department(Guid.NewGuid(), factory.Id, "D1", "الأول", null, 1);
+        var secondDepartment = new Department(Guid.NewGuid(), factory.Id, "D2", "الثاني", null, 2);
+        db.AddRange(factory, firstDepartment, secondDepartment);
         await db.SaveChangesAsync();
         var service = new ProductionStageCatalogService(db, new AuditEngine(db), new StageDependencyInspector(db));
 
-        var first = await service.CreateOperationalStageAsync(firstLine.Id, "First", 1, true, Guid.NewGuid());
-        var second = await service.CreateOperationalStageAsync(secondLine.Id, "Second", 1, true, Guid.NewGuid());
+        var first = await service.CreateOperationalStageAsync(firstDepartment.Id, "First", 1, true, Guid.NewGuid());
+        var second = await service.CreateOperationalStageAsync(secondDepartment.Id, "Second", 1, true, Guid.NewGuid());
 
         Assert.True(first.IsSuccess);
         Assert.True(second.IsSuccess);
@@ -175,20 +175,20 @@ public sealed class Structure001HierarchyTests
     {
         await using var db = CreateDb();
         var factory = new Factory(Guid.NewGuid(), "Factory", "FAC");
-        var line = new ProductionLine(Guid.NewGuid(), factory.Id, "Line", 1);
-        var group = new MainStage(Guid.NewGuid(), line.Id, "Grouping", 1);
-        var existing = new SubStage(Guid.NewGuid(), group.Id, "Existing", "STG001", 0, 4, productionLineId: line.Id);
-        db.AddRange(factory, line, group, existing);
+        var department = new Department(Guid.NewGuid(), factory.Id, "OPS", "التشغيل", null, 1);
+        var group = new MainStage(Guid.NewGuid(), department.Id, "Grouping", 1);
+        var existing = new SubStage(Guid.NewGuid(), group.Id, "Existing", "STG001", 0, 4, departmentId: group.DepartmentId);
+        db.AddRange(factory, department, group, existing);
         await db.SaveChangesAsync();
 
         var request = System.Text.Json.JsonSerializer.Deserialize<CreateOperationalStageRequest>(
-            $$"""{"productionLineId":"{{line.Id}}","name":"Operational","capacity":1,"defaultOrder":1}""",
+            $$"""{"departmentId":"{{department.Id}}","name":"Operational","capacity":1,"defaultOrder":1}""",
             new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
         Assert.NotNull(request);
         Assert.DoesNotContain(typeof(CreateOperationalStageRequest).GetProperties(), property => property.Name == "DefaultOrder");
 
         var result = await new ProductionStageCatalogService(db, new AuditEngine(db), new StageDependencyInspector(db))
-            .CreateOperationalStageAsync(request!.ProductionLineId, request.Name, request.Capacity, request.IsActive, Guid.NewGuid());
+            .CreateOperationalStageAsync(request!.DepartmentId, request.Name, request.Capacity, request.IsActive, Guid.NewGuid());
 
         Assert.True(result.IsSuccess, result.Error?.Message);
         Assert.Equal(5, result.Value!.DefaultOrder);
@@ -208,13 +208,13 @@ public sealed class Structure001HierarchyTests
         await setupConnection.OpenAsync();
         var setupOptions = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(setupConnection).Options;
         var factory = new Factory(Guid.NewGuid(), "Factory", "FAC");
-        var line = new ProductionLine(Guid.NewGuid(), factory.Id, "Line", 1);
-        var group = new MainStage(Guid.NewGuid(), line.Id, "Grouping", 1);
+        var department = new Department(Guid.NewGuid(), factory.Id, "OPS", "التشغيل", null, 1);
+        var group = new MainStage(Guid.NewGuid(), department.Id, "Grouping", 1);
         var actor = new AppUser(Guid.NewGuid(), "Test Actor", "actor@example.test", "hash");
         await using (var setup = new AppDbContext(setupOptions))
         {
             await setup.Database.EnsureCreatedAsync();
-            setup.AddRange(factory, line, group, actor);
+            setup.AddRange(factory, department, group, actor);
             await setup.SaveChangesAsync();
         }
 
@@ -228,8 +228,8 @@ public sealed class Structure001HierarchyTests
         var secondService = new ProductionStageCatalogService(secondDb, new AuditEngine(secondDb), new StageDependencyInspector(secondDb));
 
         var results = await Task.WhenAll(
-            Task.Run(() => firstService.CreateOperationalStageAsync(line.Id, "First", 1, true, actor.Id)),
-            Task.Run(() => secondService.CreateOperationalStageAsync(line.Id, "Second", 1, true, actor.Id)));
+            Task.Run(() => firstService.CreateOperationalStageAsync(department.Id, "First", 1, true, actor.Id)),
+            Task.Run(() => secondService.CreateOperationalStageAsync(department.Id, "Second", 1, true, actor.Id)));
 
         Assert.All(results, result => Assert.True(result.IsSuccess));
         Assert.Equal([1, 2], results.Select(result => result.Value!.DefaultOrder).OrderBy(order => order).ToArray());
@@ -240,12 +240,13 @@ public sealed class Structure001HierarchyTests
     {
         await using var db = CreateDb();
         var factory = new Factory(Guid.NewGuid(), "Factory", "FAC");
-        var line = new ProductionLine(Guid.NewGuid(), factory.Id, "Line", 1);
-        var group = new MainStage(Guid.NewGuid(), line.Id, "Grouping", 1);
-        var stage = new SubStage(Guid.NewGuid(), group.Id, "Operational", "STG001", 0, 1, productionLineId: line.Id);
+        var department = new Department(Guid.NewGuid(), factory.Id, "OPS", "التشغيل", null, 1);
+        var line = new ProductionLine(Guid.NewGuid(), factory.Id, "Line", 1, departmentId: department.Id);
+        var group = new MainStage(Guid.NewGuid(), department.Id, "Grouping", 1);
+        var stage = new SubStage(Guid.NewGuid(), group.Id, "Operational", "STG001", 0, 1, departmentId: group.DepartmentId);
         var worker = new Worker(Guid.NewGuid(), "100", "Worker", null, null, null, true);
-        var assignment = new WorkerDefaultAssignment(Guid.NewGuid(), worker.Id, stage.Id, Guid.NewGuid(), DateTime.UtcNow);
-        db.AddRange(factory, line, group, stage, worker, assignment);
+        var assignment = new WorkerDefaultAssignment(Guid.NewGuid(), worker.Id, stage.Id, Guid.NewGuid(), DateTime.UtcNow, productionLineId: line.Id);
+        db.AddRange(factory, department, line, group, stage, worker, assignment);
         await db.SaveChangesAsync();
 
         var result = await new StageDependencyInspector(db).InspectAsync(stage.Id);
@@ -262,10 +263,10 @@ public sealed class Structure001HierarchyTests
     {
         await using var db = CreateDb();
         var factory = new Factory(Guid.NewGuid(), "Factory", "FAC");
-        var line = new ProductionLine(Guid.NewGuid(), factory.Id, "Line", 1);
-        var group = new MainStage(Guid.NewGuid(), line.Id, "Grouping", 1);
-        var stage = new SubStage(Guid.NewGuid(), group.Id, "Operational", "STG001", 0, 1, productionLineId: line.Id);
-        db.AddRange(factory, line, group, stage);
+        var department = new Department(Guid.NewGuid(), factory.Id, "OPS", "التشغيل", null, 1);
+        var group = new MainStage(Guid.NewGuid(), department.Id, "Grouping", 1);
+        var stage = new SubStage(Guid.NewGuid(), group.Id, "Operational", "STG001", 0, 1, departmentId: group.DepartmentId);
+        db.AddRange(factory, department, group, stage);
         await db.SaveChangesAsync();
         var service = new ProductionStageCatalogService(db, new AuditEngine(db), new StageDependencyInspector(db));
 
@@ -286,12 +287,13 @@ public sealed class Structure001HierarchyTests
     {
         await using var db = CreateDb();
         var factory = new Factory(Guid.NewGuid(), "Factory", "FAC");
-        var line = new ProductionLine(Guid.NewGuid(), factory.Id, "Line", 1);
-        var group = new MainStage(Guid.NewGuid(), line.Id, "Grouping", 1);
-        var stage = new SubStage(Guid.NewGuid(), group.Id, "Operational", "STG001", 0, 1, productionLineId: line.Id);
+        var department = new Department(Guid.NewGuid(), factory.Id, "OPS", "التشغيل", null, 1);
+        var line = new ProductionLine(Guid.NewGuid(), factory.Id, "Line", 1, departmentId: department.Id);
+        var group = new MainStage(Guid.NewGuid(), department.Id, "Grouping", 1);
+        var stage = new SubStage(Guid.NewGuid(), group.Id, "Operational", "STG001", 0, 1, departmentId: group.DepartmentId);
         var worker = new Worker(Guid.NewGuid(), "100", "Worker", null, null, null, true);
-        var assignment = new WorkerDefaultAssignment(Guid.NewGuid(), worker.Id, stage.Id, Guid.NewGuid(), DateTime.UtcNow);
-        db.AddRange(factory, line, group, stage, worker, assignment);
+        var assignment = new WorkerDefaultAssignment(Guid.NewGuid(), worker.Id, stage.Id, Guid.NewGuid(), DateTime.UtcNow, productionLineId: line.Id);
+        db.AddRange(factory, department, line, group, stage, worker, assignment);
         await db.SaveChangesAsync();
         var service = new ProductionStageCatalogService(db, new AuditEngine(db), new StageDependencyInspector(db));
 

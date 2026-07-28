@@ -69,7 +69,7 @@ public sealed class ProductionCostRecordingService(
         var (order, stage) = await LoadOrderAndStageAsync(request.ProductionOrderId, request.ProductModelStageId, ct);
         EnsureRecordableOrder(order); var now = DateTime.UtcNow;
         var record = CreateSnapshotRecord(order, stage, request.ProductionDate, request.ProducedQuantity, request.AcceptedQuantity, request.RejectedQuantity, request.ClientRequestId, request.Notes, actorId, now);
-        record.ReplaceAllocations(await BuildAllocationsAsync(stage, record.AcceptedQuantity, request.Workers, actorId, ProductionDateEvidenceAtUtc(request.ProductionDate), ct)); db.Add(record);
+        record.ReplaceAllocations(await BuildAllocationsAsync(stage, order.ProductionLineId!.Value, record.AcceptedQuantity, request.Workers, actorId, ProductionDateEvidenceAtUtc(request.ProductionDate), ct)); db.Add(record);
         await AuditAsync(actorId, AuditActionType.Create, "StageProductionRecord", record.Id, null, RecordAudit(record), ct); await AuditAsync(actorId, AuditActionType.Update, "StageProductionWorkerAllocation", record.Id, null, AllocationAudit(record), ct);
         try
         {
@@ -96,7 +96,7 @@ public sealed class ProductionCostRecordingService(
     {
         var (order, stage) = await LoadOrderAndStageAsync(request.ProductionOrderId, request.ProductModelStageId, ct); EnsureRecordableOrder(order);
         var record = CreateSnapshotRecord(order, stage, request.ProductionDate, request.ProducedQuantity, request.AcceptedQuantity, request.RejectedQuantity, request.ClientRequestId == Guid.Empty ? Guid.NewGuid() : request.ClientRequestId, request.Notes, actorId, DateTime.UtcNow);
-        record.ReplaceAllocations(await BuildAllocationsAsync(stage, record.AcceptedQuantity, request.Workers, actorId, ProductionDateEvidenceAtUtc(request.ProductionDate), ct));
+        record.ReplaceAllocations(await BuildAllocationsAsync(stage, order.ProductionLineId!.Value, record.AcceptedQuantity, request.Workers, actorId, ProductionDateEvidenceAtUtc(request.ProductionDate), ct));
         record.SetCalculationPreview(record.WorkerAllocations.Sum(x => x.CalculatedEarning));
         return ToRecordDto(record);
     }
@@ -104,8 +104,8 @@ public sealed class ProductionCostRecordingService(
     public async Task<StageProductionRecordDto> UpdateDraftAsync(Guid id, UpdateStageProductionRecordRequest request, Guid actorId, CancellationToken ct)
     {
         var record = await RecordAsync(id, ct); EnsureCurrentVersion(record, request.ConcurrencyToken); db.Entry(record).Property(x => x.ConcurrencyToken).OriginalValue = request.ConcurrencyToken; EnsureRecordableOrder(record.ProductionOrder!); var before = RecordAudit(record); var allocationsBefore = AllocationAudit(record);
-        var (_, stage) = await LoadOrderAndStageAsync(record.ProductionOrderId, record.ProductModelStageId, ct);
-        record.UpdateDraft(request.ProductionDate, RoundQuantity(request.ProducedQuantity), RoundQuantity(request.AcceptedQuantity), RoundQuantity(request.RejectedQuantity), request.Notes); var allocations = await BuildAllocationsAsync(stage, record.AcceptedQuantity, request.Workers, actorId, ProductionDateEvidenceAtUtc(request.ProductionDate), ct); var removedAllocations = record.ReplaceAllocations(allocations); db.RemoveRange(removedAllocations);
+        var (order, stage) = await LoadOrderAndStageAsync(record.ProductionOrderId, record.ProductModelStageId, ct);
+        record.UpdateDraft(request.ProductionDate, RoundQuantity(request.ProducedQuantity), RoundQuantity(request.AcceptedQuantity), RoundQuantity(request.RejectedQuantity), request.Notes); var allocations = await BuildAllocationsAsync(stage, order.ProductionLineId!.Value, record.AcceptedQuantity, request.Workers, actorId, ProductionDateEvidenceAtUtc(request.ProductionDate), ct); var removedAllocations = record.ReplaceAllocations(allocations); db.RemoveRange(removedAllocations);
         await AuditAsync(actorId, AuditActionType.Update, "StageProductionRecord", id, before, RecordAudit(record), ct); await AuditAsync(actorId, AuditActionType.Update, "StageProductionWorkerAllocation", id, allocationsBefore, AllocationAudit(record), ct); try { await db.SaveChangesAsync(ct); } catch (DbUpdateConcurrencyException) { throw new ProductionConflictException("The production record changed while it was being saved. Refresh and try again."); } return await GetRecordAsync(id, ct);
     }
 
@@ -129,10 +129,10 @@ public sealed class ProductionCostRecordingService(
         if (currentAccepted + record.AcceptedQuantity > record.ProductionOrder!.PlannedQuantity) throw new ProductionConflictException("Approved accepted quantity exceeds the production order planned quantity.");
         EnsurePersistedFinancialConsistency(record);
         var before = FinancialAudit(record);
-        var (_, currentStage) = await LoadOrderAndStageAsync(record.ProductionOrderId, record.ProductModelStageId, ct);
+        var (order, currentStage) = await LoadOrderAndStageAsync(record.ProductionOrderId, record.ProductModelStageId, ct);
         // Validate current attendance and assignment eligibility without recalculating or
         // rewriting the draft's stored financial snapshot.
-        await BuildAllocationsAsync(currentStage, record.AcceptedQuantity, record.WorkerAllocations.Select(x => new WorkerAllocationRequest(x.WorkerId, x.Percentage, x.FixedAmount, x.Notes, x.ManualOverrideReason, x.InputQuantity)).ToList(), actorId, ProductionDateEvidenceAtUtc(record.ProductionDate), ct);
+        await BuildAllocationsAsync(currentStage, order.ProductionLineId!.Value, record.AcceptedQuantity, record.WorkerAllocations.Select(x => new WorkerAllocationRequest(x.WorkerId, x.Percentage, x.FixedAmount, x.Notes, x.ManualOverrideReason, x.InputQuantity)).ToList(), actorId, ProductionDateEvidenceAtUtc(record.ProductionDate), ct);
         var now = DateTime.UtcNow;
         record.Approve(actorId, now);
         await AuditAsync(actorId, AuditActionType.Update, "StageProductionRecord", id, before, FinancialAudit(record), ct);
@@ -577,6 +577,8 @@ public sealed class ProductionCostRecordingService(
         var line = await db.Set<ProductionLine>().AsNoTracking()
             .SingleOrDefaultAsync(candidate => candidate.Id == productionLineId && candidate.FactoryId == factoryId && candidate.IsActive, ct)
             ?? throw new ProductionConflictException("خط الإنتاج المحدد غير نشط أو لا يتبع المصنع.");
+        if (line.DepartmentId is null)
+            throw new ProductionConflictException("يجب ربط خط الإنتاج بقسم قبل تحميل تشغيل اليوم.");
         var product = await db.Set<ProductModel>().AsNoTracking()
             .SingleOrDefaultAsync(candidate => candidate.Id == productModelId && candidate.IsActive, ct)
             ?? throw new ProductionConflictException("الموديل المحدد غير نشط أو غير متاح.");
@@ -586,16 +588,17 @@ public sealed class ProductionCostRecordingService(
             .Include(stage => stage.SubStage)
                 .ThenInclude(subStage => subStage!.MainStage)
             .Where(stage => stage.ProductModelId == productModelId
+                            && stage.ProductionLineId == productionLineId
                             && stage.IsActive
                             && stage.SubStage != null
                             && stage.SubStage.IsActive
                             && stage.SubStage.MainStage != null
                             && stage.SubStage.MainStage.IsActive
-                            && stage.SubStage.MainStage.ProductionLineId == productionLineId)
+                            && stage.SubStage.DepartmentId == line.DepartmentId.Value)
             .OrderBy(stage => stage.StageOrder)
             .ToArrayAsync(ct);
         if (stages.Length == 0)
-            throw new ProductionConflictException("لا توجد مراحل موديل نشطة مرتبطة بخط الإنتاج المحدد.");
+            throw new ProductionConflictException("لا توجد مراحل موديل نشطة مرتبطة بقسم خط الإنتاج المحدد.");
 
         var workers = await db.Set<Worker>().AsNoTracking()
             .Where(worker => worker.IsActive && worker.EmploymentStatus == EmploymentStatus.Active)
@@ -603,7 +606,7 @@ public sealed class ProductionCostRecordingService(
             .Select(worker => new ActiveWorker(worker.Id, worker.EmployeeCode, worker.FullName))
             .ToArrayAsync(ct);
         var workerIds = workers.Select(worker => worker.Id).ToArray();
-        var assignmentWindows = await LoadAssignmentWindowsAsync(workerIds, productionDate, ct);
+        var assignmentWindows = await LoadAssignmentWindowsAsync(productionLineId, workerIds, productionDate, ct);
         var attendance = await attendanceEngine.GetPresenceWindowsByWorkerAsync(workerIds, productionDate, ct);
         if (attendance.IsFailure)
             throw new ProductionConflictException("تعذر قراءة نافذة حضور العمال لتاريخ الإنتاج المحدد. نفّذ مزامنة الحضور ثم أعد المحاولة.");
@@ -723,13 +726,14 @@ public sealed class ProductionCostRecordingService(
     }
 
     private async Task<Dictionary<(Guid WorkerId, Guid SubStageId), List<AssignmentWindow>>> LoadAssignmentWindowsAsync(
+        Guid productionLineId,
         IReadOnlyCollection<Guid> workerIds,
         DateOnly productionDate,
         CancellationToken ct)
     {
         var (dayStartUtc, dayEndUtc) = ProductionDayBoundsUtc(productionDate);
         var defaults = await db.Set<WorkerDefaultAssignment>().AsNoTracking()
-            .Where(assignment => workerIds.Contains(assignment.WorkerId) && assignment.IsActive)
+            .Where(assignment => workerIds.Contains(assignment.WorkerId) && assignment.ProductionLineId == productionLineId && assignment.IsActive)
             .Select(assignment => new
             {
                 assignment.Id,
@@ -1070,6 +1074,7 @@ public sealed class ProductionCostRecordingService(
 
     private async Task<List<StageProductionWorkerAllocation>> BuildAllocationsAsync(
         ProductModelStage stage,
+        Guid productionLineId,
         decimal accepted,
         IReadOnlyCollection<WorkerAllocationRequest> workers,
         Guid actorId,
@@ -1091,7 +1096,7 @@ public sealed class ProductionCostRecordingService(
 
         var workersRequiringOverride = workers.Where(worker =>
         {
-            var assignedToStage = assignments.Value!.TryGetValue(worker.WorkerId, out var workerAssignments) && workerAssignments.Any(assignment => assignment.EffectiveSubStageId == stage.SubStageId);
+            var assignedToStage = assignments.Value!.TryGetValue(worker.WorkerId, out var workerAssignments) && workerAssignments.Any(assignment => assignment.EffectiveSubStageId == stage.SubStageId && assignment.ProductionLineId == productionLineId);
             var isPresent = attendance.Value!.TryGetValue(worker.WorkerId, out var state) && state.Status is AttendanceStatus.Present or AttendanceStatus.Late;
             return !assignedToStage || !isPresent;
         }).ToArray();
@@ -1123,18 +1128,19 @@ public sealed class ProductionCostRecordingService(
         var stage = await db.Set<ProductModelStage>()
             .Include(x => x.SubStage)
             .ThenInclude(x => x!.MainStage)
-            .ThenInclude(x => x!.ProductionLine)
-            .ThenInclude(x => x!.Factory)
+            .ThenInclude(x => x!.Department)
             .SingleOrDefaultAsync(x => x.Id == stageId && x.ProductModelId == order.ProductModelId && x.IsActive, ct)
             ?? throw new KeyNotFoundException("Active model stage was not found for this production order.");
 
-        var line = stage.SubStage?.MainStage?.ProductionLine;
+        var line = order.ProductionLine;
         if (stage.SubStage is null || !stage.SubStage.IsActive || stage.SubStage.MainStage is null || !stage.SubStage.MainStage.IsActive || line is null || !line.IsActive || line.Factory is null || !line.Factory.IsActive)
             throw new ProductionConflictException("The selected production stage is no longer active in the factory structure.");
         if (!order.ProductionLineId.HasValue)
             throw new ProductionConflictException("لا يمكن تسجيل دفعة لأمر إنتاج لا يحتوي على خط إنتاج صالح.");
-        if (order.ProductionLineId.Value != line.Id)
-            throw new ProductionConflictException("The selected stage does not belong to the production order line.");
+        if (stage.ProductionLineId != order.ProductionLineId.Value)
+            throw new ProductionConflictException("The selected production stage is not assigned to this order's production line.");
+        if (line.DepartmentId is null || stage.SubStage.DepartmentId != line.DepartmentId.Value)
+            throw new ProductionConflictException("المرحلة المحددة لا تتبع قسم خط أمر الإنتاج.");
 
         return (order, stage);
     }
@@ -1143,7 +1149,7 @@ public sealed class ProductionCostRecordingService(
     {
         var subStage = stage.SubStage!;
         var mainStage = subStage.MainStage!;
-        var line = mainStage.ProductionLine!;
+        var line = order.ProductionLine!;
         var factory = line.Factory!;
         return new StageProductionRecord(Guid.NewGuid(), order.Id, stage.Id, productionDate, RoundQuantity(producedQuantity), RoundQuantity(acceptedQuantity), RoundQuantity(rejectedQuantity), subStage.Code, subStage.Name, RoundMoney(stage.PiecePrice), stage.StandardSeconds, stage.CompensationMode, order.ProductModel!.Code, order.ProductModel.Name, factory.Code, factory.Name, line.LineCode ?? string.Empty, line.Name, mainStage.Name, clientRequestId, notes, actorId, atUtc);
     }
@@ -1173,7 +1179,7 @@ public sealed class ProductionCostRecordingService(
         // it must block this transition and require a financial reversal instead.
     }
     private static void EnsureCurrentVersion(StageProductionRecord record, Guid supplied) { if (supplied == Guid.Empty || record.ConcurrencyToken != supplied) throw new ProductionConflictException("The production record has changed. Refresh and try again."); }
-    private async Task<ProductionOrder> OrderAsync(Guid id, CancellationToken ct, bool includeRecords = false) { var query = db.Set<ProductionOrder>().Include(x => x.ProductModel).AsQueryable(); if (includeRecords) query = query.Include(x => x.StageProductionRecords); return await query.SingleOrDefaultAsync(x => x.Id == id, ct) ?? throw new KeyNotFoundException("Production order was not found."); }
+    private async Task<ProductionOrder> OrderAsync(Guid id, CancellationToken ct, bool includeRecords = false) { var query = db.Set<ProductionOrder>().Include(x => x.ProductModel).Include(x => x.ProductionLine).ThenInclude(x => x!.Factory).AsQueryable(); if (includeRecords) query = query.Include(x => x.StageProductionRecords); return await query.SingleOrDefaultAsync(x => x.Id == id, ct) ?? throw new KeyNotFoundException("Production order was not found."); }
     private async Task<ProductionOrderDto> OrderDtoAsync(Guid id, CancellationToken ct) { var x = await OrderAsync(id, ct); return new(x.Id, x.OrderNumber, x.ProductModelId, x.ProductModel!.Code, x.ProductionLineId, x.ProductionDate, x.PlannedQuantity, x.Status.ToString(), x.Notes, x.SourceImportBatchId.HasValue, x.RecordedAtUtc, x.ApprovedAtUtc); }
     private async Task<StageProductionRecord> RecordAsync(Guid id, CancellationToken ct) => await db.Set<StageProductionRecord>().Include(x => x.ProductionOrder).ThenInclude(x => x!.ProductModel).Include(x => x.WorkerAllocations).ThenInclude(x => x.Worker).SingleOrDefaultAsync(x => x.Id == id, ct) ?? throw new KeyNotFoundException("Production record was not found.");
     private async Task<StageProductionRecordDto> GetRecordByClientRequestAsync(Guid orderId, Guid clientRequestId, CancellationToken ct) => ToRecordDto(await db.Set<StageProductionRecord>().Include(x => x.ProductionOrder).ThenInclude(x => x!.ProductModel).Include(x => x.WorkerAllocations).ThenInclude(x => x.Worker).SingleAsync(x => x.ProductionOrderId == orderId && x.ClientRequestId == clientRequestId, ct));

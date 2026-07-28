@@ -91,8 +91,7 @@ public sealed class ManufacturingDataChangeSaveChangesInterceptor(
         var batchTypes = new[]
         {
             ManufacturingEntityType.Worker,
-            ManufacturingEntityType.AttendanceRecord,
-            ManufacturingEntityType.ProductModelStage
+            ManufacturingEntityType.AttendanceRecord
         };
         var result = changes.Where(change => !batchTypes.Contains(change.EntityType)).ToList();
 
@@ -187,10 +186,10 @@ public sealed class ManufacturingDataChangeSaveChangesInterceptor(
             Factory entity => Create(entry, ManufacturingEntityType.Factory, entity.Id, actorUserId, factoryId: entity.Id),
             Department entity => Create(entry, ManufacturingEntityType.Department, entity.Id, actorUserId, factoryId: entity.FactoryId, departmentId: entity.Id),
             ProductionLine entity => Create(entry, ManufacturingEntityType.ProductionLine, entity.Id, actorUserId, factoryId: entity.FactoryId, departmentId: entity.DepartmentId, productionLineId: entity.Id),
-            MainStage entity => Create(entry, ManufacturingEntityType.MainStage, entity.Id, actorUserId, productionLineId: entity.ProductionLineId, mainStageId: entity.Id),
-            SubStage entity => Create(entry, ManufacturingEntityType.SubStage, entity.Id, actorUserId, productionLineId: entity.ProductionLineId, mainStageId: entity.MainStageId, subStageId: entity.Id),
+            MainStage entity => Create(entry, ManufacturingEntityType.MainStage, entity.Id, actorUserId, departmentId: entity.DepartmentId, mainStageId: entity.Id),
+            SubStage entity => Create(entry, ManufacturingEntityType.SubStage, entity.Id, actorUserId, departmentId: entity.DepartmentId, mainStageId: entity.MainStageId, subStageId: entity.Id),
             ProductModel entity => Create(entry, ManufacturingEntityType.ProductModel, entity.Id, actorUserId, productModelId: entity.Id),
-            ProductModelStage entity => Create(entry, ManufacturingEntityType.ProductModelStage, entity.Id, actorUserId, productModelId: entity.ProductModelId, subStageId: entity.SubStageId),
+            ProductModelStage entity => Create(entry, ManufacturingEntityType.ProductModelStage, entity.Id, actorUserId, productionLineId: entity.ProductionLineId, productModelId: entity.ProductModelId, subStageId: entity.SubStageId),
             ProductionOrder entity => Create(
                 entry,
                 ManufacturingEntityType.ProductionOrder,
@@ -254,13 +253,14 @@ public sealed class ManufacturingDataChangeSaveChangesInterceptor(
         WorkerDefaultAssignment entity,
         Guid? actorUserId)
     {
-        var location = ResolveDefaultAssignmentLocation(entry.Context, entity.SubStageId);
+        var location = ResolveDefaultAssignmentLocation(entry.Context, entity.ProductionLineId, entity.SubStageId);
         return Create(
             entry,
             ManufacturingEntityType.WorkerDefaultAssignment,
             entity.Id,
             actorUserId,
             factoryId: location.FactoryId,
+            departmentId: location.DepartmentId,
             productionLineId: location.ProductionLineId,
             mainStageId: location.MainStageId,
             subStageId: entity.SubStageId,
@@ -312,42 +312,42 @@ public sealed class ManufacturingDataChangeSaveChangesInterceptor(
             workerChangeKinds,
             attendanceChangeKinds);
 
-    private static DefaultAssignmentLocation ResolveDefaultAssignmentLocation(DbContext? context, Guid subStageId)
+    private static DefaultAssignmentLocation ResolveDefaultAssignmentLocation(DbContext? context, Guid productionLineId, Guid subStageId)
     {
-        if (context is null) return new DefaultAssignmentLocation(null, null, null);
+        if (context is null) return new DefaultAssignmentLocation(null, null, null, null);
 
         var trackedStage = context.ChangeTracker.Entries<SubStage>()
             .Where(entry => entry.State != EntityState.Deleted && entry.Entity.Id == subStageId)
             .Select(entry => entry.Entity)
             .FirstOrDefault();
-        var productionLineId = trackedStage?.ProductionLineId;
         var mainStageId = trackedStage?.MainStageId;
+        var departmentId = trackedStage?.DepartmentId;
 
-        if (!productionLineId.HasValue || productionLineId == Guid.Empty || !mainStageId.HasValue || mainStageId == Guid.Empty)
+        if (!mainStageId.HasValue || mainStageId == Guid.Empty || !departmentId.HasValue || departmentId == Guid.Empty)
         {
             var persistedStage = context.Set<SubStage>()
                 .AsNoTracking()
                 .Where(stage => stage.Id == subStageId)
-                .Select(stage => new { stage.ProductionLineId, stage.MainStageId })
+                .Select(stage => new { stage.DepartmentId, stage.MainStageId })
                 .SingleOrDefault();
-            productionLineId = persistedStage?.ProductionLineId;
+            departmentId = persistedStage?.DepartmentId;
             mainStageId = persistedStage?.MainStageId;
         }
 
-        if (!productionLineId.HasValue || productionLineId == Guid.Empty)
-            return new DefaultAssignmentLocation(null, null, mainStageId);
+        if (productionLineId == Guid.Empty)
+            return new DefaultAssignmentLocation(null, departmentId, null, mainStageId);
 
         var factoryId = context.ChangeTracker.Entries<ProductionLine>()
-            .Where(entry => entry.State != EntityState.Deleted && entry.Entity.Id == productionLineId.Value)
+            .Where(entry => entry.State != EntityState.Deleted && entry.Entity.Id == productionLineId)
             .Select(entry => (Guid?)entry.Entity.FactoryId)
             .FirstOrDefault()
             ?? context.Set<ProductionLine>()
                 .AsNoTracking()
-                .Where(line => line.Id == productionLineId.Value)
+                .Where(line => line.Id == productionLineId)
                 .Select(line => (Guid?)line.FactoryId)
                 .SingleOrDefault();
 
-        return new DefaultAssignmentLocation(factoryId, productionLineId, mainStageId);
+        return new DefaultAssignmentLocation(factoryId, departmentId, productionLineId, mainStageId);
     }
 
     private static Guid? ResolveFactoryId(DbContext? context, Guid? productionLineId)
@@ -415,7 +415,7 @@ public sealed class ManufacturingDataChangeSaveChangesInterceptor(
 
     private string? CorrelationId() => changeContext?.CorrelationId ?? correlationContext.CorrelationId;
 
-    private sealed record DefaultAssignmentLocation(Guid? FactoryId, Guid? ProductionLineId, Guid? MainStageId);
+    private sealed record DefaultAssignmentLocation(Guid? FactoryId, Guid? DepartmentId, Guid? ProductionLineId, Guid? MainStageId);
 
     private sealed record PendingChanges(IReadOnlyList<ManufacturingDataChanged> Changes, DbTransaction? Transaction);
 }

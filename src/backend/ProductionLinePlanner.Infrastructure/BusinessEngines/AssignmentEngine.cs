@@ -126,7 +126,7 @@ public sealed class AssignmentEngine : IAssignmentEngine
         var defaultAssignments = await _dbContext.WorkerDefaultAssignments
             .AsNoTracking()
             .Where(x => uniqueWorkerIds.Contains(x.WorkerId) && x.IsActive)
-            .Select(x => new { x.WorkerId, x.AssignedAt, x.Id, x.SubStageId })
+            .Select(x => new { x.WorkerId, x.AssignedAt, x.Id, x.SubStageId, x.ProductionLineId })
             .ToListAsync(cancellationToken);
 
         var byWorker = uniqueWorkerIds.ToDictionary(
@@ -146,7 +146,8 @@ public sealed class AssignmentEngine : IAssignmentEngine
                 assignment.SubStageId,
                 null,
                 null,
-                null));
+                null,
+                ProductionLineId: assignment.ProductionLineId));
         }
 
         return Result<Dictionary<Guid, IReadOnlyCollection<WorkerAssignmentState>>>.Success(
@@ -183,6 +184,12 @@ public sealed class AssignmentEngine : IAssignmentEngine
             return Result<AssignmentActionResultDto>.Failure(subStageIdValidationResult.Error!);
         }
 
+        var lineIdValidationResult = ValidateRequiredGuid(request.ProductionLineId, nameof(request.ProductionLineId));
+        if (lineIdValidationResult.IsFailure)
+        {
+            return Result<AssignmentActionResultDto>.Failure(lineIdValidationResult.Error!);
+        }
+
         if (!string.IsNullOrWhiteSpace(request.Reason) && request.Reason.Length > MaxReasonLength)
         {
             return Result<AssignmentActionResultDto>.Failure(new Error("ValidationError", $"Reason must be at most {MaxReasonLength} characters."));
@@ -193,15 +200,15 @@ public sealed class AssignmentEngine : IAssignmentEngine
             return Result<AssignmentActionResultDto>.Failure(new Error("NotFound", "Worker not found or inactive."));
         }
 
-        if ((await ResolveActiveSubStageAsync(request.SubStageId, cancellationToken)).IsFailure)
+        if ((await ResolveActiveLineStageContextAsync(request.ProductionLineId, request.SubStageId, cancellationToken)).IsFailure)
         {
-            return Result<AssignmentActionResultDto>.Failure(new Error("NotFound", "SubStage not found or inactive."));
+            return Result<AssignmentActionResultDto>.Failure(new Error("ValidationError", "المرحلة لا تتبع قسم خط الإنتاج المحدد أو أنها غير نشطة."));
         }
 
         var now = DateTime.UtcNow;
 
         var currentDefault = await _dbContext.WorkerDefaultAssignments
-            .SingleOrDefaultAsync(x => x.WorkerId == request.WorkerId && x.SubStageId == request.SubStageId && x.IsActive, cancellationToken);
+            .SingleOrDefaultAsync(x => x.WorkerId == request.WorkerId && x.ProductionLineId == request.ProductionLineId && x.SubStageId == request.SubStageId && x.IsActive, cancellationToken);
 
         if (currentDefault is not null)
         {
@@ -216,7 +223,8 @@ public sealed class AssignmentEngine : IAssignmentEngine
             assignedAtUtc: now,
             reason: request.Reason,
             isActive: true,
-            createdAtUtc: now);
+            createdAtUtc: now,
+            productionLineId: request.ProductionLineId);
 
         _dbContext.WorkerDefaultAssignments.Add(assignment);
 
@@ -253,7 +261,7 @@ public sealed class AssignmentEngine : IAssignmentEngine
             return Result<AssignmentActionResultDto>.Failure(new Error("Conflict", "The worker assignment changed while it was being saved. Refresh and try again."));
         }
 
-        await DispatchAssignmentNotificationAsync(actorUserId, assignment.WorkerId, null, assignment.SubStageId, assignment.Id, assignment.AssignmentType.ToString(), cancellationToken);
+        await DispatchAssignmentNotificationAsync(actorUserId, assignment.WorkerId, null, assignment.SubStageId, assignment.Id, assignment.AssignmentType.ToString(), assignment.ProductionLineId, cancellationToken);
 
         return Result<AssignmentActionResultDto>.Success(new AssignmentActionResultDto
         {
@@ -267,6 +275,7 @@ public sealed class AssignmentEngine : IAssignmentEngine
     }
 
     public async Task<Result<StageDefaultAssignmentsUpdateResultDto>> UpdateStageDefaultAssignmentsAsync(
+        Guid productionLineId,
         Guid subStageId,
         IReadOnlyCollection<Guid>? workerIds,
         Guid actorUserId,
@@ -277,12 +286,16 @@ public sealed class AssignmentEngine : IAssignmentEngine
         if (actorValidation.IsFailure)
             return Result<StageDefaultAssignmentsUpdateResultDto>.Failure(actorValidation.Error!);
 
+        var lineValidation = ValidateRequiredGuid(productionLineId, nameof(productionLineId));
+        if (lineValidation.IsFailure)
+            return Result<StageDefaultAssignmentsUpdateResultDto>.Failure(lineValidation.Error!);
+
         var stageValidation = ValidateRequiredGuid(subStageId, nameof(subStageId));
         if (stageValidation.IsFailure)
             return Result<StageDefaultAssignmentsUpdateResultDto>.Failure(stageValidation.Error!);
 
-        if ((await ResolveActiveSubStageAsync(subStageId, cancellationToken)).IsFailure)
-            return Result<StageDefaultAssignmentsUpdateResultDto>.Failure(new Error("NotFound", "SubStage not found or inactive."));
+        if ((await ResolveActiveLineStageContextAsync(productionLineId, subStageId, cancellationToken)).IsFailure)
+            return Result<StageDefaultAssignmentsUpdateResultDto>.Failure(new Error("ValidationError", "المرحلة لا تتبع قسم خط الإنتاج المحدد أو أنها غير نشطة."));
 
         var requestedWorkerIds = workerIds?.ToArray() ?? [];
         if (requestedWorkerIds.Any(workerId => workerId == Guid.Empty) || requestedWorkerIds.Distinct().Count() != requestedWorkerIds.Length)
@@ -305,7 +318,7 @@ public sealed class AssignmentEngine : IAssignmentEngine
         try
         {
             var currentAssignments = await _dbContext.WorkerDefaultAssignments
-                .Where(assignment => assignment.SubStageId == subStageId && assignment.IsActive)
+                .Where(assignment => assignment.ProductionLineId == productionLineId && assignment.SubStageId == subStageId && assignment.IsActive)
                 .OrderBy(assignment => assignment.WorkerId)
                 .ToListAsync(cancellationToken);
             var requestedWorkerIdSet = requestedWorkerIds.ToHashSet();
@@ -325,12 +338,13 @@ public sealed class AssignmentEngine : IAssignmentEngine
                     now,
                     reason: null,
                     isActive: true,
-                    createdAtUtc: now);
+                    createdAtUtc: now,
+                    productionLineId: productionLineId);
                 _dbContext.WorkerDefaultAssignments.Add(assignment);
                 _dbContext.AssignmentTimelineEntries.Add(new AssignmentTimelineEntry(
                     Guid.NewGuid(), workerId, null, subStageId, AssignmentType.Default.ToString(), TimelineActionCreate,
                     string.Empty, now, null, actorUserId, false, null, null, now));
-                notificationRequests.Add(new AssignmentNotificationDispatchRequest(actorUserId, workerId, null, subStageId, assignment.Id, assignment.AssignmentType.ToString()));
+                notificationRequests.Add(new AssignmentNotificationDispatchRequest(actorUserId, workerId, null, subStageId, assignment.Id, assignment.AssignmentType.ToString(), productionLineId));
                 await _auditEngine.RecordAsync(actorUserId, AuditActionType.Create, nameof(WorkerDefaultAssignment), assignment.Id.ToString(), null, assignment, requestMeta, cancellationToken);
             }
 
@@ -341,7 +355,7 @@ public sealed class AssignmentEngine : IAssignmentEngine
                 _dbContext.AssignmentTimelineEntries.Add(new AssignmentTimelineEntry(
                     Guid.NewGuid(), assignment.WorkerId, subStageId, null, AssignmentType.Default.ToString(), TimelineActionCancel,
                     BulkStageSelectionRemovalReason, assignment.AssignedAt, now, actorUserId, false, null, null, now));
-                notificationRequests.Add(new AssignmentNotificationDispatchRequest(actorUserId, assignment.WorkerId, subStageId, null, assignment.Id, assignment.AssignmentType.ToString()));
+                notificationRequests.Add(new AssignmentNotificationDispatchRequest(actorUserId, assignment.WorkerId, subStageId, null, assignment.Id, assignment.AssignmentType.ToString(), productionLineId));
                 await _auditEngine.RecordAsync(
                     actorUserId,
                     AuditActionType.Cancel,
@@ -382,6 +396,7 @@ public sealed class AssignmentEngine : IAssignmentEngine
 
     public async Task<Result<AssignmentActionResultDto>> RemoveDefaultAssignmentAsync(
         Guid workerId,
+        Guid productionLineId,
         Guid subStageId,
         string reason,
         Guid actorUserId,
@@ -392,13 +407,15 @@ public sealed class AssignmentEngine : IAssignmentEngine
         if (actorValidation.IsFailure) return Result<AssignmentActionResultDto>.Failure(actorValidation.Error!);
         var workerValidation = ValidateRequiredGuid(workerId, nameof(workerId));
         if (workerValidation.IsFailure) return Result<AssignmentActionResultDto>.Failure(workerValidation.Error!);
+        var lineValidation = ValidateRequiredGuid(productionLineId, nameof(productionLineId));
+        if (lineValidation.IsFailure) return Result<AssignmentActionResultDto>.Failure(lineValidation.Error!);
         var stageValidation = ValidateRequiredGuid(subStageId, nameof(subStageId));
         if (stageValidation.IsFailure) return Result<AssignmentActionResultDto>.Failure(stageValidation.Error!);
         var reasonValidation = ValidateReason(reason, nameof(reason));
         if (reasonValidation.IsFailure) return Result<AssignmentActionResultDto>.Failure(reasonValidation.Error!);
 
         var assignment = await _dbContext.WorkerDefaultAssignments
-            .SingleOrDefaultAsync(x => x.WorkerId == workerId && x.SubStageId == subStageId && x.IsActive, cancellationToken);
+            .SingleOrDefaultAsync(x => x.WorkerId == workerId && x.ProductionLineId == productionLineId && x.SubStageId == subStageId && x.IsActive, cancellationToken);
         if (assignment is null)
             return Result<AssignmentActionResultDto>.Failure(new Error("NotFound", "An active default assignment for this worker and stage was not found."));
 
@@ -439,7 +456,7 @@ public sealed class AssignmentEngine : IAssignmentEngine
             return Result<AssignmentActionResultDto>.Failure(new Error("Conflict", "The worker assignment changed while it was being saved. Refresh and try again."));
         }
 
-        await DispatchAssignmentNotificationAsync(actorUserId, assignment.WorkerId, assignment.SubStageId, null, assignment.Id, assignment.AssignmentType.ToString(), cancellationToken);
+        await DispatchAssignmentNotificationAsync(actorUserId, assignment.WorkerId, assignment.SubStageId, null, assignment.Id, assignment.AssignmentType.ToString(), assignment.ProductionLineId, cancellationToken);
 
         return Result<AssignmentActionResultDto>.Success(new AssignmentActionResultDto
         {
@@ -973,7 +990,7 @@ public sealed class AssignmentEngine : IAssignmentEngine
                 if (await HasEffectiveParticipationAsync(request.WorkerId, request.ToSubStageId, request.EffectiveAtUtc, cancellationToken))
                     return Result<AssignmentActionResultDto>.Failure(new Error("Conflict", "العامل مشارك بالفعل في المرحلة المستهدفة."));
                 defaultAssignment.Deactivate(now);
-                var destination = new WorkerDefaultAssignment(Guid.NewGuid(), request.WorkerId, request.ToSubStageId, actorUserId, now, request.Reason, true, now);
+                var destination = new WorkerDefaultAssignment(Guid.NewGuid(), request.WorkerId, request.ToSubStageId, actorUserId, now, request.Reason, true, now, defaultAssignment.ProductionLineId);
                 _dbContext.WorkerDefaultAssignments.Add(destination);
                 _dbContext.AssignmentTimelineEntries.Add(new AssignmentTimelineEntry(Guid.NewGuid(), request.WorkerId, request.FromSubStageId, request.ToSubStageId, AssignmentType.Default.ToString(), TimelineActionUpdate, request.Reason.Trim(), now, null, actorUserId, false, null, null, now));
                 await _auditEngine.RecordAsync(actorUserId, AuditActionType.Update, nameof(WorkerDefaultAssignment), defaultAssignment.Id.ToString(), before, destination, requestMeta, cancellationToken);
@@ -1166,8 +1183,8 @@ public sealed class AssignmentEngine : IAssignmentEngine
                 stage.Id,
                 stage.Capacity,
                 stage.MainStageId,
-                ProductionLineId = stage.MainStage!.ProductionLineId,
-                FactoryId = stage.MainStage.ProductionLine!.FactoryId
+                stage.DepartmentId,
+                FactoryId = stage.MainStage!.Department!.FactoryId
             })
             .ToArrayAsync(cancellationToken);
 
@@ -1175,6 +1192,12 @@ public sealed class AssignmentEngine : IAssignmentEngine
         {
             return Result<IReadOnlyCollection<SubStageAssignmentCoverageDto>>.Success([]);
         }
+
+        var activeLines = await _dbContext.ProductionLines
+            .AsNoTracking()
+            .Where(line => line.IsActive && line.DepartmentId.HasValue)
+            .Select(line => new { line.Id, DepartmentId = line.DepartmentId!.Value })
+            .ToArrayAsync(cancellationToken);
 
         var workerIds = await _dbContext.Workers
             .AsNoTracking()
@@ -1194,7 +1217,7 @@ public sealed class AssignmentEngine : IAssignmentEngine
         var effectiveParticipations = assignmentsResult.Value!
             .SelectMany(pair => pair.Value
                 .Where(assignment => assignment.EffectiveSubStageId.HasValue)
-                .Select(assignment => new { SubStageId = assignment.EffectiveSubStageId!.Value, WorkerId = pair.Key }))
+                .Select(assignment => new { SubStageId = assignment.EffectiveSubStageId!.Value, WorkerId = pair.Key, assignment.ProductionLineId }))
             .Distinct()
             .ToArray();
         var assignedWorkersByStage = effectiveParticipations
@@ -1205,13 +1228,31 @@ public sealed class AssignmentEngine : IAssignmentEngine
             .Distinct()
             .GroupBy(item => item.ScopeId)
             .ToDictionary(group => group.Key, group => group.Count());
+        var assignedWorkersByStageAndLine = effectiveParticipations
+            .Where(item => item.ProductionLineId.HasValue)
+            .GroupBy(item => (item.SubStageId, ProductionLineId: item.ProductionLineId!.Value))
+            .ToDictionary(group => group.Key, group => group.Select(item => item.WorkerId).Distinct().Count());
+        var distinctWorkersByMainStageAndLine = effectiveParticipations
+            .Where(item => item.ProductionLineId.HasValue)
+            .Join(stages, item => item.SubStageId, stage => stage.Id,
+                (item, stage) => new { stage.MainStageId, ProductionLineId = item.ProductionLineId!.Value, item.WorkerId })
+            .Distinct()
+            .GroupBy(item => (item.MainStageId, item.ProductionLineId))
+            .ToDictionary(group => group.Key, group => group.Count());
         var distinctWorkersByProductionLine = effectiveParticipations
-            .Join(stages, item => item.SubStageId, stage => stage.Id, (item, stage) => new { ScopeId = stage.ProductionLineId, item.WorkerId })
+            .Where(item => item.ProductionLineId.HasValue)
+            .Select(item => new { ScopeId = item.ProductionLineId!.Value, item.WorkerId })
+            .Distinct()
+            .GroupBy(item => item.ScopeId)
+            .ToDictionary(group => group.Key, group => group.Count());
+        var distinctWorkersByDepartment = effectiveParticipations
+            .Join(stages, item => item.SubStageId, stage => stage.Id, (item, stage) => new { ScopeId = stage.DepartmentId, item.WorkerId })
             .Distinct()
             .GroupBy(item => item.ScopeId)
             .ToDictionary(group => group.Key, group => group.Count());
         var distinctWorkersByFactory = effectiveParticipations
-            .Join(stages, item => item.SubStageId, stage => stage.Id, (item, stage) => new { ScopeId = stage.FactoryId, item.WorkerId })
+            .Where(item => item.ProductionLineId.HasValue)
+            .Join(_dbContext.ProductionLines.AsNoTracking(), item => item.ProductionLineId!.Value, line => line.Id, (item, line) => new { ScopeId = line.FactoryId, item.WorkerId })
             .Distinct()
             .GroupBy(item => item.ScopeId)
             .ToDictionary(group => group.Key, group => group.Count());
@@ -1242,8 +1283,16 @@ public sealed class AssignmentEngine : IAssignmentEngine
                     staffingStatus)
                 {
                     MainStageDistinctWorkersCount = distinctWorkersByMainStage.GetValueOrDefault(stage.MainStageId),
-                    ProductionLineDistinctWorkersCount = distinctWorkersByProductionLine.GetValueOrDefault(stage.ProductionLineId),
-                    FactoryDistinctWorkersCount = distinctWorkersByFactory.GetValueOrDefault(stage.FactoryId)
+                    DepartmentDistinctWorkersCount = distinctWorkersByDepartment.GetValueOrDefault(stage.DepartmentId),
+                    FactoryDistinctWorkersCount = distinctWorkersByFactory.GetValueOrDefault(stage.FactoryId),
+                    ProductionLines = activeLines
+                        .Where(line => line.DepartmentId == stage.DepartmentId)
+                        .Select(line => new ProductionLineStaffingCoverageDto(
+                            line.Id,
+                            assignedWorkersByStageAndLine.GetValueOrDefault((stage.Id, line.Id)),
+                            distinctWorkersByMainStageAndLine.GetValueOrDefault((stage.MainStageId, line.Id)),
+                            distinctWorkersByProductionLine.GetValueOrDefault(line.Id)))
+                        .ToArray()
                 };
             })
             .ToArray();
@@ -1362,8 +1411,19 @@ public sealed class AssignmentEngine : IAssignmentEngine
         Guid assignmentId,
         string assignmentType,
         CancellationToken cancellationToken) =>
+        DispatchAssignmentNotificationAsync(actorUserId, workerId, fromSubStageId, toSubStageId, assignmentId, assignmentType, null, cancellationToken);
+
+    private Task DispatchAssignmentNotificationAsync(
+        Guid actorUserId,
+        Guid workerId,
+        Guid? fromSubStageId,
+        Guid? toSubStageId,
+        Guid assignmentId,
+        string assignmentType,
+        Guid? productionLineId,
+        CancellationToken cancellationToken) =>
         DispatchAssignmentNotificationAsync(
-            new AssignmentNotificationDispatchRequest(actorUserId, workerId, fromSubStageId, toSubStageId, assignmentId, assignmentType),
+            new AssignmentNotificationDispatchRequest(actorUserId, workerId, fromSubStageId, toSubStageId, assignmentId, assignmentType, productionLineId),
             cancellationToken);
 
     private Task DispatchAssignmentNotificationAsync(
@@ -1417,6 +1477,17 @@ public sealed class AssignmentEngine : IAssignmentEngine
         }
 
         return Result<SubStage>.Success(subStage);
+    }
+
+    private async Task<Result> ResolveActiveLineStageContextAsync(Guid productionLineId, Guid subStageId, CancellationToken cancellationToken)
+    {
+        var valid = await _dbContext.ProductionLines.AsNoTracking()
+            .Where(line => line.Id == productionLineId && line.IsActive && line.DepartmentId != null)
+            .AnyAsync(line => _dbContext.SubStages.Any(stage =>
+                stage.Id == subStageId && stage.IsActive && stage.DepartmentId == line.DepartmentId), cancellationToken);
+        return valid
+            ? Result.Success()
+            : Result.Failure(new Error("ValidationError", "المرحلة لا تتبع قسم خط الإنتاج المحدد أو أنها غير نشطة."));
     }
 
     public async Task<Result<int>> FinalizeCompletedTemporaryAssignmentsAsync(

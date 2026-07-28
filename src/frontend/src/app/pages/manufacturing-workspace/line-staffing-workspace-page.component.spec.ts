@@ -193,7 +193,7 @@ describe('LineStaffingWorkspacePageComponent', () => {
     component.toggleDefaultWorker(component.availableWorkers[1], true);
     component.saveAssignment();
 
-    expect(assignments.updateStageDefaultAssignments).toHaveBeenCalledWith(defaultStageId, ['worker-one', 'worker-two']);
+    expect(assignments.updateStageDefaultAssignments).toHaveBeenCalledWith(lineId, defaultStageId, ['worker-one', 'worker-two']);
     expect(component.assignmentDialogVisible).toBeFalse();
     expect(component.successMessage).toContain('تم تحديث عمال المرحلة');
     expect(component.selectedSubStageId).toBe(defaultStageId);
@@ -301,7 +301,7 @@ describe('LineStaffingWorkspacePageComponent', () => {
     component.toggleDefaultWorker(component.availableWorkers[0], false);
     component.saveAssignment();
 
-    expect(assignments.updateStageDefaultAssignments).toHaveBeenCalledWith(defaultStageId, []);
+    expect(assignments.updateStageDefaultAssignments).toHaveBeenCalledWith(lineId, defaultStageId, []);
   });
 
   it('does not require a reason when adding a permanent participation to another stage', () => {

@@ -98,11 +98,14 @@ public sealed class AttendanceWorkforceEngine(
             var matchingStageIds = dbContext.SubStages.AsNoTracking()
                 .Where(stage => !query.SubStageId.HasValue || stage.Id == query.SubStageId.Value)
                 .Where(stage => !query.MainStageId.HasValue || stage.MainStageId == query.MainStageId.Value)
-                .Where(stage => !query.ProductionLineId.HasValue || stage.MainStage!.ProductionLineId == query.ProductionLineId.Value)
-                .Where(stage => !query.FactoryId.HasValue || stage.MainStage!.ProductionLine!.FactoryId == query.FactoryId.Value)
+                .Where(stage => !query.ProductionLineId.HasValue || dbContext.ProductionLines.Any(line => line.Id == query.ProductionLineId.Value && line.DepartmentId == stage.DepartmentId))
+                .Where(stage => !query.FactoryId.HasValue || stage.MainStage!.Department!.FactoryId == query.FactoryId.Value)
                 .Select(stage => stage.Id);
             workers = workers.Where(worker =>
-                dbContext.WorkerDefaultAssignments.Any(assignment => assignment.WorkerId == worker.Id && assignment.IsActive && matchingStageIds.Contains(assignment.SubStageId)) ||
+                dbContext.WorkerDefaultAssignments.Any(assignment => assignment.WorkerId == worker.Id && assignment.IsActive
+                    && (!query.ProductionLineId.HasValue || assignment.ProductionLineId == query.ProductionLineId.Value)
+                    && (!query.FactoryId.HasValue || assignment.ProductionLine!.FactoryId == query.FactoryId.Value)
+                    && matchingStageIds.Contains(assignment.SubStageId)) ||
                 dbContext.WorkerTemporaryAssignments.Any(assignment => assignment.WorkerId == worker.Id && assignment.StartAtUtc <= startUtc && assignment.EndAtUtc > startUtc &&
                     (assignment.Status == "Active" || assignment.Status == "Scheduled") && matchingStageIds.Contains(assignment.ToSubStageId)));
         }
@@ -161,9 +164,7 @@ public sealed class AttendanceWorkforceEngine(
         if (assignments.IsFailure) throw new InvalidOperationException(assignments.Error!.Message);
         var assignmentStates = assignments.Value!;
         var subStageIds = assignmentStates.Values.SelectMany(values => values).Select(value => value.EffectiveSubStageId).Where(id => id.HasValue).Select(id => id!.Value).Distinct().ToArray();
-        var stages = await dbContext.SubStages.AsNoTracking().Where(stage => subStageIds.Contains(stage.Id))
-            .Select(stage => new StageHeader(stage.Id, stage.Name, stage.MainStageId, stage.MainStage!.Name, stage.MainStage.ProductionLineId, stage.MainStage.ProductionLine!.Name, stage.MainStage.ProductionLine.FactoryId, stage.MainStage.ProductionLine.Factory!.Name))
-            .ToDictionaryAsync(stage => stage.Id, cancellationToken);
+        var stages = await LoadStageHeadersAsync(assignmentStates.Values.SelectMany(values => values), subStageIds, cancellationToken);
         return workers.Select(worker => MapRow(worker, assignmentStates.GetValueOrDefault(worker.Id) ?? [], stages, attendance.Value!.GetValueOrDefault(worker.Id), attendanceDataAvailable)).ToList();
     }
 
@@ -176,9 +177,7 @@ public sealed class AttendanceWorkforceEngine(
         if (assignmentResult.IsFailure) return Result<AttendanceWorkforceDetailDto>.Failure(assignmentResult.Error!);
         var states = assignmentResult.Value![workerId];
         var ids = states.Select(state => state.EffectiveSubStageId).Where(id => id.HasValue).Select(id => id!.Value).Distinct().ToArray();
-        var stages = await dbContext.SubStages.AsNoTracking().Where(stage => ids.Contains(stage.Id))
-            .Select(stage => new StageHeader(stage.Id, stage.Name, stage.MainStageId, stage.MainStage!.Name, stage.MainStage.ProductionLineId, stage.MainStage.ProductionLine!.Name, stage.MainStage.ProductionLine.FactoryId, stage.MainStage.ProductionLine.Factory!.Name))
-            .ToDictionaryAsync(stage => stage.Id, cancellationToken);
+        var stages = await LoadStageHeadersAsync(states, ids, cancellationToken);
         // SQL Server datetime2 does not preserve DateTime.Kind. AttendanceTimeUtc is an
         // established UTC contract, so mark it explicitly before serializing it to clients.
         var attendanceRecords = await dbContext.AttendanceRecords.AsNoTracking()
@@ -189,7 +188,7 @@ public sealed class AttendanceWorkforceEngine(
         return Result<AttendanceWorkforceDetailDto>.Success(new AttendanceWorkforceDetailDto(workerId, productionDate, MapAttendanceEvidence(attendanceRecords), MapAssignments(states, stages)));
     }
 
-    private AttendanceWorkforceRowDto MapRow(WorkerHeader worker, IReadOnlyCollection<WorkerAssignmentState> states, IReadOnlyDictionary<Guid, StageHeader> stages, AttendancePresenceWindowDto? attendance, bool dataAvailable)
+    private AttendanceWorkforceRowDto MapRow(WorkerHeader worker, IReadOnlyCollection<WorkerAssignmentState> states, IReadOnlyDictionary<(Guid SubStageId, Guid ProductionLineId), StageHeader> stages, AttendancePresenceWindowDto? attendance, bool dataAvailable)
     {
         var status = !dataAvailable ? "NeedsSync" : attendance is null ? "Unassigned" : attendance.Status switch
         {
@@ -206,10 +205,28 @@ public sealed class AttendanceWorkforceEngine(
             items.Any(item => item.AssignmentType is AssignmentType.Temporary or AssignmentType.Replacement), present && !isAssigned || status == "Absent" && isAssigned || status == "Incomplete");
     }
 
-    private static IReadOnlyCollection<AttendanceWorkforceAssignmentDto> MapAssignments(IEnumerable<WorkerAssignmentState> states, IReadOnlyDictionary<Guid, StageHeader> stages) => states
-        .Where(state => state.AssignmentId.HasValue && state.AssignmentType.HasValue && state.EffectiveSubStageId.HasValue && stages.TryGetValue(state.EffectiveSubStageId.Value, out _))
-        .Select(state => { var stage = stages[state.EffectiveSubStageId!.Value]; return new AttendanceWorkforceAssignmentDto(state.AssignmentId!.Value, state.AssignmentType!.Value, stage.Id, stage.MainStageId, stage.LineId, stage.FactoryId, stage.FactoryName, stage.LineName, stage.MainStageName, stage.Name, state.StartsAtUtc, state.EndsAtUtc, null); })
+    private static IReadOnlyCollection<AttendanceWorkforceAssignmentDto> MapAssignments(IEnumerable<WorkerAssignmentState> states, IReadOnlyDictionary<(Guid SubStageId, Guid ProductionLineId), StageHeader> stages) => states
+        .Where(state => state.AssignmentId.HasValue && state.AssignmentType.HasValue && state.EffectiveSubStageId.HasValue && state.ProductionLineId.HasValue && stages.ContainsKey((state.EffectiveSubStageId.Value, state.ProductionLineId.Value)))
+        .Select(state => { var stage = stages[(state.EffectiveSubStageId!.Value, state.ProductionLineId!.Value)]; return new AttendanceWorkforceAssignmentDto(state.AssignmentId!.Value, state.AssignmentType!.Value, stage.Id, stage.MainStageId, stage.LineId, stage.FactoryId, stage.FactoryName, stage.LineName, stage.MainStageName, stage.Name, state.StartsAtUtc, state.EndsAtUtc, null); })
         .OrderBy(item => item.FactoryName).ThenBy(item => item.ProductionLineName).ThenBy(item => item.MainStageName).ThenBy(item => item.SubStageName).ToArray();
+
+    private async Task<IReadOnlyDictionary<(Guid SubStageId, Guid ProductionLineId), StageHeader>> LoadStageHeadersAsync(
+        IEnumerable<WorkerAssignmentState> states,
+        Guid[] subStageIds,
+        CancellationToken cancellationToken)
+    {
+        var lineIds = states.Where(state => state.ProductionLineId.HasValue).Select(state => state.ProductionLineId!.Value).Distinct().ToArray();
+        var catalog = await dbContext.SubStages.AsNoTracking().Where(stage => subStageIds.Contains(stage.Id))
+            .Select(stage => new { stage.Id, stage.Name, stage.MainStageId, MainStageName = stage.MainStage!.Name, stage.DepartmentId })
+            .ToArrayAsync(cancellationToken);
+        var lines = await dbContext.ProductionLines.AsNoTracking().Where(line => lineIds.Contains(line.Id))
+            .Select(line => new { line.Id, line.Name, line.DepartmentId, line.FactoryId, FactoryName = line.Factory!.Name })
+            .ToArrayAsync(cancellationToken);
+        return (from stage in catalog
+                join line in lines on stage.DepartmentId equals line.DepartmentId
+                select new StageHeader(stage.Id, stage.Name, stage.MainStageId, stage.MainStageName, line.Id, line.Name, line.FactoryId, line.FactoryName))
+            .ToDictionary(stage => (stage.Id, stage.LineId));
+    }
 
     private static IEnumerable<AttendanceWorkforceRowDto> ApplyFilters(IEnumerable<AttendanceWorkforceRowDto> rows, AttendanceWorkforceQuery query)
     {

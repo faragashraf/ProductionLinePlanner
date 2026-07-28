@@ -34,14 +34,19 @@ public sealed class AssignmentNotificationDispatcher(
             {
                 return;
             }
+            if (request.ProductionLineId is not Guid productionLineId || productionLineId == Guid.Empty)
+            {
+                logger.LogWarning("Assignment notification has no production-line context for assignment {AssignmentId}.", request.AssignmentId);
+                return;
+            }
 
             var context = await (from worker in dbContext.Workers.AsNoTracking()
                                  join stage in dbContext.SubStages.AsNoTracking() on validStageId equals stage.Id
-                                 join line in dbContext.ProductionLines.AsNoTracking() on stage.ProductionLineId equals line.Id
+                                 join line in dbContext.ProductionLines.AsNoTracking() on productionLineId equals line.Id
                                  join factory in dbContext.Factories.AsNoTracking() on line.FactoryId equals factory.Id
                                  join actor in dbContext.AppUsers.AsNoTracking() on request.ActorUserId equals actor.Id into actors
                                  from actor in actors.DefaultIfEmpty()
-                                 where worker.Id == request.WorkerId
+                                 where worker.Id == request.WorkerId && line.DepartmentId == stage.DepartmentId
                                  select new
                                  {
                                      WorkerName = worker.FullName,

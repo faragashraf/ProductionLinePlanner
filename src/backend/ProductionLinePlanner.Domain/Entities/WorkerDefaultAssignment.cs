@@ -14,12 +14,15 @@ public class WorkerDefaultAssignment
         DateTime assignedAtUtc,
         string? reason = null,
         bool isActive = true,
-        DateTime? createdAtUtc = null)
+        DateTime? createdAtUtc = null,
+        Guid productionLineId = default)
     {
         if (workerId == Guid.Empty)
             throw new ArgumentException("WorkerId is required.", nameof(workerId));
         if (subStageId == Guid.Empty)
             throw new ArgumentException("SubStageId is required.", nameof(subStageId));
+        if (productionLineId == Guid.Empty)
+            throw new ArgumentException("ProductionLineId is required.", nameof(productionLineId));
         if (assignedByUserId == Guid.Empty)
             throw new ArgumentException("AssignedByUserId is required.", nameof(assignedByUserId));
         if (assignedAtUtc == default)
@@ -28,6 +31,7 @@ public class WorkerDefaultAssignment
         Id = id;
         WorkerId = workerId;
         SubStageId = subStageId;
+        ProductionLineId = productionLineId;
         AssignedByUserId = assignedByUserId;
         AssignedAt = assignedAtUtc;
         Reason = string.IsNullOrWhiteSpace(reason) ? null : reason.Trim();
@@ -41,6 +45,8 @@ public class WorkerDefaultAssignment
     public Worker? Worker { get; set; }
     public Guid SubStageId { get; init; }
     public SubStage? SubStage { get; set; }
+    public Guid ProductionLineId { get; init; }
+    public ProductionLine? ProductionLine { get; set; }
     public DateTime AssignedAt { get; private set; }
     public Guid AssignedByUserId { get; private set; }
     public bool IsActive { get; private set; }

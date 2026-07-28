@@ -4,7 +4,7 @@ import { ActivatedRoute } from '@angular/router';
 import { FormBuilder, Validators } from '@angular/forms';
 import { MenuItem, MessageService, TreeNode } from 'primeng/api';
 import { ContextMenu } from 'primeng/contextmenu';
-import { EMPTY, Subject, debounceTime, distinctUntilChanged, finalize, forkJoin, Observable, switchMap, takeUntil } from 'rxjs';
+import { Subject, debounceTime, distinctUntilChanged, finalize, forkJoin, Observable, takeUntil } from 'rxjs';
 import {
   DepartmentItem,
   CopyModelStagesRequest,
@@ -28,17 +28,8 @@ import { buildModelContextMenu, ModelContextAction } from './model-context-menu.
 type StageStatusFilter = 'all' | 'active' | 'inactive';
 type ModelStatusFilter = StageStatusFilter;
 type ModelStageRelationshipFilter = 'all' | 'linked' | 'unlinked';
-interface ModelStageLineGroup {
-  lineId: string;
-  lineName: string;
-  lineCode: string;
-  structurePath: string;
-  stages: ModelStageItem[];
-}
-
 interface ModelStageAvailabilityRow {
   stage: SubStageOption;
-  lineName: string;
   relationship: ModelStageItem | null;
 }
 
@@ -66,7 +57,6 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
   departments: DepartmentItem[] = [];
   lines: ProductionLineOption[] = [];
   stageEditDepartments: DepartmentItem[] = [];
-  stageEditLines: ProductionLineOption[] = [];
   stageFilterTreeNodes: FactoryStructureTreeNode[] = [];
   selectedStageFilterNode: FactoryStructureTreeNode | null = null;
   stageTreeSearch = '';
@@ -131,13 +121,11 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
 
   readonly stageFiltersForm = this.fb.group({
     factoryId: [''],
-    departmentId: [''],
-    productionLineId: ['']
+    departmentId: ['']
   });
   readonly stageEditForm = this.fb.group({
     factoryId: ['', Validators.required],
     departmentId: ['', Validators.required],
-    productionLineId: ['', Validators.required],
     name: ['', Validators.required],
     capacity: [0, [Validators.required, Validators.min(0)]]
   });
@@ -148,9 +136,6 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
   private readonly destroy$ = new Subject<void>();
   private modelRequestVersion = 0;
   private availableStagesRequestVersion = 0;
-  private stageEditHydrationVersion = 0;
-  private stageEditHydrating = false;
-  private stageEditHierarchy: { factoryId: string; departmentId: string; productionLineId: string } | null = null;
   private editingStageSnapshot: Readonly<SubStageOption> | null = null;
   private stageFilterExpandedIds = new Set<string>();
   private contextModelNode: TreeNode | null = null;
@@ -168,7 +153,7 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
       ? this.manufacturingRealtime?.watchScreen({ screen: 'models', refresh: () => this.refreshModelsFromRealtime() })
       : this.manufacturingRealtime?.watchScreen({
         screen: 'stages',
-        matches: change => change.entityType === 'Factory' || change.entityType === 'Department' || change.entityType === 'ProductionLine' || change.productionLineId === this.stageFiltersForm.controls.productionLineId.value,
+        matches: change => change.entityType === 'Factory' || change.entityType === 'Department' || change.departmentId === this.stageFiltersForm.controls.departmentId.value,
         refresh: () => this.refreshStagesFromRealtime()
       });
     this.reload();
@@ -180,17 +165,13 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
     const factoryId = this.stageEditForm.controls.factoryId.value;
     return this.stageEditDepartments.filter(item => item.isActive !== false && (!factoryId || item.factoryId === factoryId));
   }
-  get activeStageEditLines(): ProductionLineOption[] {
-    const departmentId = this.stageEditForm.controls.departmentId.value;
-    return this.stageEditLines.filter(item => item.isActive && (!departmentId || item.departmentId === departmentId));
-  }
   get selectedStage(): Readonly<SubStageOption> | null { return this.editingStageSnapshot?.id === this.editStageId ? this.editingStageSnapshot : null; }
   get visibleStageFilterTreeNodes(): FactoryStructureTreeNode[] { return filterFactoryStructureTree(this.stageFilterTreeNodes, this.stageTreeSearch); }
   get selectedStageFilterPath(): string { return this.selectedStageFilterNode ? this.stageFilterPath(this.selectedStageFilterNode).join(' / ') : 'كل المصانع'; }
   get stageFilterResetKey(): string { return `${this.selectedStageFilterNode?.data?.entityType ?? 'all'}:${this.selectedStageFilterNode?.data?.entityId ?? 'all'}:${this.stageStatusFilter}:${this.stageSearch}`; }
   get filteredOperationalStages(): SubStageOption[] { return this.operationalStages.filter(stage => matchesSearchTerm(this.stageSearch, [stage.name, stage.code])); }
   get stageResultCount(): number { return this.filteredOperationalStages.length; }
-  get stageEmptyMessage(): string { return normalizeSearchText(this.stageSearch) ? 'لا توجد مراحل مطابقة للبحث.' : 'اختر مصنعًا أو قسمًا أو خط إنتاج لعرض مراحل الإنتاج، أو لا توجد مراحل مطابقة.'; }
+  get stageEmptyMessage(): string { return normalizeSearchText(this.stageSearch) ? 'لا توجد مراحل مطابقة للبحث.' : 'اختر قسمًا لعرض كتالوج مراحله، أو لا توجد مراحل في القسم المحدد.'; }
   get filteredModels(): ProductModelItem[] { return this.models; }
   get modelResultTotal(): number { return this.modelTotal; }
   get modelFiltersActive(): boolean { return this.modelStatusFilter !== 'all' || !!this.modelListSearch.trim(); }
@@ -204,34 +185,6 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
     return normalizeSearchText(this.modelStageSearch)
       ? 'توجد مراحل مرتبطة، لكن لا توجد نتائج مطابقة للبحث.'
       : 'لا توجد مراحل مرتبطة بهذا الموديل.';
-  }
-  get modelJourneyGroups(): ModelStageLineGroup[] {
-    const grouped = new Map<string, ModelStageLineGroup>();
-    this.filteredLinkedStages.forEach(stage => {
-      const catalog = this.availableStageOptionCache.get(stage.subStageId);
-      const lineId = catalog?.productionLineId ?? 'unknown';
-      const line = this.lines.find(item => item.id === lineId);
-      const factoryId = catalog?.factoryId ?? line?.factoryId;
-      const departmentId = catalog?.departmentId ?? line?.departmentId;
-      const factory = this.factories.find(item => item.id === factoryId);
-      const department = this.departments.find(item => item.id === departmentId);
-      const group = grouped.get(lineId) ?? {
-        lineId,
-        lineName: catalog?.productionLineName ?? line?.name ?? 'خط غير محدد',
-        lineCode: line?.lineCode ?? '—',
-        structurePath: [factory?.name, department?.nameAr ?? department?.name, catalog?.productionLineName ?? line?.name].filter(Boolean).join(' ← ') || 'مسار الخط غير متاح',
-        stages: []
-      };
-      group.stages.push(stage);
-      grouped.set(lineId, group);
-    });
-    return [...grouped.values()]
-      .map(group => ({ ...group, stages: [...group.stages].sort((left, right) => left.stageOrder - right.stageOrder) }))
-      .sort((left, right) => {
-        const leftOrder = this.lines.find(line => line.id === left.lineId)?.sequenceOrder ?? Number.MAX_SAFE_INTEGER;
-        const rightOrder = this.lines.find(line => line.id === right.lineId)?.sequenceOrder ?? Number.MAX_SAFE_INTEGER;
-        return leftOrder - rightOrder || left.lineName.localeCompare(right.lineName, 'ar');
-      });
   }
   get availableStageChoices(): SubStageOption[] {
     const selected = this.selectedAvailableStage;
@@ -247,25 +200,15 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
       && !!department.id
       && department.factoryId === this.selectedModelStageFactoryId);
   }
-  get modelStageLineOptions(): ProductionLineOption[] {
-    if (!this.selectedModelStageDepartmentId) return [];
-    return this.lines
-      .filter(line => line.isActive
-        && line.factoryId === this.selectedModelStageFactoryId
-        && line.departmentId === this.selectedModelStageDepartmentId)
-      .sort((left, right) => left.sequenceOrder - right.sequenceOrder || left.name.localeCompare(right.name, 'ar'));
-  }
   get availableModelStageRows(): ModelStageAvailabilityRow[] {
     if (!this.hasModelStageContext) return [];
     const relationships = new Map(this.stages.map(stage => [stage.subStageId, stage]));
     return this.availableStageCatalog
       .filter(stage => stage.isActive
         && this.factoryIdForStage(stage) === this.selectedModelStageFactoryId
-        && this.departmentIdForStage(stage) === this.selectedModelStageDepartmentId
-        && stage.productionLineId === this.selectedModelStageProductionLineId)
-      .map(stage => ({ stage, lineName: this.lineNameForStage(stage), relationship: relationships.get(stage.id) ?? null }))
-      .sort((left, right) => this.lineOrderForStage(left.stage) - this.lineOrderForStage(right.stage)
-        || left.stage.sequenceOrder - right.stage.sequenceOrder
+        && this.departmentIdForStage(stage) === this.selectedModelStageDepartmentId)
+      .map(stage => ({ stage, relationship: relationships.get(stage.id) ?? null }))
+      .sort((left, right) => left.stage.sequenceOrder - right.stage.sequenceOrder
         || left.stage.name.localeCompare(right.stage.name, 'ar'));
   }
   get filteredAvailableModelStageRows(): ModelStageAvailabilityRow[] {
@@ -273,9 +216,9 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
       || (this.modelStageRelationshipFilter === 'linked' ? !!row.relationship : !row.relationship));
   }
   get modelStageFilterEmptyMessage(): string {
-    if (this.modelStageRelationshipFilter === 'linked') return 'لا توجد مراحل مرتبطة بهذا الموديل على الخط المختار.';
-    if (this.modelStageRelationshipFilter === 'unlinked') return 'لا توجد مراحل غير مرتبطة متاحة على الخط المختار.';
-    return 'الخط المختار لا يحتوي مراحل.';
+    if (this.modelStageRelationshipFilter === 'linked') return 'لا توجد مراحل مرتبطة بهذا الموديل في القسم المختار.';
+    if (this.modelStageRelationshipFilter === 'unlinked') return 'لا توجد مراحل غير مرتبطة متاحة في القسم المختار.';
+    return 'القسم المختار لا يحتوي مراحل.';
   }
   get selectableModelStageRows(): ModelStageAvailabilityRow[] {
     return this.filteredAvailableModelStageRows.filter(row => !!row.relationship);
@@ -304,9 +247,7 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
   }
   get bulkCopyTargetLineOptions(): ProductionLineOption[] {
     return this.lines
-      .filter(line => line.isActive
-        && line.factoryId === this.bulkCopyTargetFactoryId
-        && line.departmentId === this.bulkCopyTargetDepartmentId)
+      .filter(line => line.isActive && line.factoryId === this.bulkCopyTargetFactoryId && line.departmentId === this.bulkCopyTargetDepartmentId)
       .sort((left, right) => left.sequenceOrder - right.sequenceOrder || left.name.localeCompare(right.name, 'ar'));
   }
   get bulkCopyTargetSameAsSource(): boolean {
@@ -324,12 +265,15 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
       && !this.bulkCopyBusy;
   }
   get bulkCopySourceLabel(): string {
-    return `${this.selected?.code ?? '—'} — ${this.lines.find(line => line.id === this.selectedModelStageProductionLineId)?.name ?? '—'}`;
+    const department = this.departments.find(item => item.id === this.selectedModelStageDepartmentId);
+    const line = this.lines.find(item => item.id === this.selectedModelStageProductionLineId);
+    return `${this.selected?.code ?? '—'} — ${department?.nameAr ?? department?.name ?? '—'} — ${line?.name ?? '—'}`;
   }
   get bulkCopyTargetLabel(): string {
     const model = this.bulkCopyTargetModels.find(item => item.id === this.bulkCopyTargetModelId);
+    const department = this.departments.find(item => item.id === this.bulkCopyTargetDepartmentId);
     const line = this.lines.find(item => item.id === this.bulkCopyTargetProductionLineId);
-    return `${model?.code ?? '—'} — ${line?.name ?? '—'}`;
+    return `${model?.code ?? '—'} — ${department?.nameAr ?? department?.name ?? '—'} — ${line?.name ?? '—'}`;
   }
   get hasModelStageContext(): boolean {
     return !!this.selectedModelStageFactoryId
@@ -341,7 +285,7 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
     if (!this.selectedModelStageFactoryId) return 'اختر مصنعًا أولًا.';
     if (!this.selected) return 'اختر موديلًا لعرض علاقات مراحله.';
     if (!this.selectedModelStageDepartmentId) return 'اختر قسمًا تابعًا للمصنع.';
-    if (!this.selectedModelStageProductionLineId) return 'اختر خط إنتاج تابعًا للقسم.';
+    if (!this.selectedModelStageProductionLineId) return 'اختر خط إنتاج لعرض علاقات مراحل الموديل.';
     return '';
   }
   get modelStageContextBreadcrumb(): string {
@@ -390,8 +334,7 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
     }
     forkJoin({
       factories: this.api.factories(),
-      departments: this.api.departments(undefined, false),
-      lines: this.api.allProductionLines()
+      departments: this.api.departments(undefined, false)
     }).pipe(finalize(() => this.loading = false), takeUntil(this.destroy$)).subscribe({
       next: data => {
         this.applyStageStructureData(data);
@@ -406,7 +349,7 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
   clearStageFilterSearch(): void { this.stageTreeSearch = ''; }
 
   selectStageFilterNode(node: FactoryStructureTreeNode): void {
-    if (node.data?.entityType !== 'line') return;
+    if (node.data?.entityType !== 'department') return;
     this.selectedStageFilterNode = node;
     this.applyStageFilterSelection(node);
     this.loadOperationalStages();
@@ -414,7 +357,7 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
 
   clearStageTreeFilter(): void {
     this.selectedStageFilterNode = null;
-    this.stageFiltersForm.reset({ factoryId: '', departmentId: '', productionLineId: '' }, { emitEvent: false });
+    this.stageFiltersForm.reset({ factoryId: '', departmentId: '' }, { emitEvent: false });
     this.operationalStages = [];
   }
 
@@ -435,25 +378,14 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
   }
 
   selectStageEditFactory(factoryId: string): void {
-    if (this.stageEditHydrating) return;
-    this.stageEditForm.patchValue({ factoryId, departmentId: '', productionLineId: '' });
+    this.stageEditForm.patchValue({ factoryId, departmentId: '' });
     this.stageEditDepartments = [];
-    this.stageEditLines = [];
     if (!factoryId) return;
     this.api.departments(factoryId, false).pipe(takeUntil(this.destroy$)).subscribe({ next: departments => this.stageEditDepartments = departments.filter(item => item.factoryId === factoryId && item.isActive), error: error => this.setError(error) });
   }
 
   selectStageEditDepartment(departmentId: string): void {
-    if (this.stageEditHydrating) return;
-    this.stageEditForm.patchValue({ departmentId, productionLineId: '' });
-    this.stageEditLines = [];
-    if (!departmentId) return;
-    this.api.productionLinesForDepartment(departmentId).pipe(takeUntil(this.destroy$)).subscribe({ next: lines => this.stageEditLines = lines.filter(line => line.departmentId === departmentId && line.isActive), error: error => this.setError(error) });
-  }
-
-  selectStageEditLine(productionLineId: string): void {
-    if (this.stageEditHydrating) return;
-    this.stageEditForm.patchValue({ productionLineId });
+    this.stageEditForm.patchValue({ departmentId });
   }
 
   setStageStatusFilter(value: string): void {
@@ -499,15 +431,8 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
     const department = this.modelStageDepartmentOptions.find(item => item.id === departmentId);
     this.selectedModelStageDepartmentId = department?.id ?? '';
     this.selectedModelStageProductionLineId = '';
+    this.stages = [];
     this.clearModelStageSelection();
-    this.rebuildAvailableStageOptions();
-  }
-  selectModelStageProductionLine(productionLineId: string): void {
-    const previousLineId = this.selectedModelStageProductionLineId;
-    this.selectedModelStageProductionLineId = this.modelStageLineOptions.some(line => line.id === productionLineId)
-      ? productionLineId
-      : '';
-    if (previousLineId !== this.selectedModelStageProductionLineId) this.clearModelStageSelection();
     this.rebuildAvailableStageOptions();
   }
   selectModelStageContextNode(node: TreeNode): void {
@@ -515,12 +440,15 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
     if (!context) return;
     this.selectedModelStageContextNode = node;
     const previousModelId = this.selected?.id;
-    const previousLineId = this.selectedModelStageProductionLineId;
+    const previousDepartmentId = this.selectedModelStageDepartmentId;
+    const previousProductionLineId = this.selectedModelStageProductionLineId;
 
     if (context.contextType === 'factory') {
       this.selectModelStageFactory(context.factoryId);
       this.selected = null;
       this.stages = [];
+      this.selectedModelStageDepartmentId = '';
+      this.selectedModelStageProductionLineId = '';
       this.modelStageFormVisible = false;
       this.clearModelStageSelection();
       return;
@@ -532,8 +460,9 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
     if (context.contextType === 'model') {
       this.selectedModelStageDepartmentId = '';
       this.selectedModelStageProductionLineId = '';
+      this.stages = [];
       this.modelStageFormVisible = false;
-      if (previousModelId !== context.modelId || previousLineId) this.clearModelStageSelection();
+      if (previousModelId !== context.modelId || previousDepartmentId) this.clearModelStageSelection();
       this.rebuildAvailableStageOptions();
       return;
     }
@@ -541,14 +470,13 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
     this.selectedModelStageDepartmentId = context.departmentId ?? '';
     if (context.contextType === 'department') {
       this.selectedModelStageProductionLineId = '';
-      this.modelStageFormVisible = false;
-      if (previousModelId !== context.modelId || previousLineId) this.clearModelStageSelection();
-      this.rebuildAvailableStageOptions();
-      return;
+      this.stages = [];
+    } else {
+      this.selectedModelStageProductionLineId = context.productionLineId ?? '';
+      if (this.selected && this.selectedModelStageProductionLineId) this.reloadSelectedModelStages(this.selected.id);
     }
-
-    this.selectedModelStageProductionLineId = context.productionLineId ?? '';
-    if (previousModelId !== context.modelId || previousLineId !== this.selectedModelStageProductionLineId) this.clearModelStageSelection();
+    this.modelStageFormVisible = false;
+    if (previousModelId !== context.modelId || previousDepartmentId !== this.selectedModelStageDepartmentId || previousProductionLineId !== this.selectedModelStageProductionLineId) this.clearModelStageSelection();
     this.rebuildAvailableStageOptions();
   }
   onModelLazyLoad(event: { first?: number | null; rows?: number | null }): void { const page = Math.floor((event.first ?? 0) / (event.rows ?? this.modelPageSize)) + 1; if (page !== this.modelPage) this.loadModelPage(this.modelListSearch, page); }
@@ -561,67 +489,24 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
   }
 
   openStageForm(): void {
-    this.cancelStageEditHydration();
     this.editStageId = '';
     this.editingStageSnapshot = null;
     this.stageFormVisible = true;
     const hierarchy = this.stageFiltersForm.getRawValue();
     this.stageEditDepartments = this.departments.filter(item => item.factoryId === hierarchy.factoryId);
-    this.stageEditLines = this.lines.filter(item => item.departmentId === hierarchy.departmentId);
     this.stageEditForm.reset({ ...hierarchy, name: '', capacity: 0 }, { emitEvent: false });
   }
 
   editOperationalStage(stage: SubStageOption): void {
-    const hydrationVersion = ++this.stageEditHydrationVersion;
-    const stageLine = stage.productionLineId ? this.lines.find(line => line.id === stage.productionLineId) : undefined;
     const hierarchy = {
-      factoryId: stage.factoryId ?? stageLine?.factoryId ?? '',
-      departmentId: stage.departmentId ?? stageLine?.departmentId ?? '',
-      productionLineId: stage.productionLineId ?? ''
+      factoryId: stage.factoryId ?? '',
+      departmentId: stage.departmentId
     };
-    this.stageEditHydrating = true;
-    this.stageEditHierarchy = hierarchy;
     this.editingStageSnapshot = Object.freeze({ ...stage, ...hierarchy });
     this.editStageId = stage.id;
     this.stageFormVisible = true;
-    this.stageEditDepartments = [];
-    this.stageEditLines = [];
+    this.stageEditDepartments = this.departments.filter(item => item.factoryId === hierarchy.factoryId);
     this.stageEditForm.reset({ ...hierarchy, name: stage.name, capacity: stage.capacity }, { emitEvent: false });
-
-    if (!hierarchy.factoryId) {
-      this.stageEditHydrating = false;
-      return;
-    }
-
-    this.api.departments(hierarchy.factoryId, false).pipe(
-      switchMap(departments => {
-        if (!this.isCurrentStageEditHydration(hydrationVersion, stage.id)) return EMPTY;
-        const currentDepartment = this.departments.find(item => item.id === hierarchy.departmentId);
-        this.stageEditDepartments = currentDepartment && !departments.some(item => item.id === currentDepartment.id)
-          ? [...departments, currentDepartment]
-          : departments;
-        this.restoreStageEditHierarchy(hydrationVersion, stage.id);
-        return hierarchy.departmentId
-          ? this.api.productionLinesForDepartment(hierarchy.departmentId)
-          : EMPTY;
-      }),
-      finalize(() => {
-        if (this.isCurrentStageEditHydration(hydrationVersion, stage.id)) this.stageEditHydrating = false;
-      }),
-      takeUntil(this.destroy$)
-    ).subscribe({
-      next: lines => {
-        if (!this.isCurrentStageEditHydration(hydrationVersion, stage.id)) return;
-        const currentLine = this.lines.find(item => item.id === hierarchy.productionLineId);
-        this.stageEditLines = currentLine && !lines.some(item => item.id === currentLine.id)
-          ? [...lines, currentLine]
-          : lines;
-        this.restoreStageEditHierarchy(hydrationVersion, stage.id);
-      },
-      error: error => {
-        if (this.isCurrentStageEditHydration(hydrationVersion, stage.id)) this.setError(error);
-      }
-    });
   }
 
   saveOperationalStage(): void {
@@ -630,16 +515,15 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
     const correlationId = this.localCorrelation('stages');
     const request = this.editStageId
       ? this.api.updateOperationalStage(this.editStageId, { name: value.name, capacity: value.capacity }, correlationId)
-      : this.api.createOperationalStage({ productionLineId: value.productionLineId!, name: value.name!, capacity: value.capacity! }, correlationId);
+      : this.api.createOperationalStage({ departmentId: value.departmentId!, name: value.name!, capacity: value.capacity! }, correlationId);
     this.save(request, stage => {
       this.stageFormVisible = false;
       this.editStageId = '';
-      this.cancelStageEditHydration();
       this.loadOperationalStages();
     });
   }
 
-  closeStageForm(): void { this.stageFormVisible = false; this.editStageId = ''; this.editingStageSnapshot = null; this.cancelStageEditHydration(); }
+  closeStageForm(): void { this.stageFormVisible = false; this.editStageId = ''; this.editingStageSnapshot = null; }
 
   openDependencyDialog(stage: SubStageOption, action: 'disable' | 'delete'): void {
     this.pendingStage = stage;
@@ -742,11 +626,8 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
     if (this.selected?.id !== item.id) this.clearModelStageSelection();
     this.selected = item;
     this.modelStageSearch = '';
-    this.modelStagesLoading = true;
-    this.api.modelStages(item.id).pipe(finalize(() => this.modelStagesLoading = false), takeUntil(this.destroy$)).subscribe({
-      next: stages => { this.stages = [...stages].sort((left, right) => left.stageOrder - right.stageOrder); this.rebuildAvailableStageOptions(); },
-      error: error => this.setError(error)
-    });
+    if (this.selectedModelStageProductionLineId) this.reloadSelectedModelStages(item.id);
+    else this.stages = [];
     if (!this.availableStageCatalog.length && !this.availableStagesLoading) this.loadAvailableStageCatalog();
   }
   beginAddModelStage(stage: SubStageOption): void {
@@ -817,6 +698,7 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
     this.bulkCopyError = '';
     this.api.copyModelStages(
       this.selected!.id,
+      this.selectedModelStageProductionLineId,
       this.buildBulkCopyRequest(true),
       this.localCorrelation('models')
     ).pipe(finalize(() => this.bulkCopyBusy = false), takeUntil(this.destroy$)).subscribe({
@@ -847,6 +729,7 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
     this.bulkCopyError = '';
     this.api.copyModelStages(
       sourceModelId,
+      this.selectedModelStageProductionLineId,
       this.buildBulkCopyRequest(false),
       this.localCorrelation('models')
     ).pipe(finalize(() => this.bulkCopyBusy = false), takeUntil(this.destroy$)).subscribe({
@@ -864,15 +747,19 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
         this.bulkCopyDialogVisible = false;
         this.bulkCopyPreview = null;
         this.bulkCopyStep = 'configure';
-        if (this.selected?.id === targetModelId) this.reloadSelectedModelStages(targetModelId);
+        if (this.selected?.id === targetModelId && this.selectedModelStageProductionLineId === this.bulkCopyTargetProductionLineId) this.reloadSelectedModelStages(targetModelId);
       },
       error: error => this.bulkCopyError = this.errorMessage(error)
     });
   }
   private buildBulkCopyRequest(previewOnly: boolean): CopyModelStagesRequest {
     return {
+      sourceFactoryId: this.selectedModelStageFactoryId,
+      sourceDepartmentId: this.selectedModelStageDepartmentId,
       sourceProductionLineId: this.selectedModelStageProductionLineId,
       targetModelId: this.bulkCopyTargetModelId,
+      targetFactoryId: this.bulkCopyTargetFactoryId,
+      targetDepartmentId: this.bulkCopyTargetDepartmentId,
       targetProductionLineId: this.bulkCopyTargetProductionLineId,
       sourceProductModelStageIds: this.selectedModelStageRelationships.map(stage => stage.id),
       previewOnly
@@ -883,17 +770,19 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
     this.bulkCopyError = '';
   }
   private reloadSelectedModelStages(modelId: string): void {
+    const productionLineId = this.selectedModelStageProductionLineId;
+    if (!productionLineId) { this.stages = []; this.rebuildAvailableStageOptions(); return; }
     this.modelStagesLoading = true;
-    this.api.modelStages(modelId).pipe(finalize(() => this.modelStagesLoading = false), takeUntil(this.destroy$)).subscribe({
+    this.api.modelStages(modelId, productionLineId).pipe(finalize(() => this.modelStagesLoading = false), takeUntil(this.destroy$)).subscribe({
       next: stages => {
-        if (this.selected?.id !== modelId) return;
+        if (this.selected?.id !== modelId || this.selectedModelStageProductionLineId !== productionLineId) return;
         this.stages = [...stages].sort((left, right) => left.stageOrder - right.stageOrder);
         this.rebuildAvailableStageOptions();
       },
       error: error => this.setError(error)
     });
   }
-  saveModelStage(): void { if (!this.selected || this.modelStageForm.invalid) return; const value = this.modelStageForm.getRawValue(); if (this.stages.some(item => item.subStageId === value.subStageId && item.id !== this.editModelStageId) || this.stages.some(item => item.stageOrder === value.stageOrder && item.id !== this.editModelStageId)) { this.error = 'لا يمكن تكرار المرحلة أو ترتيبها داخل الموديل.'; return; } const correlationId = this.localCorrelation('models'); this.save(this.editModelStageId ? this.api.updateModelStage(this.selected.id, this.editModelStageId, value, correlationId) : this.api.addModelStage(this.selected.id, value, correlationId), item => { this.stages = this.upsert(this.stages, item, 'stageOrder'); this.rebuildAvailableStageOptions(); this.editModelStageId = ''; this.modelStageFormVisible = false; }); }
+  saveModelStage(): void { if (!this.selected || !this.selectedModelStageProductionLineId || this.modelStageForm.invalid) return; const value = this.modelStageForm.getRawValue(); if (this.stages.some(item => item.subStageId === value.subStageId && item.id !== this.editModelStageId) || this.stages.some(item => item.stageOrder === value.stageOrder && item.id !== this.editModelStageId)) { this.error = 'لا يمكن تكرار المرحلة أو ترتيبها داخل الموديل وخط الإنتاج.'; return; } const correlationId = this.localCorrelation('models'); this.save(this.editModelStageId ? this.api.updateModelStage(this.selected.id, this.selectedModelStageProductionLineId, this.editModelStageId, value, correlationId) : this.api.addModelStage(this.selected.id, this.selectedModelStageProductionLineId, value, correlationId), item => { this.stages = this.upsert(this.stages, item, 'stageOrder'); this.rebuildAvailableStageOptions(); this.editModelStageId = ''; this.modelStageFormVisible = false; }); }
   editModelStage(item: ModelStageItem): void { this.editModelStageId = item.id; this.modelStageFormVisible = true; this.modelStageForm.reset(item); this.rebuildAvailableStageOptions(); }
   isModelStageSaving(id: string): boolean { return this.modelStageSavingIds.has(id); }
   modelStageRelationshipLabel(row: ModelStageAvailabilityRow): string {
@@ -910,6 +799,7 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
     this.modelStageSavingIds.add(item.id);
     this.api.updateModelStage(
       selectedModel.id,
+      this.selectedModelStageProductionLineId,
       item.id,
       { isActive: !item.isActive },
       this.localCorrelation('models')
@@ -945,8 +835,8 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
   totalPrice(): number { return this.stages.filter(item => item.isActive).reduce((sum, item) => sum + item.piecePrice, 0); }
   totalSeconds(): number { return this.stages.filter(item => item.isActive).reduce((sum, item) => sum + (item.standardSeconds ?? 0), 0); }
   stageStatusLabel(isActive: boolean): string { return isActive ? 'فعالة' : 'معطلة'; }
-  stageStructurePath(stage: Pick<SubStageOption, 'factoryName' | 'departmentNameAr' | 'productionLineName'>): string {
-    return [stage.factoryName, stage.departmentNameAr, stage.productionLineName].filter((value): value is string => !!value?.trim()).join(' ← ');
+  stageStructurePath(stage: Pick<SubStageOption, 'factoryName' | 'departmentNameAr'>): string {
+    return [stage.factoryName, stage.departmentNameAr].filter((value): value is string => !!value?.trim()).join(' ← ');
   }
 
   private save<T>(request: Observable<T>, success?: (result: T) => void): void { this.saving = true; this.error = ''; request.pipe(finalize(() => this.saving = false), takeUntil(this.destroy$)).subscribe({ next: result => success?.(result), error: error => this.setError(error) }); }
@@ -978,10 +868,8 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
     const available = this.availableStageCatalog
       .filter(option => option.isActive
         && this.departmentIdForStage(option) === this.selectedModelStageDepartmentId
-        && (!this.selectedModelStageProductionLineId || option.productionLineId === this.selectedModelStageProductionLineId)
         && !linkedStageIds.has(option.id))
-      .sort((left, right) => this.lineOrderForStage(left) - this.lineOrderForStage(right)
-        || left.sequenceOrder - right.sequenceOrder
+      .sort((left, right) => left.sequenceOrder - right.sequenceOrder
         || left.name.localeCompare(right.name, 'ar'));
     this.availableStageOptions = available;
   }
@@ -1058,19 +946,13 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
     if (this.bulkCopyDialogVisible) this.closeBulkCopyDialog();
   }
   private departmentIdForStage(stage: SubStageOption): string | null {
-    return stage.departmentId ?? this.lines.find(line => line.id === stage.productionLineId)?.departmentId ?? null;
+    return stage.departmentId || null;
   }
   private factoryIdForStage(stage: SubStageOption): string | null {
-    return stage.factoryId ?? this.lines.find(line => line.id === stage.productionLineId)?.factoryId ?? null;
-  }
-  private lineNameForStage(stage: SubStageOption): string {
-    return stage.productionLineName ?? this.lines.find(line => line.id === stage.productionLineId)?.name ?? 'خط غير محدد';
-  }
-  private lineOrderForStage(stage: SubStageOption): number {
-    return this.lines.find(line => line.id === stage.productionLineId)?.sequenceOrder ?? Number.MAX_SAFE_INTEGER;
+    return stage.factoryId ?? this.departments.find(department => department.id === stage.departmentId)?.factoryId ?? null;
   }
   private toAvailableOption(item: ModelStageItem): SubStageOption {
-    return { id: item.subStageId, mainStageId: '', code: item.subStageCode || '—', name: item.subStageName || 'مرحلة مرتبطة', capacity: 0, sequenceOrder: item.stageOrder, isActive: item.isActive };
+    return { id: item.subStageId, mainStageId: '', departmentId: item.departmentId, code: item.subStageCode || '—', name: item.subStageName || 'مرحلة مرتبطة', capacity: 0, sequenceOrder: item.stageOrder, isActive: item.isActive };
   }
   linkedStageName(item: ModelStageItem): string { return item.subStageName || this.availableStageOptionCache.get(item.subStageId)?.name || '-'; }
   linkedStageCode(item: ModelStageItem): string { return item.subStageCode || this.availableStageOptionCache.get(item.subStageId)?.code || '—'; }
@@ -1106,8 +988,7 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
     const selectedId = this.selectedStageFilterNode?.data?.entityId;
     forkJoin({
       factories: this.api.factories(),
-      departments: this.api.departments(undefined, false),
-      lines: this.api.allProductionLines()
+      departments: this.api.departments(undefined, false)
     }).pipe(takeUntil(this.destroy$)).subscribe({
       next: data => {
         this.applyStageStructureData(data);
@@ -1124,45 +1005,39 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
     });
   }
 
-  private clearStageContext(level: 'factory' | 'department' | 'line'): void {
+  private clearStageContext(level: 'factory' | 'department'): void {
     if (level === 'factory') {
-      this.stageFiltersForm.patchValue({ factoryId: '', departmentId: '', productionLineId: '' });
-    } else if (level === 'department') {
-      this.stageFiltersForm.patchValue({ departmentId: '', productionLineId: '' });
+      this.stageFiltersForm.patchValue({ factoryId: '', departmentId: '' });
     } else {
-      this.stageFiltersForm.patchValue({ productionLineId: '' });
+      this.stageFiltersForm.patchValue({ departmentId: '' });
     }
     this.operationalStages = [];
   }
 
-  private applyStageStructureData(data: { factories: readonly { id: string; code: string; name: string; isActive: boolean }[]; departments: readonly DepartmentItem[]; lines: readonly ProductionLineOption[] }): void {
+  private applyStageStructureData(data: { factories: readonly { id: string; code: string; name: string; isActive: boolean }[]; departments: readonly DepartmentItem[]; lines?: readonly ProductionLineOption[] }): void {
     this.factories = data.factories.filter(factory => factory.isActive);
     const factoryIds = new Set(this.factories.map(factory => factory.id));
     this.departments = data.departments.filter(item => item.isActive !== false && !!item.factoryId && factoryIds.has(item.factoryId));
-    const departmentIds = new Set(this.departments.map(item => item.id).filter(Boolean));
-    this.lines = data.lines.filter(line => line.isActive && factoryIds.has(line.factoryId) && (!line.departmentId || departmentIds.has(line.departmentId)));
+    if (data.lines) {
+      const departmentIds = new Set(this.departments.map(item => item.id).filter((id): id is string => !!id));
+      this.lines = data.lines.filter(line => line.isActive && factoryIds.has(line.factoryId) && !!line.departmentId && departmentIds.has(line.departmentId));
+    }
   }
 
   private validateStageFilterContextAfterStructureRefresh(): void {
     const factoryId = this.stageFiltersForm.controls.factoryId.value;
     const departmentId = this.stageFiltersForm.controls.departmentId.value;
-    const productionLineId = this.stageFiltersForm.controls.productionLineId.value;
     if (factoryId && !this.factories.some(factory => factory.id === factoryId)) {
-      this.stageFiltersForm.patchValue({ factoryId: '', departmentId: '', productionLineId: '' });
+      this.stageFiltersForm.patchValue({ factoryId: '', departmentId: '' });
       this.operationalStages = [];
       return;
     }
     if (departmentId && !this.departments.some(department => department.id === departmentId)) {
-      this.stageFiltersForm.patchValue({ departmentId: '', productionLineId: '' });
+      this.stageFiltersForm.patchValue({ departmentId: '' });
       this.operationalStages = [];
       return;
     }
-    if (productionLineId && !this.lines.some(line => line.id === productionLineId)) {
-      this.stageFiltersForm.patchValue({ productionLineId: '' });
-      this.operationalStages = [];
-      return;
-    }
-    if (productionLineId) this.loadOperationalStages();
+    if (departmentId) this.loadOperationalStages();
     else this.operationalStages = [];
   }
 
@@ -1171,9 +1046,16 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
     this.stageFilterTreeNodes = buildFactoryStructureTree({
       factories: this.factories,
       departments: this.departments,
-      lines: this.lines,
+      lines: [],
       eligibility: new Map()
-    }, this.stageFilterExpandedIds);
+    }, this.stageFilterExpandedIds).map(factoryNode => ({
+      ...factoryNode,
+      children: factoryNode.children?.map(departmentNode => ({
+        ...departmentNode,
+        children: undefined,
+        leaf: true
+      }))
+    }));
     const selectedId = this.selectedStageFilterNode?.data?.entityId;
     this.selectedStageFilterNode = selectedId ? findFactoryStructureNode(this.stageFilterTreeNodes, selectedId) ?? null : null;
   }
@@ -1182,42 +1064,24 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
     const data = node.data;
     if (!data) return;
     if (data.entityType === 'factory') {
-      this.stageFiltersForm.patchValue({ factoryId: data.entityId, departmentId: '', productionLineId: '' });
+      this.stageFiltersForm.patchValue({ factoryId: data.entityId, departmentId: '' });
       return;
     }
     if (data.entityType === 'department') {
-      this.stageFiltersForm.patchValue({ factoryId: data.parentId ?? '', departmentId: data.entityId, productionLineId: '' });
+      this.stageFiltersForm.patchValue({ factoryId: data.parentId ?? '', departmentId: data.entityId });
       return;
     }
-    const line = data.source as ProductionLineOption;
-    this.stageFiltersForm.patchValue({ factoryId: line.factoryId, departmentId: line.departmentId ?? '', productionLineId: data.entityId });
   }
 
-  private isCurrentStageEditHydration(version: number, stageId: string): boolean {
-    return version === this.stageEditHydrationVersion && stageId === this.editStageId && !!this.stageEditHierarchy;
-  }
-
-  private restoreStageEditHierarchy(version: number, stageId: string): void {
-    if (!this.isCurrentStageEditHydration(version, stageId) || !this.stageEditHierarchy) return;
-    this.stageEditForm.patchValue(this.stageEditHierarchy, { emitEvent: false });
-  }
-
-  private cancelStageEditHydration(): void {
-    this.stageEditHydrationVersion += 1;
-    this.stageEditHydrating = false;
-    this.stageEditHierarchy = null;
-    this.editingStageSnapshot = null;
-  }
-
-  private stageHierarchyFilters(): { factoryId?: string; departmentId?: string; productionLineId?: string } | null {
+  private stageHierarchyFilters(): { factoryId?: string; departmentId?: string } | null {
     const data = this.selectedStageFilterNode?.data;
     if (!data) {
-      const productionLineId = this.stageFiltersForm.controls.productionLineId.value;
-      return productionLineId ? { productionLineId } : null;
+      const departmentId = this.stageFiltersForm.controls.departmentId.value;
+      return departmentId ? { departmentId } : null;
     }
     if (data.entityType === 'factory') return { factoryId: data.entityId };
     if (data.entityType === 'department') return { departmentId: data.entityId };
-    return { productionLineId: data.entityId };
+    return null;
   }
 
   private stageFilterPath(node: FactoryStructureTreeNode): string[] {

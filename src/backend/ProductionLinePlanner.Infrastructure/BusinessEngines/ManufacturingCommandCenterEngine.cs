@@ -140,13 +140,14 @@ public sealed class ManufacturingCommandCenterEngine(
                          && worker.IsActive && worker.EmploymentStatus == EmploymentStatus.Active
                          && subStage.IsActive
                          && mainStage.IsActive
-                         && scopedLineIds.Contains(mainStage.ProductionLineId)
+                         && scopedLineIds.Contains(assignment.ProductionLineId)
+                         && assignment.ProductionLine!.DepartmentId == subStage.DepartmentId
                      select new AssignmentRow(
                          assignment.WorkerId,
                          worker.EmployeeCode,
                          worker.FullName,
                          assignment.SubStageId,
-                         mainStage.ProductionLineId,
+                         assignment.ProductionLineId,
                          assignment.UpdatedAtUtc,
                          subStage.Name))
                 .ToArrayAsync(cancellationToken);
@@ -192,7 +193,8 @@ public sealed class ManufacturingCommandCenterEngine(
                      join mainStage in db.MainStages.AsNoTracking() on subStage.MainStageId equals mainStage.Id
                      where assignment.IsActive && worker.IsActive && worker.EmploymentStatus == EmploymentStatus.Active
                          && subStage.IsActive && mainStage.IsActive
-                         && allActiveLineIds.Contains(mainStage.ProductionLineId)
+                         && allActiveLineIds.Contains(assignment.ProductionLineId)
+                         && assignment.ProductionLine!.DepartmentId == subStage.DepartmentId
                      select assignment.WorkerId)
                 .Distinct()
                 .ToArrayAsync(cancellationToken);
@@ -216,12 +218,12 @@ public sealed class ManufacturingCommandCenterEngine(
                      where modelStage.IsActive && modelStage.IsRequired
                          && subStage.IsActive && mainStage.IsActive
                          && modelIds.Contains(modelStage.ProductModelId)
-                         && scopedLineIds.Contains(mainStage.ProductionLineId)
+                         && scopedLineIds.Contains(modelStage.ProductionLineId)
                      select new JourneyStageRow(
                          modelStage.Id,
                          modelStage.ProductModelId,
                          modelStage.SubStageId,
-                         mainStage.ProductionLineId,
+                         modelStage.ProductionLineId,
                          mainStage.Name,
                          subStage.Code,
                          subStage.Name,
@@ -240,12 +242,12 @@ public sealed class ManufacturingCommandCenterEngine(
                      join mainStage in db.MainStages.AsNoTracking() on subStage.MainStageId equals mainStage.Id
                      where modelStage.IsActive && modelStage.IsRequired && model.IsActive
                          && subStage.IsActive && mainStage.IsActive
-                         && scopedLineIds.Contains(mainStage.ProductionLineId)
+                         && scopedLineIds.Contains(modelStage.ProductionLineId)
                      select new JourneyStageRow(
                          modelStage.Id,
                          modelStage.ProductModelId,
                          modelStage.SubStageId,
-                         mainStage.ProductionLineId,
+                         modelStage.ProductionLineId,
                          mainStage.Name,
                          subStage.Code,
                          subStage.Name,
@@ -452,7 +454,10 @@ public sealed class ManufacturingCommandCenterEngine(
             .ToHashSet();
         var stages = journey.OrderBy(stage => stage.StageOrder).Select(stage =>
         {
-            var stageAssignments = assignments.Where(assignment => assignment.SubStageId == stage.SubStageId).ToArray();
+            var stageAssignments = assignments
+                .Where(assignment => assignment.SubStageId == stage.SubStageId
+                    && assignment.ProductionLineId == operation.ProductionLineId)
+                .ToArray();
             var presentCount = stageAssignments.Where(assignment => presentWorkerIds.Contains(assignment.WorkerId))
                 .Select(assignment => assignment.WorkerId).Distinct().Count();
             var alerts = new List<string>();
@@ -508,7 +513,10 @@ public sealed class ManufacturingCommandCenterEngine(
     {
         var lineById = lineRows.ToDictionary(line => line.Id);
         var issues = new List<CommandCenterQualityIssueDto>();
-        foreach (var stage in journeyRows)
+        // Stage definitions are department-owned and may be executable on multiple lines.
+        // Price/time quality is a model-stage concern, so report it once rather than once
+        // for every eligible line in the department.
+        foreach (var stage in journeyRows.GroupBy(item => item.Id).Select(group => group.First()))
         {
             var line = lineById[stage.ProductionLineId];
             if (stage.PiecePrice <= 0)

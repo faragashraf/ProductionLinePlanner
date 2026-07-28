@@ -10,9 +10,9 @@ const factory = { id: 'factory-1', code: 'F-01', name: 'مصنع الاختبا�
 const department = { id: 'department-1', factoryId: factory.id, code: 'CUT', nameAr: 'قسم القص', isActive: true };
 const line = { id: 'line-1', factoryId: factory.id, departmentId: department.id, lineCode: 'L-01', name: 'خط التشغيل اليومي', sequenceOrder: 1, isActive: true };
 const model = { id: 'model-1', code: 'M-01', name: 'موديل الاختبار', isActive: true };
-const stage = { id: 'stage-1', mainStageId: 'main-1', productionLineId: line.id, factoryId: factory.id, departmentId: department.id, factoryName: factory.name, departmentNameAr: department.nameAr, productionLineName: line.name, code: 'ST-01', name: 'مرحلة التجميع', capacity: 5, sequenceOrder: 1, isActive: true };
+const stage = { id: 'stage-1', mainStageId: 'main-1', mainStageName: 'التشغيل', factoryId: factory.id, departmentId: department.id, factoryName: factory.name, departmentNameAr: department.nameAr, code: 'ST-01', name: 'مرحلة التجميع', capacity: 5, sequenceOrder: 1, isActive: true };
 const secondStage = { ...stage, id: 'stage-2', code: 'ST-02', name: 'مرحلة التشطيب', sequenceOrder: 2 };
-const modelStage = { id: 'model-stage-1', subStageId: stage.id, subStageCode: stage.code, subStageName: stage.name, stageOrder: 1, piecePrice: .6, standardSeconds: 30, compensationMode: 'SharedPercentage', isRequired: true, isActive: true };
+const modelStage = { id: 'model-stage-1', productionLineId: line.id, subStageId: stage.id, departmentId: department.id, subStageCode: stage.code, subStageName: stage.name, stageOrder: 1, piecePrice: .6, standardSeconds: 30, compensationMode: 'SharedPercentage', isRequired: true, isActive: true };
 const secondModelStage = { ...modelStage, id: 'model-stage-2', subStageId: secondStage.id, subStageCode: secondStage.code, subStageName: secondStage.name, stageOrder: 2, piecePrice: .75 };
 
 test.beforeAll(async () => {
@@ -39,7 +39,7 @@ async function preparePage(page: Page): Promise<void> {
     else if (pathname.endsWith('/api/factories')) data = { items: [factory] };
     else if (pathname.endsWith('/api/departments')) data = { items: [department] };
     else if (pathname.endsWith('/api/production-lines')) data = { items: [line] };
-    else if (pathname.endsWith(`/api/product-models/${model.id}/stages`)) data = [modelStage, secondModelStage];
+    else if (pathname.endsWith(`/api/product-models/${model.id}/production-lines/${line.id}/stages`)) data = [modelStage, secondModelStage];
     else if (pathname.endsWith('/api/product-models')) data = { items: [model], totalCount: 1, pageNumber: 1, pageSize: 10 };
     else if (pathname.endsWith('/api/stages')) data = { items: [stage], totalCount: 1, pageNumber: 1, pageSize: 200 };
     else if (pathname.includes('/api/attendance/sync/production-date/')) data = { sourceUsersCount: 1, sourceCheckInsCount: 1, matchedWorkersCount: 1, unmatchedSourceUsersCount: 0, workersWithoutAttendanceCount: 0, insertedRecords: 1, updatedRecords: 0, skippedRecords: 0 };
@@ -92,25 +92,29 @@ async function expectViewportSafe(page: Page): Promise<void> {
   expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.clientWidth + 1);
 }
 
-test('model journey search lives in the journey card and stays independent from model-list search', async ({ page }) => {
+test('line-scoped model journey search stays inside the assignment table', async ({ page }) => {
   await preparePage(page);
   for (const [name, width, height] of [['desktop', 1440, 900], ['tablet-landscape', 1280, 800], ['tablet-portrait', 800, 1280], ['mobile', 390, 844]] as const) {
     await page.setViewportSize({ width, height });
     await page.goto('/manufacturing/models');
-    await page.getByRole('button', { name: 'اختيار' }).click();
-    const modelSearch = page.getByPlaceholder('ابحث في الموديلات');
+    const contextTree = page.locator('.master-page__model-context');
+    await contextTree.locator('.p-tree-toggler').first().click();
+    const modelNode = contextTree.locator('.p-treenode-content', { hasText: `${model.code} — ${model.name}` });
+    await modelNode.locator('.p-tree-toggler').click();
+    const departmentNode = contextTree.locator('.p-treenode-content', { hasText: department.nameAr });
+    await departmentNode.locator('.p-tree-toggler').click();
+    await contextTree.locator('.p-treenode-content', { hasText: line.name }).click();
     const stageSearch = page.getByPlaceholder('ابحث باسم أو كود المرحلة');
-    await expect(modelSearch).toHaveValue('');
     await expect(stageSearch).toBeVisible();
     await stageSearch.fill('ST-01');
-    await expect(page.locator('.model-journey')).toContainText('مرحلة التجميع');
-    const activationToggle = page.getByRole('switch', { name: 'تعطيل إعداد المرحلة' });
+    await expect(page.locator('tbody')).toContainText('مرحلة التجميع');
+    await expect(page.locator('tbody')).not.toContainText('مرحلة التشطيب');
+    const activationToggle = page.getByRole('button', { name: 'تعطيل الارتباط بالموديل' });
     await expect(activationToggle).toBeVisible();
-    await expect(activationToggle).toHaveAttribute('aria-checked', 'true');
     const toggleBox = await activationToggle.boundingBox();
     expect(toggleBox?.height).toBeGreaterThanOrEqual(44);
     await activationToggle.screenshot({ path: path.join(visualOutput, `model-stage-toggle-${name}.png`) });
-    await expect(modelSearch).toHaveValue('');
+    await expect(contextTree.getByRole('treeitem', { name: `${line.lineCode} — ${line.name}` })).toHaveAttribute('aria-selected', 'true');
     await page.screenshot({ path: path.join(visualOutput, `models-${name}.png`), fullPage: true });
     await expectViewportSafe(page);
   }

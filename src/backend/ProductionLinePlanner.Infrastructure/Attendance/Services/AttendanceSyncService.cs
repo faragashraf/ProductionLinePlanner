@@ -1055,11 +1055,14 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
             return new HashSet<Guid>();
         }
 
-        var assignments = await ResolveCurrentAssignmentsAsync(allActiveWorkerIds, dateUtc, cancellationToken);
-
-        return assignments
-            .Where(x => x.Value.EffectiveSubStageId is not null && scopeSubStageIds.Contains(x.Value.EffectiveSubStageId.Value))
-            .Select(x => x.Key)
+        return (await _appDbContext.WorkerDefaultAssignments.AsNoTracking()
+                .Where(assignment => assignment.IsActive
+                    && allActiveWorkerIds.Contains(assignment.WorkerId)
+                    && scopeSubStageIds.Contains(assignment.SubStageId)
+                    && (!lineId.HasValue || assignment.ProductionLineId == lineId.Value))
+                .Select(assignment => assignment.WorkerId)
+                .Distinct()
+                .ToArrayAsync(cancellationToken))
             .ToHashSet();
     }
 
@@ -1067,7 +1070,7 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
     {
         var subStageIds = await (from subStage in _appDbContext.SubStages.AsNoTracking()
                                 join main in _appDbContext.MainStages.AsNoTracking() on subStage.MainStageId equals main.Id
-                                join line in _appDbContext.ProductionLines.AsNoTracking() on main.ProductionLineId equals line.Id
+                                join line in _appDbContext.ProductionLines.AsNoTracking() on main.DepartmentId equals line.DepartmentId
                                 where subStage.IsActive && main.IsActive && line.IsActive
                                 select new
                                 {

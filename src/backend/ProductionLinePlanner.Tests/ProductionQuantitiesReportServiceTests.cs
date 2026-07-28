@@ -423,12 +423,13 @@ public sealed class ProductionQuantitiesReportServiceTests
         public async Task<ReportScope> CreateScopeAsync(string suffix)
         {
             var factory = new Factory(Guid.NewGuid(), $"Factory {suffix}", $"F-{suffix}");
-            var line = new ProductionLine(Guid.NewGuid(), factory.Id, $"Line {suffix}", 1, $"L-{suffix}");
-            var mainStage = new MainStage(Guid.NewGuid(), line.Id, $"Main {suffix}", 1);
+            var department = new Department(Guid.NewGuid(), factory.Id, $"D-{suffix}", $"قسم {suffix}", $"Department {suffix}", 1);
+            var line = new ProductionLine(Guid.NewGuid(), factory.Id, $"Line {suffix}", 1, $"L-{suffix}", departmentId: department.Id);
+            var mainStage = new MainStage(Guid.NewGuid(), department.Id, $"Main {suffix}", 1);
             var subStage = new SubStage(Guid.NewGuid(), mainStage.Id, $"Stage {suffix}", $"S-{suffix}", 1, 1);
             var model = new ProductModel(Guid.NewGuid(), $"M-{suffix}", $"Model {suffix}");
-            var productModelStage = new ProductModelStage(Guid.NewGuid(), model.Id, subStage.Id, 1, 0m, null, CompensationMode.SharedPercentage);
-            Db.AddRange(factory, line, mainStage, subStage, model, productModelStage);
+            var productModelStage = new ProductModelStage(Guid.NewGuid(), model.Id, line.Id, subStage.Id, 1, 0m, null, CompensationMode.SharedPercentage);
+            Db.AddRange(factory, department, line, mainStage, subStage, model, productModelStage);
             await Db.SaveChangesAsync();
             return new ReportScope(factory, line, mainStage, subStage, model, productModelStage);
         }
@@ -482,6 +483,7 @@ public sealed class ProductionQuantitiesReportServiceTests
                 var productModelStage = new ProductModelStage(
                     Guid.NewGuid(),
                     scope.ProductModelId,
+                    scope.ProductionLineId,
                     subStage.Id,
                     _additionalStageSequence + 1,
                     0m,

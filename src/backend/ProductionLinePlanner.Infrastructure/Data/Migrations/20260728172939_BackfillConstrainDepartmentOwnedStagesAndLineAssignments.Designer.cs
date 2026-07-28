@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using ProductionLinePlanner.Infrastructure.Data;
 
@@ -11,9 +12,11 @@ using ProductionLinePlanner.Infrastructure.Data;
 namespace ProductionLinePlanner.Infrastructure.Data.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260728172939_BackfillConstrainDepartmentOwnedStagesAndLineAssignments")]
+    partial class BackfillConstrainDepartmentOwnedStagesAndLineAssignments
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -180,73 +183,6 @@ namespace ProductionLinePlanner.Infrastructure.Data.Migrations
                     b.ToTable("AssignmentTimelineEntries", (string)null);
                 });
 
-            modelBuilder.Entity("ProductionLinePlanner.Domain.Entities.AttendanceNotificationEvent", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<int>("AttemptCount")
-                        .HasColumnType("int");
-
-                    b.Property<Guid>("AttendanceRecordId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime>("AttendanceTimeUtc")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("AttendanceType")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
-
-                    b.Property<DateTime>("CreatedAtUtc")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("EmployeeCode")
-                        .IsRequired()
-                        .HasMaxLength(120)
-                        .HasColumnType("nvarchar(120)");
-
-                    b.Property<string>("IdempotencyKey")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<DateTime?>("LastAttemptAtUtc")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("LastErrorCode")
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<DateTime?>("ProcessedAtUtc")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("Source")
-                        .IsRequired()
-                        .HasMaxLength(60)
-                        .HasColumnType("nvarchar(60)");
-
-                    b.Property<Guid>("WorkerId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("WorkerName")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("AttendanceRecordId");
-
-                    b.HasIndex("IdempotencyKey")
-                        .IsUnique();
-
-                    b.HasIndex("ProcessedAtUtc", "CreatedAtUtc");
-
-                    b.ToTable("AttendanceNotificationEvents", (string)null);
-                });
-
             modelBuilder.Entity("ProductionLinePlanner.Domain.Entities.AttendanceRecord", b =>
                 {
                     b.Property<Guid>("Id")
@@ -290,8 +226,7 @@ namespace ProductionLinePlanner.Infrastructure.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("WorkerId", "AttendanceTimeUtc")
-                        .IsUnique();
+                    b.HasIndex("WorkerId", "AttendanceTimeUtc");
 
                     b.ToTable("AttendanceRecords", (string)null);
                 });
@@ -512,10 +447,6 @@ namespace ProductionLinePlanner.Infrastructure.Data.Migrations
                     b.Property<Guid>("Id")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<string>("CorrelationKey")
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("datetime2");
 
@@ -523,38 +454,15 @@ namespace ProductionLinePlanner.Infrastructure.Data.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
-                    b.Property<bool>("IsBrowserEnabled")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bit")
-                        .HasDefaultValue(false);
-
                     b.Property<bool>("IsRead")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("bit")
                         .HasDefaultValue(false);
 
-                    b.Property<bool>("IsSoundEnabled")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bit")
-                        .HasDefaultValue(false);
-
-                    b.Property<bool>("IsToastEnabled")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bit")
-                        .HasDefaultValue(true);
-
                     b.Property<string>("Message")
                         .IsRequired()
                         .HasMaxLength(2000)
                         .HasColumnType("nvarchar(2000)");
-
-                    b.Property<string>("MetadataJson")
-                        .HasMaxLength(4000)
-                        .HasColumnType("nvarchar(4000)");
-
-                    b.Property<string>("NavigationUrl")
-                        .HasMaxLength(300)
-                        .HasColumnType("nvarchar(300)");
 
                     b.Property<DateTime?>("ReadAtUtc")
                         .HasColumnType("datetime2");
@@ -600,10 +508,6 @@ namespace ProductionLinePlanner.Infrastructure.Data.Migrations
 
                     b.HasIndex("SenderUserId");
 
-                    b.HasIndex("RecipientUserId", "CorrelationKey")
-                        .IsUnique()
-                        .HasFilter("[CorrelationKey] IS NOT NULL");
-
                     b.ToTable("Notifications", (string)null);
                 });
 
@@ -622,9 +526,6 @@ namespace ProductionLinePlanner.Infrastructure.Data.Migrations
                         .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
-
-                    b.Property<bool>("IsBrowserEnabled")
-                        .HasColumnType("bit");
 
                     b.Property<bool>("IsEnabled")
                         .HasColumnType("bit");
@@ -735,7 +636,7 @@ namespace ProductionLinePlanner.Infrastructure.Data.Migrations
 
                     b.ToTable("NotificationPolicyRecipientRules", null, t =>
                         {
-                            t.HasCheckConstraint("CK_NotificationPolicyRecipientRules_Target", "([RecipientKind] = 0 AND [UserId] IS NOT NULL AND [RoleId] IS NULL AND [PermissionKey] IS NULL AND [CapabilityKey] IS NULL AND [IsExcludeActor] = 0) OR ([RecipientKind] = 1 AND [UserId] IS NULL AND [RoleId] IS NOT NULL AND [PermissionKey] IS NULL AND [CapabilityKey] IS NULL AND [IsExcludeActor] = 0) OR ([RecipientKind] = 2 AND [UserId] IS NULL AND [RoleId] IS NULL AND [PermissionKey] IS NOT NULL AND [CapabilityKey] IS NULL AND [IsExcludeActor] = 0) OR ([RecipientKind] = 3 AND [UserId] IS NULL AND [RoleId] IS NULL AND [PermissionKey] IS NULL AND [CapabilityKey] IS NOT NULL AND [IsExcludeActor] = 0) OR ([RecipientKind] = 4 AND [UserId] IS NULL AND [RoleId] IS NULL AND [PermissionKey] IS NULL AND [CapabilityKey] IS NULL AND [IsExcludeActor] = 0) OR ([RecipientKind] = 5 AND [UserId] IS NULL AND [RoleId] IS NULL AND [PermissionKey] IS NULL AND [CapabilityKey] IS NULL AND [IsExcludeActor] = 1) OR ([RecipientKind] = 6 AND [UserId] IS NULL AND [RoleId] IS NULL AND [PermissionKey] IS NULL AND [CapabilityKey] IS NULL AND [IsExcludeActor] = 0)");
+                            t.HasCheckConstraint("CK_NotificationPolicyRecipientRules_Target", "([RecipientKind] = 0 AND [UserId] IS NOT NULL AND [RoleId] IS NULL AND [PermissionKey] IS NULL AND [CapabilityKey] IS NULL AND [IsExcludeActor] = 0) OR ([RecipientKind] = 1 AND [UserId] IS NULL AND [RoleId] IS NOT NULL AND [PermissionKey] IS NULL AND [CapabilityKey] IS NULL AND [IsExcludeActor] = 0) OR ([RecipientKind] = 2 AND [UserId] IS NULL AND [RoleId] IS NULL AND [PermissionKey] IS NOT NULL AND [CapabilityKey] IS NULL AND [IsExcludeActor] = 0) OR ([RecipientKind] = 3 AND [UserId] IS NULL AND [RoleId] IS NULL AND [PermissionKey] IS NULL AND [CapabilityKey] IS NOT NULL AND [IsExcludeActor] = 0) OR ([RecipientKind] = 4 AND [UserId] IS NULL AND [RoleId] IS NULL AND [PermissionKey] IS NULL AND [CapabilityKey] IS NULL AND [IsExcludeActor] = 0) OR ([RecipientKind] = 5 AND [UserId] IS NULL AND [RoleId] IS NULL AND [PermissionKey] IS NULL AND [CapabilityKey] IS NULL AND [IsExcludeActor] = 1)");
                         });
                 });
 
@@ -1767,17 +1668,6 @@ namespace ProductionLinePlanner.Infrastructure.Data.Migrations
                     b.Navigation("ToSubStage");
 
                     b.Navigation("Worker");
-                });
-
-            modelBuilder.Entity("ProductionLinePlanner.Domain.Entities.AttendanceNotificationEvent", b =>
-                {
-                    b.HasOne("ProductionLinePlanner.Domain.Entities.AttendanceRecord", "AttendanceRecord")
-                        .WithMany()
-                        .HasForeignKey("AttendanceRecordId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("AttendanceRecord");
                 });
 
             modelBuilder.Entity("ProductionLinePlanner.Domain.Entities.AttendanceRecord", b =>

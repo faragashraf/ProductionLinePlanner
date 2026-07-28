@@ -65,6 +65,7 @@ public sealed class PilotMasterDataResetPreviewDto
     public int SubStages { get; init; }
     public int MainStages { get; init; }
     public int ProductionLines { get; init; }
+    public int Departments { get; init; }
     public int Factories { get; init; }
     public int WorkersPreserved { get; init; }
     public int AttendanceRecordsPreserved { get; init; }
@@ -78,7 +79,7 @@ public sealed class PilotMasterDataResetPreviewDto
         ProductionDayStageResolutions + ImportBatches + AssignmentTimelineEntries +
         WorkerTemporaryAssignments + WorkerDefaultAssignments + StageReadinessSnapshots +
         WorkerSalaryHistories + ProductStageMappings + ProductModels + SubStages +
-        MainStages + ProductionLines + Factories;
+        MainStages + ProductionLines + Departments + Factories;
 }
 
 public sealed record PilotMasterDataResetApplyResultDto(bool WasAlreadyReset, PilotMasterDataResetPreviewDto Summary);

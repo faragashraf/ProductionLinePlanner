@@ -29,6 +29,7 @@ describe('AssignmentsApiService', () => {
 
     service.createFactoryStructureDefaultAssignment({
       workerId: 'worker-1',
+      productionLineId: 'line-1',
       subStageId: 'sub-1',
       reason: 'Factory structure assignment'
     }).subscribe(result => assignmentId = result.assignmentId);
@@ -38,6 +39,7 @@ describe('AssignmentsApiService', () => {
     );
     expect(request.request.body).toEqual({
       workerId: 'worker-1',
+      productionLineId: 'line-1',
       subStageId: 'sub-1',
       reason: 'Factory structure assignment'
     });
@@ -58,13 +60,13 @@ describe('AssignmentsApiService', () => {
   it('updates permanent selections for one stage in one request', () => {
     let added = -1;
 
-    service.updateStageDefaultAssignments(subStageId, [workerId, 'a1e4c17a-5ba5-4a56-95d8-02f39b896b2c'])
+    service.updateStageDefaultAssignments('line-1', subStageId, [workerId, 'a1e4c17a-5ba5-4a56-95d8-02f39b896b2c'])
       .subscribe(result => added = result.addedWorkersCount);
 
     const request = http.expectOne(httpRequest =>
       httpRequest.method === 'PUT' && httpRequest.url.endsWith(`/api/assignments/default/stages/${subStageId}`)
     );
-    expect(request.request.body).toEqual({ workerIds: [workerId, 'a1e4c17a-5ba5-4a56-95d8-02f39b896b2c'] });
+    expect(request.request.body).toEqual({ productionLineId: 'line-1', workerIds: [workerId, 'a1e4c17a-5ba5-4a56-95d8-02f39b896b2c'] });
     request.flush({
       success: true,
       data: { subStageId, addedWorkersCount: 1, removedWorkersCount: 0, activeWorkerIds: [workerId, 'a1e4c17a-5ba5-4a56-95d8-02f39b896b2c'] }
@@ -178,11 +180,12 @@ describe('AssignmentsApiService', () => {
 
   it('sends a required removal reason with the current-stage assignment request', () => {
     let status = '';
-    service.removeDefaultAssignment(workerId, subStageId, 'انتهت الوردية').subscribe(result => status = result.assignmentType);
+    service.removeDefaultAssignment(workerId, 'line-1', subStageId, 'انتهت الوردية').subscribe(result => status = result.assignmentType);
     const request = http.expectOne(httpRequest =>
       httpRequest.method === 'DELETE' && httpRequest.url.endsWith(`/api/assignments/default/${workerId}`)
     );
     expect(request.request.params.get('subStageId')).toBe(subStageId);
+    expect(request.request.params.get('productionLineId')).toBe('line-1');
     expect(request.request.params.get('reason')).toBe('انتهت الوردية');
     request.flush({ success: true, data: { assignmentId: 'assignment-1', workerId, subStageId, assignmentType: 'Default' } });
     expect(status).toBe('Default');

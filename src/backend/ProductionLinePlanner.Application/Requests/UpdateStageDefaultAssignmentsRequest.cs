@@ -6,5 +6,6 @@ namespace ProductionLinePlanner.Application.Requests;
 /// </summary>
 public sealed class UpdateStageDefaultAssignmentsRequest
 {
+    public Guid ProductionLineId { get; init; }
     public IReadOnlyCollection<Guid>? WorkerIds { get; init; }
 }

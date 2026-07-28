@@ -232,10 +232,10 @@ public sealed class RealDataIntakeService(
         var products = await db.Set<ProductModel>().AsNoTracking().Where(x => x.IsActive).ToArrayAsync(ct);
         var product = MatchExactly(products, upload.ProductName, x => x.Name, "Product", issues);
 
-        var existingSubStages = line is null ? [] : await db.SubStages.AsNoTracking().Include(x => x.MainStage)
-            .Where(x => x.IsActive && x.MainStage!.IsActive && x.MainStage.ProductionLineId == line.Id).ToArrayAsync(ct);
-        var mappings = product is null ? [] : await db.Set<ProductModelStage>().AsNoTracking().Include(x => x.SubStage)
-            .Where(x => x.ProductModelId == product.Id && x.IsActive).ToArrayAsync(ct);
+        var existingSubStages = line?.DepartmentId is null ? [] : await db.SubStages.AsNoTracking().Include(x => x.MainStage)
+            .Where(x => x.IsActive && x.MainStage!.IsActive && x.DepartmentId == line.DepartmentId.Value).ToArrayAsync(ct);
+        var mappings = product is null || line is null ? [] : await db.Set<ProductModelStage>().AsNoTracking().Include(x => x.SubStage)
+            .Where(x => x.ProductModelId == product.Id && x.ProductionLineId == line.Id && x.IsActive).ToArrayAsync(ct);
         var mappingBySubStage = mappings.GroupBy(x => x.SubStageId).ToDictionary(x => x.Key, x => x.ToArray());
         if (line is not null && product is not null && upload.ProductionDayQuantities.Count > 0)
         {
@@ -345,9 +345,12 @@ public sealed class RealDataIntakeService(
     {
         var preparedLine = prepared.Line ?? throw new ProductionConflictException("Production line mapping is required before apply.");
         var preparedProduct = prepared.Product ?? throw new ProductionConflictException("Product mapping is required before apply.");
-        var mains = await db.MainStages.Where(x => x.ProductionLineId == preparedLine.Id).ToListAsync(ct);
-        var subStages = await db.SubStages.Include(x => x.MainStage).Where(x => x.MainStage!.ProductionLineId == preparedLine.Id).ToListAsync(ct);
-        var mappings = await db.Set<ProductModelStage>().Where(x => x.ProductModelId == preparedProduct.Id).ToListAsync(ct);
+        var departmentId = preparedLine.DepartmentId ?? throw new ProductionConflictException("يجب ربط خط الإنتاج بقسم قبل استيراد المراحل.");
+        var mains = await db.MainStages.Where(x => x.DepartmentId == departmentId).ToListAsync(ct);
+        var subStages = await db.SubStages.Include(x => x.MainStage).Where(x => x.DepartmentId == departmentId).ToListAsync(ct);
+        var mappings = await db.Set<ProductModelStage>()
+            .Where(x => x.ProductModelId == preparedProduct.Id && x.ProductionLineId == preparedLine.Id)
+            .ToListAsync(ct);
         var created = 0;
         var updated = 0;
         foreach (var plan in prepared.Stages)
@@ -355,14 +358,14 @@ public sealed class RealDataIntakeService(
             var main = mains.SingleOrDefault(x => normalizer.NormalizeLookup(x.Name) == normalizer.NormalizeLookup(plan.Source.MainStageName));
             if (main is null)
             {
-                main = new MainStage(Guid.NewGuid(), preparedLine.Id, plan.Source.MainStageName, mains.Count == 0 ? 0 : mains.Max(x => x.SequenceOrder) + 1, false, true, now);
+                main = new MainStage(Guid.NewGuid(), departmentId, plan.Source.MainStageName, mains.Count == 0 ? 0 : mains.Max(x => x.SequenceOrder) + 1, false, true, now);
                 mains.Add(main); db.Add(main);
             }
             var subStage = subStages.SingleOrDefault(x => StageIdentity(x.MainStage!.Name, x.Name) == StageIdentity(plan.Source.MainStageName, plan.Source.SubStageName));
             if (subStage is null)
             {
                 var order = subStages.Where(x => x.MainStageId == main.Id).Select(x => x.DefaultOrder).DefaultIfEmpty(0).Max() + 1;
-                subStage = new SubStage(Guid.NewGuid(), main.Id, plan.Source.SubStageName, plan.Code, 0, order, true, now, main.ProductionLineId);
+                subStage = new SubStage(Guid.NewGuid(), main.Id, plan.Source.SubStageName, plan.Code, 0, order, true, now, departmentId);
                 subStages.Add(subStage); db.Add(subStage); created++;
             }
             var mapping = mappings.Single(x => x.SubStageId == subStage.Id);
@@ -403,8 +406,10 @@ public sealed class RealDataIntakeService(
     {
         var preparedLine = prepared.Line ?? throw new ProductionConflictException("Production line mapping is required before apply.");
         var preparedProduct = prepared.Product ?? throw new ProductionConflictException("Product mapping is required before apply.");
-        var mappings = await db.Set<ProductModelStage>().Include(x => x.SubStage).ThenInclude(x => x!.MainStage).ThenInclude(x => x!.ProductionLine).ThenInclude(x => x!.Factory)
-            .Where(x => x.ProductModelId == preparedProduct.Id).ToDictionaryAsync(x => x.SubStageId, ct);
+        var mappings = await db.Set<ProductModelStage>().Include(x => x.SubStage).ThenInclude(x => x!.MainStage)
+            .Where(x => x.ProductModelId == preparedProduct.Id && x.ProductionLineId == preparedLine.Id)
+            .ToDictionaryAsync(x => x.SubStageId, ct);
+        var factory = await db.Factories.AsNoTracking().SingleAsync(x => x.Id == preparedLine.FactoryId, ct);
         var participatingWorkerIds = prepared.ProductionPlans.Where(plan => plan.Worker is not null).Select(plan => plan.Worker!.Id).Distinct().ToArray();
         var workers = await db.Workers.Where(x => participatingWorkerIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, ct);
         var orders = new Dictionary<DateOnly, ProductionOrder>();
@@ -424,10 +429,8 @@ public sealed class RealDataIntakeService(
             var mapping = mappings[group.Key.SubStageId];
             var subStage = mapping.SubStage!;
             var mainStage = subStage.MainStage!;
-            var line = mainStage.ProductionLine!;
-            var factory = line.Factory!;
             var clientRequestId = DeterministicGuid($"{prepared.IdempotencyKey}|{group.Key.ProductionDate:yyyy-MM-dd}|{mapping.Id}");
-            var record = new StageProductionRecord(Guid.NewGuid(), order.Id, mapping.Id, order.ProductionDate, order.PlannedQuantity, order.PlannedQuantity, 0m, subStage.Code, subStage.Name, mapping.PiecePrice, mapping.StandardSeconds, mapping.CompensationMode, preparedProduct.Code, preparedProduct.Name, factory.Code, factory.Name, line.LineCode ?? string.Empty, line.Name, mainStage.Name, clientRequestId, "Imported worker allocations", actorId, now);
+            var record = new StageProductionRecord(Guid.NewGuid(), order.Id, mapping.Id, order.ProductionDate, order.PlannedQuantity, order.PlannedQuantity, 0m, subStage.Code, subStage.Name, mapping.PiecePrice, mapping.StandardSeconds, mapping.CompensationMode, preparedProduct.Code, preparedProduct.Name, factory.Code, factory.Name, preparedLine.LineCode ?? string.Empty, preparedLine.Name, mainStage.Name, clientRequestId, "Imported worker allocations", actorId, now);
             var allocations = group.Select(plan => CreateImportedAllocation(plan.Source, workers[plan.Worker!.Id], mapping, order.PlannedQuantity)).ToList();
             record.ReplaceAllocations(allocations);
             record.SetCalculationPreview(decimal.Round(allocations.Sum(x => x.CalculatedEarning), 4, MidpointRounding.AwayFromZero));

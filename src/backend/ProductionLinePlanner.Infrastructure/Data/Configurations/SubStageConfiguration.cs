@@ -10,6 +10,7 @@ public sealed class SubStageConfiguration : IEntityTypeConfiguration<SubStage>
     {
         builder.ToTable("SubStages", table =>
         {
+            table.HasTrigger("TR_SubStages_ProductModelStageDepartmentGuard");
             table.HasCheckConstraint("CK_SubStage_Capacity_NonNegative", "[Capacity] >= 0");
             table.HasCheckConstraint("CK_SubStage_DefaultOrder_Positive", "[SequenceOrder] > 0");
         });
@@ -17,7 +18,7 @@ public sealed class SubStageConfiguration : IEntityTypeConfiguration<SubStage>
 
         builder.Property(x => x.Id).ValueGeneratedNever();
         builder.Property(x => x.MainStageId).IsRequired();
-        builder.Property(x => x.ProductionLineId).IsRequired();
+        builder.Property(x => x.DepartmentId).IsRequired();
         builder.Property(x => x.Name).IsRequired().HasMaxLength(200);
         builder.Property(x => x.Code).IsRequired().HasMaxLength(120).UseCollation("SQL_Latin1_General_CP1_CI_AS");
         builder.Property(x => x.Capacity).IsRequired();
@@ -25,18 +26,13 @@ public sealed class SubStageConfiguration : IEntityTypeConfiguration<SubStage>
         builder.Property(x => x.IsActive).HasDefaultValue(true);
         builder.Property(x => x.CreatedAtUtc).IsRequired();
         builder.Property(x => x.UpdatedAtUtc).IsRequired();
-        builder.HasIndex(x => new { x.ProductionLineId, x.Code }).IsUnique();
+        builder.HasIndex(x => new { x.DepartmentId, x.Code }).IsUnique();
         builder.HasIndex(x => new { x.MainStageId, x.DefaultOrder }).IsUnique();
-        builder.HasIndex(x => x.ProductionLineId);
 
         builder.HasOne(x => x.MainStage)
             .WithMany(x => x.SubStages)
-            .HasForeignKey(x => x.MainStageId)
-            .OnDelete(DeleteBehavior.Restrict);
-
-        builder.HasOne(x => x.ProductionLine)
-            .WithMany()
-            .HasForeignKey(x => x.ProductionLineId)
+            .HasForeignKey(x => new { x.MainStageId, x.DepartmentId })
+            .HasPrincipalKey(x => new { x.Id, x.DepartmentId })
             .OnDelete(DeleteBehavior.Restrict);
 
         builder.HasMany(x => x.DefaultAssignments)

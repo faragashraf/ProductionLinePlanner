@@ -17,7 +17,7 @@ public sealed class ProductionStageCatalogService(
     IStageDependencyInspector dependencyInspector) : IProductionStageCatalogService
 {
     public async Task<PagedResult<MainStageDto>> GetMainStagesAsync(
-        Guid? productionLineId,
+        Guid? departmentId,
         string? search,
         bool? isActive = true,
         int page = 1,
@@ -30,9 +30,9 @@ public sealed class ProductionStageCatalogService(
         }
 
         var query = dbContext.MainStages.AsNoTracking().AsQueryable();
-        if (productionLineId.HasValue)
+        if (departmentId.HasValue)
         {
-            query = query.Where(x => x.ProductionLineId == productionLineId.Value);
+            query = query.Where(x => x.DepartmentId == departmentId.Value);
         }
 
         if (isActive.HasValue)
@@ -55,7 +55,7 @@ public sealed class ProductionStageCatalogService(
             .Select(x => new MainStageDto
             {
                 Id = x.Id,
-                ProductionLineId = x.ProductionLineId,
+                DepartmentId = x.DepartmentId,
                 Name = x.Name,
                 SequenceOrder = x.SequenceOrder,
                 IsCritical = x.IsCritical,
@@ -82,7 +82,7 @@ public sealed class ProductionStageCatalogService(
         return Result<MainStageDto>.Success(new MainStageDto
         {
             Id = entity.Id,
-            ProductionLineId = entity.ProductionLineId,
+            DepartmentId = entity.DepartmentId,
             Name = entity.Name,
             SequenceOrder = entity.SequenceOrder,
             IsCritical = entity.IsCritical,
@@ -130,7 +130,8 @@ public sealed class ProductionStageCatalogService(
             {
                 Id = x.Id,
                 MainStageId = x.MainStageId,
-                ProductionLineId = x.ProductionLineId,
+                MainStageName = x.MainStage!.Name,
+                DepartmentId = x.DepartmentId,
                 Code = x.Code,
                 Name = x.Name,
                 Capacity = x.Capacity,
@@ -149,7 +150,7 @@ public sealed class ProductionStageCatalogService(
             return Result<SubStageDto>.Failure(new Error("ValidationError", "SubStageId is required."));
         }
 
-        var entity = await dbContext.SubStages.AsNoTracking().FirstOrDefaultAsync(x => x.Id == subStageId, cancellationToken);
+        var entity = await dbContext.SubStages.AsNoTracking().Include(x => x.MainStage).FirstOrDefaultAsync(x => x.Id == subStageId, cancellationToken);
         if (entity is null)
         {
             return Result<SubStageDto>.Failure(new Error("NotFound", "Sub stage not found."));
@@ -159,7 +160,8 @@ public sealed class ProductionStageCatalogService(
         {
             Id = entity.Id,
             MainStageId = entity.MainStageId,
-            ProductionLineId = entity.ProductionLineId,
+            MainStageName = entity.MainStage?.Name,
+            DepartmentId = entity.DepartmentId,
             Code = entity.Code,
             Name = entity.Name,
             Capacity = entity.Capacity,
@@ -169,7 +171,7 @@ public sealed class ProductionStageCatalogService(
     }
 
     public async Task<Result<MainStageDto>> CreateMainStageAsync(
-        Guid productionLineId,
+        Guid departmentId,
         string name,
         bool isCritical,
         int sequenceOrder,
@@ -183,9 +185,9 @@ public sealed class ProductionStageCatalogService(
             return Result<MainStageDto>.Failure(new Error("Unauthorized", "User context is required."));
         }
 
-        if (productionLineId == Guid.Empty)
+        if (departmentId == Guid.Empty)
         {
-            return Result<MainStageDto>.Failure(new Error("ValidationError", "ProductionLineId is required."));
+            return Result<MainStageDto>.Failure(new Error("ValidationError", "DepartmentId is required."));
         }
 
         var normalizedName = name?.Trim();
@@ -199,23 +201,23 @@ public sealed class ProductionStageCatalogService(
             return Result<MainStageDto>.Failure(new Error("ValidationError", "SequenceOrder must be zero or greater."));
         }
 
-        var lineExists = await dbContext.ProductionLines.AnyAsync(x => x.Id == productionLineId && x.IsActive, cancellationToken);
-        if (!lineExists)
+        var departmentExists = await dbContext.Departments.AnyAsync(x => x.Id == departmentId && x.IsActive, cancellationToken);
+        if (!departmentExists)
         {
-            return Result<MainStageDto>.Failure(new Error("NotFound", "ProductionLine was not found."));
+            return Result<MainStageDto>.Failure(new Error("NotFound", "القسم غير موجود أو غير نشط."));
         }
 
         var conflict = await dbContext.MainStages.AnyAsync(
-            x => x.ProductionLineId == productionLineId && x.SequenceOrder == sequenceOrder && x.IsActive,
+            x => x.DepartmentId == departmentId && x.Name == normalizedName,
             cancellationToken);
         if (conflict)
         {
-            return Result<MainStageDto>.Failure(new Error("Conflict", "SequenceOrder must be unique for this production line."));
+            return Result<MainStageDto>.Failure(new Error("Conflict", "يوجد مستوى رئيسي بالاسم نفسه داخل القسم."));
         }
 
         var entity = new MainStage(
             id: Guid.NewGuid(),
-            productionLineId: productionLineId,
+            departmentId: departmentId,
             name: normalizedName,
             isCritical: isCritical,
             sequenceOrder: sequenceOrder,
@@ -228,14 +230,14 @@ public sealed class ProductionStageCatalogService(
             nameof(MainStage),
             entity.Id.ToString(),
             before: null,
-            after: new { entity.Id, entity.ProductionLineId, entity.Name, entity.IsCritical, entity.SequenceOrder, entity.IsActive },
+            after: new { entity.Id, entity.DepartmentId, entity.Name, entity.IsCritical, entity.SequenceOrder, entity.IsActive },
             requestMeta: requestMeta);
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return Result<MainStageDto>.Success(new MainStageDto
         {
             Id = entity.Id,
-            ProductionLineId = entity.ProductionLineId,
+            DepartmentId = entity.DepartmentId,
             Name = entity.Name,
             SequenceOrder = entity.SequenceOrder,
             IsCritical = entity.IsCritical,
@@ -280,24 +282,23 @@ public sealed class ProductionStageCatalogService(
             return Result<MainStageDto>.Failure(new Error("ValidationError", "Name cannot be empty."));
         }
 
-        var duplicateSequence = false;
         if (sequenceOrder is not null && sequenceOrder.Value < 0)
         {
             return Result<MainStageDto>.Failure(new Error("ValidationError", "SequenceOrder must be zero or greater."));
         }
 
-        if (sequenceOrder is not null && entity.SequenceOrder != sequenceOrder.Value)
+        if (normalizedName is not null && !string.Equals(normalizedName, entity.Name, StringComparison.Ordinal))
         {
-            duplicateSequence = await dbContext.MainStages.AnyAsync(
-                x => x.Id != entity.Id && x.ProductionLineId == entity.ProductionLineId && x.SequenceOrder == sequenceOrder.Value && x.IsActive,
+            var duplicateName = await dbContext.MainStages.AnyAsync(
+                x => x.Id != entity.Id && x.DepartmentId == entity.DepartmentId && x.Name == normalizedName,
                 cancellationToken);
-            if (duplicateSequence)
+            if (duplicateName)
             {
-                return Result<MainStageDto>.Failure(new Error("Conflict", "SequenceOrder must be unique for this production line."));
+                return Result<MainStageDto>.Failure(new Error("Conflict", "يوجد مستوى رئيسي بالاسم نفسه داخل القسم."));
             }
         }
 
-        var before = new { entity.Id, entity.ProductionLineId, entity.Name, entity.IsCritical, entity.SequenceOrder, entity.IsActive };
+        var before = new { entity.Id, entity.DepartmentId, entity.Name, entity.IsCritical, entity.SequenceOrder, entity.IsActive };
         if (normalizedName is not null)
         {
             entity.Rename(normalizedName);
@@ -326,14 +327,14 @@ public sealed class ProductionStageCatalogService(
             nameof(MainStage),
             entity.Id.ToString(),
             before,
-            new { entity.Id, entity.ProductionLineId, entity.Name, entity.IsCritical, entity.SequenceOrder, entity.IsActive },
+            new { entity.Id, entity.DepartmentId, entity.Name, entity.IsCritical, entity.SequenceOrder, entity.IsActive },
             requestMeta);
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return Result<MainStageDto>.Success(new MainStageDto
         {
             Id = entity.Id,
-            ProductionLineId = entity.ProductionLineId,
+            DepartmentId = entity.DepartmentId,
             Name = entity.Name,
             SequenceOrder = entity.SequenceOrder,
             IsCritical = entity.IsCritical,
@@ -372,7 +373,7 @@ public sealed class ProductionStageCatalogService(
             return Result.Failure(new Error("Conflict", "Main stage cannot be deactivated while it has active assignments."));
         }
 
-        var before = new { entity.Id, entity.ProductionLineId, entity.Name, entity.IsCritical, entity.SequenceOrder, entity.IsActive };
+        var before = new { entity.Id, entity.DepartmentId, entity.Name, entity.IsCritical, entity.SequenceOrder, entity.IsActive };
         dbContext.Entry(entity).Property(nameof(MainStage.IsActive)).CurrentValue = false;
         dbContext.Entry(entity).Property(nameof(MainStage.UpdatedAtUtc)).CurrentValue = DateTime.UtcNow;
         await auditEngine.RecordAsync(
@@ -381,7 +382,7 @@ public sealed class ProductionStageCatalogService(
             nameof(MainStage),
             entity.Id.ToString(),
             before: before,
-            after: new { entity.Id, entity.ProductionLineId, entity.Name, entity.IsCritical, entity.SequenceOrder, entity.IsActive },
+            after: new { entity.Id, entity.DepartmentId, entity.Name, entity.IsCritical, entity.SequenceOrder, entity.IsActive },
             requestMeta: requestMeta);
         await dbContext.SaveChangesAsync(cancellationToken);
 
@@ -403,7 +404,7 @@ public sealed class ProductionStageCatalogService(
         _ = defaultOrder; // Operational ordering is allocated by the catalog under a transaction.
         var mainStage = await dbContext.MainStages.AsNoTracking().FirstOrDefaultAsync(x => x.Id == mainStageId, cancellationToken);
         if (mainStage is null) return Result<SubStageDto>.Failure(new Error("NotFound", "Main stage was not found."));
-        return await CreateOperationalStageCoreAsync(mainStage.ProductionLineId, mainStageId, name, capacity, isActive, actorUserId, requestMeta, cancellationToken);
+        return await CreateOperationalStageCoreAsync(mainStage.DepartmentId, mainStageId, name, capacity, isActive, actorUserId, requestMeta, cancellationToken);
     }
 
     public async Task<Result<SubStageDto>> UpdateSubStageAsync(
@@ -480,7 +481,7 @@ public sealed class ProductionStageCatalogService(
         {
             entity.Id,
             entity.MainStageId,
-            entity.ProductionLineId,
+            entity.DepartmentId,
             entity.Code,
             entity.Name,
             entity.Capacity,
@@ -520,7 +521,7 @@ public sealed class ProductionStageCatalogService(
             nameof(SubStage),
             entity.Id.ToString(),
             before: before,
-            after: new { entity.Id, entity.MainStageId, entity.ProductionLineId, entity.Code, entity.Name, entity.Capacity, entity.DefaultOrder, entity.IsActive },
+            after: new { entity.Id, entity.MainStageId, entity.DepartmentId, entity.Code, entity.Name, entity.Capacity, entity.DefaultOrder, entity.IsActive },
             requestMeta: requestMeta);
         await dbContext.SaveChangesAsync(cancellationToken);
 
@@ -528,7 +529,7 @@ public sealed class ProductionStageCatalogService(
         {
             Id = entity.Id,
             MainStageId = entity.MainStageId,
-            ProductionLineId = entity.ProductionLineId,
+            DepartmentId = entity.DepartmentId,
             Code = entity.Code,
             Name = entity.Name,
             Capacity = entity.Capacity,
@@ -567,7 +568,7 @@ public sealed class ProductionStageCatalogService(
         if (dependencies.IsFailure) return Result<SubStageDto>.Failure(dependencies.Error!);
         if (!dependencies.Value!.CanDisable) return Result<SubStageDto>.Failure(new Error("Conflict", dependencies.Value.DisableMessageAr));
 
-        var before = new { entity.Id, entity.MainStageId, entity.ProductionLineId, entity.Code, entity.Name, entity.Capacity, entity.DefaultOrder, entity.IsActive };
+        var before = new { entity.Id, entity.MainStageId, entity.DepartmentId, entity.Code, entity.Name, entity.Capacity, entity.DefaultOrder, entity.IsActive };
         dbContext.Entry(entity).Property(nameof(SubStage.IsActive)).CurrentValue = false;
         dbContext.Entry(entity).Property(nameof(SubStage.UpdatedAtUtc)).CurrentValue = DateTime.UtcNow;
         await auditEngine.RecordAsync(
@@ -576,7 +577,7 @@ public sealed class ProductionStageCatalogService(
             nameof(SubStage),
             entity.Id.ToString(),
             before: before,
-            after: new { entity.Id, entity.MainStageId, entity.ProductionLineId, entity.Code, entity.Name, entity.Capacity, entity.DefaultOrder, entity.IsActive },
+            after: new { entity.Id, entity.MainStageId, entity.DepartmentId, entity.Code, entity.Name, entity.Capacity, entity.DefaultOrder, entity.IsActive },
             requestMeta: requestMeta);
         await dbContext.SaveChangesAsync(cancellationToken);
 
@@ -586,7 +587,6 @@ public sealed class ProductionStageCatalogService(
     public async Task<PagedResult<SubStageDto>> GetOperationalStagesAsync(
         Guid? factoryId,
         Guid? departmentId,
-        Guid? productionLineId,
         string? name,
         string? code,
         bool? isActive,
@@ -600,9 +600,8 @@ public sealed class ProductionStageCatalogService(
         }
 
         var query = dbContext.SubStages.AsNoTracking().AsQueryable();
-        if (factoryId.HasValue) query = query.Where(x => x.ProductionLine!.FactoryId == factoryId.Value);
-        if (departmentId.HasValue) query = query.Where(x => x.ProductionLine!.DepartmentId == departmentId.Value);
-        if (productionLineId.HasValue) query = query.Where(x => x.ProductionLineId == productionLineId.Value);
+        if (factoryId.HasValue) query = query.Where(x => x.MainStage!.Department!.FactoryId == factoryId.Value);
+        if (departmentId.HasValue) query = query.Where(x => x.DepartmentId == departmentId.Value);
         if (isActive.HasValue) query = query.Where(x => x.IsActive == isActive.Value);
         if (!string.IsNullOrWhiteSpace(name))
         {
@@ -616,31 +615,31 @@ public sealed class ProductionStageCatalogService(
         }
 
         var total = await query.CountAsync(cancellationToken);
-        var items = await query.OrderBy(x => x.ProductionLineId).ThenBy(x => x.DefaultOrder).ThenBy(x => x.Name)
+        var items = await query.OrderBy(x => x.DepartmentId).ThenBy(x => x.MainStageId).ThenBy(x => x.DefaultOrder).ThenBy(x => x.Name)
             .Skip((page - 1) * pageSize).Take(pageSize)
             .Select(x => new SubStageDto
             {
-                Id = x.Id, MainStageId = x.MainStageId, ProductionLineId = x.ProductionLineId,
-                FactoryId = x.ProductionLine!.FactoryId, DepartmentId = x.ProductionLine.DepartmentId,
-                FactoryName = x.ProductionLine.Factory!.Name, DepartmentNameAr = x.ProductionLine.Department == null ? null : x.ProductionLine.Department.NameAr,
-                ProductionLineName = x.ProductionLine.Name,
+                Id = x.Id, MainStageId = x.MainStageId, DepartmentId = x.DepartmentId,
+                MainStageName = x.MainStage!.Name,
+                FactoryId = x.MainStage!.Department!.FactoryId,
+                FactoryName = x.MainStage.Department.Factory!.Name, DepartmentNameAr = x.MainStage.Department.NameAr,
                 Code = x.Code, Name = x.Name, Capacity = x.Capacity, DefaultOrder = x.DefaultOrder, IsActive = x.IsActive
             }).ToArrayAsync(cancellationToken);
         return PagedResult<SubStageDto>.Success(items, page, pageSize, total);
     }
 
     public async Task<Result<SubStageDto>> CreateOperationalStageAsync(
-        Guid productionLineId,
+        Guid departmentId,
         string name,
         int capacity,
         bool isActive,
         Guid actorUserId,
         string? requestMeta = null,
         CancellationToken cancellationToken = default)
-        => await CreateOperationalStageCoreAsync(productionLineId, null, name, capacity, isActive, actorUserId, requestMeta, cancellationToken);
+        => await CreateOperationalStageCoreAsync(departmentId, null, name, capacity, isActive, actorUserId, requestMeta, cancellationToken);
 
     private async Task<Result<SubStageDto>> CreateOperationalStageCoreAsync(
-        Guid productionLineId,
+        Guid departmentId,
         Guid? requestedMainStageId,
         string name,
         int capacity,
@@ -650,14 +649,14 @@ public sealed class ProductionStageCatalogService(
         CancellationToken cancellationToken)
     {
         if (actorUserId == Guid.Empty) return Result<SubStageDto>.Failure(new Error("Unauthorized", "User context is required."));
-        if (productionLineId == Guid.Empty) return Result<SubStageDto>.Failure(new Error("ValidationError", "ProductionLineId is required."));
+        if (departmentId == Guid.Empty) return Result<SubStageDto>.Failure(new Error("ValidationError", "DepartmentId is required."));
         var normalizedName = name?.Trim();
         if (string.IsNullOrWhiteSpace(normalizedName)) return Result<SubStageDto>.Failure(new Error("ValidationError", "Name is required."));
         if (capacity < 0) return Result<SubStageDto>.Failure(new Error("ValidationError", "Capacity must be zero or greater."));
 
-        if (!await dbContext.ProductionLines.AnyAsync(x => x.Id == productionLineId && x.IsActive, cancellationToken))
+        if (!await dbContext.Departments.AnyAsync(x => x.Id == departmentId && x.IsActive, cancellationToken))
         {
-            return Result<SubStageDto>.Failure(new Error("NotFound", "Production line was not found or is inactive."));
+            return Result<SubStageDto>.Failure(new Error("NotFound", "القسم غير موجود أو غير نشط."));
         }
 
         for (var attempt = 0; attempt < 3; attempt++)
@@ -667,7 +666,7 @@ public sealed class ProductionStageCatalogService(
                 : null;
             try
             {
-                var groupResult = await ResolveLegacyGroupAsync(productionLineId, requestedMainStageId, actorUserId, requestMeta, cancellationToken);
+                var groupResult = await ResolveStageGroupAsync(departmentId, requestedMainStageId, actorUserId, requestMeta, cancellationToken);
                 if (groupResult.IsFailure)
                 {
                     if (transaction is not null) await transaction.RollbackAsync(cancellationToken);
@@ -693,12 +692,12 @@ public sealed class ProductionStageCatalogService(
                     continue;
                 }
 
-                var entity = new SubStage(Guid.NewGuid(), selectedGroup.Id, normalizedName, code, capacity, defaultOrder, isActive, productionLineId: productionLineId);
+                var entity = new SubStage(Guid.NewGuid(), selectedGroup.Id, normalizedName, code, capacity, defaultOrder, isActive, departmentId: departmentId);
                 dbContext.SubStages.Add(entity);
-                await auditEngine.RecordAsync(actorUserId, AuditActionType.Create, nameof(SubStage), entity.Id.ToString(), after: new { entity.Id, entity.MainStageId, entity.ProductionLineId, entity.Code, entity.Name, entity.Capacity, entity.DefaultOrder, entity.IsActive }, requestMeta: requestMeta, cancellationToken: cancellationToken);
+                await auditEngine.RecordAsync(actorUserId, AuditActionType.Create, nameof(SubStage), entity.Id.ToString(), after: new { entity.Id, entity.MainStageId, entity.DepartmentId, entity.Code, entity.Name, entity.Capacity, entity.DefaultOrder, entity.IsActive }, requestMeta: requestMeta, cancellationToken: cancellationToken);
                 await dbContext.SaveChangesAsync(cancellationToken);
                 if (transaction is not null) await transaction.CommitAsync(cancellationToken);
-                return Result<SubStageDto>.Success(ToDto(entity));
+                return Result<SubStageDto>.Success(ToDto(entity, selectedGroup.Name));
             }
             catch (Exception exception) when (attempt < 2 && IsConfirmedAllocationConcurrencyConflict(exception))
             {
@@ -737,7 +736,7 @@ public sealed class ProductionStageCatalogService(
         var dependencies = await dependencyInspector.InspectAsync(subStageId, cancellationToken);
         if (dependencies.IsFailure) return Result.Failure(dependencies.Error!);
         if (!dependencies.Value!.CanDelete) return Result.Failure(new Error("Conflict", dependencies.Value.DeleteMessageAr));
-        await auditEngine.RecordAsync(actorUserId, AuditActionType.Delete, nameof(SubStage), entity.Id.ToString(), new { entity.Id, entity.MainStageId, entity.ProductionLineId, entity.Code, entity.Name }, null, requestMeta, cancellationToken);
+        await auditEngine.RecordAsync(actorUserId, AuditActionType.Delete, nameof(SubStage), entity.Id.ToString(), new { entity.Id, entity.MainStageId, entity.DepartmentId, entity.Code, entity.Name }, null, requestMeta, cancellationToken);
         dbContext.SubStages.Remove(entity);
         await dbContext.SaveChangesAsync(cancellationToken);
         return Result.Success();
@@ -784,9 +783,10 @@ public sealed class ProductionStageCatalogService(
     private static long ParseLegacyStageNumber(string code) =>
         code.StartsWith("STG", StringComparison.OrdinalIgnoreCase) && long.TryParse(code[3..], out var value) ? value : 0;
 
-    private static SubStageDto ToDto(SubStage entity) => new()
+    private static SubStageDto ToDto(SubStage entity, string? mainStageName = null) => new()
     {
-        Id = entity.Id, MainStageId = entity.MainStageId, ProductionLineId = entity.ProductionLineId,
+        Id = entity.Id, MainStageId = entity.MainStageId, DepartmentId = entity.DepartmentId,
+        MainStageName = mainStageName ?? entity.MainStage?.Name,
         Code = entity.Code, Name = entity.Name, Capacity = entity.Capacity, DefaultOrder = entity.DefaultOrder, IsActive = entity.IsActive
     };
 
@@ -794,17 +794,17 @@ public sealed class ProductionStageCatalogService(
     /// MainStage remains a mandatory legacy parent. New operational-stage flows
     /// never expose it: an explicit legacy request is honored for compatibility,
     /// otherwise the first active group is selected deterministically. A single
-    /// internal group is created only when a line has no active group at all.
+    /// internal group is created only when a department has no active group at all.
     /// </summary>
-    private async Task<Result<MainStage>> ResolveLegacyGroupAsync(
-        Guid productionLineId,
+    private async Task<Result<MainStage>> ResolveStageGroupAsync(
+        Guid departmentId,
         Guid? requestedMainStageId,
         Guid actorUserId,
         string? requestMeta,
         CancellationToken cancellationToken)
     {
         var activeGroups = await dbContext.MainStages
-            .Where(stage => stage.ProductionLineId == productionLineId && stage.IsActive)
+            .Where(stage => stage.DepartmentId == departmentId && stage.IsActive)
             .OrderBy(stage => stage.SequenceOrder).ThenBy(stage => stage.Name).ThenBy(stage => stage.Id)
             .ToArrayAsync(cancellationToken);
 
@@ -812,24 +812,24 @@ public sealed class ProductionStageCatalogService(
         {
             var requested = activeGroups.FirstOrDefault(stage => stage.Id == requestedMainStageId.Value);
             return requested is null
-                ? Result<MainStage>.Failure(new Error("ValidationError", "The legacy stage group must belong to the selected active production line."))
+                ? Result<MainStage>.Failure(new Error("ValidationError", "يجب أن يتبع المستوى الرئيسي القسم المحدد وأن يكون نشطًا."))
                 : Result<MainStage>.Success(requested);
         }
 
         if (activeGroups.Length > 0) return Result<MainStage>.Success(activeGroups[0]);
 
         var nextSequenceOrder = await dbContext.MainStages
-            .Where(stage => stage.ProductionLineId == productionLineId)
+            .Where(stage => stage.DepartmentId == departmentId)
             .Select(stage => (int?)stage.SequenceOrder)
             .MaxAsync(cancellationToken) ?? 0;
-        var group = new MainStage(Guid.NewGuid(), productionLineId, "Internal operational stage group", nextSequenceOrder + 1);
+        var group = new MainStage(Guid.NewGuid(), departmentId, "مجموعة المراحل التشغيلية", nextSequenceOrder + 1);
         dbContext.MainStages.Add(group);
         await auditEngine.RecordAsync(
             actorUserId,
             AuditActionType.Create,
             nameof(MainStage),
             group.Id.ToString(),
-            after: new { group.Id, group.ProductionLineId, group.SequenceOrder, Purpose = "OperationalStageCompatibility" },
+            after: new { group.Id, group.DepartmentId, group.SequenceOrder, Purpose = "OperationalStageCompatibility" },
             requestMeta: requestMeta,
             cancellationToken: cancellationToken);
         return Result<MainStage>.Success(group);

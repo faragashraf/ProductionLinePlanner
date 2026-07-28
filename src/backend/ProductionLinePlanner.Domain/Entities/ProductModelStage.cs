@@ -9,6 +9,7 @@ public class ProductModelStage
     public ProductModelStage(
         Guid id,
         Guid productModelId,
+        Guid productionLineId,
         Guid subStageId,
         int stageOrder,
         decimal piecePrice,
@@ -21,6 +22,8 @@ public class ProductModelStage
     {
         if (productModelId == Guid.Empty)
             throw new ArgumentException("ProductModelId is required.", nameof(productModelId));
+        if (productionLineId == Guid.Empty)
+            throw new ArgumentException("ProductionLineId is required.", nameof(productionLineId));
         if (subStageId == Guid.Empty)
             throw new ArgumentException("SubStageId is required.", nameof(subStageId));
         if (stageOrder <= 0)
@@ -32,6 +35,7 @@ public class ProductModelStage
 
         Id = id;
         ProductModelId = productModelId;
+        ProductionLineId = productionLineId;
         SubStageId = subStageId;
         StageOrder = stageOrder;
         PiecePrice = piecePrice;
@@ -47,6 +51,8 @@ public class ProductModelStage
     public Guid Id { get; init; }
     public Guid ProductModelId { get; private set; }
     public ProductModel? ProductModel { get; set; }
+    public Guid ProductionLineId { get; private set; }
+    public ProductionLine? ProductionLine { get; set; }
     public Guid SubStageId { get; private set; }
     public SubStage? SubStage { get; set; }
     public int StageOrder { get; private set; }

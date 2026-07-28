@@ -8,7 +8,7 @@ public sealed class ProductionLineConfiguration : IEntityTypeConfiguration<Produ
 {
     public void Configure(EntityTypeBuilder<ProductionLine> builder)
     {
-        builder.ToTable("ProductionLines");
+        builder.ToTable("ProductionLines", table => table.HasTrigger("TR_ProductionLines_ProductModelStageDepartmentGuard"));
         builder.HasKey(x => x.Id);
 
         builder.Property(x => x.Id).ValueGeneratedNever();
@@ -29,11 +29,6 @@ public sealed class ProductionLineConfiguration : IEntityTypeConfiguration<Produ
         builder.HasOne(x => x.Factory)
             .WithMany(x => x.ProductionLines)
             .HasForeignKey(x => x.FactoryId)
-            .OnDelete(DeleteBehavior.Restrict);
-
-        builder.HasMany(x => x.MainStages)
-            .WithOne(x => x.ProductionLine)
-            .HasForeignKey(x => x.ProductionLineId)
             .OnDelete(DeleteBehavior.Restrict);
 
         builder.HasOne(x => x.Department)

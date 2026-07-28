@@ -79,7 +79,7 @@ public sealed class CorsMiddlewareIntegrationTests
 
         var response = await fixture.SendAsync(
             HttpMethod.Options,
-            "/api/product-models/11111111-1111-1111-1111-111111111111/stages/22222222-2222-2222-2222-222222222222",
+            "/api/product-models/11111111-1111-1111-1111-111111111111/production-lines/33333333-3333-3333-3333-333333333333/stages/22222222-2222-2222-2222-222222222222",
             LanAllowedOrigin,
             accessControlRequestMethod: "PATCH",
             accessControlRequestHeaders: "authorization,content-type,x-manufacturing-realtime-correlation-id");
@@ -99,7 +99,7 @@ public sealed class CorsMiddlewareIntegrationTests
 
         var response = await fixture.SendAsync(
             HttpMethod.Options,
-            "/api/product-models/11111111-1111-1111-1111-111111111111/stages/22222222-2222-2222-2222-222222222222",
+            "/api/product-models/11111111-1111-1111-1111-111111111111/production-lines/33333333-3333-3333-3333-333333333333/stages/22222222-2222-2222-2222-222222222222",
             DisallowedOrigin,
             accessControlRequestMethod: "PATCH",
             accessControlRequestHeaders: "authorization,content-type,x-manufacturing-realtime-correlation-id");
@@ -244,7 +244,7 @@ public sealed class CorsMiddlewareIntegrationTests
             app.MapPost("/api/production/records/preview", () => Results.Ok(new { reached = true })).RequireAuthorization("production.record").RequireRateLimiting("production");
             app.MapPost("/api/production/records/validation", () => Results.ValidationProblem(new Dictionary<string, string[]> { ["productionDate"] = ["Production date is required."] })).RequireAuthorization("production.record");
             app.MapPost("/api/production/records/conflict", () => Results.Conflict()).RequireAuthorization("production.record");
-            app.MapPatch("/api/product-models/{modelId:guid}/stages/{stageId:guid}", () => Results.Ok()).RequireAuthorization("production.record");
+            app.MapPatch("/api/product-models/{modelId:guid}/production-lines/{productionLineId:guid}/stages/{stageId:guid}", () => Results.Ok()).RequireAuthorization("production.record");
             app.MapGet("/api/workers/{workerId:guid}/photo", () => Results.Ok()).RequireAuthorization("workers.view").RequireRateLimiting("photo");
             app.MapHub<CorsTestNotificationsHub>("/hubs/notifications").RequireAuthorization();
             await app.StartAsync();

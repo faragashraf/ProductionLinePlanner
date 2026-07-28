@@ -46,6 +46,7 @@ public interface IAssignmentEngine
     /// across stages: a worker keeps every other active participation.
     /// </summary>
     Task<Result<StageDefaultAssignmentsUpdateResultDto>> UpdateStageDefaultAssignmentsAsync(
+        Guid productionLineId,
         Guid subStageId,
         IReadOnlyCollection<Guid>? workerIds,
         Guid actorUserId,
@@ -54,6 +55,7 @@ public interface IAssignmentEngine
 
     Task<Result<AssignmentActionResultDto>> RemoveDefaultAssignmentAsync(
         Guid workerId,
+        Guid productionLineId,
         Guid subStageId,
         string reason,
         Guid actorUserId,
@@ -118,4 +120,5 @@ public sealed record WorkerAssignmentState(
     Guid? FromSubStageId,
     Guid? ToSubStageId,
     Guid? ReplacementForWorkerId,
-    TemporaryAssignmentMode? ParticipationMode = null);
+    TemporaryAssignmentMode? ParticipationMode = null,
+    Guid? ProductionLineId = null);

@@ -13,6 +13,13 @@ public sealed record SubStageAssignmentCoverageDto(
     string StaffingStatus)
 {
     public int MainStageDistinctWorkersCount { get; init; }
-    public int ProductionLineDistinctWorkersCount { get; init; }
+    public int DepartmentDistinctWorkersCount { get; init; }
     public int FactoryDistinctWorkersCount { get; init; }
+    public IReadOnlyCollection<ProductionLineStaffingCoverageDto> ProductionLines { get; init; } = [];
 }
+
+public sealed record ProductionLineStaffingCoverageDto(
+    Guid ProductionLineId,
+    int AssignedWorkersCount,
+    int MainStageDistinctWorkersCount,
+    int ProductionLineDistinctWorkersCount);

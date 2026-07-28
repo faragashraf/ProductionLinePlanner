@@ -80,7 +80,7 @@ export class ReportsWorkspacePageComponent implements OnInit, OnDestroy {
       refresh: () => this.loadReport(true)
     });
     this.loadLookups();
-    if (this.filters.productModelId) this.loadStages(this.filters.productModelId);
+    if (this.filters.productModelId && this.filters.productionLineId) this.loadStages(this.filters.productModelId, this.filters.productionLineId);
   }
 
   ngOnDestroy(): void {
@@ -172,7 +172,7 @@ export class ReportsWorkspacePageComponent implements OnInit, OnDestroy {
       productModelId: factoryChanged || lineChanged ? '' : next.productModelId,
       productModelStageId: factoryChanged || lineChanged || modelChanged ? '' : next.productModelStageId
     };
-    if (modelChanged) this.loadStages(this.filters.productModelId);
+    if (modelChanged) this.loadStages(this.filters.productModelId, this.filters.productionLineId);
   }
 
   applyFilters(): void {
@@ -318,13 +318,13 @@ export class ReportsWorkspacePageComponent implements OnInit, OnDestroy {
     });
   }
 
-  private loadStages(productModelId: string): void {
-    if (!productModelId) {
+  private loadStages(productModelId: string, productionLineId: string): void {
+    if (!productModelId || !productionLineId) {
       this.stages = [];
       return;
     }
     this.stageLoading = true;
-    this.masterData.modelStages(productModelId)
+    this.masterData.modelStages(productModelId, productionLineId)
       .pipe(catchError(() => of([] as ModelStageItem[])), finalize(() => this.stageLoading = false), takeUntil(this.destroy$))
       .subscribe(stages => this.stages = stages.filter(stage => stage.isActive));
   }

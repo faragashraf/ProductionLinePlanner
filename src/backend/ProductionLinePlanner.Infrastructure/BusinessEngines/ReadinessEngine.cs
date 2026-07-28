@@ -30,14 +30,21 @@ public sealed class ReadinessEngine : IReadinessEngine
     {
         var asOf = asOfUtc ?? DateTime.UtcNow;
 
-        var activeSubStages = await (from ss in _dbContext.SubStages.AsNoTracking()
-                                    join ms in _dbContext.MainStages.AsNoTracking() on ss.MainStageId equals ms.Id
-                                    join pl in _dbContext.ProductionLines.AsNoTracking() on ms.ProductionLineId equals pl.Id
-                                    where ss.IsActive && ms.IsActive && pl.IsActive
-                                    select new { ss.Id, ss.Capacity })
+        var activeLineStages = await (from modelStage in _dbContext.ProductModelStages.AsNoTracking()
+                                      join subStage in _dbContext.SubStages.AsNoTracking() on modelStage.SubStageId equals subStage.Id
+                                      join mainStage in _dbContext.MainStages.AsNoTracking() on subStage.MainStageId equals mainStage.Id
+                                      join line in _dbContext.ProductionLines.AsNoTracking() on modelStage.ProductionLineId equals line.Id
+                                      where modelStage.IsActive
+                                            && modelStage.IsRequired
+                                            && subStage.IsActive
+                                            && mainStage.IsActive
+                                            && line.IsActive
+                                            && line.DepartmentId == subStage.DepartmentId
+                                      select new { modelStage.ProductionLineId, SubStageId = subStage.Id, subStage.Capacity })
+            .Distinct()
             .ToListAsync(cancellationToken);
 
-        var requiredWorkers = activeSubStages.Sum(x => x.Capacity);
+        var requiredWorkers = activeLineStages.Sum(x => x.Capacity);
         var activeWorkerIds = await _dbContext.Workers
             .AsNoTracking()
             .Where(x => x.IsActive)
@@ -50,9 +57,13 @@ public sealed class ReadinessEngine : IReadinessEngine
             return Result<StageReadinessDto>.Failure(assignments.Error!);
         }
 
-        var activeSubStageIds = activeSubStages.Select(x => x.Id).ToHashSet();
+        var activeLineStageKeys = activeLineStages
+            .Select(stage => (stage.ProductionLineId, stage.SubStageId))
+            .ToHashSet();
         var assignmentsInActiveSubStages = assignments.Value!
-            .Where(x => x.Value.EffectiveSubStageId.HasValue && activeSubStageIds.Contains(x.Value.EffectiveSubStageId.Value))
+            .Where(x => x.Value.EffectiveSubStageId.HasValue
+                && x.Value.ProductionLineId.HasValue
+                && activeLineStageKeys.Contains((x.Value.ProductionLineId.Value, x.Value.EffectiveSubStageId.Value)))
             .ToList();
 
         var attendanceByWorkerResult = await _attendanceEngine.GetLatestAttendanceStatusByWorkerAsync(
@@ -96,19 +107,35 @@ public sealed class ReadinessEngine : IReadinessEngine
     {
         var asOf = asOfUtc ?? DateTime.UtcNow;
 
-        var lineItems = await (from line in _dbContext.ProductionLines.AsNoTracking()
-                              join mainStage in _dbContext.MainStages.AsNoTracking() on line.Id equals mainStage.ProductionLineId
-                              join subStage in _dbContext.SubStages.AsNoTracking() on mainStage.Id equals subStage.MainStageId
-                              where line.IsActive && mainStage.IsActive && subStage.IsActive
-                              group subStage by new { line.Id, line.Name } into g
-                              select new
-                              {
-                                  ProductionLineId = g.Key.Id,
-                                  LineName = g.Key.Name,
-                                  RequiredWorkers = g.Sum(x => x.Capacity),
-                                  SubStageIds = g.Select(x => x.Id).ToArray()
-                              })
+        var activeLineStages = await (from modelStage in _dbContext.ProductModelStages.AsNoTracking()
+                                      join subStage in _dbContext.SubStages.AsNoTracking() on modelStage.SubStageId equals subStage.Id
+                                      join mainStage in _dbContext.MainStages.AsNoTracking() on subStage.MainStageId equals mainStage.Id
+                                      join line in _dbContext.ProductionLines.AsNoTracking() on modelStage.ProductionLineId equals line.Id
+                                      where modelStage.IsActive
+                                            && modelStage.IsRequired
+                                            && subStage.IsActive
+                                            && mainStage.IsActive
+                                            && line.IsActive
+                                            && line.DepartmentId == subStage.DepartmentId
+                                      select new
+                                      {
+                                          ProductionLineId = line.Id,
+                                          LineName = line.Name,
+                                          SubStageId = subStage.Id,
+                                          subStage.Capacity
+                                      })
+            .Distinct()
             .ToListAsync(cancellationToken);
+        var lineItems = activeLineStages
+            .GroupBy(stage => new { stage.ProductionLineId, stage.LineName })
+            .Select(group => new
+            {
+                group.Key.ProductionLineId,
+                group.Key.LineName,
+                RequiredWorkers = group.Sum(stage => stage.Capacity),
+                SubStageIds = group.Select(stage => stage.SubStageId).ToHashSet()
+            })
+            .ToArray();
 
         var activeWorkerIds = await _dbContext.Workers
             .AsNoTracking()
@@ -140,7 +167,9 @@ public sealed class ReadinessEngine : IReadinessEngine
             .Select(item =>
             {
                 var assignmentsInLine = assignments.Value!
-                    .Where(x => x.Value.EffectiveSubStageId is not null && item.SubStageIds.Contains(x.Value.EffectiveSubStageId.Value))
+                    .Where(x => x.Value.EffectiveSubStageId is not null
+                        && x.Value.ProductionLineId == item.ProductionLineId
+                        && item.SubStageIds.Contains(x.Value.EffectiveSubStageId.Value))
                     .ToList();
 
                 var counts = ComputeReadinessCounts(
@@ -280,8 +309,8 @@ public sealed class ReadinessEngine : IReadinessEngine
             {
                 stage.Id,
                 stage.MainStageId,
-                ProductionLineId = stage.MainStage!.ProductionLineId,
-                FactoryId = stage.MainStage.ProductionLine!.FactoryId
+                stage.DepartmentId,
+                FactoryId = stage.MainStage!.Department!.FactoryId
             })
             .ToArrayAsync(cancellationToken);
         var activeSubStageIds = activeSubStages.Select(stage => stage.Id).ToArray();
@@ -290,6 +319,12 @@ public sealed class ReadinessEngine : IReadinessEngine
         {
             return Result<IReadOnlyCollection<SubStageAttendanceSummaryDto>>.Success([]);
         }
+
+        var activeLines = await _dbContext.ProductionLines
+            .AsNoTracking()
+            .Where(line => line.IsActive && line.DepartmentId.HasValue)
+            .Select(line => new { line.Id, DepartmentId = line.DepartmentId!.Value })
+            .ToArrayAsync(cancellationToken);
 
         var activeWorkerIds = await _dbContext.Workers
             .AsNoTracking()
@@ -309,7 +344,7 @@ public sealed class ReadinessEngine : IReadinessEngine
         var effectiveParticipations = effectiveAssignmentsResult.Value!
             .SelectMany(pair => pair.Value
                 .Where(assignment => assignment.EffectiveSubStageId.HasValue && activeSubStageIds.Contains(assignment.EffectiveSubStageId.Value))
-                .Select(assignment => new { SubStageId = assignment.EffectiveSubStageId!.Value, WorkerId = pair.Key }))
+                .Select(assignment => new { SubStageId = assignment.EffectiveSubStageId!.Value, WorkerId = pair.Key, assignment.ProductionLineId }))
             .Distinct()
             .ToArray();
         var assignedWorkerIdsByStage = effectiveParticipations
@@ -320,13 +355,31 @@ public sealed class ReadinessEngine : IReadinessEngine
             .Distinct()
             .GroupBy(item => item.ScopeId)
             .ToDictionary(group => group.Key, group => group.Select(item => item.WorkerId).ToArray());
+        var assignedWorkerIdsByStageAndLine = effectiveParticipations
+            .Where(item => item.ProductionLineId.HasValue)
+            .GroupBy(item => (item.SubStageId, ProductionLineId: item.ProductionLineId!.Value))
+            .ToDictionary(group => group.Key, group => group.Select(item => item.WorkerId).Distinct().ToArray());
+        var assignedWorkerIdsByMainStageAndLine = effectiveParticipations
+            .Where(item => item.ProductionLineId.HasValue)
+            .Join(activeSubStages, item => item.SubStageId, stage => stage.Id,
+                (item, stage) => new { stage.MainStageId, ProductionLineId = item.ProductionLineId!.Value, item.WorkerId })
+            .Distinct()
+            .GroupBy(item => (item.MainStageId, item.ProductionLineId))
+            .ToDictionary(group => group.Key, group => group.Select(item => item.WorkerId).ToArray());
         var assignedWorkerIdsByProductionLine = effectiveParticipations
-            .Join(activeSubStages, item => item.SubStageId, stage => stage.Id, (item, stage) => new { ScopeId = stage.ProductionLineId, item.WorkerId })
+            .Where(item => item.ProductionLineId.HasValue)
+            .Select(item => new { ScopeId = item.ProductionLineId!.Value, item.WorkerId })
+            .Distinct()
+            .GroupBy(item => item.ScopeId)
+            .ToDictionary(group => group.Key, group => group.Select(item => item.WorkerId).ToArray());
+        var assignedWorkerIdsByDepartment = effectiveParticipations
+            .Join(activeSubStages, item => item.SubStageId, stage => stage.Id, (item, stage) => new { ScopeId = stage.DepartmentId, item.WorkerId })
             .Distinct()
             .GroupBy(item => item.ScopeId)
             .ToDictionary(group => group.Key, group => group.Select(item => item.WorkerId).ToArray());
         var assignedWorkerIdsByFactory = effectiveParticipations
-            .Join(activeSubStages, item => item.SubStageId, stage => stage.Id, (item, stage) => new { ScopeId = stage.FactoryId, item.WorkerId })
+            .Where(item => item.ProductionLineId.HasValue)
+            .Join(_dbContext.ProductionLines.AsNoTracking(), item => item.ProductionLineId!.Value, line => line.Id, (item, line) => new { ScopeId = line.FactoryId, item.WorkerId })
             .Distinct()
             .GroupBy(item => item.ScopeId)
             .ToDictionary(group => group.Key, group => group.Select(item => item.WorkerId).ToArray());
@@ -348,6 +401,9 @@ public sealed class ReadinessEngine : IReadinessEngine
         var productionLineCounts = assignedWorkerIdsByProductionLine.ToDictionary(
             pair => pair.Key,
             pair => CountDistinctAttendance(pair.Value, attendanceByWorker));
+        var departmentCounts = assignedWorkerIdsByDepartment.ToDictionary(
+            pair => pair.Key,
+            pair => CountDistinctAttendance(pair.Value, attendanceByWorker));
         var factoryCounts = assignedWorkerIdsByFactory.ToDictionary(
             pair => pair.Key,
             pair => CountDistinctAttendance(pair.Value, attendanceByWorker));
@@ -355,7 +411,7 @@ public sealed class ReadinessEngine : IReadinessEngine
             .Select(stage =>
             {
                 var mainStage = mainStageCounts.GetValueOrDefault(stage.MainStageId, DistinctAttendanceCounts.Empty);
-                var productionLine = productionLineCounts.GetValueOrDefault(stage.ProductionLineId, DistinctAttendanceCounts.Empty);
+                var department = departmentCounts.GetValueOrDefault(stage.DepartmentId, DistinctAttendanceCounts.Empty);
                 var factory = factoryCounts.GetValueOrDefault(stage.FactoryId, DistinctAttendanceCounts.Empty);
                 return CreateSubStageAttendanceSummary(
                     stage.Id,
@@ -365,12 +421,42 @@ public sealed class ReadinessEngine : IReadinessEngine
                     MainStageDistinctAssignedWorkersCount = mainStage.Assigned,
                     MainStageDistinctPresentWorkersCount = mainStage.Present,
                     MainStageDistinctAbsentWorkersCount = mainStage.Absent,
-                    ProductionLineDistinctAssignedWorkersCount = productionLine.Assigned,
-                    ProductionLineDistinctPresentWorkersCount = productionLine.Present,
-                    ProductionLineDistinctAbsentWorkersCount = productionLine.Absent,
+                    DepartmentDistinctAssignedWorkersCount = department.Assigned,
+                    DepartmentDistinctPresentWorkersCount = department.Present,
+                    DepartmentDistinctAbsentWorkersCount = department.Absent,
                     FactoryDistinctAssignedWorkersCount = factory.Assigned,
                     FactoryDistinctPresentWorkersCount = factory.Present,
-                    FactoryDistinctAbsentWorkersCount = factory.Absent
+                    FactoryDistinctAbsentWorkersCount = factory.Absent,
+                    ProductionLines = activeLines
+                        .Where(line => line.DepartmentId == stage.DepartmentId)
+                        .Select(line =>
+                        {
+                            var stageLineSummary = CreateSubStageAttendanceSummary(
+                                stage.Id,
+                                assignedWorkerIdsByStageAndLine.GetValueOrDefault((stage.Id, line.Id), []),
+                                attendanceByWorker);
+                            var stageLine = CountDistinctAttendance(
+                                assignedWorkerIdsByStageAndLine.GetValueOrDefault((stage.Id, line.Id), []),
+                                attendanceByWorker);
+                            var mainStageLine = CountDistinctAttendance(
+                                assignedWorkerIdsByMainStageAndLine.GetValueOrDefault((stage.MainStageId, line.Id), []),
+                                attendanceByWorker);
+                            var productionLine = productionLineCounts.GetValueOrDefault(line.Id, DistinctAttendanceCounts.Empty);
+                            return new ProductionLineAttendanceSummaryDto(
+                                line.Id,
+                                stageLine.Assigned,
+                                stageLine.Present,
+                                stageLine.Absent,
+                                stageLineSummary.AttendanceDataStatus,
+                                stageLineSummary.AttendanceStatus,
+                                mainStageLine.Assigned,
+                                mainStageLine.Present,
+                                mainStageLine.Absent,
+                                productionLine.Assigned,
+                                productionLine.Present,
+                                productionLine.Absent);
+                        })
+                        .ToArray()
                 };
             })
             .ToArray();
