@@ -163,7 +163,7 @@ public sealed class AttendanceNotificationOutboxProcessor(
     {
         var candidates = await (from assignment in dbContext.WorkerDefaultAssignments.AsNoTracking()
                                 join stage in dbContext.SubStages.AsNoTracking() on assignment.SubStageId equals stage.Id
-                                join line in dbContext.ProductionLines.AsNoTracking() on stage.ProductionLineId equals line.Id
+                                join line in dbContext.ProductionLines.AsNoTracking() on assignment.ProductionLineId equals line.Id
                                 where assignment.WorkerId == attendanceEvent.WorkerId
                                       && assignment.IsActive
                                       && assignment.AssignedAt <= attendanceEvent.AttendanceTimeUtc

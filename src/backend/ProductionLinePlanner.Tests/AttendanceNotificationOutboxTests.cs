@@ -39,6 +39,7 @@ public sealed class AttendanceNotificationOutboxTests
         Assert.Equal(eventKey, notification.EventKey);
         Assert.Contains(expectedText, notification.Message);
         Assert.Contains("مرحلة التجميع", notification.Message);
+        Assert.Contains("خط الإنتاج 2", notification.Message);
         Assert.True(notification.IsToastEnabled);
         Assert.True(notification.IsSoundEnabled);
         Assert.True(notification.IsBrowserEnabled);
@@ -171,16 +172,23 @@ public sealed class AttendanceNotificationOutboxTests
             if (assigned)
             {
                 var factory = new Factory(Guid.NewGuid(), "مصنع القاهرة", "CAI");
-                var line = new ProductionLine(Guid.NewGuid(), factory.Id, "خط الإنتاج 2", 1);
-                var mainStage = new MainStage(Guid.NewGuid(), line.Id, "التجميع", 1);
-                var stage = new SubStage(Guid.NewGuid(), mainStage.Id, "التجميع", "ASM", 10, 1, productionLineId: line.Id);
-                db.AddRange(factory, line, mainStage, stage,
-                    new WorkerDefaultAssignment(Guid.NewGuid(), worker.Id, stage.Id, userOne.Id, attendanceTime.AddHours(-2)));
+                var department = new Department(Guid.NewGuid(), factory.Id, "ASM", "التجميع", null, 1);
+                var line = new ProductionLine(Guid.NewGuid(), factory.Id, "خط الإنتاج 2", 1, departmentId: department.Id);
+                var mainStage = new MainStage(Guid.NewGuid(), department.Id, "التجميع", 1);
+                var stage = new SubStage(Guid.NewGuid(), mainStage.Id, "التجميع", "ASM", 10, 1, departmentId: department.Id);
+                db.AddRange(factory, department, line, mainStage, stage,
+                    new WorkerDefaultAssignment(
+                        Guid.NewGuid(), worker.Id, stage.Id, userOne.Id, attendanceTime.AddHours(-2),
+                        productionLineId: line.Id));
                 if (multipleAssignments)
                 {
-                    var newerStage = new SubStage(Guid.NewGuid(), mainStage.Id, "مرحلة التعبئة", "PACK", 10, 2, productionLineId: line.Id);
+                    var newerStage = new SubStage(
+                        Guid.NewGuid(), mainStage.Id, "مرحلة التعبئة", "PACK", 10, 2,
+                        departmentId: department.Id);
                     db.AddRange(newerStage,
-                        new WorkerDefaultAssignment(Guid.NewGuid(), worker.Id, newerStage.Id, userOne.Id, attendanceTime.AddHours(-1)));
+                        new WorkerDefaultAssignment(
+                            Guid.NewGuid(), worker.Id, newerStage.Id, userOne.Id, attendanceTime.AddHours(-1),
+                            productionLineId: line.Id));
                 }
             }
             await db.SaveChangesAsync();
