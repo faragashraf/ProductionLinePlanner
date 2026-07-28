@@ -18,30 +18,37 @@ public sealed class AddDepartmentStageAndLineAssignmentKeys : Migration
         // was being reviewed, but do not have an EF history row for that work.
         migrationBuilder.Sql("""
             IF COL_LENGTH(N'[dbo].[MainStages]', N'DepartmentId') IS NULL
-                ALTER TABLE [dbo].[MainStages] ADD [DepartmentId] uniqueidentifier NULL;
+                EXEC sys.sp_executesql N'ALTER TABLE [dbo].[MainStages] ADD [DepartmentId] uniqueidentifier NULL;';
+            """);
 
+        migrationBuilder.Sql("""
             IF COL_LENGTH(N'[dbo].[SubStages]', N'DepartmentId') IS NULL
-                ALTER TABLE [dbo].[SubStages] ADD [DepartmentId] uniqueidentifier NULL;
+                EXEC sys.sp_executesql N'ALTER TABLE [dbo].[SubStages] ADD [DepartmentId] uniqueidentifier NULL;';
+            """);
 
+        migrationBuilder.Sql("""
             IF COL_LENGTH(N'[dbo].[ProductModelStages]', N'ProductionLineId') IS NULL
-                ALTER TABLE [dbo].[ProductModelStages] ADD [ProductionLineId] uniqueidentifier NULL;
+                EXEC sys.sp_executesql N'ALTER TABLE [dbo].[ProductModelStages] ADD [ProductionLineId] uniqueidentifier NULL;';
+            """);
 
+        migrationBuilder.Sql("""
             IF COL_LENGTH(N'[dbo].[WorkerDefaultAssignments]', N'ProductionLineId') IS NULL
-                ALTER TABLE [dbo].[WorkerDefaultAssignments] ADD [ProductionLineId] uniqueidentifier NULL;
+                EXEC sys.sp_executesql N'ALTER TABLE [dbo].[WorkerDefaultAssignments] ADD [ProductionLineId] uniqueidentifier NULL;';
+            """);
 
-            -- Retained until rollback of the pair so Down() can restore the exact
-            -- legacy line owner rather than guessing when a department has many lines.
+        // Retained until rollback of the pair so Down() can restore the exact
+        // legacy line owner rather than guessing when a department has many lines.
+        migrationBuilder.Sql("""
             IF OBJECT_ID(N'[dbo].[StageOwnershipMigrationRollbackMap]', N'U') IS NULL
-            BEGIN
-                CREATE TABLE [dbo].[StageOwnershipMigrationRollbackMap]
-                (
-                    [StageKind] tinyint NOT NULL,
-                    [StageId] uniqueidentifier NOT NULL,
-                    [ProductionLineId] uniqueidentifier NOT NULL,
-                    CONSTRAINT [PK_StageOwnershipMigrationRollbackMap]
-                        PRIMARY KEY ([StageKind], [StageId])
-                );
-            END;
+                EXEC sys.sp_executesql N'
+                    CREATE TABLE [dbo].[StageOwnershipMigrationRollbackMap]
+                    (
+                        [StageKind] tinyint NOT NULL,
+                        [StageId] uniqueidentifier NOT NULL,
+                        [ProductionLineId] uniqueidentifier NOT NULL,
+                        CONSTRAINT [PK_StageOwnershipMigrationRollbackMap]
+                            PRIMARY KEY ([StageKind], [StageId])
+                    );';
             """);
     }
 
@@ -50,18 +57,22 @@ public sealed class AddDepartmentStageAndLineAssignmentKeys : Migration
         migrationBuilder.Sql("""
             IF OBJECT_ID(N'[dbo].[StageOwnershipMigrationRollbackMap]', N'U') IS NOT NULL
                 DROP TABLE [dbo].[StageOwnershipMigrationRollbackMap];
-
+            """);
+        migrationBuilder.Sql("""
             IF COL_LENGTH(N'[dbo].[WorkerDefaultAssignments]', N'ProductionLineId') IS NOT NULL
-                ALTER TABLE [dbo].[WorkerDefaultAssignments] DROP COLUMN [ProductionLineId];
-
+                EXEC sys.sp_executesql N'ALTER TABLE [dbo].[WorkerDefaultAssignments] DROP COLUMN [ProductionLineId];';
+            """);
+        migrationBuilder.Sql("""
             IF COL_LENGTH(N'[dbo].[ProductModelStages]', N'ProductionLineId') IS NOT NULL
-                ALTER TABLE [dbo].[ProductModelStages] DROP COLUMN [ProductionLineId];
-
+                EXEC sys.sp_executesql N'ALTER TABLE [dbo].[ProductModelStages] DROP COLUMN [ProductionLineId];';
+            """);
+        migrationBuilder.Sql("""
             IF COL_LENGTH(N'[dbo].[SubStages]', N'DepartmentId') IS NOT NULL
-                ALTER TABLE [dbo].[SubStages] DROP COLUMN [DepartmentId];
-
+                EXEC sys.sp_executesql N'ALTER TABLE [dbo].[SubStages] DROP COLUMN [DepartmentId];';
+            """);
+        migrationBuilder.Sql("""
             IF COL_LENGTH(N'[dbo].[MainStages]', N'DepartmentId') IS NOT NULL
-                ALTER TABLE [dbo].[MainStages] DROP COLUMN [DepartmentId];
+                EXEC sys.sp_executesql N'ALTER TABLE [dbo].[MainStages] DROP COLUMN [DepartmentId];';
             """);
     }
 }

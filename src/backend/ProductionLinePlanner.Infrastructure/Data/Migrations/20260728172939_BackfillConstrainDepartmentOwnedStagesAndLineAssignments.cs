@@ -9,7 +9,7 @@ public partial class BackfillConstrainDepartmentOwnedStagesAndLineAssignments : 
 {
     protected override void Up(MigrationBuilder migrationBuilder)
     {
-        migrationBuilder.Sql("""
+        var sql = """
             IF COL_LENGTH(N'dbo.MainStages', N'DepartmentId') IS NULL
                OR COL_LENGTH(N'dbo.SubStages', N'DepartmentId') IS NULL
                OR COL_LENGTH(N'dbo.ProductModelStages', N'ProductionLineId') IS NULL
@@ -27,7 +27,7 @@ public partial class BackfillConstrainDepartmentOwnedStagesAndLineAssignments : 
                 -- Dynamic SQL is intentional: SQL Server otherwise resolves legacy
                 -- column names when compiling the whole batch, including resume paths
                 -- where those columns were already removed.
-                EXEC(N'
+                EXEC sys.sp_executesql N'
                     IF EXISTS (
                         SELECT 1
                         FROM [MainStages] AS [m]
@@ -106,7 +106,7 @@ public partial class BackfillConstrainDepartmentOwnedStagesAndLineAssignments : 
                     UPDATE [wda]
                     SET [ProductionLineId] = [s].[ProductionLineId]
                     FROM [WorkerDefaultAssignments] AS [wda]
-                    INNER JOIN [SubStages] AS [s] ON [s].[Id] = [wda].[SubStageId];');
+                    INNER JOIN [SubStages] AS [s] ON [s].[Id] = [wda].[SubStageId];';
             END
             ELSE
             BEGIN
@@ -265,11 +265,11 @@ public partial class BackfillConstrainDepartmentOwnedStagesAndLineAssignments : 
                 ALTER TABLE [WorkerDefaultAssignments] WITH CHECK ADD CONSTRAINT [FK_WorkerDefaultAssignments_ProductionLines_ProductionLineId] FOREIGN KEY ([ProductionLineId]) REFERENCES [ProductionLines] ([Id]);
 
             IF @subHasLegacyLine = 1
-                EXEC(N'ALTER TABLE [SubStages] DROP COLUMN [ProductionLineId];');
+                EXEC sys.sp_executesql N'ALTER TABLE [SubStages] DROP COLUMN [ProductionLineId];';
             IF @mainHasLegacyLine = 1
-                EXEC(N'ALTER TABLE [MainStages] DROP COLUMN [ProductionLineId];');
+                EXEC sys.sp_executesql N'ALTER TABLE [MainStages] DROP COLUMN [ProductionLineId];';
 
-            EXEC(N'CREATE OR ALTER TRIGGER [dbo].[TR_ProductModelStages_DepartmentGuard]
+            EXEC sys.sp_executesql N'CREATE OR ALTER TRIGGER [dbo].[TR_ProductModelStages_DepartmentGuard]
             ON [dbo].[ProductModelStages]
             AFTER INSERT, UPDATE
             AS
@@ -282,9 +282,9 @@ public partial class BackfillConstrainDepartmentOwnedStagesAndLineAssignments : 
                     LEFT JOIN [dbo].[SubStages] AS s ON s.Id = i.SubStageId
                     WHERE l.Id IS NULL OR s.Id IS NULL OR l.DepartmentId IS NULL OR l.DepartmentId <> s.DepartmentId)
                     THROW 51120, ''ProductModelStage line and SubStage must belong to the same department.'', 1;
-            END');
+            END';
 
-            EXEC(N'CREATE OR ALTER TRIGGER [dbo].[TR_ProductionLines_ProductModelStageDepartmentGuard]
+            EXEC sys.sp_executesql N'CREATE OR ALTER TRIGGER [dbo].[TR_ProductionLines_ProductModelStageDepartmentGuard]
             ON [dbo].[ProductionLines]
             AFTER UPDATE
             AS
@@ -297,9 +297,9 @@ public partial class BackfillConstrainDepartmentOwnedStagesAndLineAssignments : 
                     INNER JOIN [dbo].[SubStages] AS s ON s.Id = pms.SubStageId
                     WHERE i.DepartmentId IS NULL OR i.DepartmentId <> s.DepartmentId)
                     THROW 51121, ''A line with model-stage assignments cannot move to another department.'', 1;
-            END');
+            END';
 
-            EXEC(N'CREATE OR ALTER TRIGGER [dbo].[TR_SubStages_ProductModelStageDepartmentGuard]
+            EXEC sys.sp_executesql N'CREATE OR ALTER TRIGGER [dbo].[TR_SubStages_ProductModelStageDepartmentGuard]
             ON [dbo].[SubStages]
             AFTER UPDATE
             AS
@@ -312,8 +312,10 @@ public partial class BackfillConstrainDepartmentOwnedStagesAndLineAssignments : 
                     INNER JOIN [dbo].[ProductionLines] AS l ON l.Id = pms.ProductionLineId
                     WHERE l.DepartmentId IS NULL OR l.DepartmentId <> i.DepartmentId)
                     THROW 51122, ''An assigned SubStage cannot move to a different department than its line.'', 1;
-            END');
-            """);
+            END';
+            """;
+
+        migrationBuilder.Sql(AsDeferredCommand(sql));
     }
 
     protected override void Down(MigrationBuilder migrationBuilder)
@@ -390,7 +392,7 @@ public partial class BackfillConstrainDepartmentOwnedStagesAndLineAssignments : 
 
             -- Compile all references to the newly added legacy columns only after
             -- ALTER TABLE has executed. This keeps generated Down SQL batch-safe.
-            EXEC(N'
+            EXEC sys.sp_executesql N'
                 UPDATE [m]
                 SET [ProductionLineId] = [map].[ProductionLineId]
                 FROM [MainStages] AS [m]
@@ -416,7 +418,7 @@ public partial class BackfillConstrainDepartmentOwnedStagesAndLineAssignments : 
                 ALTER TABLE [MainStages] ADD CONSTRAINT [FK_MainStages_ProductionLines_ProductionLineId]
                     FOREIGN KEY ([ProductionLineId]) REFERENCES [ProductionLines] ([Id]) ON DELETE NO ACTION;
                 ALTER TABLE [SubStages] ADD CONSTRAINT [FK_SubStages_ProductionLines_ProductionLineId]
-                    FOREIGN KEY ([ProductionLineId]) REFERENCES [ProductionLines] ([Id]) ON DELETE NO ACTION;');
+                    FOREIGN KEY ([ProductionLineId]) REFERENCES [ProductionLines] ([Id]) ON DELETE NO ACTION;';
             """);
 
         migrationBuilder.CreateIndex(name: "IX_WorkerDefaultAssignments_WorkerId_SubStageId", table: "WorkerDefaultAssignments", columns: new[] { "WorkerId", "SubStageId" }, unique: true, filter: "[IsActive] = 1");
@@ -425,4 +427,7 @@ public partial class BackfillConstrainDepartmentOwnedStagesAndLineAssignments : 
         migrationBuilder.CreateIndex(name: "IX_ProductModelStages_ProductModelId_SubStageId", table: "ProductModelStages", columns: new[] { "ProductModelId", "SubStageId" }, unique: true);
         migrationBuilder.AddForeignKey(name: "FK_SubStages_MainStages_MainStageId", table: "SubStages", column: "MainStageId", principalTable: "MainStages", principalColumn: "Id", onDelete: ReferentialAction.Restrict);
     }
+
+    private static string AsDeferredCommand(string sql) =>
+        $"EXEC sys.sp_executesql N'{sql.Replace("'", "''", StringComparison.Ordinal)}';";
 }
