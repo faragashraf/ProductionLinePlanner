@@ -4,6 +4,7 @@ import { AuthUser } from '../models/auth.models';
 import { NotificationSummary } from '../models/realtime-notification.models';
 import { AuthService } from './auth.service';
 import { NotificationInboxService } from './notification-inbox.service';
+import { BrowserNotificationService } from './browser-notification.service';
 import {
   NotificationPresentationService,
   NotificationSoundPlayer
@@ -15,17 +16,21 @@ describe('NotificationPresentationService', () => {
   let messages: jasmine.SpyObj<MessageService>;
   let sound: jasmine.SpyObj<NotificationSoundPlayer>;
   let service: NotificationPresentationService;
+  let browser: jasmine.SpyObj<BrowserNotificationService>;
 
   beforeEach(() => {
+    window.localStorage.removeItem('plp.notifications.sound-enabled');
     users = new BehaviorSubject<AuthUser | null>(null);
     live = new Subject<NotificationSummary>();
     messages = jasmine.createSpyObj<MessageService>('MessageService', ['add']);
     sound = jasmine.createSpyObj<NotificationSoundPlayer>('NotificationSoundPlayer', ['initialize', 'play', 'teardown']);
+    browser = jasmine.createSpyObj<BrowserNotificationService>('BrowserNotificationService', ['show']);
     service = new NotificationPresentationService(
       { currentUser$: users.asObservable() } as AuthService,
       { liveNotifications$: live.asObservable() } as NotificationInboxService,
       messages,
-      sound
+      sound,
+      browser
     );
     service.initialize();
   });
@@ -41,6 +46,7 @@ describe('NotificationPresentationService', () => {
 
     expect(messages.add).toHaveBeenCalledTimes(1);
     expect(sound.play).toHaveBeenCalledOnceWith('default', 0.2);
+    expect(browser.show).toHaveBeenCalledTimes(1);
   });
 
   it('does not present before login or for a live item already marked read', () => {
@@ -229,6 +235,9 @@ function notification(): NotificationSummary {
     relatedEntityType: null,
     relatedEntityId: null,
     createdAtUtc: '2026-07-19T09:00:00Z',
-    readAtUtc: null
+    readAtUtc: null,
+    isToastEnabled: true,
+    isSoundEnabled: true,
+    isBrowserEnabled: true
   };
 }

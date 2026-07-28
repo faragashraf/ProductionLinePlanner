@@ -9,6 +9,7 @@ public sealed record NotificationPolicyListItemDto
     public required bool IsToastEnabled { get; init; }
     public required bool IsInboxEnabled { get; init; }
     public required bool IsSoundEnabled { get; init; }
+    public bool IsBrowserEnabled { get; init; }
     public required string UpdatedAtUtc { get; init; }
 }
 
@@ -22,6 +23,7 @@ public sealed record NotificationPolicyDetailsDto
     public required bool IsToastEnabled { get; init; }
     public required bool IsInboxEnabled { get; init; }
     public required bool IsSoundEnabled { get; init; }
+    public bool IsBrowserEnabled { get; init; }
     public string? SoundKey { get; init; }
     public required string TitleTemplateAr { get; init; }
     public required string MessageTemplateAr { get; init; }
@@ -50,6 +52,7 @@ public sealed record NotificationPolicyUpdateRequest
     public required bool IsToastEnabled { get; init; }
     public required bool IsInboxEnabled { get; init; }
     public required bool IsSoundEnabled { get; init; }
+    public bool IsBrowserEnabled { get; init; }
     public string? SoundKey { get; init; }
     public required string TitleTemplateAr { get; init; }
     public required string MessageTemplateAr { get; init; }

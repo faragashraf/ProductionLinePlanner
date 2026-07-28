@@ -30,6 +30,7 @@ public sealed class NotificationRecipientResolver(
         var requestedCapabilities = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var includeCreator = false;
         var excludeActor = false;
+        var includeAllActiveUsers = false;
 
         foreach (var rule in rules)
         {
@@ -81,12 +82,24 @@ public sealed class NotificationRecipientResolver(
                     excludeActor = true;
                     break;
 
+                case NotificationRecipientKind.AllActiveUsers:
+                    includeAllActiveUsers = true;
+                    break;
+
                 default:
                     return InvalidRule("The recipient rule kind is not supported.");
             }
         }
 
         var recipients = new HashSet<Guid>();
+        if (includeAllActiveUsers)
+        {
+            recipients.UnionWith(await dbContext.AppUsers
+                .AsNoTracking()
+                .Where(user => user.IsActive)
+                .Select(user => user.Id)
+                .ToArrayAsync(cancellationToken));
+        }
         if (directUserIds.Count > 0)
         {
             recipients.UnionWith(await dbContext.AppUsers

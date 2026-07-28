@@ -2,7 +2,6 @@ import { NgModule } from '@angular/core';
 import { RouterModule, Routes } from '@angular/router';
 import { DashboardPageComponent } from './pages/dashboard-page/dashboard-page.component';
 import { FactoryMapPageComponent } from './pages/factory-map-page/factory-map-page.component';
-import { NotificationsPageComponent } from './pages/notifications-page/notifications-page.component';
 import { LoginPageComponent } from './pages/login-page/login-page.component';
 import { AppShellComponent } from './layout/app-shell/app-shell.component';
 import { AccessDeniedPageComponent } from './pages/access-denied-page/access-denied-page.component';
@@ -67,7 +66,11 @@ export const APP_ROUTES: Routes = [
           requireAny: [PERMISSIONS.users.view, PERMISSIONS.roles.view, PERMISSIONS.permissions.assign, PERMISSIONS.notifications.policiesManage]
         }
       },
-      { path: 'notifications', component: NotificationsPageComponent, data: { title: 'الإشعارات', breadcrumb: 'الإشعارات' } },
+      {
+        path: 'notifications',
+        loadChildren: () => import('./pages/notifications-page/notifications-page.module').then((module) => module.NotificationsPageModule),
+        data: { title: 'الإشعارات', breadcrumb: 'الإشعارات' }
+      },
       { path: '**', redirectTo: 'dashboard' }
     ]
   },

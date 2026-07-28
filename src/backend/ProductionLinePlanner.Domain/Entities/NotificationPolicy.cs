@@ -24,10 +24,29 @@ public sealed class NotificationPolicy
         string messageTemplateAr,
         Guid? actorUserId = null,
         DateTime? createdAtUtc = null)
+        : this(id, eventKey, isEnabled, severity, isToastEnabled, isInboxEnabled, isSoundEnabled,
+            isBrowserEnabled: false, soundKey, titleTemplateAr, messageTemplateAr, actorUserId, createdAtUtc)
+    {
+    }
+
+    public NotificationPolicy(
+        Guid id,
+        string eventKey,
+        bool isEnabled,
+        NotificationSeverity severity,
+        bool isToastEnabled,
+        bool isInboxEnabled,
+        bool isSoundEnabled,
+        bool isBrowserEnabled,
+        string? soundKey,
+        string titleTemplateAr,
+        string messageTemplateAr,
+        Guid? actorUserId = null,
+        DateTime? createdAtUtc = null)
     {
         Id = id == Guid.Empty ? throw new ArgumentException("Id is required.", nameof(id)) : id;
         EventKey = NormalizeEventKey(eventKey);
-        ApplySettings(isEnabled, severity, isToastEnabled, isInboxEnabled, isSoundEnabled, soundKey, titleTemplateAr, messageTemplateAr, actorUserId, createdAtUtc ?? DateTime.UtcNow);
+        ApplySettings(isEnabled, severity, isToastEnabled, isInboxEnabled, isSoundEnabled, isBrowserEnabled, soundKey, titleTemplateAr, messageTemplateAr, actorUserId, createdAtUtc ?? DateTime.UtcNow);
         CreatedByUserId = actorUserId;
         CreatedAtUtc = createdAtUtc ?? DateTime.UtcNow;
     }
@@ -39,6 +58,7 @@ public sealed class NotificationPolicy
     public bool IsToastEnabled { get; private set; }
     public bool IsInboxEnabled { get; private set; }
     public bool IsSoundEnabled { get; private set; }
+    public bool IsBrowserEnabled { get; private set; }
     public string? SoundKey { get; private set; }
     public string TitleTemplateAr { get; private set; } = string.Empty;
     public string MessageTemplateAr { get; private set; } = string.Empty;
@@ -57,6 +77,7 @@ public sealed class NotificationPolicy
         bool isToastEnabled,
         bool isInboxEnabled,
         bool isSoundEnabled,
+        bool isBrowserEnabled,
         string? soundKey,
         string titleTemplateAr,
         string messageTemplateAr,
@@ -68,7 +89,7 @@ public sealed class NotificationPolicy
             throw new ArgumentException("Actor user id is required.", nameof(actorUserId));
         }
 
-        ApplySettings(isEnabled, severity, isToastEnabled, isInboxEnabled, isSoundEnabled, soundKey, titleTemplateAr, messageTemplateAr, actorUserId, updatedAtUtc ?? DateTime.UtcNow);
+        ApplySettings(isEnabled, severity, isToastEnabled, isInboxEnabled, isSoundEnabled, isBrowserEnabled, soundKey, titleTemplateAr, messageTemplateAr, actorUserId, updatedAtUtc ?? DateTime.UtcNow);
     }
 
     private void ApplySettings(
@@ -77,6 +98,7 @@ public sealed class NotificationPolicy
         bool isToastEnabled,
         bool isInboxEnabled,
         bool isSoundEnabled,
+        bool isBrowserEnabled,
         string? soundKey,
         string titleTemplateAr,
         string messageTemplateAr,
@@ -93,6 +115,7 @@ public sealed class NotificationPolicy
         IsToastEnabled = isToastEnabled;
         IsInboxEnabled = isInboxEnabled;
         IsSoundEnabled = isSoundEnabled;
+        IsBrowserEnabled = isBrowserEnabled;
         SoundKey = NormalizeSoundKey(isSoundEnabled, soundKey);
         TitleTemplateAr = NormalizeRequired(titleTemplateAr, MaxTitleTemplateLength, nameof(titleTemplateAr));
         MessageTemplateAr = NormalizeRequired(messageTemplateAr, MaxMessageTemplateLength, nameof(messageTemplateAr));

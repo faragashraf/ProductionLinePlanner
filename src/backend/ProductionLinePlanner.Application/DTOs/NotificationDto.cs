@@ -17,6 +17,11 @@ public sealed class NotificationDto
     public Guid? RelatedEntityId { get; init; }
     public string? EventKey { get; init; }
     public NotificationSeverity Severity { get; init; } = NotificationSeverity.Information;
+    public bool IsToastEnabled { get; init; } = true;
+    public bool IsSoundEnabled { get; init; }
+    public bool IsBrowserEnabled { get; init; }
+    public string? NavigationUrl { get; init; }
+    public string? MetadataJson { get; init; }
     public DateTime CreatedAtUtc { get; init; }
     public DateTime? ReadAtUtc { get; init; }
 }

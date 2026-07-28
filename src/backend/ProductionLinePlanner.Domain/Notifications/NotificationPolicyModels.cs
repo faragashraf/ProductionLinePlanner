@@ -15,7 +15,8 @@ public enum NotificationRecipientKind
     Permission,
     CapabilityGroup,
     Creator,
-    ExcludeActor
+    ExcludeActor,
+    AllActiveUsers
 }
 
 public sealed record NotificationSoundPolicy(bool Enabled);
@@ -23,6 +24,8 @@ public sealed record NotificationSoundPolicy(bool Enabled);
 public sealed record NotificationToastPolicy(bool Enabled);
 
 public sealed record NotificationInboxPolicy(bool Enabled);
+
+public sealed record NotificationBrowserPolicy(bool Enabled);
 
 public sealed record NotificationRecipientRule(
     NotificationRecipientKind Kind,
@@ -36,9 +39,26 @@ public sealed record NotificationPolicyDefinition(
     NotificationSoundPolicy Sound,
     NotificationToastPolicy Toast,
     NotificationInboxPolicy Inbox,
+    NotificationBrowserPolicy Browser,
     string TitleTemplate,
     string MessageTemplate,
-    IReadOnlyCollection<NotificationRecipientRule> RecipientRules);
+    IReadOnlyCollection<NotificationRecipientRule> RecipientRules)
+{
+    public NotificationPolicyDefinition(
+        string eventKey,
+        bool isEnabled,
+        NotificationSeverity severity,
+        NotificationSoundPolicy sound,
+        NotificationToastPolicy toast,
+        NotificationInboxPolicy inbox,
+        string titleTemplate,
+        string messageTemplate,
+        IReadOnlyCollection<NotificationRecipientRule> recipientRules)
+        : this(eventKey, isEnabled, severity, sound, toast, inbox,
+            new NotificationBrowserPolicy(Enabled: false), titleTemplate, messageTemplate, recipientRules)
+    {
+    }
+}
 
 public sealed record NotificationEventDefinition(
     string Key,

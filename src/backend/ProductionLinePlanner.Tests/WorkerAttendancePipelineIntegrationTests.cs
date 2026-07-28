@@ -98,6 +98,9 @@ public sealed class WorkerAttendancePipelineIntegrationTests
             Assert.Equal(3, first.Value!.MatchedWorkersCount);
             Assert.Equal(7, await appDb.Workers.CountAsync());
             Assert.Equal(7, await appDb.AttendanceRecords.CountAsync());
+            Assert.Equal(5, await appDb.AttendanceNotificationEvents.CountAsync());
+            Assert.Equal(3, await appDb.AttendanceNotificationEvents.CountAsync(item => item.AttendanceType == WorkerAttendanceNotificationType.CheckIn));
+            Assert.Equal(2, await appDb.AttendanceNotificationEvents.CountAsync(item => item.AttendanceType == WorkerAttendanceNotificationType.CheckOut));
         }
 
         await using var reloadedAppDb = new AppDbContext(appOptions);

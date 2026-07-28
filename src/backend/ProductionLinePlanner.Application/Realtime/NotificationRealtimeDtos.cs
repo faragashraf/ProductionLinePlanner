@@ -14,7 +14,12 @@ public sealed record NotificationSummaryDto(
     DateTime CreatedAtUtc,
     DateTime? ReadAtUtc,
     string? EventKey = null,
-    NotificationSeverity Severity = NotificationSeverity.Information);
+    NotificationSeverity Severity = NotificationSeverity.Information,
+    bool IsToastEnabled = true,
+    bool IsSoundEnabled = false,
+    bool IsBrowserEnabled = false,
+    string? NavigationUrl = null,
+    string? MetadataJson = null);
 
 public sealed record PublishUserNotificationCommand(
     Guid NotificationId,
@@ -27,7 +32,13 @@ public sealed record PublishUserNotificationCommand(
     Guid? RelatedEntityId = null,
     DateTime? CreatedAtUtc = null,
     string? EventKey = null,
-    NotificationSeverity? Severity = null);
+    NotificationSeverity? Severity = null,
+    bool IsToastEnabled = true,
+    bool IsSoundEnabled = false,
+    bool IsBrowserEnabled = false,
+    string? NavigationUrl = null,
+    string? MetadataJson = null,
+    string? CorrelationKey = null);
 
 public sealed record NotificationPublishResultDto(
     Guid NotificationId,

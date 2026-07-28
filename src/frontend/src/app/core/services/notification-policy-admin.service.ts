@@ -5,7 +5,7 @@ import { buildApiUrl } from '../config/api.config';
 import { ApiResponse } from '../models/api-response.model';
 
 export type NotificationPolicySeverity = 'Information' | 'Success' | 'Warning' | 'Critical';
-export type NotificationRecipientKind = 'User' | 'Role' | 'Permission' | 'CapabilityGroup' | 'Creator' | 'ExcludeActor';
+export type NotificationRecipientKind = 'User' | 'Role' | 'Permission' | 'CapabilityGroup' | 'Creator' | 'ExcludeActor' | 'AllActiveUsers';
 
 export interface NotificationPolicyListItem {
   eventKey: string;
@@ -15,6 +15,7 @@ export interface NotificationPolicyListItem {
   isToastEnabled: boolean;
   isInboxEnabled: boolean;
   isSoundEnabled: boolean;
+  isBrowserEnabled: boolean;
   updatedAtUtc: string;
 }
 
@@ -52,6 +53,7 @@ export interface NotificationPolicyUpdateRequest {
   isToastEnabled: boolean;
   isInboxEnabled: boolean;
   isSoundEnabled: boolean;
+  isBrowserEnabled: boolean;
   soundKey: 'default' | null;
   titleTemplateAr: string;
   messageTemplateAr: string;

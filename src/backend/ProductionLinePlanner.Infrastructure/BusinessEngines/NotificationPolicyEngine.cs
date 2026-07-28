@@ -35,7 +35,7 @@ public sealed class NotificationPolicyEngine(
             return Failure("InvalidNotificationSeverity", "The notification severity is not supported.");
         }
 
-        if (policy.Sound is null || policy.Toast is null || policy.Inbox is null || policy.RecipientRules is null)
+        if (policy.Sound is null || policy.Toast is null || policy.Inbox is null || policy.Browser is null || policy.RecipientRules is null)
         {
             return Failure("InvalidNotificationPolicy", "Channel policies and recipient rules are required.");
         }
@@ -50,6 +50,7 @@ public sealed class NotificationPolicyEngine(
                 policy.Sound,
                 policy.Toast,
                 policy.Inbox,
+                policy.Browser,
                 Title: null,
                 Message: null,
                 RecipientUserIds: []));
@@ -89,7 +90,7 @@ public sealed class NotificationPolicyEngine(
             return Result<NotificationPolicyDecision>.Failure(recipientResult.Error!);
         }
 
-        var hasDeliveryChannel = policy.Sound.Enabled || policy.Toast.Enabled || policy.Inbox.Enabled;
+        var hasDeliveryChannel = policy.Sound.Enabled || policy.Toast.Enabled || policy.Inbox.Enabled || policy.Browser.Enabled;
         var recipients = recipientResult.Value!;
         return Result<NotificationPolicyDecision>.Success(new NotificationPolicyDecision(
             eventDefinition.Key,
@@ -99,6 +100,7 @@ public sealed class NotificationPolicyEngine(
             policy.Sound,
             policy.Toast,
             policy.Inbox,
+            policy.Browser,
             titleResult.Value,
             messageResult.Value,
             recipients));

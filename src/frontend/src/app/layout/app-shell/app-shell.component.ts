@@ -9,6 +9,7 @@ import { PRODUCTION_RUNTIME_Z_INDEX } from '../../shared/design-system/layering/
 import { PLP_ANGULAR_MOTION } from '../../shared/product/product-motion';
 import { PRODUCT_IDENTITY } from '../../core/config/product-identity.config';
 import { productionIconFor } from '../../shared/design-system/icons/production-icon-map';
+import { NotificationInboxService } from '../../core/services/notification-inbox.service';
 
 export type ShellNavigationMode = 'phone' | 'tablet-portrait' | 'tablet-landscape' | 'desktop';
 
@@ -37,6 +38,7 @@ export class AppShellComponent implements OnInit, OnDestroy {
   administrationNavigationItems: AppNavigationItem[] = [];
   permissionHydrationState: PermissionHydrationState = 'idle';
   currentPageLabel = 'لوحة التحكم';
+  unreadNotificationCount = 0;
 
   private destroy$ = new Subject<void>();
 
@@ -44,11 +46,16 @@ export class AppShellComponent implements OnInit, OnDestroy {
     private readonly router: Router,
     private readonly activatedRoute: ActivatedRoute,
     private readonly authService: AuthService,
-    private readonly permissionService: PermissionService
+    private readonly permissionService: PermissionService,
+    private readonly notificationInbox: NotificationInboxService
   ) {}
 
   ngOnInit(): void {
     this.checkViewport();
+
+    this.notificationInbox.unreadCount$
+      .pipe(takeUntil(this.destroy$))
+      .subscribe(count => this.unreadNotificationCount = count);
 
     this.permissionService.hydrationState$
       .pipe(takeUntil(this.destroy$))

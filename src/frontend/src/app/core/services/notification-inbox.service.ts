@@ -1,6 +1,6 @@
 import { Injectable, OnDestroy } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { BehaviorSubject, EMPTY, Subject, Subscription, catchError, distinctUntilChanged, filter, map, tap } from 'rxjs';
+import { BehaviorSubject, EMPTY, Observable, Subject, Subscription, catchError, distinctUntilChanged, filter, map, tap } from 'rxjs';
 import { buildApiUrl } from '../config/api.config';
 import { ApiResponse } from '../models/api-response.model';
 import { NotificationPage, NotificationSummary } from '../models/realtime-notification.models';
@@ -57,6 +57,12 @@ export class NotificationInboxService implements OnDestroy {
     if (!this.activeUserId) return;
     this.loadUnreadCount();
     this.loadRecent();
+  }
+
+  getPage(page: number, pageSize: number): Observable<NotificationPage> {
+    return this.http.get<ApiResponse<NotificationPage>>(buildApiUrl('/api/notifications'), {
+      params: { page, pageSize }
+    }).pipe(map(response => this.extractData(response)));
   }
 
   markAsRead(notificationId: string): void {
@@ -138,6 +144,10 @@ export class NotificationInboxService implements OnDestroy {
     this.seenNotificationIds.clear();
     this.unreadCountSubject.next(0);
     this.recentSubject.next([]);
+    if (userId) {
+      this.loadUnreadCount();
+      this.loadRecent();
+    }
   }
 
   private acceptLiveNotification(notification: NotificationSummary): void {

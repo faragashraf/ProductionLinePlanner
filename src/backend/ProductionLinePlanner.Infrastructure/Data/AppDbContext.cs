@@ -15,6 +15,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<WorkerTemporaryAssignment> WorkerTemporaryAssignments => Set<WorkerTemporaryAssignment>();
     public DbSet<AssignmentTimelineEntry> AssignmentTimelineEntries => Set<AssignmentTimelineEntry>();
     public DbSet<AttendanceRecord> AttendanceRecords => Set<AttendanceRecord>();
+    public DbSet<AttendanceNotificationEvent> AttendanceNotificationEvents => Set<AttendanceNotificationEvent>();
     public DbSet<StageReadinessSnapshot> StageReadinessSnapshots => Set<StageReadinessSnapshot>();
     public DbSet<Notification> Notifications => Set<Notification>();
     public DbSet<NotificationPolicy> NotificationPolicies => Set<NotificationPolicy>();

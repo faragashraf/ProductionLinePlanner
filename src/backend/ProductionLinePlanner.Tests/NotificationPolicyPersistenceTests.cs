@@ -16,12 +16,18 @@ namespace ProductionLinePlanner.Tests;
 public sealed class NotificationPolicyPersistenceTests
 {
     [Fact]
-    public async Task Catalog_reconciliation_creates_each_static_event_disabled_and_is_idempotent()
+    public async Task Catalog_reconciliation_creates_each_static_event_with_declared_defaults_and_is_idempotent()
     {
         await using var fixture = await Fixture.CreateAsync();
 
         Assert.Equal(NotificationEventCatalog.All.Count, await fixture.Db.NotificationPolicies.CountAsync());
-        Assert.All(await fixture.Db.NotificationPolicies.ToListAsync(), policy => Assert.False(policy.IsEnabled));
+        var policies = await fixture.Db.NotificationPolicies.Include(policy => policy.RecipientRules).ToListAsync();
+        Assert.All(policies.Where(policy => policy.EventKey is not NotificationEventKeys.WorkerCheckedIn and not NotificationEventKeys.WorkerCheckedOut), policy => Assert.False(policy.IsEnabled));
+        Assert.All(policies.Where(policy => policy.EventKey is NotificationEventKeys.WorkerCheckedIn or NotificationEventKeys.WorkerCheckedOut), policy =>
+        {
+            Assert.True(policy.IsEnabled);
+            Assert.Contains(policy.RecipientRules, rule => rule.RecipientKind == NotificationRecipientKind.AllActiveUsers);
+        });
 
         var repeat = await fixture.Reconciler.EnsureDefaultsAsync();
 
@@ -168,6 +174,28 @@ public sealed class NotificationPolicyPersistenceTests
         Assert.True(severity.IsNullable);
         Assert.Equal((int)NotificationSeverity.Information, severity.DefaultValue);
         Assert.DoesNotContain(builder.Operations, operation => operation is DropTableOperation or DropColumnOperation or DropIndexOperation or DeleteDataOperation or UpdateDataOperation or AlterColumnOperation);
+    }
+
+    [Fact]
+    public void Attendance_notification_migration_is_additive_and_enforces_idempotency_indexes()
+    {
+        var migration = new AddAttendanceRealtimeNotifications();
+        var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
+        typeof(Migration).GetMethod("Up", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(migration, [builder]);
+
+        var table = Assert.Single(
+            builder.Operations.OfType<CreateTableOperation>(),
+            operation => operation.Name == "AttendanceNotificationEvents");
+        Assert.Contains(table.ForeignKeys, foreignKey =>
+            foreignKey.PrincipalTable == "AttendanceRecords" && foreignKey.OnDelete == ReferentialAction.Restrict);
+        Assert.Contains(builder.Operations.OfType<CreateIndexOperation>(), index =>
+            index.Table == "AttendanceNotificationEvents" && index.Name == "IX_AttendanceNotificationEvents_IdempotencyKey" && index.IsUnique);
+        Assert.Contains(builder.Operations.OfType<CreateIndexOperation>(), index =>
+            index.Table == "Notifications" && index.Name == "IX_Notifications_RecipientUserId_CorrelationKey" && index.IsUnique && index.Filter is not null);
+        Assert.Contains(builder.Operations.OfType<CreateIndexOperation>(), index =>
+            index.Table == "AttendanceRecords" && index.Name == "IX_AttendanceRecords_WorkerId_AttendanceTimeUtc" && index.IsUnique);
+        Assert.DoesNotContain(builder.Operations, operation =>
+            operation is DropTableOperation or DropColumnOperation or DeleteDataOperation or UpdateDataOperation or AlterColumnOperation);
     }
 
     private static NotificationPolicyRecipientRuleUpdateRequest Rule(

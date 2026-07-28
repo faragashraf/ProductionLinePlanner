@@ -645,8 +645,9 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
 
             if (!existingByWorker.TryGetValue(worker.Id, out var existing))
             {
+                var attendanceRecordId = Guid.NewGuid();
                 var record = new AttendanceRecord(
-                    id: Guid.NewGuid(),
+                    id: attendanceRecordId,
                     workerId: worker.Id,
                     attendanceTimeUtc: statusTime,
                     attendanceStatus: status,
@@ -658,6 +659,14 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
                     createdAtUtc: syncRunAt);
 
                 _appDbContext.AttendanceRecords.Add(record);
+                if (matchedByWorker.TryGetValue(worker.Id, out var insertedMatch))
+                {
+                    QueueAttendanceNotification(record, worker, WorkerAttendanceNotificationType.CheckIn, insertedMatch.FirstIn);
+                    if (insertedMatch.LastOut > insertedMatch.FirstIn)
+                    {
+                        QueueAttendanceNotification(record, worker, WorkerAttendanceNotificationType.CheckOut, insertedMatch.LastOut);
+                    }
+                }
                 insertCount++;
                 continue;
             }
@@ -668,6 +677,7 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
                 continue;
             }
 
+            var previousWindow = ReadAttendanceWindow(existing.SourcePayload);
             existing.UpdateAttendanceStatus(
                 statusTime,
                 status,
@@ -677,6 +687,17 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
                 worker.AttendanceUserId,
                 worker.BadgeNumber,
                 syncRunAt);
+            if (matchedByWorker.TryGetValue(worker.Id, out var updatedMatch))
+            {
+                if (previousWindow.FirstInUtc is null)
+                {
+                    QueueAttendanceNotification(existing, worker, WorkerAttendanceNotificationType.CheckIn, updatedMatch.FirstIn);
+                }
+                if (updatedMatch.LastOut > updatedMatch.FirstIn && previousWindow.LastOutUtc is null)
+                {
+                    QueueAttendanceNotification(existing, worker, WorkerAttendanceNotificationType.CheckOut, updatedMatch.LastOut);
+                }
+            }
             updateCount++;
         }
 
@@ -803,6 +824,45 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
         if (result.IsFailure)
         {
             _logger.LogWarning("Attendance staging rows could not be released for retry after processing failed.");
+        }
+    }
+
+    private void QueueAttendanceNotification(
+        AttendanceRecord attendanceRecord,
+        Worker worker,
+        WorkerAttendanceNotificationType attendanceType,
+        DateTime attendanceTimeUtc)
+    {
+        var idempotencyKey = $"attendance:{attendanceRecord.Id:D}:{attendanceType}";
+        _appDbContext.AttendanceNotificationEvents.Add(new AttendanceNotificationEvent(
+            Guid.NewGuid(),
+            attendanceRecord.Id,
+            worker.Id,
+            worker.FullName,
+            worker.EmployeeCode ?? worker.BadgeNumber ?? worker.AttendanceUserId ?? worker.Id.ToString("D"),
+            attendanceType,
+            DateTime.SpecifyKind(attendanceTimeUtc, DateTimeKind.Utc),
+            _sourceOptions.SourceName,
+            idempotencyKey));
+    }
+
+    private static (DateTime? FirstInUtc, DateTime? LastOutUtc) ReadAttendanceWindow(string? sourcePayload)
+    {
+        if (string.IsNullOrWhiteSpace(sourcePayload)) return (null, null);
+        try
+        {
+            using var json = JsonDocument.Parse(sourcePayload);
+            DateTime? first = json.RootElement.TryGetProperty("FirstInUtc", out var firstValue) && firstValue.TryGetDateTime(out var parsedFirst)
+                ? DateTime.SpecifyKind(parsedFirst, DateTimeKind.Utc)
+                : null;
+            DateTime? last = json.RootElement.TryGetProperty("LastOutUtc", out var lastValue) && lastValue.ValueKind != JsonValueKind.Null && lastValue.TryGetDateTime(out var parsedLast)
+                ? DateTime.SpecifyKind(parsedLast, DateTimeKind.Utc)
+                : null;
+            return (first, last);
+        }
+        catch (JsonException)
+        {
+            return (null, null);
         }
     }
 

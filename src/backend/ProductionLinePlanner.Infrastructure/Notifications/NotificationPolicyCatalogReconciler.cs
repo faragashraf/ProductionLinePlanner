@@ -32,17 +32,34 @@ public sealed class NotificationPolicyCatalogReconciler(
             foreach (var entry in missingEntries)
             {
                 var defaults = entry.DefaultPolicy;
-                dbContext.NotificationPolicies.Add(new NotificationPolicy(
-                    Guid.NewGuid(),
+                var policyId = Guid.NewGuid();
+                var policy = new NotificationPolicy(
+                    policyId,
                     entry.Key,
-                    isEnabled: false,
+                    defaults.IsEnabled,
                     defaults.Severity,
                     defaults.Toast.Enabled,
                     defaults.Inbox.Enabled,
                     defaults.Sound.Enabled,
+                    defaults.Browser.Enabled,
                     soundKey: defaults.Sound.Enabled ? "default" : null,
                     defaults.TitleTemplate,
-                    defaults.MessageTemplate));
+                    defaults.MessageTemplate);
+                dbContext.NotificationPolicies.Add(policy);
+                var sortOrder = 0;
+                foreach (var rule in defaults.RecipientRules)
+                {
+                    policy.RecipientRules.Add(new NotificationPolicyRecipientRule(
+                        Guid.NewGuid(),
+                        policyId,
+                        rule.Kind,
+                        rule.Kind == Domain.Notifications.NotificationRecipientKind.User ? rule.SubjectId : null,
+                        rule.Kind == Domain.Notifications.NotificationRecipientKind.Role ? rule.SubjectId : null,
+                        rule.Kind == Domain.Notifications.NotificationRecipientKind.Permission ? rule.Value : null,
+                        rule.Kind == Domain.Notifications.NotificationRecipientKind.CapabilityGroup ? rule.Value : null,
+                        rule.Kind == Domain.Notifications.NotificationRecipientKind.ExcludeActor,
+                        sortOrder++));
+                }
             }
 
             if (missingEntries.Length > 0)

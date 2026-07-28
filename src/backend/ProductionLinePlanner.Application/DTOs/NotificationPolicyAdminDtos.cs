@@ -26,6 +26,7 @@ public sealed record NotificationPolicyDraftDto
     public required bool SoundEnabled { get; init; }
     public required bool ToastEnabled { get; init; }
     public required bool InboxEnabled { get; init; }
+    public bool BrowserEnabled { get; init; }
     public required string TitleTemplate { get; init; }
     public required string MessageTemplate { get; init; }
     public required IReadOnlyCollection<NotificationRecipientRuleDto> RecipientRules { get; init; }

@@ -54,6 +54,11 @@ export interface NotificationSummary {
   relatedEntityId: string | null;
   eventKey?: string | null;
   severity?: 'Information' | 'Success' | 'Warning' | 'Critical' | number;
+  isToastEnabled?: boolean;
+  isSoundEnabled?: boolean;
+  isBrowserEnabled?: boolean;
+  navigationUrl?: string | null;
+  metadataJson?: string | null;
   createdAtUtc: string;
   readAtUtc: string | null;
 }
@@ -71,4 +76,17 @@ export interface NotificationPresentationPreferences {
   enabled: boolean;
   soundKey: NotificationSoundKey;
   volume: number;
+}
+
+export interface AttendanceNotificationMetadata {
+  workerId: string;
+  workerName: string;
+  employeeCode: string;
+  attendanceType: 'CheckIn' | 'CheckOut';
+  attendanceTimeUtc: string;
+  assignmentStatus: 'Assigned' | 'Unassigned';
+  stageId?: string | null;
+  stageName?: string | null;
+  productionLineId?: string | null;
+  productionLineName?: string | null;
 }

@@ -7,6 +7,8 @@ public static class NotificationEventKeys
     public const string AssignmentChanged = nameof(AssignmentChanged);
     public const string DailyProductionApproved = nameof(DailyProductionApproved);
     public const string AttendanceSyncFailed = nameof(AttendanceSyncFailed);
+    public const string WorkerCheckedIn = nameof(WorkerCheckedIn);
+    public const string WorkerCheckedOut = nameof(WorkerCheckedOut);
 }
 
 public static class NotificationEventCatalog
@@ -52,7 +54,17 @@ public static class NotificationEventCatalog
             soundEnabled: true,
             "فشلت مزامنة الحضور",
             "فشلت مزامنة الحضور في {FactoryName}. تتطلب المراجعة بواسطة {ActorName}.",
-            ["ActorName", "FactoryName"])
+            ["ActorName", "FactoryName"]),
+        CreateAttendance(
+            NotificationEventKeys.WorkerCheckedIn,
+            "تسجيل حضور عامل",
+            "حضور عامل",
+            "سجل العامل {WorkerName} — رقم {EmployeeCode} — الحضور الساعة {AttendanceTime}. {AssignmentText}"),
+        CreateAttendance(
+            NotificationEventKeys.WorkerCheckedOut,
+            "تسجيل انصراف عامل",
+            "انصراف عامل",
+            "سجل العامل {WorkerName} — رقم {EmployeeCode} — الانصراف الساعة {AttendanceTime}. {AssignmentText}")
     ];
 
     public static IReadOnlyList<NotificationEventDefinition> All => Entries;
@@ -81,10 +93,36 @@ public static class NotificationEventCatalog
             new NotificationSoundPolicy(soundEnabled),
             new NotificationToastPolicy(Enabled: true),
             new NotificationInboxPolicy(Enabled: true),
+            new NotificationBrowserPolicy(Enabled: false),
             titleTemplate,
             messageTemplate,
             RecipientRules: []);
 
         return new NotificationEventDefinition(key, displayName, allowedTokens, defaultPolicy);
+    }
+
+    private static NotificationEventDefinition CreateAttendance(
+        string key,
+        string displayName,
+        string titleTemplate,
+        string messageTemplate)
+    {
+        var defaultPolicy = new NotificationPolicyDefinition(
+            key,
+            IsEnabled: true,
+            NotificationSeverity.Information,
+            new NotificationSoundPolicy(Enabled: true),
+            new NotificationToastPolicy(Enabled: true),
+            new NotificationInboxPolicy(Enabled: true),
+            new NotificationBrowserPolicy(Enabled: true),
+            titleTemplate,
+            messageTemplate,
+            [new NotificationRecipientRule(NotificationRecipientKind.AllActiveUsers)]);
+
+        return new NotificationEventDefinition(
+            key,
+            displayName,
+            ["WorkerName", "EmployeeCode", "AttendanceTime", "AssignmentText"],
+            defaultPolicy);
     }
 }

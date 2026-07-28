@@ -19,6 +19,12 @@ public sealed class NotificationConfiguration : IEntityTypeConfiguration<Notific
         builder.Property(x => x.Message).IsRequired().HasMaxLength(2000);
         builder.Property(x => x.EventKey).HasMaxLength(NotificationPolicy.MaxEventKeyLength);
         builder.Property(x => x.Severity).HasDefaultValue(NotificationSeverity.Information);
+        builder.Property(x => x.IsToastEnabled).HasDefaultValue(true);
+        builder.Property(x => x.IsSoundEnabled).HasDefaultValue(false);
+        builder.Property(x => x.IsBrowserEnabled).HasDefaultValue(false);
+        builder.Property(x => x.NavigationUrl).HasMaxLength(300);
+        builder.Property(x => x.MetadataJson).HasMaxLength(4000);
+        builder.Property(x => x.CorrelationKey).HasMaxLength(200);
         builder.Property(x => x.IsRead).HasDefaultValue(false);
         builder.Property(x => x.ReadAtUtc);
         builder.Property(x => x.CreatedAtUtc).IsRequired();
@@ -27,6 +33,9 @@ public sealed class NotificationConfiguration : IEntityTypeConfiguration<Notific
         builder.HasIndex(x => x.RecipientUserId);
         builder.HasIndex(x => x.RelatedEntityId);
         builder.HasIndex(x => x.EventKey);
+        builder.HasIndex(x => new { x.RecipientUserId, x.CorrelationKey })
+            .IsUnique()
+            .HasFilter("[CorrelationKey] IS NOT NULL");
 
         builder.HasOne(x => x.RecipientUser)
             .WithMany()

@@ -118,6 +118,38 @@
   gap: var(--plp-space-8);
 }
 
+.plp-app-shell__notification-trigger {
+  align-items: center;
+  border-radius: var(--plp-radius-pill);
+  color: var(--plp-color-text-soft);
+  display: inline-flex;
+  justify-content: center;
+  min-block-size: var(--plp-touch-target-min);
+  min-inline-size: var(--plp-touch-target-min);
+  position: relative;
+  text-decoration: none;
+}
+
+.plp-app-shell__notification-trigger:hover { background: var(--plp-color-primary-soft); color: var(--plp-color-primary-active); }
+.plp-app-shell__notification-trigger:focus-visible { outline: 3px solid var(--plp-color-focus-ring); outline-offset: 2px; }
+.plp-app-shell__notification-count {
+  align-items: center;
+  background: var(--plp-status-critical);
+  border: 2px solid var(--plp-color-surface-raised);
+  border-radius: var(--plp-radius-pill);
+  color: var(--plp-color-text-inverse);
+  display: inline-flex;
+  font-size: 0.65rem;
+  font-weight: var(--plp-font-weight-bold);
+  inset-block-start: 0;
+  inset-inline-end: 0;
+  justify-content: center;
+  min-block-size: 1.15rem;
+  min-inline-size: 1.15rem;
+  padding-inline: 0.15rem;
+  position: absolute;
+}
+
 .plp-app-shell__account-copy {
   display: none;
   min-inline-size: 0;

@@ -36,6 +36,7 @@ describe('NotificationInboxService', () => {
   });
 
   it('loads the persisted inbox after connect and reconnect without breaking on API failure', () => {
+    flushSessionBootstrap();
     const counts: number[] = [];
     service.unreadCount$.subscribe(count => counts.push(count));
 
@@ -56,6 +57,7 @@ describe('NotificationInboxService', () => {
   });
 
   it('updates unread state from a live event without duplicate inbox entries', () => {
+    flushSessionBootstrap();
     const recent: NotificationSummary[][] = [];
     const counts: number[] = [];
     const live: NotificationSummary[] = [];
@@ -74,6 +76,7 @@ describe('NotificationInboxService', () => {
   });
 
   it('marks only the selected notification as read and decrements the count', () => {
+    flushSessionBootstrap();
     const value = notification();
     realtime.notifications.next(value);
     http.expectOne('/api/notifications/unread-count').flush({ success: true, data: { unreadCount: 1 } });
@@ -93,6 +96,7 @@ describe('NotificationInboxService', () => {
   });
 
   it('does not emit historical inbox rows as live notifications or replay them after reconnect', () => {
+    flushSessionBootstrap();
     const live: NotificationSummary[] = [];
     service.liveNotifications$.subscribe(value => live.push(value));
     const persisted = notification();
@@ -109,6 +113,7 @@ describe('NotificationInboxService', () => {
   });
 
   it('cancels stale session requests and clears notification state on logout', () => {
+    flushSessionBootstrap();
     const value = notification();
     realtime.notifications.next(value);
     const pendingCount = http.expectOne('/api/notifications/unread-count');
@@ -126,6 +131,7 @@ describe('NotificationInboxService', () => {
   });
 
   it('preserves a live row while replacing an older connect count request', () => {
+    flushSessionBootstrap();
     realtime.connectionStatus.next('connected');
     const liveValue = notification();
     const olderValue = notification('44444444-4444-4444-4444-444444444444', '2026-07-19T08:00:00Z');
@@ -150,6 +156,7 @@ describe('NotificationInboxService', () => {
   });
 
   it('continues accepting live events after an unread-count API failure', () => {
+    flushSessionBootstrap();
     realtime.notifications.next(notification());
     http.expectOne('/api/notifications/unread-count').flush('unavailable', { status: 503, statusText: 'Unavailable' });
     realtime.notifications.next(notification('55555555-5555-5555-5555-555555555555'));
@@ -159,6 +166,30 @@ describe('NotificationInboxService', () => {
     service.recent$.subscribe(items => latest = items);
     expect(latest.length).toBe(2);
   });
+
+  it('loads persisted state immediately for an authenticated session without waiting for SignalR', () => {
+    const persisted = notification();
+    http.expectOne('/api/notifications/unread-count').flush({ success: true, data: { unreadCount: 1 } });
+    http.expectOne(request => request.url === '/api/notifications').flush({
+      success: true,
+      data: { items: [persisted], totalCount: 1, pageNumber: 1, pageSize: 20 }
+    });
+
+    let latest: NotificationSummary[] = [];
+    let unread = -1;
+    service.recent$.subscribe(items => latest = items);
+    service.unreadCount$.subscribe(count => unread = count);
+    expect(latest).toEqual([persisted]);
+    expect(unread).toBe(1);
+  });
+
+  function flushSessionBootstrap(): void {
+    http.expectOne('/api/notifications/unread-count').flush({ success: true, data: { unreadCount: 0 } });
+    http.expectOne(request => request.url === '/api/notifications').flush({
+      success: true,
+      data: { items: [], totalCount: 0, pageNumber: 1, pageSize: 20 }
+    });
+  }
 
   function notification(
     id = '22222222-2222-2222-2222-222222222222',

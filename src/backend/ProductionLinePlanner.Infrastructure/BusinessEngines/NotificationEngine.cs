@@ -65,6 +65,11 @@ public sealed class NotificationEngine : INotificationEngine
                 RelatedEntityId = x.RelatedEntityId,
                 EventKey = x.EventKey,
                 Severity = x.Severity ?? NotificationSeverity.Information,
+                IsToastEnabled = x.IsToastEnabled,
+                IsSoundEnabled = x.IsSoundEnabled,
+                IsBrowserEnabled = x.IsBrowserEnabled,
+                NavigationUrl = x.NavigationUrl,
+                MetadataJson = x.MetadataJson,
                 CreatedAtUtc = x.CreatedAtUtc,
                 ReadAtUtc = x.ReadAtUtc
             })
@@ -148,6 +153,11 @@ public sealed class NotificationEngine : INotificationEngine
             RelatedEntityId = notification.RelatedEntityId,
             EventKey = notification.EventKey,
             Severity = notification.Severity ?? NotificationSeverity.Information,
+            IsToastEnabled = notification.IsToastEnabled,
+            IsSoundEnabled = notification.IsSoundEnabled,
+            IsBrowserEnabled = notification.IsBrowserEnabled,
+            NavigationUrl = notification.NavigationUrl,
+            MetadataJson = notification.MetadataJson,
             CreatedAtUtc = notification.CreatedAtUtc,
             ReadAtUtc = notification.ReadAtUtc
         });

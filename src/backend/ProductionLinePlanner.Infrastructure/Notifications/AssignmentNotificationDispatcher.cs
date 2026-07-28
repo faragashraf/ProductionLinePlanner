@@ -63,6 +63,7 @@ public sealed class AssignmentNotificationDispatcher(
                 new NotificationSoundPolicy(policy.IsSoundEnabled),
                 new NotificationToastPolicy(policy.IsToastEnabled),
                 new NotificationInboxPolicy(policy.IsInboxEnabled),
+                new NotificationBrowserPolicy(policy.IsBrowserEnabled),
                 policy.TitleTemplateAr,
                 policy.MessageTemplateAr,
                 policy.RecipientRules
@@ -108,7 +109,10 @@ public sealed class AssignmentNotificationDispatcher(
                     RelatedEntityType: "WorkerAssignment",
                     RelatedEntityId: request.AssignmentId,
                     EventKey: evaluated.EventKey,
-                    Severity: evaluated.Severity), cancellationToken);
+                    Severity: evaluated.Severity,
+                    IsToastEnabled: evaluated.Toast.Enabled,
+                    IsSoundEnabled: evaluated.Sound.Enabled,
+                    IsBrowserEnabled: evaluated.Browser.Enabled), cancellationToken);
                 if (published.IsFailure)
                 {
                     logger.LogWarning("Assignment notification persistence failed for assignment {AssignmentId} and recipient {RecipientUserId}: {Code}.", request.AssignmentId, recipientUserId, published.Error?.Code);
@@ -133,6 +137,7 @@ public sealed class AssignmentNotificationDispatcher(
         NotificationRecipientKind.CapabilityGroup => new(NotificationRecipientKind.CapabilityGroup, Value: rule.CapabilityKey),
         NotificationRecipientKind.Creator => new(NotificationRecipientKind.Creator),
         NotificationRecipientKind.ExcludeActor => new(NotificationRecipientKind.ExcludeActor),
+        NotificationRecipientKind.AllActiveUsers => new(NotificationRecipientKind.AllActiveUsers),
         _ => throw new InvalidOperationException("Unsupported notification recipient rule.")
     };
 }

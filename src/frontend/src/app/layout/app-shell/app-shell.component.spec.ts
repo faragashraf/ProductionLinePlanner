@@ -12,6 +12,7 @@ import { PermissionHydrationState, PermissionService } from '../../core/services
 import { ProductExperienceModule } from '../../shared/product/product-experience.module';
 import { AppShellComponent, ShellNavigationMode } from './app-shell.component';
 import { PRODUCT_IDENTITY } from '../../core/config/product-identity.config';
+import { NotificationInboxService } from '../../core/services/notification-inbox.service';
 
 describe('AppShellComponent', () => {
   let fixture: ComponentFixture<AppShellComponent>;
@@ -47,7 +48,8 @@ describe('AppShellComponent', () => {
           useValue: { root: { snapshot: { url: [], data: {}, children: [] } } }
         },
         { provide: AuthService, useValue: authService },
-        { provide: PermissionService, useValue: permissions }
+        { provide: PermissionService, useValue: permissions },
+        { provide: NotificationInboxService, useValue: { unreadCount$: of(3) } }
       ],
       schemas: [NO_ERRORS_SCHEMA]
     });

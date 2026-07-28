@@ -174,7 +174,9 @@ public sealed class NotificationPolicyPlatformFoundationTests
     {
         var foundation = CreateAdminFoundationService().GetFoundation();
 
-        Assert.Equal(5, foundation.Events.Count);
+        Assert.Equal(7, foundation.Events.Count);
+        Assert.Contains(foundation.Events, item => item.EventKey == NotificationEventKeys.WorkerCheckedIn && item.DefaultPolicy.BrowserEnabled);
+        Assert.Contains(foundation.Events, item => item.EventKey == NotificationEventKeys.WorkerCheckedOut && item.DefaultPolicy.SoundEnabled);
         Assert.Contains(foundation.Events, item => item.EventKey == NotificationEventKeys.WorkerCreated);
         Assert.Equal(Enum.GetNames<NotificationSeverity>(), foundation.Severities);
         Assert.False(foundation.CanCreateEvents);

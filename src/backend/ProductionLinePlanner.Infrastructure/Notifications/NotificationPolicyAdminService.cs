@@ -33,6 +33,7 @@ public sealed class NotificationPolicyAdminService(
                     SoundEnabled = definition.DefaultPolicy.Sound.Enabled,
                     ToastEnabled = definition.DefaultPolicy.Toast.Enabled,
                     InboxEnabled = definition.DefaultPolicy.Inbox.Enabled,
+                    BrowserEnabled = definition.DefaultPolicy.Browser.Enabled,
                     TitleTemplate = definition.DefaultPolicy.TitleTemplate,
                     MessageTemplate = definition.DefaultPolicy.MessageTemplate,
                     RecipientRules = []
@@ -176,6 +177,7 @@ public sealed class NotificationPolicyAdminService(
             policy.IsToastEnabled,
             policy.IsInboxEnabled,
             policy.IsSoundEnabled,
+            policy.IsBrowserEnabled,
             RecipientRuleCount = policy.RecipientRules.Count
         };
         try
@@ -186,6 +188,7 @@ public sealed class NotificationPolicyAdminService(
                 update.IsToastEnabled,
                 update.IsInboxEnabled,
                 update.IsSoundEnabled,
+                update.IsBrowserEnabled,
                 update.SoundKey,
                 update.TitleTemplateAr,
                 update.MessageTemplateAr,
@@ -222,6 +225,7 @@ public sealed class NotificationPolicyAdminService(
                     policy.IsToastEnabled,
                     policy.IsInboxEnabled,
                     policy.IsSoundEnabled,
+                    policy.IsBrowserEnabled,
                     RecipientRuleCount = update.Rules.Count
                 },
                 requestMeta,
@@ -264,6 +268,7 @@ public sealed class NotificationPolicyAdminService(
                 IsToastEnabled = policy.IsToastEnabled,
                 IsInboxEnabled = policy.IsInboxEnabled,
                 IsSoundEnabled = policy.IsSoundEnabled,
+                IsBrowserEnabled = policy.IsBrowserEnabled,
                 SoundKey = policy.SoundKey,
                 TitleTemplateAr = policy.TitleTemplateAr,
                 MessageTemplateAr = policy.MessageTemplateAr,
@@ -315,6 +320,7 @@ public sealed class NotificationPolicyAdminService(
             request.IsToastEnabled,
             request.IsInboxEnabled,
             request.IsSoundEnabled,
+            request.IsBrowserEnabled,
             request.IsSoundEnabled ? "default" : null,
             request.TitleTemplateAr.Trim(),
             request.MessageTemplateAr.Trim(),
@@ -345,6 +351,7 @@ public sealed class NotificationPolicyAdminService(
                 NotificationRecipientKind.CapabilityGroup => userId is null && roleId is null && permissionKey is null && IsKnownCapability(capabilityKey) && !request.IsExcludeActor,
                 NotificationRecipientKind.Creator => userId is null && roleId is null && permissionKey is null && capabilityKey is null && !request.IsExcludeActor,
                 NotificationRecipientKind.ExcludeActor => userId is null && roleId is null && permissionKey is null && capabilityKey is null && request.IsExcludeActor,
+                NotificationRecipientKind.AllActiveUsers => userId is null && roleId is null && permissionKey is null && capabilityKey is null && !request.IsExcludeActor,
                 _ => false
             };
             if (!validShape)
@@ -386,6 +393,7 @@ public sealed class NotificationPolicyAdminService(
         IsToastEnabled = policy.IsToastEnabled,
         IsInboxEnabled = policy.IsInboxEnabled,
         IsSoundEnabled = policy.IsSoundEnabled,
+        IsBrowserEnabled = policy.IsBrowserEnabled,
         UpdatedAtUtc = policy.UpdatedAtUtc.ToString("O")
     };
 
@@ -399,6 +407,7 @@ public sealed class NotificationPolicyAdminService(
         IsToastEnabled = policy.IsToastEnabled,
         IsInboxEnabled = policy.IsInboxEnabled,
         IsSoundEnabled = policy.IsSoundEnabled,
+        IsBrowserEnabled = policy.IsBrowserEnabled,
         SoundKey = policy.SoundKey,
         TitleTemplateAr = policy.TitleTemplateAr,
         MessageTemplateAr = policy.MessageTemplateAr,
@@ -462,6 +471,7 @@ public sealed class NotificationPolicyAdminService(
         bool IsToastEnabled,
         bool IsInboxEnabled,
         bool IsSoundEnabled,
+        bool IsBrowserEnabled,
         string? SoundKey,
         string TitleTemplateAr,
         string MessageTemplateAr,

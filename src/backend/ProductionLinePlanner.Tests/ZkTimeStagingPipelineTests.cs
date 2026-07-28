@@ -46,6 +46,7 @@ public sealed class ZkTimeStagingPipelineTests
         {
             Assert.Single(await beforeBackend.Workers.ToArrayAsync());
             Assert.Empty(await beforeBackend.AttendanceRecords.ToArrayAsync());
+            Assert.Empty(await beforeBackend.AttendanceNotificationEvents.ToArrayAsync());
         }
 
         var first = await fixture.RunAsync();
@@ -55,6 +56,9 @@ public sealed class ZkTimeStagingPipelineTests
         {
             Assert.Equal(7, await firstRead.Workers.CountAsync());
             Assert.Equal(7, await firstRead.AttendanceRecords.CountAsync());
+            Assert.Equal(5, await firstRead.AttendanceNotificationEvents.CountAsync());
+            Assert.Equal(3, await firstRead.AttendanceNotificationEvents.CountAsync(item => item.AttendanceType == WorkerAttendanceNotificationType.CheckIn));
+            Assert.Equal(2, await firstRead.AttendanceNotificationEvents.CountAsync(item => item.AttendanceType == WorkerAttendanceNotificationType.CheckOut));
             var importedIds = await firstRead.Workers.AsNoTracking()
                 .Where(worker => worker.AttendanceUserId != "3887")
                 .OrderBy(worker => worker.AttendanceUserId)
@@ -80,6 +84,10 @@ public sealed class ZkTimeStagingPipelineTests
         await using var reloaded = fixture.CreateDbContext();
         Assert.Equal(7, await reloaded.Workers.CountAsync());
         Assert.Equal(7, await reloaded.AttendanceRecords.CountAsync());
+        Assert.Equal(6, await reloaded.AttendanceNotificationEvents.CountAsync());
+        Assert.Equal(6, await reloaded.AttendanceNotificationEvents.Select(item => item.IdempotencyKey).Distinct().CountAsync());
+        Assert.Equal(3, await reloaded.AttendanceNotificationEvents.CountAsync(item => item.AttendanceType == WorkerAttendanceNotificationType.CheckIn));
+        Assert.Equal(3, await reloaded.AttendanceNotificationEvents.CountAsync(item => item.AttendanceType == WorkerAttendanceNotificationType.CheckOut));
         var worker2430 = await reloaded.Workers.AsNoTracking().SingleAsync(worker => worker.BadgeNumber == "2430");
         var worker2430Attendance = await reloaded.AttendanceRecords.AsNoTracking()
             .SingleAsync(record => record.WorkerId == worker2430.Id);
@@ -311,6 +319,11 @@ public sealed class ZkTimeStagingPipelineTests
         var result = await fixture.RunAsync();
 
         Assert.True(result.IsFailure);
+        await using (var reloaded = fixture.CreateDbContext())
+        {
+            Assert.Empty(await reloaded.AttendanceRecords.ToArrayAsync());
+            Assert.Empty(await reloaded.AttendanceNotificationEvents.ToArrayAsync());
+        }
         Assert.All([101L, 102L], inboxId =>
         {
             var row = fixture.Source.GetPunchInbox(inboxId);

@@ -7,7 +7,6 @@ import { AppRoutingModule } from './app-routing.module';
 import { AppComponent } from './app.component';
 import { DashboardPageComponent } from './pages/dashboard-page/dashboard-page.component';
 import { FactoryMapPageComponent } from './pages/factory-map-page/factory-map-page.component';
-import { NotificationsPageComponent } from './pages/notifications-page/notifications-page.component';
 import { LoginPageComponent } from './pages/login-page/login-page.component';
 import { AccessDeniedPageComponent } from './pages/access-denied-page/access-denied-page.component';
 import { AppShellComponent } from './layout/app-shell/app-shell.component';
@@ -26,6 +25,7 @@ import { ProductExperienceModule } from './shared/product/product-experience.mod
 import { RealtimeService } from './core/services/realtime.service';
 import { NotificationInboxService } from './core/services/notification-inbox.service';
 import { NotificationPresentationService } from './core/services/notification-presentation.service';
+import { PlpProductPageHeaderComponent } from './shared/product/plp-page-header.component';
 
 export function initializeRealtimeNotifications(
   realtimeService: RealtimeService,
@@ -45,7 +45,6 @@ export function initializeRealtimeNotifications(
     DashboardPageComponent,
     AccessDeniedPageComponent,
     FactoryMapPageComponent,
-    NotificationsPageComponent,
     LoginPageComponent,
     AppShellComponent
   ],
@@ -62,6 +61,7 @@ export function initializeRealtimeNotifications(
     ButtonModule,
     ToastModule,
     ProductExperienceModule,
+    PlpProductPageHeaderComponent,
     SharedModule
   ],
   providers: [

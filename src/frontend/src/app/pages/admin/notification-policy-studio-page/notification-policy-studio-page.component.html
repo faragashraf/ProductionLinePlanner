@@ -50,6 +50,7 @@
         <label><input type="checkbox" [(ngModel)]="draft.isToastEnabled" (ngModelChange)="markDirty()"> تنبيه فوري</label>
         <label><input type="checkbox" [(ngModel)]="draft.isInboxEnabled" (ngModelChange)="markDirty()"> صندوق الوارد</label>
         <label><input type="checkbox" [(ngModel)]="draft.isSoundEnabled" (ngModelChange)="markDirty()"> صوت</label>
+        <label><input type="checkbox" [(ngModel)]="draft.isBrowserEnabled" (ngModelChange)="markDirty()"> إشعار الجهاز</label>
         <label>الشدة
           <select [(ngModel)]="draft.severity" (ngModelChange)="markDirty()">
             <option *ngFor="let severity of severities" [value]="severity">{{ severityLabel(severity) }}</option>

@@ -196,6 +196,7 @@ builder.Services.AddScoped<IManufacturingRealtimeCorrelationContext, HttpManufac
 builder.Services.AddSingleton<IPasswordHasher<AppUser>, PasswordHasher<AppUser>>();
 builder.Services.AddSingleton<IUserPasswordHasher, UserPasswordHasher>();
 builder.Services.AddSignalR(options => options.EnableDetailedErrors = false);
+builder.Services.AddHostedService<AttendanceNotificationOutboxBackgroundService>();
 builder.Services.AddSingleton<IUserIdProvider, AuthenticatedUserIdProvider>();
 builder.Services.AddScoped<INotificationLiveDispatcher, SignalRNotificationLiveDispatcher>();
 builder.Services.AddScoped<IManufacturingDataChangePublisher, SignalRManufacturingDataChangePublisher>();

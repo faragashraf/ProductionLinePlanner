@@ -32,12 +32,15 @@ export class NotificationPolicyStudioPageComponent implements OnInit {
   draft: NotificationPolicyDetails | null = null;
   isDirty = false;
   readonly severities: NotificationPolicySeverity[] = ['Information', 'Success', 'Warning', 'Critical'];
-  readonly recipientKinds: NotificationRecipientKind[] = ['User', 'Role', 'Permission', 'CapabilityGroup', 'Creator', 'ExcludeActor'];
+  readonly recipientKinds: NotificationRecipientKind[] = ['AllActiveUsers', 'User', 'Role', 'Permission', 'CapabilityGroup', 'Creator', 'ExcludeActor'];
   readonly tokenSamples: Record<string, string> = {
     WorkerName: 'أحمد محمد',
     ActorName: 'مشرف الخط',
     LineName: 'خط التجميع 1',
-    FactoryName: 'مصنع القاهرة'
+    FactoryName: 'مصنع القاهرة',
+    EmployeeCode: '1024',
+    AttendanceTime: '07:44 ص',
+    AssignmentText: 'التسكين الحالي: مرحلة التجميع، خط الإنتاج 2.'
   };
 
   constructor(private readonly policyService: NotificationPolicyAdminService) {}
@@ -162,6 +165,7 @@ export class NotificationPolicyStudioPageComponent implements OnInit {
       isToastEnabled: this.draft.isToastEnabled,
       isInboxEnabled: this.draft.isInboxEnabled,
       isSoundEnabled: this.draft.isSoundEnabled,
+      isBrowserEnabled: this.draft.isBrowserEnabled,
       soundKey: this.draft.isSoundEnabled ? 'default' : null,
       titleTemplateAr: this.draft.titleTemplateAr.trim(),
       messageTemplateAr: this.draft.messageTemplateAr.trim(),
@@ -187,7 +191,7 @@ export class NotificationPolicyStudioPageComponent implements OnInit {
   }
 
   recipientKindLabel(kind: NotificationRecipientKind): string {
-    return ({ User: 'مستخدم', Role: 'دور', Permission: 'صلاحية', CapabilityGroup: 'مجموعة قدرات', Creator: 'منشئ الحدث', ExcludeActor: 'استبعاد المنفذ' })[kind];
+    return ({ User: 'مستخدم', Role: 'دور', Permission: 'صلاحية', CapabilityGroup: 'مجموعة قدرات', Creator: 'منشئ الحدث', ExcludeActor: 'استبعاد المنفذ', AllActiveUsers: 'كل مستخدمي التطبيق النشطين' })[kind];
   }
 
   userLabel(id: string | null | undefined): string {

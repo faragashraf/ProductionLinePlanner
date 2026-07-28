@@ -4,7 +4,7 @@ import { NotificationPolicyStudioPageComponent } from './notification-policy-stu
 describe('NotificationPolicyStudioPageComponent', () => {
   const policy: any = {
     eventKey: 'WorkerCreated', displayName: 'تم إنشاء عامل', allowedTokens: ['WorkerName'], isEnabled: false,
-    severity: 'Information', isToastEnabled: true, isInboxEnabled: true, isSoundEnabled: false,
+    severity: 'Information', isToastEnabled: true, isInboxEnabled: true, isSoundEnabled: false, isBrowserEnabled: false,
     soundKey: null, titleTemplateAr: 'عامل {WorkerName}', messageTemplateAr: 'تم إنشاء {WorkerName}', rowVersion: 'AQI=', recipientRules: [], updatedAtUtc: '2026-07-20T00:00:00Z'
   };
 

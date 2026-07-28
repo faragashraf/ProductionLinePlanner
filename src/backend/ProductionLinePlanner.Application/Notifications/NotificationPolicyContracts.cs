@@ -22,6 +22,7 @@ public sealed record NotificationPolicyDecision(
     NotificationSoundPolicy Sound,
     NotificationToastPolicy Toast,
     NotificationInboxPolicy Inbox,
+    NotificationBrowserPolicy Browser,
     string? Title,
     string? Message,
     IReadOnlyCollection<Guid> RecipientUserIds);
@@ -95,4 +96,9 @@ public interface INotificationPolicyAdminService
 public interface INotificationPolicyCatalogReconciler
 {
     Task<Result<int>> EnsureDefaultsAsync(CancellationToken cancellationToken = default);
+}
+
+public interface IAttendanceNotificationOutboxProcessor
+{
+    Task<Result<int>> ProcessPendingAsync(int batchSize = 50, CancellationToken cancellationToken = default);
 }

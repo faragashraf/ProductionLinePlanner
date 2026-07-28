@@ -65,7 +65,13 @@ public sealed class NotificationPublisher(
             NotificationStatus.Unread,
             command.CreatedAtUtc,
             command.EventKey,
-            command.Severity);
+            command.Severity,
+            command.IsToastEnabled,
+            command.IsSoundEnabled,
+            command.IsBrowserEnabled,
+            command.NavigationUrl,
+            command.MetadataJson,
+            command.CorrelationKey);
 
         dbContext.Notifications.Add(notification);
         try
@@ -159,6 +165,8 @@ public sealed class NotificationPublisher(
             return new Error("ValidationError", "Message is required and cannot exceed 2000 characters.");
         if (command.RelatedEntityType?.Trim().Length > 100)
             return new Error("ValidationError", "RelatedEntityType cannot exceed 100 characters.");
+        if (command.NavigationUrl?.Trim().Length > 300 || command.MetadataJson?.Trim().Length > 4000 || command.CorrelationKey?.Trim().Length > 200)
+            return new Error("ValidationError", "Notification presentation metadata exceeds its supported length.");
         if (command.CreatedAtUtc is { Kind: not DateTimeKind.Utc })
             return new Error("ValidationError", "CreatedAtUtc must be UTC when provided.");
 
@@ -180,6 +188,12 @@ public sealed class NotificationPublisher(
         notification.RelatedEntityId == command.RelatedEntityId &&
         notification.EventKey == command.EventKey &&
         notification.Severity == command.Severity &&
+        notification.IsToastEnabled == command.IsToastEnabled &&
+        notification.IsSoundEnabled == command.IsSoundEnabled &&
+        notification.IsBrowserEnabled == command.IsBrowserEnabled &&
+        notification.NavigationUrl == command.NavigationUrl?.Trim() &&
+        notification.MetadataJson == command.MetadataJson?.Trim() &&
+        notification.CorrelationKey == command.CorrelationKey?.Trim() &&
         (command.CreatedAtUtc is null || notification.CreatedAtUtc == command.CreatedAtUtc.Value);
 
     private static NotificationSummaryDto ToSummary(Notification notification) => new(
@@ -193,5 +207,10 @@ public sealed class NotificationPublisher(
         notification.CreatedAtUtc,
         notification.ReadAtUtc,
         notification.EventKey,
-        notification.Severity ?? NotificationSeverity.Information);
+        notification.Severity ?? NotificationSeverity.Information,
+        notification.IsToastEnabled,
+        notification.IsSoundEnabled,
+        notification.IsBrowserEnabled,
+        notification.NavigationUrl,
+        notification.MetadataJson);
 }
