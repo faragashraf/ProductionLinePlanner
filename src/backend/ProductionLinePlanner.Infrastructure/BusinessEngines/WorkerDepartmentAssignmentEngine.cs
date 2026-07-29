@@ -40,6 +40,8 @@ public sealed class WorkerDepartmentAssignmentEngine(
         var worker = await dbContext.Workers.FirstOrDefaultAsync(item => item.Id == workerId, cancellationToken);
         if (worker is null)
             return Failure("NotFound", "Worker not found.");
+        if (!worker.IsActive || worker.EmploymentStatus != EmploymentStatus.Active)
+            return Failure("ValidationError", "Inactive workers cannot be assigned to an organizational department.");
 
         var department = await dbContext.Departments
             .Include(item => item.Factory)

@@ -33,7 +33,7 @@ describe('WorkersApiService', () => {
     });
 
     http.expectNone(request => request.url.endsWith('/api/workers'));
-    expect(workers).toEqual([{ id: 'worker-1', code: 'W-1', fullName: 'عامل تجريبي', state: 'على رأس العمل', employmentStatus: 'Active', isActive: true, photoReference: 'worker-1.png', hasPhoto: true, phone: '01000000000' }]);
+    expect(workers).toEqual([{ id: 'worker-1', code: 'W-1', fullName: 'عامل تجريبي', state: 'على رأس العمل', employmentStatus: 'Active', isActive: true, photoReference: 'worker-1.png', hasPhoto: true, phone: '01000000000', permanentAssignments: [] }]);
   });
 
   it('retains lightweight photo metadata without exposing image bytes', () => {
@@ -93,9 +93,13 @@ describe('WorkersApiService', () => {
     expect(request.request.method).toBe('GET');
     request.flush({ success: true, data: {
       id: 'worker-1', employeeCode: 'E-1', fullName: 'عامل', isActive: true, employmentStatus: 'Active',
-      badgeNumber: 'B-1', attendanceUserId: '99', hasPhoto: true, photoReference: '/api/workers/worker-1/photo?v=abc', photoVersion: 'abc'
+      badgeNumber: 'B-1', attendanceUserId: '99', attendanceDepartmentId: 5, employmentEndDate: null,
+      lastExternalSyncAt: '2026-07-29T07:00:00Z', createdAtUtc: '2026-01-01T08:00:00Z', updatedAtUtc: '2026-07-29T07:00:00Z',
+      hasPhoto: true, photoReference: '/api/workers/worker-1/photo?v=abc', photoVersion: 'abc',
+      permanentAssignments: [{ id: 'assignment-1', factoryId: 'factory-1', factoryName: 'المصنع', productionLineId: 'line-1', productionLineName: 'الخط', departmentId: 'department-1', departmentName: 'التشغيل', mainStageId: 'main-1', mainStageName: 'التجهيز', subStageId: 'sub-1', subStageName: 'القص', assignedAtUtc: '2026-07-01T08:00:00Z' }]
     } });
-    expect(worker).toEqual(jasmine.objectContaining({ badgeNumber: 'B-1', attendanceUserId: '99', photoReference: jasmine.stringContaining('?v=') }));
+    expect(worker).toEqual(jasmine.objectContaining({ badgeNumber: 'B-1', attendanceUserId: '99', attendanceDepartmentId: 5, photoReference: jasmine.stringContaining('?v='), lastExternalSyncAt: '2026-07-29T07:00:00Z' }));
+    expect(worker?.permanentAssignments?.[0]).toEqual(jasmine.objectContaining({ factoryName: 'المصنع', productionLineName: 'الخط', subStageName: 'القص' }));
   });
 
   it('uses protected worker photo routes for upload, replacement, delete, and local employment status', () => {
@@ -118,5 +122,14 @@ describe('WorkersApiService', () => {
     expect(status.request.method).toBe('PATCH');
     expect(status.request.body).toEqual({ employmentStatus: 'Suspended' });
     status.flush({ success: true, data: { id: 'worker-1', employeeCode: 'E-1', fullName: 'عامل', isActive: false, employmentStatus: 'Suspended' } });
+  });
+
+  it('loads the current salary only through the compensation contract', () => {
+    let amount = 0;
+    service.getCurrentSalary('worker-1').subscribe(value => amount = value.amount);
+    const request = http.expectOne(item => item.url.endsWith('/api/workers/worker-1/compensation/current'));
+    expect(request.request.method).toBe('GET');
+    request.flush({ success: true, data: { id: 'salary-1', workerId: 'worker-1', amount: 7000, currencyCode: 'EGP', effectiveFrom: '2026-07-01T00:00:00Z', effectiveTo: null } });
+    expect(amount).toBe(7000);
   });
 });

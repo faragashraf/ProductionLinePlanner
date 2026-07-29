@@ -2116,13 +2116,16 @@ stagesApi.MapDelete("/{stageId:guid}", async (
 
 workersApi.MapGet("", async (
     IEmployeeMasterDataService employeeService,
+    ICurrentUserService currentUserService,
+    IPermissionService permissionService,
     CancellationToken cancellationToken,
     string? search = null,
     bool? isActive = null,
     int page = 1,
     int pageSize = 50) =>
 {
-    var result = await employeeService.GetWorkersAsync(search, isActive, page, pageSize, cancellationToken);
+    var includePermanentAssignments = await CanViewAssignmentsAsync(currentUserService, permissionService, cancellationToken);
+    var result = await employeeService.GetWorkersAsync(search, isActive, page, pageSize, includePermanentAssignments, cancellationToken);
     if (result.IsFailure)
     {
         return ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code));
@@ -2147,13 +2150,17 @@ workersApi.MapGet("", async (
 
 workersApi.MapWorkerPhotoEndpoints();
 workersApi.MapWorkerSyncEndpoints();
+workersApi.MapWorkerAttendanceHistoryEndpoints();
 
 workersApi.MapGet("/{workerId:guid}", async (
     Guid workerId,
     IEmployeeMasterDataService employeeService,
+    ICurrentUserService currentUserService,
+    IPermissionService permissionService,
     CancellationToken cancellationToken) =>
 {
-    var result = await employeeService.GetWorkerAsync(workerId, cancellationToken);
+    var includePermanentAssignments = await CanViewAssignmentsAsync(currentUserService, permissionService, cancellationToken);
+    var result = await employeeService.GetWorkerAsync(workerId, includePermanentAssignments, cancellationToken);
     if (result.IsFailure)
     {
         return ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code));
@@ -2170,6 +2177,7 @@ workersApi.MapPatch("/{workerId:guid}", async (
     UpdateWorkerRequest request,
     IEmployeeMasterDataService employeeService,
     ICurrentUserService currentUserService,
+    IPermissionService permissionService,
     HttpContext httpContext,
     CancellationToken cancellationToken) =>
 {
@@ -2180,11 +2188,13 @@ workersApi.MapPatch("/{workerId:guid}", async (
     }
 
     var requestMeta = $"{httpContext.Request.Method} {httpContext.Request.Path}";
+    var includePermanentAssignments = await CanViewAssignmentsAsync(currentUserService, permissionService, cancellationToken);
     var result = await employeeService.UpdateMasterIdentityAsync(
         workerId,
         request,
         actorUserId.Value,
         requestMeta,
+        includePermanentAssignments,
         cancellationToken);
 
     if (result.IsFailure)
@@ -2203,6 +2213,7 @@ workersApi.MapPatch("/{workerId:guid}/employment-status", async (
     SetWorkerEmploymentStatusRequest request,
     IEmployeeMasterDataService employeeService,
     ICurrentUserService currentUserService,
+    IPermissionService permissionService,
     HttpContext httpContext,
     CancellationToken cancellationToken) =>
 {
@@ -2213,11 +2224,13 @@ workersApi.MapPatch("/{workerId:guid}/employment-status", async (
     }
 
     var requestMeta = $"{httpContext.Request.Method} {httpContext.Request.Path}";
+    var includePermanentAssignments = await CanViewAssignmentsAsync(currentUserService, permissionService, cancellationToken);
     var result = await employeeService.SetEmploymentStatusAsync(
         workerId,
         request,
         actorUserId.Value,
         requestMeta,
+        includePermanentAssignments,
         cancellationToken);
 
     if (result.IsFailure)
@@ -3812,6 +3825,16 @@ static int MapFailureStatusCode(string? code)
         "AttendanceSourceError" or "AttendanceSyncCancelled" => StatusCodes.Status503ServiceUnavailable,
         _ => StatusCodes.Status500InternalServerError
     };
+}
+
+static async Task<bool> CanViewAssignmentsAsync(
+    ICurrentUserService currentUserService,
+    IPermissionService permissionService,
+    CancellationToken cancellationToken)
+{
+    if (currentUserService.UserId is not { } userId) return false;
+    var permissions = await permissionService.GetEffectivePermissionsAsync(userId, cancellationToken);
+    return permissions.Contains("assignments.view", StringComparer.OrdinalIgnoreCase);
 }
 
 static IResult? ValidateBootstrapSecret(string? requestBootstrapSecret, string? configuredBootstrapSecret)

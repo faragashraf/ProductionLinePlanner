@@ -20,6 +20,7 @@ public sealed class EmployeeMasterDataService(
         bool? isActive = null,
         int page = 1,
         int pageSize = 50,
+        bool includePermanentAssignments = false,
         CancellationToken cancellationToken = default)
     {
         if (page < 1 || pageSize < 1 || pageSize > 200)
@@ -51,11 +52,11 @@ public sealed class EmployeeMasterDataService(
             .Take(pageSize)
             .ToArrayAsync(cancellationToken);
 
-        var dtos = await MapWorkersWithAssignmentsAsync(entities, cancellationToken);
-            return PagedResult<WorkerDto>.Success(dtos, page, pageSize, totalCount);
+        var dtos = await MapWorkersAsync(entities, includePermanentAssignments, cancellationToken);
+        return PagedResult<WorkerDto>.Success(dtos, page, pageSize, totalCount);
     }
 
-    public async Task<Result<WorkerDto>> GetWorkerAsync(Guid workerId, CancellationToken cancellationToken = default)
+    public async Task<Result<WorkerDto>> GetWorkerAsync(Guid workerId, bool includePermanentAssignments = false, CancellationToken cancellationToken = default)
     {
         if (workerId == Guid.Empty)
         {
@@ -71,7 +72,7 @@ public sealed class EmployeeMasterDataService(
             return Result<WorkerDto>.Failure(new Error("NotFound", "Worker not found."));
         }
 
-        var dtos = await MapWorkersWithAssignmentsAsync([entity], cancellationToken);
+        var dtos = await MapWorkersAsync([entity], includePermanentAssignments, cancellationToken);
         return Result<WorkerDto>.Success(dtos.Single());
     }
 
@@ -80,6 +81,7 @@ public sealed class EmployeeMasterDataService(
         UpdateWorkerRequest request,
         Guid actorUserId,
         string? requestMeta = null,
+        bool includePermanentAssignments = false,
         CancellationToken cancellationToken = default)
     {
         if (actorUserId == Guid.Empty)
@@ -163,7 +165,7 @@ public sealed class EmployeeMasterDataService(
             cancellationToken: cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        var result = (await MapWorkersWithAssignmentsAsync([entity], cancellationToken)).Single();
+        var result = (await MapWorkersAsync([entity], includePermanentAssignments, cancellationToken)).Single();
         return Result<WorkerDto>.Success(result);
     }
 
@@ -172,6 +174,7 @@ public sealed class EmployeeMasterDataService(
         SetWorkerEmploymentStatusRequest request,
         Guid actorUserId,
         string? requestMeta = null,
+        bool includePermanentAssignments = false,
         CancellationToken cancellationToken = default)
     {
         if (actorUserId == Guid.Empty)
@@ -233,13 +236,27 @@ public sealed class EmployeeMasterDataService(
             cancellationToken: cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        var result = (await MapWorkersWithAssignmentsAsync([entity], cancellationToken)).Single();
+        var result = (await MapWorkersAsync([entity], includePermanentAssignments, cancellationToken)).Single();
         return Result<WorkerDto>.Success(result);
     }
 
-    private static WorkerDto MapWorker(Worker worker, Guid? defaultSubStageId = null)
+    private Task<WorkerDto[]> MapWorkersAsync(
+        IEnumerable<Worker> workers,
+        bool includePermanentAssignments,
+        CancellationToken cancellationToken)
+    {
+        var workerArray = workers as Worker[] ?? workers.ToArray();
+        return includePermanentAssignments
+            ? MapWorkersWithAssignmentsAsync(workerArray, cancellationToken)
+            : Task.FromResult(workerArray.Select(worker => MapWorker(worker)).ToArray());
+    }
+
+    private static WorkerDto MapWorker(
+        Worker worker,
+        IReadOnlyCollection<WorkerPermanentAssignmentDto>? permanentAssignments = null)
     {
         var hasManagedPhoto = WorkerPhotoReference.TryParse(worker.PhotoReference, worker.Id, out var photoVersion);
+        var assignments = permanentAssignments ?? [];
         return new WorkerDto
         {
             Id = worker.Id,
@@ -263,35 +280,54 @@ public sealed class EmployeeMasterDataService(
             HasPhoto = hasManagedPhoto,
             PhotoVersion = hasManagedPhoto ? photoVersion : null,
             IsActive = worker.IsActive,
-            DefaultSubStageId = defaultSubStageId
+            DefaultSubStageId = assignments.FirstOrDefault()?.SubStageId,
+            LastExternalSyncAt = worker.LastExternalSyncAt,
+            CreatedAtUtc = worker.CreatedAtUtc,
+            UpdatedAtUtc = worker.UpdatedAtUtc,
+            PermanentAssignments = assignments
         };
     }
 
     private async Task<WorkerDto[]> MapWorkersWithAssignmentsAsync(IEnumerable<Worker> workers, CancellationToken cancellationToken)
     {
         var workerIds = workers.Select(x => x.Id).Distinct().ToArray();
-        var assignments = workerIds.Length == 0
+        var assignmentRows = workerIds.Length == 0
             ? []
             : await dbContext.WorkerDefaultAssignments
                 .AsNoTracking()
                 .Where(x => workerIds.Contains(x.WorkerId) && x.IsActive)
-                .Select(x => new { x.WorkerId, x.AssignedAt, x.Id, x.SubStageId })
-                .ToListAsync(cancellationToken);
+                .OrderBy(x => x.WorkerId)
+                .ThenByDescending(x => x.AssignedAt)
+                .ThenByDescending(x => x.Id)
+                .Select(x => new
+                {
+                    x.WorkerId,
+                    Item = new WorkerPermanentAssignmentDto
+                    {
+                        Id = x.Id,
+                        FactoryId = x.ProductionLine!.FactoryId,
+                        FactoryName = x.ProductionLine.Factory!.Name,
+                        ProductionLineId = x.ProductionLineId,
+                        ProductionLineName = x.ProductionLine.Name,
+                        DepartmentId = x.SubStage!.MainStage!.DepartmentId,
+                        DepartmentName = x.SubStage.MainStage.Department!.NameAr,
+                        MainStageId = x.SubStage.MainStageId,
+                        MainStageName = x.SubStage.MainStage.Name,
+                        SubStageId = x.SubStageId,
+                        SubStageName = x.SubStage.Name,
+                        AssignedAtUtc = x.AssignedAt
+                    }
+                })
+                .ToArrayAsync(cancellationToken);
 
-        var activeDefaultByWorker = assignments
+        var assignmentsByWorker = assignmentRows
             .GroupBy(x => x.WorkerId)
             .ToDictionary(
-                g => g.Key,
-                g => g.OrderByDescending(x => x.AssignedAt)
-                    .ThenByDescending(x => x.Id)
-                    .First().SubStageId);
+                group => group.Key,
+                group => (IReadOnlyCollection<WorkerPermanentAssignmentDto>)group.Select(x => x.Item).ToArray());
 
         return workers
-            .Select(worker =>
-            {
-                var defaultSubStageId = activeDefaultByWorker.GetValueOrDefault(worker.Id);
-                return MapWorker(worker, defaultSubStageId);
-            })
+            .Select(worker => MapWorker(worker, assignmentsByWorker.GetValueOrDefault(worker.Id) ?? []))
             .ToArray();
     }
 }

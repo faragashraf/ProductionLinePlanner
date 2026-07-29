@@ -16,9 +16,13 @@ describe('WorkersPageComponent', () => {
   };
   const profile: WorkerManagementProfile = {
     id: listItem.id,
-    local: { displayName: listItem.localName, photoUrl: null, salary: null, profileStatus: 'complete', employmentStatus: 'active' },
-    source: { sourceName: null, badgeNumber: 'B-1', employeeCode: 'EMP-1', employmentStatus: null, department: null, shift: null, lastObservedAt: null, linkStatus: 'linked' },
-    assignments: [], history: [], sourcePreview: [], assignmentStatus: 'unassigned', defaultSubStageId: null
+    local: { displayName: listItem.localName, photoUrl: null, phone: null, salary: null, profileStatus: 'complete', employmentStatus: 'active', employmentEndDate: null },
+    source: { sourceName: null, attendanceUserId: '99', attendanceDepartmentId: null, badgeNumber: 'B-1', employeeCode: 'EMP-1', employmentStatus: 'Active', department: null, shift: null, lastObservedAt: null, linkStatus: 'linked' },
+    assignments: [], assignmentStatus: 'unassigned', defaultSubStageId: null,
+    attendance: null, organizationalDepartmentId: null, organizationalDepartmentName: null,
+    organizationalFactoryName: null, organizationalDepartmentConcurrencyToken: 'token-1',
+    system: { createdAtUtc: null, updatedAtUtc: null },
+    dataStates: { assignments: 'empty', attendance: 'forbidden', salary: 'forbidden' }
   };
   const page: WorkerManagementPage = { items: [listItem], totalCount: 1, page: 1, pageSize: 6, totalPages: 1 };
 
@@ -87,10 +91,31 @@ describe('WorkersPageComponent', () => {
     const component = createComponent();
     component.ngOnInit();
     component.openProfile(listItem);
-    expect(facade.loadProfile).toHaveBeenCalledWith(listItem.id);
+    expect(facade.loadProfile).toHaveBeenCalledWith(listItem.id, { assignments: true, attendance: false, compensation: false });
     expect(component.selectedProfile).toEqual(profile);
     component.closeProfile();
     expect(component.workers).toEqual([listItem]);
+  });
+
+  it('cancels an older profile request before a newer worker can be replaced by its response', () => {
+    const firstResponse = new Subject<WorkerManagementProfile>();
+    const secondResponse = new Subject<WorkerManagementProfile>();
+    const secondItem = { ...listItem, id: '22222222-2222-2222-2222-222222222222', localName: 'عامل ثانٍ' };
+    const secondProfile = { ...structuredClone(profile), id: secondItem.id, local: { ...profile.local, displayName: secondItem.localName } };
+    facade.loadProfile.and.callFake(workerId => workerId === listItem.id ? firstResponse : secondResponse);
+    const component = createComponent();
+    component.ngOnInit();
+
+    component.openProfile(listItem);
+    component.openProfile(secondItem);
+    firstResponse.next(profile);
+    secondResponse.next(secondProfile);
+    secondResponse.complete();
+
+    expect(component.selectedProfile).toEqual(secondProfile);
+    expect(component.selectedProfileWorkerId).toBe(secondItem.id);
+    expect(component.profileLoading).toBeFalse();
+    component.ngOnDestroy();
   });
 
   it('refreshes the manufacturing employees page through the shared realtime service without losing its query or page', () => {
@@ -139,18 +164,42 @@ describe('WorkersPageComponent', () => {
     expect(messageService.add).toHaveBeenCalledTimes(1);
   });
 
+  it('opens the existing department form from the profile and updates both profile and row after save', () => {
+    permissions.hasPermission.and.returnValue(true);
+    const component = createComponent();
+    component.ngOnInit();
+    component.openProfile(listItem);
+
+    component.openProfileDepartmentDialog();
+    expect(component.departmentDialogVisible).toBeTrue();
+    expect(component.selectedDepartmentWorker?.id).toBe(profile.id);
+    component.selectedDepartmentId = 'department-1';
+    component.saveDepartmentAssignment();
+
+    expect(component.selectedProfile).toEqual(jasmine.objectContaining({
+      organizationalDepartmentId: 'department-1',
+      organizationalDepartmentName: 'قسم التشغيل',
+      organizationalDepartmentConcurrencyToken: 'token-2'
+    }));
+    expect(component.workers[0].organizationalDepartmentName).toBe('قسم التشغيل');
+    expect(component.profileViewOpen).toBeTrue();
+  });
+
   it('keeps department assignment inside the authorized row action menu', () => {
-    const menu = { toggle: jasmine.createSpy('toggle') };
+    const overlay = { toggle: jasmine.createSpy('toggle'), hide: jasmine.createSpy('hide') };
     const component = createComponent();
 
-    component.openWorkerActions(new Event('click'), listItem, menu as never);
-    expect(component.workerActionItems.map(item => item.label)).toEqual(['فتح الملف']);
+    component.openWorkerActions(new Event('click'), listItem, overlay as never);
+    component.openProfileFromWorkerActions(overlay as never);
+    expect(component.profileViewOpen).toBeTrue();
+    expect(overlay.hide).toHaveBeenCalled();
 
     permissions.hasPermission.and.returnValue(true);
-    component.openWorkerActions(new Event('click'), listItem, menu as never);
+    component.openWorkerActions(new Event('click'), listItem, overlay as never);
+    component.openDepartmentFromWorkerActions(overlay as never);
 
-    expect(component.workerActionItems.map(item => item.label)).toEqual(['فتح الملف', 'تعيين إلى قسم']);
-    expect(menu.toggle).toHaveBeenCalledTimes(2);
+    expect(component.departmentDialogVisible).toBeTrue();
+    expect(overlay.toggle).toHaveBeenCalledTimes(2);
   });
 
   it('keeps an open dialog and blocks saving when another client changes the same worker', () => {

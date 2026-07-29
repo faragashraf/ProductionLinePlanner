@@ -103,6 +103,126 @@ public sealed class AttendanceWorkforceEngineTests
     }
 
     [Fact]
+    public async Task GetWorkerProfileSummary_returns_today_window_and_latest_known_movement()
+    {
+        await using var db = CreateDb();
+        var worker = new Worker(Guid.NewGuid(), "1001", "أحمد");
+        var lastOut = new DateTime(2026, 7, 19, 13, 0, 0, DateTimeKind.Utc);
+        db.AddRange(worker, new AttendanceRecord(
+            Guid.NewGuid(),
+            worker.Id,
+            DayEvidenceUtc,
+            AttendanceStatus.Present,
+            sourcePayload: $"{{\"FirstInUtc\":\"{DayEvidenceUtc:O}\",\"LastOutUtc\":\"{lastOut:O}\"}}"));
+        await db.SaveChangesAsync();
+        var windows = new Dictionary<Guid, AttendancePresenceWindowDto>
+        {
+            [worker.Id] = new(worker.Id, AttendanceStatus.Present, DayEvidenceUtc, lastOut, true)
+        };
+
+        var result = await CreateEngine(db, windows).GetWorkerProfileSummaryAsync(worker.Id, ProductionDate);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("Present", result.Value!.TodayStatus);
+        Assert.True(result.Value.AttendanceDataAvailableForDate);
+        Assert.Equal(DayEvidenceUtc, result.Value.FirstCheckInUtc);
+        Assert.Equal(lastOut, result.Value.LastCheckOutUtc);
+        Assert.Equal(lastOut, result.Value.LastKnownMovementUtc);
+        Assert.Equal(DateTimeKind.Utc, result.Value.LastKnownMovementUtc!.Value.Kind);
+    }
+
+    [Fact]
+    public async Task GetWorkerProfileSummary_distinguishes_no_movement_from_an_unsynchronized_day()
+    {
+        await using var db = CreateDb();
+        var worker = new Worker(Guid.NewGuid(), "1001", "أحمد");
+        var otherWorker = new Worker(Guid.NewGuid(), "1002", "محمود");
+        db.AddRange(worker, otherWorker, Attendance(otherWorker.Id, AttendanceStatus.Present));
+        await db.SaveChangesAsync();
+        var engine = CreateEngine(db, new Dictionary<Guid, AttendancePresenceWindowDto>());
+
+        var noMovement = await engine.GetWorkerProfileSummaryAsync(worker.Id, ProductionDate);
+        var needsSync = await engine.GetWorkerProfileSummaryAsync(worker.Id, ProductionDate.AddDays(1));
+
+        Assert.Equal("NoMovement", noMovement.Value!.TodayStatus);
+        Assert.True(noMovement.Value.AttendanceDataAvailableForDate);
+        Assert.Equal("NeedsSync", needsSync.Value!.TodayStatus);
+        Assert.False(needsSync.Value.AttendanceDataAvailableForDate);
+    }
+
+    [Fact]
+    public async Task GetWorkerAttendanceHistory_filters_inclusive_dates_projects_explicit_in_out_and_pages_newest_first()
+    {
+        await using var db = CreateDb();
+        var worker = new Worker(Guid.NewGuid(), "1001", "أحمد");
+        var firstIn = new DateTime(2026, 7, 19, 4, 30, 0, DateTimeKind.Utc);
+        var firstOut = firstIn.AddHours(8);
+        var secondIn = firstIn.AddDays(1);
+        var secondOut = secondIn.AddHours(8);
+        db.AddRange(
+            worker,
+            AttendanceWindow(worker.Id, firstIn, firstOut),
+            AttendanceWindow(worker.Id, secondIn, secondOut),
+            new AttendanceRecord(Guid.NewGuid(), worker.Id, secondIn.AddHours(1), AttendanceStatus.Absent));
+        await db.SaveChangesAsync();
+
+        var result = await CreateEngine(db, new Dictionary<Guid, AttendancePresenceWindowDto>()).GetWorkerAttendanceHistoryAsync(
+            worker.Id,
+            new WorkerAttendanceHistoryQuery(new DateOnly(2026, 7, 19), new DateOnly(2026, 7, 20), Page: 1, PageSize: 1));
+
+        Assert.True(result.IsSuccess, result.Error?.Message);
+        Assert.Equal(2, result.Value!.TotalCount);
+        Assert.Equal(2, result.Value.TotalPages);
+        var record = Assert.Single(result.Value.Items);
+        Assert.Equal(new DateOnly(2026, 7, 20), record.ProductionDate);
+        Assert.Collection(record.Movements,
+            movement => { Assert.Equal("In", movement.MovementType); Assert.Equal(secondIn, movement.OccurredAtUtc); Assert.Equal(DateTimeKind.Utc, movement.OccurredAtUtc.Kind); },
+            movement => { Assert.Equal("Out", movement.MovementType); Assert.Equal(secondOut, movement.OccurredAtUtc); });
+    }
+
+    [Fact]
+    public async Task GetWorkerAttendanceHistory_includes_both_range_boundaries_and_returns_empty_for_worker_without_movements()
+    {
+        await using var db = CreateDb();
+        var worker = new Worker(Guid.NewGuid(), "1001", "أحمد");
+        var emptyWorker = new Worker(Guid.NewGuid(), "1002", "محمود");
+        db.AddRange(
+            worker,
+            emptyWorker,
+            AttendanceWindow(worker.Id, new DateTime(2026, 7, 18, 22, 0, 0, DateTimeKind.Utc), null),
+            AttendanceWindow(worker.Id, new DateTime(2026, 7, 20, 20, 0, 0, DateTimeKind.Utc), null),
+            AttendanceWindow(worker.Id, new DateTime(2026, 7, 20, 22, 0, 0, DateTimeKind.Utc), null));
+        await db.SaveChangesAsync();
+        var engine = CreateEngine(db, new Dictionary<Guid, AttendancePresenceWindowDto>());
+
+        var bounded = await engine.GetWorkerAttendanceHistoryAsync(worker.Id, new(new(2026, 7, 19), new(2026, 7, 20), PageSize: 10));
+        var empty = await engine.GetWorkerAttendanceHistoryAsync(emptyWorker.Id, new(new(2026, 7, 19), new(2026, 7, 20)));
+
+        Assert.Equal(2, bounded.Value!.TotalCount);
+        Assert.Equal([new DateOnly(2026, 7, 20), new DateOnly(2026, 7, 19)], bounded.Value.Items.Select(item => item.ProductionDate));
+        Assert.Empty(empty.Value!.Items);
+        Assert.Equal(0, empty.Value.TotalCount);
+    }
+
+    [Theory]
+    [InlineData(0, 20, "2026-07-19", "2026-07-20")]
+    [InlineData(1, 101, "2026-07-19", "2026-07-20")]
+    [InlineData(1, 20, "2026-07-20", "2026-07-19")]
+    public async Task GetWorkerAttendanceHistory_rejects_invalid_range_and_pagination(int page, int pageSize, string from, string to)
+    {
+        await using var db = CreateDb();
+        var worker = new Worker(Guid.NewGuid(), "1001", "أحمد");
+        db.Add(worker);
+        await db.SaveChangesAsync();
+
+        var result = await CreateEngine(db, new Dictionary<Guid, AttendancePresenceWindowDto>()).GetWorkerAttendanceHistoryAsync(
+            worker.Id,
+            new WorkerAttendanceHistoryQuery(DateOnly.Parse(from), DateOnly.Parse(to), page, pageSize));
+
+        Assert.Equal("ValidationError", result.Error?.Code);
+    }
+
+    [Fact]
     public async Task GetPage_resolves_filtered_workers_in_bounded_batches()
     {
         await using var db = CreateDb();
@@ -127,6 +247,15 @@ public sealed class AttendanceWorkforceEngineTests
 
     private static AttendanceRecord Attendance(Guid workerId, AttendanceStatus status) =>
         new(Guid.NewGuid(), workerId, DayEvidenceUtc, status);
+
+    private static AttendanceRecord AttendanceWindow(Guid workerId, DateTime firstInUtc, DateTime? lastOutUtc) =>
+        new(
+            Guid.NewGuid(),
+            workerId,
+            firstInUtc,
+            AttendanceStatus.Present,
+            source: "AttendanceSync",
+            sourcePayload: $"{{\"FirstInUtc\":\"{firstInUtc:O}\",\"LastOutUtc\":{(lastOutUtc.HasValue ? $"\"{lastOutUtc.Value:O}\"" : "null")}}}");
 
     private static AppDbContext CreateDb() => new(new DbContextOptionsBuilder<AppDbContext>()
         .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))

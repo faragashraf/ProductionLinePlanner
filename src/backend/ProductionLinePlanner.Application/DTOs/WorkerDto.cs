@@ -25,4 +25,24 @@ public sealed class WorkerDto
     public string? PhotoVersion { get; init; }
     public bool IsActive { get; init; }
     public Guid? DefaultSubStageId { get; init; }
+    public DateTime? LastExternalSyncAt { get; init; }
+    public DateTime CreatedAtUtc { get; init; }
+    public DateTime UpdatedAtUtc { get; init; }
+    public IReadOnlyCollection<WorkerPermanentAssignmentDto> PermanentAssignments { get; init; } = [];
+}
+
+public sealed class WorkerPermanentAssignmentDto
+{
+    public Guid Id { get; init; }
+    public Guid FactoryId { get; init; }
+    public string FactoryName { get; init; } = string.Empty;
+    public Guid ProductionLineId { get; init; }
+    public string ProductionLineName { get; init; } = string.Empty;
+    public Guid DepartmentId { get; init; }
+    public string DepartmentName { get; init; } = string.Empty;
+    public Guid MainStageId { get; init; }
+    public string MainStageName { get; init; } = string.Empty;
+    public Guid SubStageId { get; init; }
+    public string SubStageName { get; init; } = string.Empty;
+    public DateTime AssignedAtUtc { get; init; }
 }

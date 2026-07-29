@@ -7,6 +7,16 @@ namespace ProductionLinePlanner.Api.Endpoints;
 
 public static class AttendanceWorkforceEndpoints
 {
+    public static RouteGroupBuilder MapWorkerAttendanceHistoryEndpoints(this RouteGroupBuilder workersApi)
+    {
+        workersApi.MapGet("/{workerId:guid}/attendance-records", GetHistoryAsync)
+            .RequirePermission("attendance.view")
+            .WithTags("Workers", "Attendance")
+            .WithName("GetWorkerAttendanceHistory");
+
+        return workersApi;
+    }
+
     public static RouteGroupBuilder MapAttendanceWorkforceEndpoints(this RouteGroupBuilder attendanceApi)
     {
         attendanceApi.MapPost("/sync/production-date/{productionDate}", SyncProductionDateAsync)
@@ -25,6 +35,11 @@ public static class AttendanceWorkforceEndpoints
             .RequirePermission("assignments.view")
             .WithTags("Attendance")
             .WithName("GetAttendanceWorkforceDetail");
+
+        attendanceApi.MapGet("/workforce/workers/{workerId:guid}/summary", GetProfileSummaryAsync)
+            .RequirePermission("attendance.view")
+            .WithTags("Attendance")
+            .WithName("GetWorkerAttendanceProfileSummary");
 
         return attendanceApi;
     }
@@ -77,6 +92,43 @@ public static class AttendanceWorkforceEndpoints
         var result = await workforceEngine.GetWorkerDetailAsync(workerId, productionDate ?? cairoDate, cancellationToken);
         return result.IsFailure
             ? ApiResponse.Failure(result.Error?.Code ?? "AttendanceWorkforceReadFailed", result.Error?.Message ?? "Unable to load worker attendance.", MapFailureStatusCode(result.Error?.Code))
+            : Results.Ok(ApiResponse.Success(result.Value!));
+    }
+
+    private static async Task<IResult> GetProfileSummaryAsync(
+        Guid workerId,
+        IAttendanceWorkforceEngine workforceEngine,
+        ICairoTimeZoneProvider cairoTimeZoneProvider,
+        DateOnly? productionDate = null,
+        CancellationToken cancellationToken = default)
+    {
+        var cairoDate = DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, cairoTimeZoneProvider.TimeZone));
+        var result = await workforceEngine.GetWorkerProfileSummaryAsync(workerId, productionDate ?? cairoDate, cancellationToken);
+        return result.IsFailure
+            ? ApiResponse.Failure(result.Error?.Code ?? "AttendanceWorkforceReadFailed", result.Error?.Message ?? "Unable to load worker attendance summary.", MapFailureStatusCode(result.Error?.Code))
+            : Results.Ok(ApiResponse.Success(result.Value!));
+    }
+
+    private static async Task<IResult> GetHistoryAsync(
+        Guid workerId,
+        IAttendanceWorkforceEngine workforceEngine,
+        ICairoTimeZoneProvider cairoTimeZoneProvider,
+        DateOnly? fromDate = null,
+        DateOnly? toDate = null,
+        int page = 1,
+        int pageSize = 20,
+        string sortDirection = "desc",
+        CancellationToken cancellationToken = default)
+    {
+        var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, cairoTimeZoneProvider.TimeZone));
+        var effectiveTo = toDate ?? today;
+        var effectiveFrom = fromDate ?? effectiveTo.AddDays(-29);
+        var result = await workforceEngine.GetWorkerAttendanceHistoryAsync(
+            workerId,
+            new WorkerAttendanceHistoryQuery(effectiveFrom, effectiveTo, page, pageSize, sortDirection),
+            cancellationToken);
+        return result.IsFailure
+            ? ApiResponse.Failure(result.Error?.Code ?? "AttendanceWorkforceReadFailed", result.Error?.Message ?? "Unable to load worker attendance history.", MapFailureStatusCode(result.Error?.Code))
             : Results.Ok(ApiResponse.Success(result.Value!));
     }
 

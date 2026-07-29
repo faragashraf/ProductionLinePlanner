@@ -2,8 +2,7 @@ import {
   WorkerAssignmentStatus,
   WorkerLocalEmploymentStatus,
   WorkerLocalProfileStatus,
-  WorkerSourceLinkStatus,
-  WorkerSourcePreviewKind
+  WorkerSourceLinkStatus
 } from './worker-management.models';
 
 export type WorkerManagementTone = 'success' | 'warning' | 'danger' | 'info' | 'neutral';
@@ -29,23 +28,15 @@ const SOURCE_LINK_STATUS: Readonly<Record<WorkerSourceLinkStatus, WorkerManageme
 };
 
 const ASSIGNMENT_STATUS: Readonly<Record<WorkerAssignmentStatus, WorkerManagementStatusPresentation>> = {
-  assigned: { label: 'مسكن', tone: 'success', icon: 'pi pi-map-marker' },
-  unassigned: { label: 'غير مسكن', tone: 'warning', icon: 'pi pi-map' },
-  mixed: { label: 'دائم ومؤقت', tone: 'info', icon: 'pi pi-directions' }
+  assigned: { label: 'مسكن دائمًا', tone: 'success', icon: 'pi pi-map-marker' },
+  unassigned: { label: 'غير مسكن حاليًا', tone: 'warning', icon: 'pi pi-map' },
+  multiple: { label: 'تسكينات دائمة متعددة', tone: 'info', icon: 'pi pi-sitemap' }
 };
 
 const LOCAL_EMPLOYMENT_STATUS: Readonly<Record<WorkerLocalEmploymentStatus, WorkerManagementStatusPresentation>> = {
   active: { label: 'نشط محليًا', tone: 'success', icon: 'pi pi-check-circle' },
   inactive: { label: 'معلّق محليًا', tone: 'neutral', icon: 'pi pi-ban' },
   'left-employment': { label: 'منتهية خدمته محليًا', tone: 'warning', icon: 'pi pi-user-minus' }
-};
-
-const SOURCE_PREVIEW: Readonly<Record<WorkerSourcePreviewKind, WorkerManagementStatusPresentation>> = {
-  new: { label: 'جديد', tone: 'info', icon: 'pi pi-plus-circle' },
-  unchanged: { label: 'بدون تغيير', tone: 'success', icon: 'pi pi-check' },
-  'protected-local': { label: 'بيانات محلية محمية', tone: 'neutral', icon: 'pi pi-shield' },
-  'identity-conflict': { label: 'تعارض هوية', tone: 'danger', icon: 'pi pi-exclamation-triangle' },
-  observed: { label: 'بيان مرصود', tone: 'warning', icon: 'pi pi-eye' }
 };
 
 export function localProfileStatusPresentation(status: WorkerLocalProfileStatus): WorkerManagementStatusPresentation {
@@ -64,10 +55,6 @@ export function localEmploymentStatusPresentation(status: WorkerLocalEmploymentS
   return LOCAL_EMPLOYMENT_STATUS[status];
 }
 
-export function sourcePreviewPresentation(kind: WorkerSourcePreviewKind): WorkerManagementStatusPresentation {
-  return SOURCE_PREVIEW[kind];
-}
-
 export function formatWorkerCurrency(amount: number | null | undefined, currencyCode = 'EGP'): string {
   if (amount === null || amount === undefined || !Number.isFinite(amount)) return 'غير مسجل';
   return new Intl.NumberFormat('ar-EG', {
@@ -78,7 +65,7 @@ export function formatWorkerCurrency(amount: number | null | undefined, currency
 }
 
 export function formatWorkerObservedAt(value: string | null): string {
-  if (!value) return 'غير متاح';
+  if (!value) return 'لم تُسجل مزامنة خارجية';
   return new Intl.DateTimeFormat('ar-EG', {
     dateStyle: 'medium',
     timeStyle: 'short',

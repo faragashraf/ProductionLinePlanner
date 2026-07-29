@@ -1,5 +1,6 @@
+import { HttpErrorResponse } from '@angular/common/http';
 import { Injectable, Optional } from '@angular/core';
-import { Observable, forkJoin, map, of, switchMap, throwError } from 'rxjs';
+import { Observable, catchError, forkJoin, map, of, switchMap, throwError } from 'rxjs';
 import { WorkerPageItem } from '../../shared/models/worker.model';
 import {
   WorkerEmploymentStatusUpdate,
@@ -14,7 +15,12 @@ import {
   WorkerManagementQuery,
   WorkerSourceLinkStatus,
   WorkerDepartmentOption,
-  WorkerDepartmentAssignmentResult
+  WorkerDepartmentAssignmentResult,
+  WorkerAttendanceSummary,
+  WorkerProfileAccess,
+  WorkerProfileDataState,
+  WorkerAttendanceHistoryPage,
+  WorkerAttendanceHistoryQuery
 } from './worker-management.models';
 import {
   WorkerManagementDataSource,
@@ -22,6 +28,12 @@ import {
 } from './worker-management.data-source';
 import { ManufacturingRealtimeService } from '../../core/services/manufacturing-realtime.service';
 import { ManufacturingMasterDataApiService } from '../../core/services/manufacturing-master-data-api.service';
+import { AttendanceWorkforceApiService, WorkerAttendanceProfileSummary } from '../../core/services/attendance-workforce-api.service';
+
+interface OptionalProfileValue<T> {
+  state: WorkerProfileDataState;
+  value: T | null;
+}
 
 /**
  * Runtime worker workspace source. It uses only Planner APIs backed by the
@@ -33,7 +45,8 @@ export class WorkerManagementApiDataSource implements WorkerManagementDataSource
   constructor(
     private readonly workersApi: WorkersApiService,
     @Optional() private readonly manufacturingRealtime?: ManufacturingRealtimeService,
-    @Optional() private readonly masterDataApi?: ManufacturingMasterDataApiService
+    @Optional() private readonly masterDataApi?: ManufacturingMasterDataApiService,
+    @Optional() private readonly attendanceApi?: AttendanceWorkforceApiService
   ) {}
 
   loadPage(query: WorkerManagementQuery): Observable<WorkerManagementPage> {
@@ -61,8 +74,12 @@ export class WorkerManagementApiDataSource implements WorkerManagementDataSource
     );
   }
 
-  loadProfile(workerId: string): Observable<WorkerManagementProfile> {
-    return this.workersApi.getWorker(workerId).pipe(map(worker => this.toProfile(worker)));
+  loadProfile(workerId: string, access: WorkerProfileAccess): Observable<WorkerManagementProfile> {
+    return forkJoin({
+      worker: this.workersApi.getWorker(workerId),
+      salary: this.loadSalary(workerId, access.compensation),
+      attendance: this.loadAttendance(workerId, access.attendance)
+    }).pipe(map(({ worker, salary, attendance }) => this.toProfile(worker, access, salary, attendance)));
   }
 
   saveLocalProfile(worker: WorkerManagementProfile, update: WorkerManagementLocalUpdate): Observable<WorkerManagementProfile> {
@@ -80,24 +97,28 @@ export class WorkerManagementApiDataSource implements WorkerManagementDataSource
           employmentStatus: this.toApiEmploymentStatus(update.employmentStatus)
         }, this.localCorrelation())
         : of(updated)),
-      map(updated => this.toProfile(updated))
+      map(updated => this.mergeWorker(worker, updated))
     );
   }
 
-  uploadPhoto(workerId: string, photo: File): Observable<WorkerManagementProfile> {
-    return this.workersApi.uploadWorkerPhoto(workerId, photo, this.localCorrelation()).pipe(
-      switchMap(() => this.loadProfile(workerId))
-    );
+  uploadPhoto(worker: WorkerManagementProfile, photo: File): Observable<WorkerManagementProfile> {
+    return this.workersApi.uploadWorkerPhoto(worker.id, photo, this.localCorrelation()).pipe(map(change => ({
+      ...worker,
+      local: { ...worker.local, photoUrl: change.photo.photoReference }
+    })));
   }
 
-  deletePhoto(workerId: string): Observable<WorkerManagementProfile> {
-    return this.workersApi.deleteWorkerPhoto(workerId, this.localCorrelation()).pipe(
-      switchMap(() => this.loadProfile(workerId))
-    );
+  deletePhoto(worker: WorkerManagementProfile): Observable<WorkerManagementProfile> {
+    return this.workersApi.deleteWorkerPhoto(worker.id, this.localCorrelation()).pipe(map(() => ({
+      ...worker,
+      local: { ...worker.local, photoUrl: null }
+    })));
   }
 
   private toListItem(worker: WorkerPageItem): WorkerManagementListItem {
-    const assignmentStatus: WorkerAssignmentStatus = worker.defaultSubStageId ? 'assigned' : 'unassigned';
+    const permanentAssignments = worker.permanentAssignments ?? [];
+    const assignmentStatus = this.assignmentStatus(permanentAssignments.length);
+    const primaryAssignment = permanentAssignments[0];
     const sourceLinkStatus = this.sourceLinkStatus(worker);
     return {
       id: worker.id ?? '',
@@ -106,16 +127,18 @@ export class WorkerManagementApiDataSource implements WorkerManagementDataSource
       photoUrl: worker.hasPhoto ? worker.photoReference ?? null : null,
       badgeNumber: worker.badgeNumber ?? null,
       employeeCode: worker.code,
-      assignmentLabel: assignmentStatus === 'assigned' ? 'مرتبط بمرحلة محلية' : 'لا يوجد تسكين افتراضي نشط',
-      factoryLineLabel: assignmentStatus === 'assigned'
-        ? 'تفاصيل المصنع والخط غير متاحة في واجهة العاملين الحالية'
-        : 'لا يوجد تسكين حالي',
+      assignmentLabel: primaryAssignment
+        ? `${primaryAssignment.mainStageName} / ${primaryAssignment.subStageName}${permanentAssignments.length > 1 ? ` +${permanentAssignments.length - 1}` : ''}`
+        : 'غير مسكن حاليًا',
+      factoryLineLabel: primaryAssignment
+        ? `${primaryAssignment.factoryName} / ${primaryAssignment.productionLineName}`
+        : 'لا يوجد تسكين دائم نشط',
       sourceLinkStatus,
       localProfileStatus: 'complete',
       assignmentStatus,
       localEmploymentStatus: this.toEmploymentStatus(worker.employmentStatus, worker.isActive),
-      factoryId: null,
-      productionLineId: null,
+      factoryId: primaryAssignment?.factoryId ?? null,
+      productionLineId: primaryAssignment?.productionLineId ?? null,
       hasIdentityConflict: false,
       organizationalDepartmentId: worker.organizationalDepartmentId ?? null,
       organizationalDepartmentName: worker.organizationalDepartmentName ?? null,
@@ -160,33 +183,170 @@ export class WorkerManagementApiDataSource implements WorkerManagementDataSource
       })));
   }
 
-  private toProfile(worker: WorkerPageItem): WorkerManagementProfile {
-    const assignmentStatus: WorkerAssignmentStatus = worker.defaultSubStageId ? 'assigned' : 'unassigned';
+  loadAttendanceHistory(workerId: string, query: WorkerAttendanceHistoryQuery): Observable<WorkerAttendanceHistoryPage> {
+    if (!this.attendanceApi) return throwError(() => new Error('تعذر تحميل سجل الحضور والانصراف.'));
+    return this.attendanceApi.getWorkerHistory(workerId, { ...query, sortDirection: 'desc' }).pipe(map(page => ({
+      items: page.items,
+      page: page.page,
+      pageSize: page.pageSize,
+      totalCount: page.totalCount,
+      totalPages: page.totalPages
+    })));
+  }
+
+  private toProfile(
+    worker: WorkerPageItem,
+    access: WorkerProfileAccess,
+    salary: OptionalProfileValue<{ amount: number; currencyCode: string; effectiveFrom: string }>,
+    attendance: OptionalProfileValue<WorkerAttendanceProfileSummary>
+  ): WorkerManagementProfile {
+    const assignments = access.assignments ? this.mapAssignments(worker) : [];
+    const assignmentStatus = this.assignmentStatus(assignments.length);
     return {
       id: worker.id ?? '',
       local: {
         displayName: worker.fullName,
         photoUrl: worker.hasPhoto ? worker.photoReference ?? null : null,
-        salary: null,
+        phone: worker.phone ?? null,
+        salary: salary.value,
         profileStatus: 'complete',
-        employmentStatus: this.toEmploymentStatus(worker.employmentStatus, worker.isActive)
+        employmentStatus: this.toEmploymentStatus(worker.employmentStatus, worker.isActive),
+        employmentEndDate: worker.employmentEndDate ?? null
       },
       source: {
         sourceName: null,
+        attendanceUserId: worker.attendanceUserId ?? null,
+        attendanceDepartmentId: worker.attendanceDepartmentId ?? null,
         badgeNumber: worker.badgeNumber ?? null,
         employeeCode: worker.code,
-        employmentStatus: null,
-        department: null,
+        employmentStatus: worker.employmentStatus ?? null,
+        department: worker.department ?? null,
         shift: null,
-        lastObservedAt: null,
+        lastObservedAt: worker.lastExternalSyncAt ?? null,
         linkStatus: this.sourceLinkStatus(worker)
       },
-      assignments: [],
-      history: [],
-      sourcePreview: [],
+      assignments,
       assignmentStatus,
-      defaultSubStageId: worker.defaultSubStageId ?? null
+      defaultSubStageId: assignments[0]?.stageNames.length ? worker.defaultSubStageId ?? null : null,
+      attendance: attendance.value ? this.mapAttendance(attendance.value) : null,
+      organizationalDepartmentId: worker.organizationalDepartmentId ?? null,
+      organizationalDepartmentName: worker.organizationalDepartmentName ?? null,
+      organizationalFactoryName: worker.organizationalFactoryName ?? null,
+      organizationalDepartmentConcurrencyToken: worker.organizationalDepartmentConcurrencyToken ?? '',
+      system: {
+        createdAtUtc: worker.createdAtUtc ?? null,
+        updatedAtUtc: worker.updatedAtUtc ?? null
+      },
+      dataStates: {
+        assignments: access.assignments ? assignments.length ? 'loaded' : 'empty' : 'forbidden',
+        attendance: attendance.state,
+        salary: salary.state
+      }
     };
+  }
+
+  private mergeWorker(existing: WorkerManagementProfile, worker: WorkerPageItem): WorkerManagementProfile {
+    const canUseAssignments = existing.dataStates.assignments !== 'forbidden';
+    const assignments = canUseAssignments ? this.mapAssignments(worker) : existing.assignments;
+    return {
+      ...existing,
+      local: {
+        ...existing.local,
+        displayName: worker.fullName,
+        phone: worker.phone ?? null,
+        photoUrl: worker.hasPhoto ? worker.photoReference ?? null : existing.local.photoUrl,
+        employmentStatus: this.toEmploymentStatus(worker.employmentStatus, worker.isActive),
+        employmentEndDate: worker.employmentEndDate ?? null
+      },
+      source: {
+        ...existing.source,
+        attendanceUserId: worker.attendanceUserId ?? null,
+        attendanceDepartmentId: worker.attendanceDepartmentId ?? null,
+        badgeNumber: worker.badgeNumber ?? null,
+        employeeCode: worker.code,
+        employmentStatus: worker.employmentStatus ?? null,
+        department: worker.department ?? null,
+        lastObservedAt: worker.lastExternalSyncAt ?? null,
+        linkStatus: this.sourceLinkStatus(worker)
+      },
+      assignments,
+      assignmentStatus: this.assignmentStatus(assignments.length),
+      defaultSubStageId: worker.defaultSubStageId ?? null,
+      organizationalDepartmentId: worker.organizationalDepartmentId ?? existing.organizationalDepartmentId ?? null,
+      organizationalDepartmentName: worker.organizationalDepartmentName ?? existing.organizationalDepartmentName ?? null,
+      organizationalFactoryName: worker.organizationalFactoryName ?? existing.organizationalFactoryName ?? null,
+      organizationalDepartmentConcurrencyToken: worker.organizationalDepartmentConcurrencyToken ?? existing.organizationalDepartmentConcurrencyToken ?? '',
+      system: {
+        createdAtUtc: worker.createdAtUtc ?? existing.system.createdAtUtc,
+        updatedAtUtc: worker.updatedAtUtc ?? existing.system.updatedAtUtc
+      },
+      dataStates: {
+        ...existing.dataStates,
+        assignments: canUseAssignments ? assignments.length ? 'loaded' : 'empty' : 'forbidden'
+      }
+    };
+  }
+
+  private mapAssignments(worker: WorkerPageItem): WorkerManagementProfile['assignments'] {
+    return (worker.permanentAssignments ?? []).map(assignment => ({
+      id: assignment.id,
+      kind: 'permanent',
+      factoryId: assignment.factoryId,
+      factoryName: assignment.factoryName,
+      productionLineId: assignment.productionLineId,
+      productionLineName: assignment.productionLineName,
+      stageNames: [assignment.mainStageName, assignment.subStageName].filter(Boolean),
+      periodLabel: assignment.assignedAtUtc
+        ? `بدأ في ${new Intl.DateTimeFormat('ar-EG', { dateStyle: 'medium', timeZone: 'Africa/Cairo' }).format(new Date(assignment.assignedAtUtc))}`
+        : 'تسكين دائم نشط'
+    }));
+  }
+
+  private mapAttendance(value: WorkerAttendanceProfileSummary): WorkerAttendanceSummary {
+    return {
+      productionDate: value.productionDate,
+      todayStatus: value.todayStatus,
+      attendanceDataAvailableForDate: value.attendanceDataAvailableForDate,
+      firstCheckInUtc: value.firstCheckInUtc,
+      lastCheckOutUtc: value.lastCheckOutUtc,
+      lastKnownMovementUtc: value.lastKnownMovementUtc
+    };
+  }
+
+  private loadSalary(workerId: string, permitted: boolean): Observable<OptionalProfileValue<{ amount: number; currencyCode: string; effectiveFrom: string }>> {
+    if (!permitted) return of({ state: 'forbidden', value: null });
+    return this.workersApi.getCurrentSalary(workerId).pipe(
+      map(value => ({
+        state: 'loaded' as const,
+        value: { amount: value.amount, currencyCode: value.currencyCode, effectiveFrom: value.effectiveFrom }
+      })),
+      catchError(error => of({
+        state: this.errorStatus(error) === 404 ? 'empty' as const : this.errorStatus(error) === 403 ? 'forbidden' as const : 'error' as const,
+        value: null
+      }))
+    );
+  }
+
+  private loadAttendance(workerId: string, permitted: boolean): Observable<OptionalProfileValue<WorkerAttendanceProfileSummary>> {
+    if (!permitted) return of({ state: 'forbidden', value: null });
+    if (!this.attendanceApi) return of({ state: 'error', value: null });
+    return this.attendanceApi.getProfileSummary(workerId).pipe(
+      map(value => ({ state: 'loaded' as const, value })),
+      catchError(error => of({
+        state: this.errorStatus(error) === 403 ? 'forbidden' as const : 'error' as const,
+        value: null
+      }))
+    );
+  }
+
+  private errorStatus(error: unknown): number {
+    return error instanceof HttpErrorResponse ? error.status : typeof error === 'object' && error !== null && 'status' in error
+      ? Number((error as { status?: unknown }).status) || 0
+      : 0;
+  }
+
+  private assignmentStatus(count: number): WorkerAssignmentStatus {
+    return count > 1 ? 'multiple' : count === 1 ? 'assigned' : 'unassigned';
   }
 
   private sourceLinkStatus(worker: WorkerPageItem): WorkerSourceLinkStatus {
@@ -213,7 +373,16 @@ export class WorkerManagementApiDataSource implements WorkerManagementDataSource
       isActive: worker.local.employmentStatus === 'active',
       ...(worker.local.photoUrl ? { photoReference: worker.local.photoUrl, hasPhoto: true } : { hasPhoto: false }),
       ...(worker.source.badgeNumber ? { badgeNumber: worker.source.badgeNumber } : {}),
-      ...(worker.defaultSubStageId ? { defaultSubStageId: worker.defaultSubStageId } : {})
+      ...(worker.source.attendanceUserId ? { attendanceUserId: worker.source.attendanceUserId } : {}),
+      ...(worker.source.attendanceDepartmentId !== null ? { attendanceDepartmentId: worker.source.attendanceDepartmentId } : {}),
+      ...(worker.organizationalDepartmentId ? { organizationalDepartmentId: worker.organizationalDepartmentId } : {}),
+      ...(worker.organizationalDepartmentName ? { organizationalDepartmentName: worker.organizationalDepartmentName } : {}),
+      ...(worker.organizationalFactoryName ? { organizationalFactoryName: worker.organizationalFactoryName } : {}),
+      ...(worker.organizationalDepartmentConcurrencyToken ? { organizationalDepartmentConcurrencyToken: worker.organizationalDepartmentConcurrencyToken } : {}),
+      ...(worker.defaultSubStageId ? { defaultSubStageId: worker.defaultSubStageId } : {}),
+      ...(worker.local.employmentEndDate ? { employmentEndDate: worker.local.employmentEndDate } : {}),
+      ...(worker.system.createdAtUtc ? { createdAtUtc: worker.system.createdAtUtc } : {}),
+      ...(worker.system.updatedAtUtc ? { updatedAtUtc: worker.system.updatedAtUtc } : {})
     };
   }
 

@@ -11,6 +11,7 @@ public interface IEmployeeMasterDataService
         bool? isActive = null,
         int page = 1,
         int pageSize = 50,
+        bool includePermanentAssignments = false,
         CancellationToken cancellationToken = default);
 
     Task<Result<WorkerDto>> UpdateMasterIdentityAsync(
@@ -18,6 +19,7 @@ public interface IEmployeeMasterDataService
         UpdateWorkerRequest request,
         Guid actorUserId,
         string? requestMeta = null,
+        bool includePermanentAssignments = false,
         CancellationToken cancellationToken = default);
 
     Task<Result<WorkerDto>> SetEmploymentStatusAsync(
@@ -25,7 +27,8 @@ public interface IEmployeeMasterDataService
         SetWorkerEmploymentStatusRequest request,
         Guid actorUserId,
         string? requestMeta = null,
+        bool includePermanentAssignments = false,
         CancellationToken cancellationToken = default);
 
-    Task<Result<WorkerDto>> GetWorkerAsync(Guid workerId, CancellationToken cancellationToken = default);
+    Task<Result<WorkerDto>> GetWorkerAsync(Guid workerId, bool includePermanentAssignments = false, CancellationToken cancellationToken = default);
 }

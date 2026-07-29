@@ -13,6 +13,19 @@
   gap: var(--plp-space-8);
 }
 
+.worker-management-page__creation-note {
+  align-items: center;
+  background: var(--plp-color-info-soft);
+  border: 1px solid var(--plp-color-info);
+  border-radius: var(--plp-radius-pill);
+  color: var(--plp-color-text);
+  display: inline-flex;
+  font-size: var(--plp-type-caption);
+  gap: var(--plp-space-8);
+  min-block-size: 2.75rem;
+  padding-inline: var(--plp-space-12);
+}
+
 .worker-management-page__header-note,
 .worker-management-page__results {
   color: var(--plp-color-text-subtle);
@@ -101,7 +114,7 @@
 }
 
 .worker-management-page__identity small,
-.worker-management-page__assignment span {
+.worker-management-page__assignment :is(span, small) {
   overflow-wrap: anywhere;
 }
 
@@ -112,7 +125,7 @@
 
 .worker-management-page__identity span,
 .worker-management-page__identity small,
-.worker-management-page__assignment span {
+.worker-management-page__assignment :is(span, small) {
   color: var(--plp-color-text-subtle);
   font-size: var(--plp-type-caption);
 }
@@ -126,6 +139,12 @@
 .worker-management-page__assignment {
   align-items: flex-start;
   display: grid;
+}
+
+.worker-management-page__status-stack {
+  align-items: flex-start;
+  display: grid;
+  gap: var(--plp-space-8);
 }
 
 .worker-management-page__actions {
@@ -194,7 +213,7 @@ th.worker-management-page__actions {
   padding: var(--plp-space-12);
 }
 
-@media (max-width: 60rem) {
+@media (max-width: 68.75rem) {
   .worker-management-page__actions {
     background: transparent;
     min-inline-size: 0;
@@ -212,9 +231,9 @@ th.worker-management-page__actions {
   white-space: nowrap;
 }
 
-@media (min-width: 801px) {
+@media (min-width: 1101px) {
   :host ::ng-deep .worker-management-page__table .p-datatable-table {
-    min-inline-size: 70rem;
+    min-inline-size: 52rem;
     table-layout: auto;
   }
 

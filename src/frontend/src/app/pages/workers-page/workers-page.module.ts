@@ -8,7 +8,7 @@ import { PaginatorModule } from 'primeng/paginator';
 import { RippleModule } from 'primeng/ripple';
 import { TableModule } from 'primeng/table';
 import { DropdownModule } from 'primeng/dropdown';
-import { MenuModule } from 'primeng/menu';
+import { OverlayPanelModule } from 'primeng/overlaypanel';
 import { PERMISSIONS } from '../../core/config/permission-identifiers';
 import { PermissionCanActivateGuard } from '../../core/guards/permission-can-activate.guard';
 import { PermissionCanMatchGuard } from '../../core/guards/permission-can-match.guard';
@@ -55,7 +55,7 @@ export const WORKERS_ROUTES: Routes = [
     RippleModule,
     TableModule,
     DropdownModule,
-    MenuModule,
+    OverlayPanelModule,
     PlpProductEmptyStateComponent,
     PlpProductErrorStateComponent,
     PlpProductLoadingStateComponent,
