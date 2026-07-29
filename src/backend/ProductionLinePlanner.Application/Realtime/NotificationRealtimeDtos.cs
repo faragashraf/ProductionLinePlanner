@@ -21,6 +21,16 @@ public sealed record NotificationSummaryDto(
     string? NavigationUrl = null,
     string? MetadataJson = null);
 
+/// <summary>
+/// A persisted inbox read-state change sent to all live connections of its owner.
+/// NotificationId is null when the user marked every unread notification as read.
+/// </summary>
+public sealed record NotificationReadStateChangedDto(
+    Guid? NotificationId,
+    bool IsRead,
+    int UpdatedCount,
+    DateTime OccurredAtUtc);
+
 public sealed record PublishUserNotificationCommand(
     Guid NotificationId,
     Guid RecipientUserId,

@@ -103,6 +103,21 @@ public sealed class AttendanceWorkforceEngineTests
     }
 
     [Fact]
+    public async Task GetWorkerDetail_keeps_historical_attendance_available_after_worker_becomes_inactive()
+    {
+        await using var db = CreateDb();
+        var worker = new Worker(Guid.NewGuid(), "1001", "عامل تاريخي");
+        worker.Suspend();
+        db.AddRange(worker, Attendance(worker.Id, AttendanceStatus.Present));
+        await db.SaveChangesAsync();
+
+        var result = await CreateEngine(db, new Dictionary<Guid, AttendancePresenceWindowDto>()).GetWorkerDetailAsync(worker.Id, ProductionDate);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(worker.Id, result.Value!.WorkerId);
+    }
+
+    [Fact]
     public async Task GetPage_resolves_filtered_workers_in_bounded_batches()
     {
         await using var db = CreateDb();
@@ -123,6 +138,28 @@ public sealed class AttendanceWorkforceEngineTests
         Assert.Equal(3, attendanceEngine.CallCount);
         Assert.InRange(attendanceEngine.MaxRequestedWorkerCount, 1, 100);
         Assert.InRange(assignmentEngine.MaxRequestedWorkerCount, 1, 100);
+    }
+
+    [Fact]
+    public async Task GetPage_filters_by_worker_id_in_the_database_and_keeps_historical_inactive_worker_visible()
+    {
+        await using var db = CreateDb();
+        var historicalWorker = new Worker(Guid.NewGuid(), "1001", "عامل تاريخي");
+        historicalWorker.Suspend();
+        var otherWorker = new Worker(Guid.NewGuid(), "1002", "عامل آخر");
+        db.AddRange(historicalWorker, otherWorker, Attendance(historicalWorker.Id, AttendanceStatus.Present));
+        await db.SaveChangesAsync();
+        var windows = new Dictionary<Guid, AttendancePresenceWindowDto>
+        {
+            [historicalWorker.Id] = new(historicalWorker.Id, AttendanceStatus.Present, DayEvidenceUtc, DayEvidenceUtc.AddHours(8), true)
+        };
+
+        var result = await CreateEngine(db, windows).GetPageAsync(new AttendanceWorkforceQuery(ProductionDate, WorkerId: historicalWorker.Id));
+
+        Assert.True(result.IsSuccess);
+        var row = Assert.Single(result.Value!.Items);
+        Assert.Equal(historicalWorker.Id, row.WorkerId);
+        Assert.Equal(1, result.Value.TotalCount);
     }
 
     private static AttendanceRecord Attendance(Guid workerId, AttendanceStatus status) =>

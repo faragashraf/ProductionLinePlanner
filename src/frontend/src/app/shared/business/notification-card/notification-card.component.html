@@ -1,4 +1,5 @@
-<article class="plp-notification-card" [class]="readStateClass" [attr.tabindex]="actionable ? 0 : null" [attr.role]="actionable ? 'button' : null" (click)="actionable && activate.emit()" (keydown)="onKeydown($event)">
+<article class="plp-notification-card" [class]="readStateClass">
+  <div class="plp-notification-card__content" [attr.tabindex]="actionable ? 0 : null" [attr.role]="actionable ? 'button' : null" (click)="actionable && activate.emit()" (keydown)="onKeydown($event)">
   <header class="plp-notification-card__head">
     <span class="plp-notification-card__identity"><i [class]="icon" aria-hidden="true"></i><plp-status-badge [status]="severity"></plp-status-badge></span>
     <span class="plp-notification-card__state">{{ isRead ? 'مقروء' : 'غير مقروء' }}</span>
@@ -10,5 +11,10 @@
     <div *ngIf="attendanceTime"><dt>وقت البصمة</dt><dd>{{ attendanceTime }}</dd></div>
     <div *ngIf="assignmentLabel"><dt>التسكين</dt><dd>{{ assignmentLabel }}</dd></div>
   </dl>
-  <footer *ngIf="createdAtLabel"><time>{{ createdAtLabel }}</time><span *ngIf="actionable">فتح التفاصيل</span></footer>
+  <footer *ngIf="createdAtLabel">
+    <time>{{ createdAtLabel }}</time>
+    <span *ngIf="actionable">فتح التفاصيل</span>
+  </footer>
+  </div>
+  <div *ngIf="!isRead" class="plp-notification-card__actions"><button pButton pRipple type="button" class="p-button-outlined p-button-sm" icon="pi pi-check" aria-label="تحديد كمقروء" (click)="onMarkRead($event)"><span class="p-button-label">تحديد كمقروء</span></button></div>
 </article>

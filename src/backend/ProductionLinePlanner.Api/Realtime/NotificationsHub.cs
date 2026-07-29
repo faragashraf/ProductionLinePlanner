@@ -14,6 +14,7 @@ public static class RealtimeEndpointPaths
 public interface IRealtimeClient
 {
     Task NotificationReceived(NotificationSummaryDto notification);
+    Task NotificationReadStateChanged(NotificationReadStateChangedDto change);
     Task ManufacturingDataChanged(ManufacturingDataChangedMessage change);
 }
 

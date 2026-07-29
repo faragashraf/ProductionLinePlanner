@@ -3,5 +3,6 @@
 .notifications-page__preferences div { display: grid; gap: 0.2rem; }
 .notifications-page__preferences span { color: var(--plp-color-text-subtle); font-size: var(--plp-font-size-xs); }
 .notifications-page__preferences .p-button { min-block-size: var(--plp-touch-target-min); }
+.notifications-page__feedback { margin: 0; color: var(--plp-color-text-subtle); font-size: var(--plp-font-size-sm); }
 .notifications-page__list { display: grid; gap: 0.75rem; }
 @media (max-width: 599px) { .notifications-page__preferences { align-items: stretch; } .notifications-page__preferences .p-button { inline-size: 100%; } }

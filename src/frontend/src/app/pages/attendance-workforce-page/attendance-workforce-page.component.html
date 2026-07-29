@@ -7,6 +7,7 @@
   <p class="workforce-page__feedback" *ngIf="syncMessage" role="status">{{ syncMessage }}</p>
   <div class="workforce-page__mobile-filter-toggle"><button pButton pRipple type="button" class="p-button-outlined" [attr.aria-expanded]="!filtersCollapsed" icon="pi pi-filter" [label]="(filtersCollapsed ? 'إظهار الفلاتر' : 'إخفاء الفلاتر') + (activeFilterCount ? ' (' + activeFilterCount + ')' : '')" (click)="toggleFilters()"></button></div>
   <section class="workforce-page__filters" [class.workforce-page__filters--collapsed]="filtersCollapsed" aria-label="فلاتر الحضور والتسكين">
+    <div *ngIf="selectedWorkerId" class="workforce-page__feedback"><span>تمت تصفية النتائج للعامل المحدد من الإشعار.</span><button pButton pRipple type="button" class="p-button-text p-button-sm" icon="pi pi-times" label="إزالة فلتر العامل" (click)="clearWorkerFilter()"></button></div>
     <label>التاريخ <input type="date" [(ngModel)]="selectedDate" (change)="onDateChange()"></label>
     <label>بحث <input pInputText type="search" [ngModel]="search" (ngModelChange)="onSearch($event)" placeholder="الاسم أو كود العامل"></label>
     <label>المصنع <select [(ngModel)]="selectedFactoryId" (change)="onFactoryChange()"><option value="">كل المصانع</option><option *ngFor="let factory of factories" [value]="factory.id">{{ factory.name }}</option></select></label>

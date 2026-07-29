@@ -125,6 +125,12 @@ public sealed class AttendanceNotificationOutboxProcessor(
 
         var metadataJson = JsonSerializer.Serialize(new
         {
+            navigationAction = NotificationNavigationActions.OpenDailyAttendance,
+            navigationPayload = new
+            {
+                workerId = attendanceEvent.WorkerId,
+                productionDate = DateOnly.FromDateTime(localTime)
+            },
             workerId = attendanceEvent.WorkerId,
             workerName = attendanceEvent.WorkerName,
             employeeCode = attendanceEvent.EmployeeCode,
@@ -155,6 +161,8 @@ public sealed class AttendanceNotificationOutboxProcessor(
                     IsToastEnabled: evaluated.Toast.Enabled,
                     IsSoundEnabled: evaluated.Sound.Enabled,
                     IsBrowserEnabled: evaluated.Browser.Enabled,
+                    // Legacy clients can still open this trusted route. New clients
+                    // use the action/payload stored in MetadataJson above.
                     NavigationUrl: "/attendance/workforce",
                     MetadataJson: metadataJson,
                     CorrelationKey: attendanceEvent.IdempotencyKey),

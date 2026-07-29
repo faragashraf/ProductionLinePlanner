@@ -24,6 +24,7 @@ test.beforeAll(async () => {
 
 async function prepareStudio(page: Page, scenario: Scenario = 'default'): Promise<{ updates: number; consoleErrors: string[]; failedRequests: string[] }> {
   const diagnostics = { updates: 0, consoleErrors: [] as string[], failedRequests: [] as string[] };
+  let persistedWorkerPolicy = structuredClone(workerPolicy);
   page.on('console', message => { if (message.type() === 'error') diagnostics.consoleErrors.push(message.text()); });
   page.on('pageerror', error => diagnostics.consoleErrors.push(error.message));
   page.on('requestfailed', request => diagnostics.failedRequests.push(`${request.method()} ${request.url()}`));
@@ -58,8 +59,11 @@ async function prepareStudio(page: Page, scenario: Scenario = 'default'): Promis
     } else if (pathname === '/api/admin/notification-policies/recipient-options') {
       data = { users: [{ id: 'f0000000-0000-0000-0000-000000000001', fullName: 'أحمد محمد', email: 'ahmed@test.local' }], roles: [{ id: 'f0000000-0000-0000-0000-000000000002', name: 'مشرف' }], permissions: [{ name: 'workers.view', capability: 'workers', descriptionAr: 'عرض بيانات العمال' }], capabilityGroups: ['workers'] };
     } else if (pathname.endsWith('/WorkerCreated')) {
-      data = route.request().method() === 'PUT' ? { ...workerPolicy, ...route.request().postDataJSON(), rowVersion: 'ERITFBUWFxg=' } : workerPolicy;
-      if (route.request().method() === 'PUT') diagnostics.updates += 1;
+      if (route.request().method() === 'PUT') {
+        persistedWorkerPolicy = { ...persistedWorkerPolicy, ...route.request().postDataJSON(), rowVersion: 'ERITFBUWFxg=' };
+        diagnostics.updates += 1;
+      }
+      data = persistedWorkerPolicy;
     } else if (pathname.endsWith('/AssignmentChanged')) {
       data = assignmentPolicy;
     }
@@ -146,4 +150,27 @@ test('shows explicit loading, empty, and error states', async ({ page }) => {
   await expect(page.getByTitle('تعذر إكمال العملية').locator('section[role="alert"]')).toContainText('تعذر تحميل السياسات');
   await expect(page.getByRole('button', { name: 'إعادة المحاولة' })).toBeVisible();
   await page.screenshot({ path: path.join(visualOutput, 'mobile-error.png'), fullPage: true });
+});
+
+test('keeps a role recipient selected after save and a policy reload', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const diagnostics = await prepareStudio(page);
+  await openStudio(page);
+
+  await page.getByRole('button', { name: 'إضافة قاعدة' }).click();
+  const rule = page.locator('.policy-studio__rule').last();
+  await rule.locator('select').first().selectOption('Role');
+  const roleSelect = rule.locator('select').nth(1);
+  await roleSelect.selectOption('f0000000-0000-0000-0000-000000000002');
+  await expect(roleSelect).toHaveValue('f0000000-0000-0000-0000-000000000002');
+
+  await page.getByRole('button', { name: 'حفظ السياسة' }).click();
+  await expect.poll(() => diagnostics.updates).toBe(1);
+  await page.getByText('تم تغيير التسكين').first().click();
+  await page.getByText('تم إنشاء عامل').first().click();
+
+  await expect(page.locator('.policy-studio__rule').last().locator('select').nth(1))
+    .toHaveValue('f0000000-0000-0000-0000-000000000002');
+  expect(diagnostics.consoleErrors).toEqual([]);
+  expect(diagnostics.failedRequests).toEqual([]);
 });
