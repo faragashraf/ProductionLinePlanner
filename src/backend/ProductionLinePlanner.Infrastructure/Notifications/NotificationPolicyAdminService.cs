@@ -377,8 +377,8 @@ public sealed class NotificationPolicyAdminService(
         var roleIds = normalized.Where(rule => rule.RoleId is not null).Select(rule => rule.RoleId!.Value).ToArray();
         if (roleIds.Length > 0)
         {
-            var existing = await dbContext.AppRoles.CountAsync(role => roleIds.Contains(role.Id), cancellationToken);
-            if (existing != roleIds.Distinct().Count()) return RuleFailure("One or more recipient roles do not exist.");
+            var existing = await dbContext.AppRoles.CountAsync(role => roleIds.Contains(role.Id) && role.IsActive, cancellationToken);
+            if (existing != roleIds.Distinct().Count()) return RuleFailure("One or more recipient roles do not exist or are inactive.");
         }
 
         return Result<IReadOnlyCollection<ValidatedRule>>.Success(normalized.OrderBy(rule => rule.SortOrder).ToArray());

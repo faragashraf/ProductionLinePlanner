@@ -79,7 +79,7 @@
             <option *ngFor="let kind of recipientKinds" [value]="kind">{{ recipientKindLabel(kind) }}</option>
           </select>
           <select *ngIf="rule.recipientKind === 'User'" [(ngModel)]="rule.userId" (ngModelChange)="markDirty()"><option [ngValue]="null">{{ userLabel(null) }}</option><option *ngFor="let user of recipientOptions.users" [value]="user.id">{{ user.fullName }} — {{ user.email }}</option></select>
-          <select *ngIf="rule.recipientKind === 'Role'" [(ngModel)]="rule.roleId" (ngModelChange)="markDirty()"><option [ngValue]="null">اختر دورًا</option><option *ngFor="let role of recipientOptions.roles" [value]="role.id">{{ role.name }}</option></select>
+          <select *ngIf="rule.recipientKind === 'Role'" [(ngModel)]="rule.roleId" (ngModelChange)="markDirty()" [attr.aria-label]="'الدور المستلم ' + (index + 1)" required><option [ngValue]="null">اختر دورًا</option><option *ngFor="let role of recipientOptions.roles" [value]="role.id">{{ role.name }}</option></select>
           <select *ngIf="rule.recipientKind === 'Permission'" [(ngModel)]="rule.permissionKey" (ngModelChange)="markDirty()"><option [ngValue]="null">اختر صلاحية</option><option *ngFor="let permission of recipientOptions.permissions" [value]="permission.name">{{ permission.descriptionAr || permission.name }} ({{ permission.name }})</option></select>
           <select *ngIf="rule.recipientKind === 'CapabilityGroup'" [(ngModel)]="rule.capabilityKey" (ngModelChange)="markDirty()"><option [ngValue]="null">اختر مجموعة</option><option *ngFor="let capability of recipientOptions.capabilityGroups" [value]="capability">{{ capability }}</option></select>
           <span *ngIf="rule.recipientKind === 'Creator'">منشئ الحدث الحالي</span><span *ngIf="rule.recipientKind === 'ExcludeActor'">استبعاد المستخدم الذي نفذ الحدث</span>
@@ -88,7 +88,7 @@
         </div>
       </section>
 
-      <footer><span *ngIf="isDirty" class="policy-studio__dirty">لديك تعديلات غير محفوظة</span><button pButton type="button" label="حفظ السياسة" icon="pi pi-save" [loading]="isSaving" (click)="save()"></button></footer>
+      <footer><span *ngIf="isDirty" class="policy-studio__dirty">لديك تعديلات غير محفوظة</span><button pButton type="button" label="حفظ السياسة" icon="pi pi-save" [loading]="isSaving" [disabled]="isSaving || !canSave" (click)="save()"></button></footer>
       <p *ngIf="hasError" class="policy-studio__operation-error" role="alert">{{ errorMessage }}</p>
     </article>
   </div>

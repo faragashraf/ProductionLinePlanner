@@ -100,6 +100,39 @@ public sealed class ZkTimeStagingPipelineTests
     }
 
     [Fact]
+    public async Task Existing_notification_does_not_block_late_arriving_in_out_punches()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        fixture.Source.AddWorkers(Worker(1, 3887, "1024"));
+        fixture.Source.AddPunches(
+            Punch(101, 3887, "1024", 8, 5, "I"),
+            Punch(102, 3887, "1024", 17, 0, "O"));
+
+        await using (var setup = fixture.CreateDbContext())
+        {
+            var worker = await setup.Workers.SingleAsync(item => item.AttendanceUserId == "3887");
+            var record = new AttendanceRecord(
+                Guid.NewGuid(), worker.Id, new DateTime(2026, 7, 16, 13, 29, 55, DateTimeKind.Utc),
+                AttendanceStatus.Late, source: "Existing");
+            setup.AttendanceRecords.Add(record);
+            setup.AttendanceNotificationEvents.Add(new AttendanceNotificationEvent(
+                Guid.NewGuid(), record.Id, worker.Id, worker.FullName, worker.EmployeeCode!,
+                WorkerAttendanceNotificationType.CheckIn, record.AttendanceTimeUtc, "Existing",
+                $"attendance:{record.Id:D}:CheckIn"));
+            await setup.SaveChangesAsync();
+        }
+
+        var result = await fixture.RunAsync();
+
+        Assert.True(result.IsSuccess, result.Error?.Message);
+        await using var reloaded = fixture.CreateDbContext();
+        Assert.Equal(2, await reloaded.AttendanceNotificationEvents.CountAsync());
+        Assert.Equal(2, await reloaded.AttendanceNotificationEvents.Select(item => item.IdempotencyKey).Distinct().CountAsync());
+        Assert.Contains(101, fixture.Source.ProcessedPunchIds);
+        Assert.Contains(102, fixture.Source.ProcessedPunchIds);
+    }
+
+    [Fact]
     public async Task Punch_type_aggregation_uses_the_first_in_and_last_out_without_inventing_a_checkout()
     {
         await using var fixture = await Fixture.CreateAsync(includeExistingWorker: false);
@@ -388,6 +421,7 @@ public sealed class ZkTimeStagingPipelineTests
             Assert.Equal(FakeStagingSource.State.Pending, row.State);
             Assert.Equal(1, row.AttemptCount);
             Assert.Null(row.ProcessingLeaseId);
+            Assert.Equal("Synthetic attendance persistence failure.", row.ResolutionDetails);
         });
         Assert.Equal([101L, 102L], fixture.Source.AttendanceCompletions.Single().InboxIds);
     }
@@ -530,7 +564,7 @@ public sealed class ZkTimeStagingPipelineTests
         public PunchInboxSnapshot GetPunchInbox(long inboxId)
         {
             var row = punches[inboxId];
-            return new PunchInboxSnapshot(row.State, row.Attempts, row.ProcessingLeaseId);
+            return new PunchInboxSnapshot(row.State, row.Attempts, row.ProcessingLeaseId, row.ResolutionDetails);
         }
 
         public void AddWorkers(params WorkerIdentitySourceItem[] rows)
@@ -623,6 +657,7 @@ public sealed class ZkTimeStagingPipelineTests
 
                 row.State = ResolveState(outcome, row.Attempts);
                 row.ProcessingLeaseId = null;
+                row.ResolutionDetails = outcome.ResolutionDetails;
             }
             if (batch.LeaseId.HasValue && outcomes.Count > 0)
             {
@@ -648,11 +683,12 @@ public sealed class ZkTimeStagingPipelineTests
             public State State { get; set; } = State.Pending;
             public int Attempts { get; set; }
             public Guid? ProcessingLeaseId { get; set; }
+            public string? ResolutionDetails { get; set; }
         }
 
         public sealed record AttendanceClaim(Guid LeaseId, long[] InboxIds);
         public sealed record AttendanceCompletion(Guid LeaseId, long[] InboxIds);
-        public sealed record PunchInboxSnapshot(State State, int AttemptCount, Guid? ProcessingLeaseId);
+        public sealed record PunchInboxSnapshot(State State, int AttemptCount, Guid? ProcessingLeaseId, string? ResolutionDetails);
         public enum State { Pending, Processing, Processed, Skipped, Failed }
     }
 
