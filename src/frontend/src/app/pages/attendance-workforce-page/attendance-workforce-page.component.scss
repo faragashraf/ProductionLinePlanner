@@ -1,0 +1,37 @@
+:host { display:block; min-width:0; }
+.workforce-page { display:grid; gap:var(--plp-spacing-3); width:100%; max-width:none; }
+.workforce-page__header-actions { display:flex; gap:.5rem; }
+.workforce-page__feedback { margin:0; color:var(--plp-color-text-subtle); }
+.workforce-page__filters { display:grid; grid-template-columns:repeat(auto-fit,minmax(10rem,1fr)); gap:var(--plp-spacing-2); align-items:end; padding:var(--plp-spacing-3); border:1px solid var(--plp-color-border); border-radius:var(--plp-radius-md); background:var(--plp-color-surface); }
+.workforce-page__filters label { display:grid; gap:.3rem; color:var(--plp-color-text-subtle); font-size:var(--plp-font-size-sm); }
+.workforce-page__filters input,.workforce-page__filters select { min-height:2.5rem; width:100%; border:1px solid var(--plp-color-border); border-radius:var(--plp-radius-sm); padding:.35rem .55rem; background:var(--plp-color-surface); color:var(--plp-color-text); }
+.workforce-page__summary { display:grid; grid-template-columns:repeat(auto-fit,minmax(9rem,1fr)); gap:var(--plp-spacing-2); }
+.workforce-page__summary article { display:grid; gap:.35rem; padding:var(--plp-spacing-2); border:1px solid var(--plp-color-border); border-radius:var(--plp-radius-md); background:var(--plp-color-surface); }
+.workforce-page__summary span,.workforce-page__worker small { color:var(--plp-color-text-subtle); }
+.workforce-page__summary-scope { margin:calc(var(--plp-spacing-2) * -1) 0 0; color:var(--plp-color-text-subtle); font-size:var(--plp-font-size-sm); }
+.workforce-page__summary strong { font-size:var(--plp-font-size-xl); }
+.workforce-page__worker { display:flex; align-items:center; gap:.65rem; min-width:12rem; }.workforce-page__worker span { display:grid; gap:.15rem; }
+.workforce-page__badge { display:inline-flex; max-width:max-content; padding:.25rem .55rem; border-radius:999px; background:var(--plp-color-info-2); color:var(--plp-color-text); font-weight:700; font-size:var(--plp-font-size-xs); }.workforce-page__badge.is-warning,.workforce-page__badge--warning{background:var(--plp-color-warning-2)}.workforce-page__badge--success{background:#dcfae6;color:#067647}.workforce-page__badge--danger{background:#fee4e2;color:#b42318}.workforce-page__badge--neutral{background:#f2f4f7;color:#475467}
+.workforce-page__details { background:color-mix(in oklab,var(--plp-color-surface) 88%,var(--plp-color-info-2)); }
+.workforce-page__details { padding:var(--plp-spacing-2); }
+.workforce-page__detail-section { display:inline-grid; vertical-align:top; width:min(100%,28rem); margin:.4rem 1rem .4rem 0; padding:.7rem; border:1px solid var(--plp-color-border); border-radius:var(--plp-radius-sm); }.workforce-page__detail-section h3,.workforce-page__detail-section p { margin:.15rem 0; overflow-wrap:anywhere; }.workforce-page__detail-section h3 { font-size:var(--plp-font-size-sm); }.workforce-page__expand-button { min-height:2.75rem; min-width:6.25rem; }.workforce-page__mobile-filter-toggle { display:none; }
+@media (max-width: 64rem) { .workforce-page__filters { grid-template-columns:repeat(2,minmax(0,1fr)); }.workforce-page__duration-column { display:none; } }
+@media (max-width: 50rem) {
+  .workforce-page__filters { grid-template-columns:1fr 1fr; }
+  .workforce-page__summary { grid-template-columns:1fr 1fr; }
+  .workforce-page__last-checkout-column,.workforce-page__duration-column,.workforce-page__tablet-landscape-column { display:none !important; }
+  .workforce-page__detail-section { display:grid; width:100%; margin:.35rem 0; }
+  .workforce-page__worker { min-width:0; }
+  :host ::ng-deep .workforce-page__table .p-datatable-wrapper { overflow:visible; }
+  :host ::ng-deep .workforce-page__table .p-datatable-table,
+  :host ::ng-deep .workforce-page__table .p-datatable-tbody { display:grid; inline-size:100%; }
+  :host ::ng-deep .workforce-page__table .p-datatable-thead { display:none; }
+  :host ::ng-deep .workforce-page__table .p-datatable-tbody { gap:var(--plp-space-12); padding:var(--plp-space-8); }
+  :host ::ng-deep .workforce-page__table .p-datatable-tbody > tr { display:grid; overflow:hidden; background:var(--plp-color-surface-raised); border:var(--plp-border-default); border-radius:var(--plp-radius-md); }
+  :host ::ng-deep .workforce-page__table .p-datatable-tbody > tr > td { display:grid; grid-template-columns:minmax(6.5rem,40%) minmax(0,1fr); gap:var(--plp-space-12); align-items:baseline; padding:var(--plp-space-8) var(--plp-space-12); }
+  :host ::ng-deep .workforce-page__table .p-datatable-tbody > tr > td::before { content:attr(data-plp-label); color:var(--plp-color-text-subtle); font-size:var(--plp-type-caption); font-weight:var(--plp-font-weight-semibold); }
+  :host ::ng-deep .workforce-page__table .p-datatable-tbody > tr > td.workforce-page__details { display:block; padding:var(--plp-space-12); }
+  :host ::ng-deep .workforce-page__table .p-datatable-tbody > tr > td.workforce-page__details::before { content:none; }
+}
+@media (max-width: 40rem) { .workforce-page__mobile-filter-toggle { display:block; }.workforce-page__filters--collapsed { display:none; }.workforce-page__filters { grid-template-columns:1fr; }.workforce-page__summary { grid-template-columns:1fr 1fr; }.workforce-page__table { overflow:hidden; }.workforce-page__expand-button { width:100%; }.workforce-page__worker small { overflow-wrap:anywhere; } }
+@media (max-width: 23rem) { .workforce-page__summary { grid-template-columns:1fr; } }

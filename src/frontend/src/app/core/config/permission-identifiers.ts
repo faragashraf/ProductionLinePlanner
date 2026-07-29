@@ -29,6 +29,7 @@ export const PERMISSIONS = {
   stages: {
     view: 'stages.view',
     manage: 'stages.manage',
+    delete: 'stages.delete',
     import: 'stages.import',
     export: 'stages.export'
   },
@@ -42,7 +43,8 @@ export const PERMISSIONS = {
     approve: 'production.approve'
   },
   reports: {
-    productionView: 'reports.production.view'
+    productionView: 'reports.production.view',
+    financialView: 'reports.financial.view'
   },
   users: {
     view: 'users.view',
@@ -57,6 +59,9 @@ export const PERMISSIONS = {
   },
   audit: {
     view: 'audit.view'
+  },
+  notifications: {
+    policiesManage: 'notifications.policies.manage'
   }
 } as const;
 

@@ -53,14 +53,12 @@ describe('ProductionCostRecordingPageComponent', () => {
     api = jasmine.createSpyObj('ProductionCostRecordingApiService', ['listOrders', 'listRecords', 'dailyReport', 'listModels', 'listModelStages', 'getProductReadiness', 'approve', 'cancelProductionApproval', 'getRecord', 'calculatePreview', 'createDraft', 'updateDraft']);
     api.listOrders.and.returnValue(of([])); api.listRecords.and.returnValue(of([])); api.dailyReport.and.returnValue(of([])); api.listModels.and.returnValue(of([])); api.listModelStages.and.returnValue(of([])); api.getProductReadiness.and.returnValue(of(readiness()));
     api.calculatePreview.and.returnValue(of(draft())); api.createDraft.and.returnValue(of(draft())); api.updateDraft.and.returnValue(of(draft())); api.cancelProductionApproval.and.returnValue(of(draft('Cancelled')));
-    masterData = jasmine.createSpyObj('ManufacturingMasterDataApiService', ['factories', 'productionLines', 'allProductionLines', 'mainStagesForLine', 'allMainStages', 'subStagesForMainStage', 'allSubStages']);
-    masterData.factories.and.returnValue(of([])); masterData.productionLines.and.returnValue(of([])); masterData.allProductionLines.and.returnValue(of([])); masterData.mainStagesForLine.and.returnValue(of([])); masterData.allMainStages.and.returnValue(of([])); masterData.subStagesForMainStage.and.returnValue(of([])); masterData.allSubStages.and.returnValue(of([]));
-    assignments = jasmine.createSpyObj('AssignmentsApiService', ['getSubStageWorkerContext', 'createDefaultAssignment', 'createTemporaryAssignment', 'createReplacementAssignment', 'removeDefaultAssignment', 'cancelTemporaryAssignment', 'moveCurrentAssignment']);
+    masterData = jasmine.createSpyObj('ManufacturingMasterDataApiService', ['factories', 'productionLines', 'allProductionLines', 'mainStagesForDepartment', 'allMainStages', 'subStagesForMainStage', 'allSubStages']);
+    masterData.factories.and.returnValue(of([])); masterData.productionLines.and.returnValue(of([])); masterData.allProductionLines.and.returnValue(of([])); masterData.mainStagesForDepartment.and.returnValue(of([])); masterData.allMainStages.and.returnValue(of([])); masterData.subStagesForMainStage.and.returnValue(of([])); masterData.allSubStages.and.returnValue(of([]));
+    assignments = jasmine.createSpyObj('AssignmentsApiService', ['getSubStageWorkerContext', 'createDefaultAssignment', 'removeDefaultAssignment']);
     assignments.getSubStageWorkerContext.and.returnValue(of({ subStageId: 'sub-1', currentWorkers: [], presentWorkers: [], availableWorkers: [], unavailableWorkersCount: 0 }));
     assignments.createDefaultAssignment.and.returnValue(of({ assignmentId: 'a-1', workerId: 'worker-1', assignmentType: 'Default', subStageId: 'sub-1', fromSubStageId: null, toSubStageId: null, startsAtUtc: null, endsAtUtc: null, status: 'Active', replacementForWorkerId: null }));
     assignments.removeDefaultAssignment.and.returnValue(of({ assignmentId: 'a-1', workerId: 'worker-1', assignmentType: 'Default', subStageId: 'sub-1', fromSubStageId: null, toSubStageId: null, startsAtUtc: null, endsAtUtc: null, status: 'Cancelled', replacementForWorkerId: null }));
-    assignments.cancelTemporaryAssignment.and.returnValue(of({ assignmentId: 'a-1', workerId: 'worker-1', assignmentType: 'Temporary', subStageId: null, fromSubStageId: 'sub-1', toSubStageId: 'sub-2', startsAtUtc: null, endsAtUtc: null, status: 'Cancelled', replacementForWorkerId: null }));
-    assignments.moveCurrentAssignment.and.returnValue(of({ assignmentId: 'a-2', workerId: 'worker-1', assignmentType: 'Default', subStageId: 'sub-2', fromSubStageId: 'sub-1', toSubStageId: 'sub-2', startsAtUtc: null, endsAtUtc: null, status: 'Active', replacementForWorkerId: null }));
     attendance = jasmine.createSpyObj('AttendanceApiService', ['getToday', 'syncToday', 'getForProductionDate', 'syncForProductionDate']);
     attendance.getToday.and.returnValue(of({ date: '2026-07-15T00:00:00Z', items: [] }));
     attendance.syncToday.and.returnValue(of(syncResult));
@@ -81,9 +79,9 @@ describe('ProductionCostRecordingPageComponent', () => {
     }).overrideComponent(ProductionCostRecordingPageComponent, { set: { template: `
       <ng-container *ngIf="showWorkerPanel; else assignmentBlocked">
         <section id="workerPanel">
-          <p id="workerLoading" *ngIf="loadingWorkers">جارٍ تحميل التعيين الحالي وحالة الحضور…</p>
+          <p id="workerLoading" *ngIf="loadingWorkers">جارٍ تحميل التسكين الحالي وحالة الحضور…</p>
           <p id="workerError" *ngIf="workerContextError">{{ workerContextError }}</p>
-          <p id="noCurrentWorkers" *ngIf="!loadingWorkers && !workerContextError && !currentWorkers.length">لا يوجد عمال معينون حاليًا لهذه المرحلة.</p>
+          <p id="noCurrentWorkers" *ngIf="!loadingWorkers && !workerContextError && !currentWorkers.length">لا يوجد عمال مسكنون حاليًا لهذه المرحلة.</p>
           <p id="attendanceEmptyState" *ngIf="showAttendanceEmptyState">لا توجد بيانات حضور متاحة لهذا التاريخ.</p>
           <p id="attendanceProductionDateNote">المزامنة اليدوية تقرأ حضور تاريخ الإنتاج المحدد.</p>
           <button id="attendanceSyncAction" *ngIf="canSyncAttendance" (click)="syncAttendanceToday()">تحديث حضور تاريخ الإنتاج</button>
@@ -202,14 +200,16 @@ describe('ProductionCostRecordingPageComponent', () => {
     expect(masterData.productionLines).not.toHaveBeenCalled();
     component.selectFactory('factory-1');
     expect(masterData.productionLines).toHaveBeenCalledTimes(1);
-    expect(masterData.mainStagesForLine).not.toHaveBeenCalled();
+    expect(masterData.mainStagesForDepartment).not.toHaveBeenCalled();
+    component.productionLines = [{ id: 'line-1', factoryId: 'factory-1', departmentId: 'department-1', lineCode: 'L-1', name: 'Line', sequenceOrder: 1, isActive: true }];
     component.selectProductionLine('line-1');
-    expect(masterData.mainStagesForLine).toHaveBeenCalledWith('line-1');
+    expect(masterData.mainStagesForDepartment).toHaveBeenCalledWith('department-1');
     expect(masterData.subStagesForMainStage).not.toHaveBeenCalled();
   });
 
   it('clears all stale descendants and production context when a parent changes', () => {
     component.selectedFactoryId = 'factory-1'; component.selectedProductionLineId = 'line-old'; component.selectedMainStageId = 'main-old'; component.selectedSubStageId = 'sub-old';
+    component.productionLines = [{ id: 'line-new', factoryId: 'factory-1', departmentId: 'department-1', lineCode: 'L-NEW', name: 'New line', sequenceOrder: 1, isActive: true }];
     component.recordForm.patchValue({ productionOrderId: 'order-old', productModelStageId: 'stage-old', producedQuantity: 20 });
     spyOn(window, 'confirm').and.returnValue(true);
     component.selectProductionLine('line-new');
@@ -217,7 +217,7 @@ describe('ProductionCostRecordingPageComponent', () => {
     expect(component.selectedSubStageId).toBe('');
     expect(component.recordForm.controls.productionOrderId.value).toBe('');
     expect(component.recordForm.controls.productModelStageId.value).toBe('');
-    expect(masterData.mainStagesForLine).toHaveBeenCalledWith('line-new');
+    expect(masterData.mainStagesForDepartment).toHaveBeenCalledWith('department-1');
   });
 
   it('loads worker context only after a sub-stage is selected', () => {
@@ -417,9 +417,9 @@ describe('ProductionCostRecordingPageComponent', () => {
 
   it('restores a contextual factory-to-sub-stage route in parent-to-child order', () => {
     masterData.factories.and.returnValue(of([{ id: 'factory-1', code: 'F-1', name: 'Factory', isActive: true }]));
-    masterData.productionLines.and.returnValue(of([{ id: 'line-1', factoryId: 'factory-1', lineCode: 'L-1', name: 'Line', sequenceOrder: 1, isActive: true }]));
-    masterData.mainStagesForLine.and.returnValue(of([{ id: 'main-1', productionLineId: 'line-1', name: 'Main', sequenceOrder: 1, isCritical: false, isActive: true }]));
-    masterData.subStagesForMainStage.and.returnValue(of([{ id: 'sub-1', mainStageId: 'main-1', code: 'SUB', name: 'Sub', capacity: 1, sequenceOrder: 1, isActive: true }]));
+    masterData.productionLines.and.returnValue(of([{ id: 'line-1', factoryId: 'factory-1', departmentId: 'department-1', lineCode: 'L-1', name: 'Line', sequenceOrder: 1, isActive: true }]));
+    masterData.mainStagesForDepartment.and.returnValue(of([{ id: 'main-1', departmentId: 'department-1', name: 'Main', sequenceOrder: 1, isCritical: false, isActive: true }]));
+    masterData.subStagesForMainStage.and.returnValue(of([{ id: 'sub-1', mainStageId: 'main-1', departmentId: 'department-1', code: 'SUB', name: 'Sub', capacity: 1, sequenceOrder: 1, isActive: true }]));
     routeQueryParams.next(convertToParamMap({ factoryId: 'factory-1', productionLineId: 'line-1', mainStageId: 'main-1', subStageId: 'sub-1' }));
 
     fixture.detectChanges();
@@ -429,7 +429,7 @@ describe('ProductionCostRecordingPageComponent', () => {
     expect(component.selectedMainStageId).toBe('main-1');
     expect(component.selectedSubStageId).toBe('sub-1');
     expect(masterData.productionLines).toHaveBeenCalledTimes(1);
-    expect(masterData.mainStagesForLine).toHaveBeenCalledWith('line-1');
+    expect(masterData.mainStagesForDepartment).toHaveBeenCalledWith('department-1');
     expect(masterData.subStagesForMainStage).toHaveBeenCalledWith('main-1');
     expect(assignments.getSubStageWorkerContext).toHaveBeenCalledWith('sub-1', component.selectedProductionDate);
   });
@@ -450,7 +450,7 @@ describe('ProductionCostRecordingPageComponent', () => {
   it('rejects duplicate workers in the same production batch before submission', () => {
     component.selectedFactoryId = 'factory-1'; component.selectedProductionLineId = 'line-1'; component.selectedMainStageId = 'main-1'; component.selectedSubStageId = 'sub-1';
     component.orders = [{ id: 'order-1', orderNumber: 'O-1', productModelId: 'model-1', productModelCode: 'M-1', productionLineId: 'line-1', productionDate: '2026-07-13', plannedQuantity: 20, status: 'Active' }];
-    component.modelStages = [{ id: 'stage-1', subStageId: 'sub-1', stageOrder: 1, piecePrice: 1, compensationMode: 'SharedPercentage', isRequired: true, isActive: true }];
+    component.modelStages = [{ id: 'stage-1', productionLineId: 'line-1', subStageId: 'sub-1', stageOrder: 1, piecePrice: 1, compensationMode: 'SharedPercentage', isRequired: true, isActive: true }];
     component.workerContext = { subStageId: 'sub-1', currentWorkers: [{ workerId: 'worker-1', employeeCode: 'W1', fullName: 'Worker', attendanceStatus: 'Present', attendanceTimeUtc: null, assignmentType: 'Default', effectiveSubStageId: 'sub-1', isAvailable: true }], presentWorkers: [], availableWorkers: [], unavailableWorkersCount: 0 };
     component.recordForm.patchValue({ productionOrderId: 'order-1', productModelStageId: 'stage-1' });
     component.addWorker(component.currentWorkers[0]);
@@ -460,32 +460,29 @@ describe('ProductionCostRecordingPageComponent', () => {
   });
 
   it('edits a current assignment inside the workflow and respects assignment permission', () => {
+    component.selectedProductionLineId = 'line-1';
     component.selectedSubStageId = 'sub-1';
     component.workerContext = { subStageId: 'sub-1', currentWorkers: [], presentWorkers: [{ workerId: 'worker-1', employeeCode: 'W1', fullName: 'Worker', attendanceStatus: 'Present', attendanceTimeUtc: null, assignmentType: null, effectiveSubStageId: null, isAvailable: true }], availableWorkers: [], unavailableWorkersCount: 0 };
-    component.assignmentForm.patchValue({ workerId: 'worker-1', mode: 'default' });
+    component.assignmentForm.patchValue({ workerId: 'worker-1' });
     component.applyAssignment();
-    expect(assignments.createDefaultAssignment).toHaveBeenCalledWith({ workerId: 'worker-1', subStageId: 'sub-1' });
+    expect(assignments.createDefaultAssignment).toHaveBeenCalledWith({ workerId: 'worker-1', productionLineId: 'line-1', subStageId: 'sub-1' });
     permissions.values = ['assignments.view'];
-    component.assignmentForm.patchValue({ workerId: 'worker-1', mode: 'default' });
+    component.assignmentForm.patchValue({ workerId: 'worker-1' });
     component.applyAssignment();
     expect(assignments.createDefaultAssignment).toHaveBeenCalledTimes(1);
   });
 
-  it('blocks an invalid temporary assignment locally and shows its Arabic missing-field reasons', () => {
-    component.selectedSubStageId = 'sub-1';
+  it('keeps only permanent assignments in the active worker list', () => {
     component.workerContext = {
       subStageId: 'sub-1',
-      currentWorkers: [],
-      presentWorkers: [{ workerId: 'worker-1', employeeCode: 'W1', fullName: 'Worker', attendanceStatus: 'Present', attendanceTimeUtc: null, assignmentType: 'Default', effectiveSubStageId: 'sub-2', isAvailable: false }],
-      availableWorkers: [], unavailableWorkersCount: 0
+      currentWorkers: [
+        { workerId: 'permanent', employeeCode: 'P1', fullName: 'Permanent', attendanceStatus: 'Present', attendanceTimeUtc: null, assignmentType: 'Default', effectiveSubStageId: 'sub-1', isAvailable: true },
+        { workerId: 'historical-temporary', employeeCode: 'T1', fullName: 'Historical', attendanceStatus: 'Present', attendanceTimeUtc: null, assignmentType: 'Temporary', effectiveSubStageId: 'sub-1', isAvailable: true }
+      ],
+      presentWorkers: [], availableWorkers: [], unavailableWorkersCount: 0
     };
-    component.assignmentForm.patchValue({ workerId: 'worker-1', mode: 'temporary', reason: '', startAtLocal: '', endAtLocal: '' });
 
-    component.applyAssignment();
-
-    expect(assignments.createTemporaryAssignment).not.toHaveBeenCalled();
-    expect(component.error).toContain('السبب مطلوب');
-    expect(component.error).toContain('وقت السريان مطلوب');
+    expect(component.currentWorkers.map(worker => worker.workerId)).toEqual(['permanent']);
   });
 
   it('keeps an absent assigned worker visible but excludes them from production participants', () => {
@@ -505,10 +502,10 @@ describe('ProductionCostRecordingPageComponent', () => {
     component.orders = [{ id: 'order-1', orderNumber: 'O-1', productModelId: 'model-1', productModelCode: 'M-1', productionLineId: 'line-1', productionDate: '2026-07-13', plannedQuantity: 20, status: 'Active' }];
     api.getRecord.and.returnValue(of({ ...draft(), workers: [{ workerId: 'worker-1', workerCode: 'W1', workerName: 'Worker', percentage: 100, equivalentQuantity: 10, calculatedEarning: 10 }] }));
     masterData.factories.and.returnValue(of([{ id: 'factory-1', code: 'F-1', name: 'Factory', isActive: true }]));
-    masterData.allProductionLines.and.returnValue(of([{ id: 'line-1', factoryId: 'factory-1', lineCode: 'L-1', name: 'Line', sequenceOrder: 1, isActive: true }]));
-    masterData.allMainStages.and.returnValue(of([{ id: 'main-1', productionLineId: 'line-1', name: 'Main', sequenceOrder: 1, isCritical: false, isActive: true }]));
-    masterData.allSubStages.and.returnValue(of([{ id: 'sub-1', mainStageId: 'main-1', code: 'SUB', name: 'Sub', capacity: 1, sequenceOrder: 1, isActive: true }]));
-    api.listModelStages.and.returnValue(of([{ id: 'stage-1', subStageId: 'sub-1', stageOrder: 1, piecePrice: 1, compensationMode: 'SharedPercentage', isRequired: true, isActive: true }]));
+    masterData.allProductionLines.and.returnValue(of([{ id: 'line-1', factoryId: 'factory-1', departmentId: 'department-1', lineCode: 'L-1', name: 'Line', sequenceOrder: 1, isActive: true }]));
+    masterData.allMainStages.and.returnValue(of([{ id: 'main-1', departmentId: 'department-1', name: 'Main', sequenceOrder: 1, isCritical: false, isActive: true }]));
+    masterData.allSubStages.and.returnValue(of([{ id: 'sub-1', mainStageId: 'main-1', departmentId: 'department-1', code: 'SUB', name: 'Sub', capacity: 1, sequenceOrder: 1, isActive: true }]));
+    api.listModelStages.and.returnValue(of([{ id: 'stage-1', productionLineId: 'line-1', subStageId: 'sub-1', departmentId: 'department-1', stageOrder: 1, piecePrice: 1, compensationMode: 'SharedPercentage', isRequired: true, isActive: true }]));
 
     component.openRecord(draft());
 
@@ -624,19 +621,14 @@ describe('ProductionCostRecordingPageComponent', () => {
     expect(component.draftContextUnavailable).toContain('تعذر استعادة مسار');
   });
 
-  it('unassigns and moves a current worker from the same workflow with mandatory reasons', () => {
-    component.selectedFactoryId = 'factory-1'; component.selectedSubStageId = 'sub-1';
+  it('unassigns a permanent current worker with a mandatory reason', () => {
+    component.selectedFactoryId = 'factory-1'; component.selectedProductionLineId = 'line-1'; component.selectedSubStageId = 'sub-1';
     const worker = { workerId: 'worker-1', employeeCode: 'W1', fullName: 'Worker', attendanceStatus: 'Present' as const, attendanceTimeUtc: null, assignmentId: 'assignment-1', assignmentType: 'Default' as const, effectiveSubStageId: 'sub-1', isAvailable: true };
     component.openUnassignDialog(worker);
     component.assignmentForm.controls.reason.setValue('انتهاء الوردية');
     component.confirmUnassign();
-    expect(assignments.removeDefaultAssignment).toHaveBeenCalledWith('worker-1', 'sub-1', 'انتهاء الوردية');
+    expect(assignments.removeDefaultAssignment).toHaveBeenCalledWith('worker-1', 'line-1', 'sub-1', 'انتهاء الوردية');
 
-    component.openMoveDialog(worker);
-    component.moveSubStageId = 'sub-2';
-    component.assignmentForm.patchValue({ reason: 'نقل للتشغيل', startAtLocal: '2026-07-14T12:00' });
-    component.confirmMove();
-    expect(assignments.moveCurrentAssignment).toHaveBeenCalledWith(jasmine.objectContaining({ workerId: 'worker-1', sourceAssignmentId: 'assignment-1', fromSubStageId: 'sub-1', toSubStageId: 'sub-2', reason: 'نقل للتشغيل' }));
   });
 
   it('does not send an invalid draft and explains the missing Arabic requirements', () => {
@@ -647,7 +639,7 @@ describe('ProductionCostRecordingPageComponent', () => {
     expect(component.error).toContain('الكمية المنتجة مطلوبة');
   });
 
-  it('invalidates a current preview when quantity, worker replacement, or unassignment changes the unsaved batch', () => {
+  it('invalidates a current preview when quantity or permanent unassignment changes the unsaved batch', () => {
     configureValidDraft(component);
     const currentPreview = { ...draft(), workers: [{ workerId: 'worker-1', workerCode: 'W1', workerName: 'Worker 1', percentage: 100, equivalentQuantity: 10, calculatedEarning: 10 }] };
     api.calculatePreview.and.returnValue(of(currentPreview));
@@ -661,7 +653,7 @@ describe('ProductionCostRecordingPageComponent', () => {
     expect(component.previewIsStale).toBeTrue();
     expect(component.previewStaleMessage).toBe('تم تغيير بيانات الدفعة. أعد حساب المعاينة.');
 
-    // Restore a fresh preview then exercise the same lifecycle through a replacement.
+    // Restore a fresh preview then exercise the same lifecycle through a removed participant.
     component.recordForm.controls.producedQuantity.setValue(10);
     component.calculatePreview();
     (component as any).assignmentDraftUpdateMode = 'draft-too';
@@ -706,10 +698,10 @@ function configureRestorableDraftContext(
   component.orders = [{ id: 'order-1', orderNumber: 'O-1', productModelId: 'model-1', productModelCode: 'M-1', productionLineId: 'line-1', productionDate: '2026-07-13', plannedQuantity: 20, status: 'Active' }];
   api.getRecord.and.returnValue(of(draftRecord()));
   masterData.factories.and.returnValue(of([{ id: 'factory-1', code: 'F-1', name: 'Factory', isActive: true }]));
-  masterData.allProductionLines.and.returnValue(of([{ id: 'line-1', factoryId: 'factory-1', lineCode: 'L-1', name: 'Line', sequenceOrder: 1, isActive: true }]));
-  masterData.allMainStages.and.returnValue(of([{ id: 'main-1', productionLineId: 'line-1', name: 'Main', sequenceOrder: 1, isCritical: false, isActive: true }]));
-  masterData.allSubStages.and.returnValue(of([{ id: 'sub-1', mainStageId: 'main-1', code: 'SUB', name: 'Sub', capacity: 1, sequenceOrder: 1, isActive: true }]));
-  api.listModelStages.and.returnValue(of([{ id: 'stage-1', subStageId: 'sub-1', stageOrder: 1, piecePrice: 1, compensationMode: 'SharedPercentage', isRequired: true, isActive: true }]));
+  masterData.allProductionLines.and.returnValue(of([{ id: 'line-1', factoryId: 'factory-1', departmentId: 'department-1', lineCode: 'L-1', name: 'Line', sequenceOrder: 1, isActive: true }]));
+  masterData.allMainStages.and.returnValue(of([{ id: 'main-1', departmentId: 'department-1', name: 'Main', sequenceOrder: 1, isCritical: false, isActive: true }]));
+  masterData.allSubStages.and.returnValue(of([{ id: 'sub-1', mainStageId: 'main-1', departmentId: 'department-1', code: 'SUB', name: 'Sub', capacity: 1, sequenceOrder: 1, isActive: true }]));
+  api.listModelStages.and.returnValue(of([{ id: 'stage-1', productionLineId: 'line-1', subStageId: 'sub-1', departmentId: 'department-1', stageOrder: 1, piecePrice: 1, compensationMode: 'SharedPercentage', isRequired: true, isActive: true }]));
 }
 
 function draftRecord(): StageProductionRecord {
@@ -727,7 +719,7 @@ function configureValidDraft(component: ProductionCostRecordingPageComponent): v
   component.selectedMainStageId = 'main-1';
   component.selectedSubStageId = 'sub-1';
   component.orders = [{ id: 'order-1', orderNumber: 'O-1', productModelId: 'model-1', productModelCode: 'M-1', productionLineId: 'line-1', productionDate: '2026-07-15', plannedQuantity: 20, status: 'Active' }];
-  component.modelStages = [{ id: 'stage-1', subStageId: 'sub-1', stageOrder: 1, piecePrice: 1, compensationMode: 'SharedPercentage', isRequired: true, isActive: true }];
+  component.modelStages = [{ id: 'stage-1', productionLineId: 'line-1', subStageId: 'sub-1', stageOrder: 1, piecePrice: 1, compensationMode: 'SharedPercentage', isRequired: true, isActive: true }];
   component.recordForm.patchValue({ productionOrderId: 'order-1', productModelStageId: 'stage-1', productionDate: '2026-07-15', producedQuantity: 10, acceptedQuantity: 10, rejectedQuantity: 0 });
   component.workerContext = {
     subStageId: 'sub-1',

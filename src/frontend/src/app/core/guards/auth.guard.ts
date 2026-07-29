@@ -22,7 +22,7 @@ export class AuthGuard implements CanActivate {
       map(() => true),
       catchError(error => {
         if (error.status === 401) {
-          this.authService.logout();
+          this.authService.expireSession();
           return of(this.router.parseUrl('/login'));
         }
 

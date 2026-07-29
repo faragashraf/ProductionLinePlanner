@@ -6,6 +6,7 @@ namespace ProductionLinePlanner.Application.Engines;
 public interface IAssignmentRecommendationEngine
 {
     Task<Result<AssignmentRecommendationResultDto>> GetRecommendationsAsync(
+        Guid productionLineId,
         Guid subStageId,
         Guid actorUserId,
         string? requestMeta = null,

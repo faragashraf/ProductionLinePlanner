@@ -1,18 +1,33 @@
-<section class="page-frame">
-  <header class="page-header">
-    <h1>الإشعارات</h1>
-  </header>
-  <div class="notification-list">
-    <article
-      class="notification-item"
+<section class="notifications-page" dir="rtl">
+  <plp-product-page-header title="الإشعارات" subtitle="سجل دائم للتنبيهات التشغيلية والحضور والانصراف."></plp-product-page-header>
+
+  <section class="notifications-page__preferences" aria-label="إعدادات تنبيهات الجهاز">
+    <div><strong>إشعارات الجهاز</strong><span>{{ browserStateLabel() }}</span></div>
+    <button *ngIf="browserState === 'default'" pButton type="button" label="تفعيل إشعارات الجهاز" icon="pi pi-bell" class="p-button-outlined" (click)="enableDeviceNotifications()"></button>
+    <button pButton type="button" [label]="presentation.isSoundEnabled ? 'كتم صوت الإشعارات' : 'تشغيل صوت الإشعارات'" [icon]="presentation.isSoundEnabled ? 'pi pi-volume-off' : 'pi pi-volume-up'" class="p-button-text" [attr.aria-pressed]="!presentation.isSoundEnabled" (click)="toggleSound()"></button>
+  </section>
+
+  <plp-product-loading-state *ngIf="isLoading" [lines]="6" label="جارٍ تحميل الإشعارات"></plp-product-loading-state>
+  <plp-product-error-state *ngIf="hasError && !isLoading" title="تعذر تحميل الإشعارات" description="تحقق من الاتصال ثم أعد المحاولة." (retry)="loadPage(page)"></plp-product-error-state>
+  <plp-product-empty-state *ngIf="!isLoading && !hasError && notifications.length === 0" title="لا توجد إشعارات" description="ستظهر تنبيهات الحضور والانصراف هنا عند وصولها."></plp-product-empty-state>
+
+  <div *ngIf="!isLoading && !hasError && notifications.length > 0" class="notifications-page__list">
+    <plp-notification-card
       *ngFor="let item of notifications; trackBy: trackByNotification"
-      [class.read]="item.isRead"
-      [class.warning]="item.severity === 'warning'"
-      [class.critical]="item.severity === 'critical'"
-    >
-      <h2>{{ item.title }}</h2>
-      <p>{{ item.message }}</p>
-      <span>{{ getSeverityLabel(item.severity) }}</span>
-    </article>
+      [title]="item.title"
+      [message]="item.message"
+      [severity]="severityFor(item)"
+      [isRead]="item.isRead"
+      [icon]="iconFor(item)"
+      [workerName]="item.metadata?.workerName || null"
+      [employeeCode]="item.metadata?.employeeCode || null"
+      [attendanceTime]="attendanceTime(item)"
+      [assignmentLabel]="assignmentLabel(item)"
+      [createdAtLabel]="createdAtLabel(item)"
+      [actionable]="!!item.navigationUrl"
+      (activate)="open(item)"
+    ></plp-notification-card>
   </div>
+
+  <p-paginator *ngIf="totalCount > pageSize" [rows]="pageSize" [totalRecords]="totalCount" [first]="(page - 1) * pageSize" (onPageChange)="onPageChange($event)"></p-paginator>
 </section>

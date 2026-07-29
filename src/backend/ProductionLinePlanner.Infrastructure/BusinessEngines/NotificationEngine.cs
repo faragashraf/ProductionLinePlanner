@@ -4,6 +4,7 @@ using ProductionLinePlanner.Application.DTOs;
 using ProductionLinePlanner.Application.Engines;
 using ProductionLinePlanner.Domain.Entities;
 using ProductionLinePlanner.Domain.Enums;
+using ProductionLinePlanner.Domain.Notifications;
 using ProductionLinePlanner.Infrastructure.Data;
 
 namespace ProductionLinePlanner.Infrastructure.BusinessEngines;
@@ -62,6 +63,13 @@ public sealed class NotificationEngine : INotificationEngine
                 RelatedWorkerId = x.RelatedWorkerId,
                 RelatedEntityType = x.RelatedEntityType,
                 RelatedEntityId = x.RelatedEntityId,
+                EventKey = x.EventKey,
+                Severity = x.Severity ?? NotificationSeverity.Information,
+                IsToastEnabled = x.IsToastEnabled,
+                IsSoundEnabled = x.IsSoundEnabled,
+                IsBrowserEnabled = x.IsBrowserEnabled,
+                NavigationUrl = x.NavigationUrl,
+                MetadataJson = x.MetadataJson,
                 CreatedAtUtc = x.CreatedAtUtc,
                 ReadAtUtc = x.ReadAtUtc
             })
@@ -121,7 +129,12 @@ public sealed class NotificationEngine : INotificationEngine
                 nameof(Notification),
                 notification.Id.ToString(),
                 before,
-                notification,
+                new
+                {
+                    notification.Id,
+                    notification.IsRead,
+                    notification.ReadAtUtc
+                },
                 cancellationToken: cancellationToken);
             await _dbContext.SaveChangesAsync(cancellationToken);
         }
@@ -138,6 +151,13 @@ public sealed class NotificationEngine : INotificationEngine
             RelatedWorkerId = notification.RelatedWorkerId,
             RelatedEntityType = notification.RelatedEntityType,
             RelatedEntityId = notification.RelatedEntityId,
+            EventKey = notification.EventKey,
+            Severity = notification.Severity ?? NotificationSeverity.Information,
+            IsToastEnabled = notification.IsToastEnabled,
+            IsSoundEnabled = notification.IsSoundEnabled,
+            IsBrowserEnabled = notification.IsBrowserEnabled,
+            NavigationUrl = notification.NavigationUrl,
+            MetadataJson = notification.MetadataJson,
             CreatedAtUtc = notification.CreatedAtUtc,
             ReadAtUtc = notification.ReadAtUtc
         });

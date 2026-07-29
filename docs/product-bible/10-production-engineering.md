@@ -15,7 +15,7 @@
 
 - Backend Capability Engine: `AssignmentEngine`, `ReadinessEngine`.
 - Domain: `WorkerDefaultAssignment`, `WorkerTemporaryAssignment`, `AssignmentTimelineEntry`.
-- UI: `factory-map-page`, `assignments-page`, `dashboard-page`.
+- UI: `factory-map-page`, `manufacturing/line-staffing`, `dashboard-page`.
 
 ## Source of Truth
 

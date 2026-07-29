@@ -3,12 +3,17 @@ import { HttpClient } from '@angular/common/http';
 import { ApiResponse } from '../models/api-response.model';
 import { buildApiUrl } from '../config/api.config';
 import { STANDARD_API_TIMEOUT_MS } from '../config/api-timeout.config';
-import { DashboardCard, AttendanceIndicator, FactoryReadinessSummary, FactoryMapLine } from './mock-data.service';
+import {
+  AttendanceIndicator,
+  DashboardCard,
+  FactoryMapLine,
+  FactoryReadinessSummary
+} from '../../shared/models/dashboard.model';
 import {
   deriveStatusFromReadiness,
   FactoryStatus
 } from '../../shared/models/factory-status.model';
-import { forkJoin, map, Observable, timeout } from 'rxjs';
+import { catchError, forkJoin, map, Observable, of, timeout } from 'rxjs';
 
 interface DashboardAttendanceSummary {
   presentWorkers: number;
@@ -18,8 +23,14 @@ interface DashboardAttendanceSummary {
   attendanceRate: number;
 }
 
+interface DashboardAttendanceWorker {
+  attendanceStatus?: string;
+}
+
 interface DashboardBackendFactoryReadiness {
   overallReadiness: number;
+  assignmentCoveragePercent: number;
+  attendanceDataStatus: string;
   totalLines: number;
   healthyLines: number;
   warningLines: number;
@@ -43,6 +54,23 @@ export interface DashboardApiData {
   attendanceIndicators: AttendanceIndicator[];
   previewLines: FactoryMapLine[];
   criticalReadinessAlerts: StageReadinessAlert[];
+  assignmentCoveragePercent: number;
+  attendanceDataStatus: string;
+  readinessState: DashboardDataSourceState;
+  attendanceState: DashboardDataSourceState;
+  notificationsState: DashboardDataSourceState;
+  hasLoadError: boolean;
+}
+
+export type DashboardDataSourceState = 'available' | 'not-authorized' | 'error';
+
+export interface DashboardLoadOptions {
+  includeAttendance?: boolean;
+}
+
+interface DashboardDataSource<T> {
+  value: T;
+  state: DashboardDataSourceState;
 }
 
 const readinessStatusLabels: Record<FactoryStatus, string> = {
@@ -62,27 +90,49 @@ const readinessStatusLabels: Record<FactoryStatus, string> = {
 export class DashboardApiService {
   constructor(private readonly http: HttpClient) {}
 
-  loadDashboardData(): Observable<DashboardApiData> {
+  loadDashboardData(options: DashboardLoadOptions = {}): Observable<DashboardApiData> {
+    const includeAttendance = options.includeAttendance ?? true;
+    const emptyAttendance = this.getEmptyAttendanceSummary();
+
     return forkJoin({
-      factoryReadiness: this.getFactoryReadiness(),
-      productionLines: this.getProductionLines(),
-      attendanceSummary: this.getAttendanceToday(),
-      unreadNotifications: this.getUnreadNotifications()
+      factoryReadiness: this.loadSource(this.getFactoryReadiness(), this.getEmptyFactoryReadiness()),
+      productionLines: this.loadSource(this.getProductionLines(), []),
+      attendanceSummary: includeAttendance
+        ? this.loadSource(this.getAttendanceToday(), emptyAttendance)
+        : of<DashboardDataSource<DashboardAttendanceSummary>>({ value: emptyAttendance, state: 'not-authorized' }),
+      unreadNotifications: this.loadSource(this.getUnreadNotifications(), 0)
     }).pipe(
-      timeout(STANDARD_API_TIMEOUT_MS),
       map(({ factoryReadiness, productionLines, attendanceSummary, unreadNotifications }) => {
-        const lineSummary = this.getFactoryReadinessFromLines(productionLines);
-        const lineReadinessSummary = this.mergeFactoryReadiness(factoryReadiness, lineSummary, attendanceSummary);
-        const criticalReadinessAlerts = this.extractCriticalReadinessAlerts(productionLines);
-        const cards = this.buildDashboardCards(lineReadinessSummary, attendanceSummary, unreadNotifications);
-        const attendanceIndicators = this.buildAttendanceIndicators(attendanceSummary);
+        const lineSummary = this.getFactoryReadinessFromLines(productionLines.value);
+        const lineReadinessSummary = this.mergeFactoryReadiness(factoryReadiness.value, lineSummary, attendanceSummary.value);
+        const criticalReadinessAlerts = this.extractCriticalReadinessAlerts(productionLines.value);
+        const readinessState = this.resolveReadinessState(factoryReadiness.state, productionLines.state);
+        const cards = this.buildDashboardCards(
+          lineReadinessSummary,
+          attendanceSummary.value,
+          unreadNotifications.value,
+          readinessState,
+          attendanceSummary.state,
+          unreadNotifications.state,
+          factoryReadiness.value.attendanceDataStatus
+        );
+        const attendanceIndicators = attendanceSummary.state === 'available'
+          ? this.buildAttendanceIndicators(attendanceSummary.value)
+          : [];
 
         return {
           cards,
           lineReadinessSummary,
           attendanceIndicators,
-          previewLines: productionLines,
-          criticalReadinessAlerts
+          previewLines: productionLines.value,
+          criticalReadinessAlerts,
+          assignmentCoveragePercent: factoryReadiness.value.assignmentCoveragePercent,
+          attendanceDataStatus: factoryReadiness.value.attendanceDataStatus,
+          readinessState,
+          attendanceState: attendanceSummary.state,
+          notificationsState: unreadNotifications.state,
+          hasLoadError: [factoryReadiness.state, productionLines.state, attendanceSummary.state, unreadNotifications.state]
+            .some((state) => state === 'error')
         };
       })
     );
@@ -137,20 +187,21 @@ export class DashboardApiService {
     lineSummary: FactoryReadinessSummary,
     attendance: DashboardAttendanceSummary
   ): FactoryReadinessSummary {
-    const activeWorkersFromAttendance = attendance.presentWorkers + attendance.lateWorkers;
-    const activeWorkers = attendance.totalWorkers > 0 ? activeWorkersFromAttendance : lineSummary.activeWorkers;
-    const totalWorkers = attendance.totalWorkers > 0 ? attendance.totalWorkers : lineSummary.totalWorkers;
     const attendanceRate = attendance.attendanceRate > 0 ? attendance.attendanceRate : lineSummary.attendanceRate;
+    const hasFactoryReadiness = factoryReadiness.totalLines > 0
+      || factoryReadiness.totalWorkers > 0
+      || factoryReadiness.overallReadiness > 0
+      || factoryReadiness.attendanceDataStatus !== 'Unknown';
 
-    if (Object.values(factoryReadiness).some((value) => value !== 0)) {
+    if (hasFactoryReadiness) {
       return {
         overallReadiness: factoryReadiness.overallReadiness,
         totalLines: factoryReadiness.totalLines || lineSummary.totalLines,
         healthyLines: factoryReadiness.healthyLines || lineSummary.healthyLines,
         warningLines: factoryReadiness.warningLines || lineSummary.warningLines,
         criticalLines: factoryReadiness.criticalLines || lineSummary.criticalLines,
-        activeWorkers,
-        totalWorkers,
+        activeWorkers: factoryReadiness.activeWorkers || lineSummary.activeWorkers,
+        totalWorkers: factoryReadiness.totalWorkers || lineSummary.totalWorkers,
         attendanceRate: attendanceRate || factoryReadiness.attendanceRate || 0
       };
     }
@@ -161,8 +212,8 @@ export class DashboardApiService {
       healthyLines: lineSummary.healthyLines,
       warningLines: lineSummary.warningLines,
       criticalLines: lineSummary.criticalLines,
-      activeWorkers,
-      totalWorkers,
+      activeWorkers: lineSummary.activeWorkers,
+      totalWorkers: lineSummary.totalWorkers,
       attendanceRate: attendanceRate || 0
     };
   }
@@ -170,38 +221,105 @@ export class DashboardApiService {
   private buildDashboardCards(
     summary: FactoryReadinessSummary,
     attendance: DashboardAttendanceSummary,
-    unreadNotifications: number
+    unreadNotifications: number,
+    readinessState: DashboardDataSourceState,
+    attendanceState: DashboardDataSourceState,
+    notificationsState: DashboardDataSourceState,
+    attendanceDataStatus: string
   ): DashboardCard[] {
     const presentWorkers = attendance.presentWorkers + attendance.lateWorkers;
     const attendanceTrend = summary.attendanceRate >= 80 ? 'up' : summary.attendanceRate >= 70 ? 'stable' : 'down';
     const readinessTrend = summary.overallReadiness >= 80 ? 'up' : summary.overallReadiness >= 65 ? 'stable' : 'down';
 
-    return [
-      {
+    const cards: DashboardCard[] = [];
+
+    if (readinessState === 'available' && attendanceState === 'available' && attendanceDataStatus === 'Complete') {
+      cards.push({
         title: 'جاهزية المصنع',
         value: `${summary.overallReadiness}%`,
         trend: readinessTrend,
         trendLabel: 'مؤشر جاهزية عام الآن'
-      },
-      {
-        title: 'العاملون الحاضرون',
-        value: String(presentWorkers),
-        trend: presentWorkers > 0 ? 'up' : 'down',
-        trendLabel: `إجمالي ${summary.totalWorkers} عامل`
-      },
-      {
-        title: 'العاملون المتأخرون',
-        value: String(attendance.lateWorkers),
-        trend: attendance.lateWorkers > 0 ? 'down' : 'stable',
-        trendLabel: attendance.lateWorkers > 0 ? 'تحديث مطلوب' : 'ضمن النطاق'
-      },
-      {
+      });
+    }
+
+    if (attendanceState === 'available') {
+      cards.push(
+        {
+          title: 'العاملون الحاضرون',
+          value: String(presentWorkers),
+          trend: presentWorkers > 0 ? 'up' : 'down',
+          trendLabel: `إجمالي ${summary.totalWorkers} عامل`
+        },
+        {
+          title: 'العاملون المتأخرون',
+          value: String(attendance.lateWorkers),
+          trend: attendance.lateWorkers > 0 ? 'down' : 'stable',
+          trendLabel: attendance.lateWorkers > 0 ? 'تحديث مطلوب' : 'ضمن النطاق'
+        }
+      );
+    }
+
+    if (notificationsState === 'available') {
+      cards.push({
         title: 'الإشعارات غير المقروءة',
         value: String(unreadNotifications),
         trend: unreadNotifications > 0 ? 'up' : 'stable',
         trendLabel: unreadNotifications > 0 ? 'تتطلب متابعة' : 'لا يوجد تنبيهات جديدة'
-      }
-    ];
+      });
+    }
+
+    return cards;
+  }
+
+  private loadSource<T>(source: Observable<T>, fallback: T): Observable<DashboardDataSource<T>> {
+    return source.pipe(
+      timeout(STANDARD_API_TIMEOUT_MS),
+      map((value) => ({ value, state: 'available' as const })),
+      catchError((error: { status?: number }) => of({
+        value: fallback,
+        state: error?.status === 403 ? 'not-authorized' as const : 'error' as const
+      }))
+    );
+  }
+
+  private resolveReadinessState(
+    factoryReadinessState: DashboardDataSourceState,
+    productionLinesState: DashboardDataSourceState
+  ): DashboardDataSourceState {
+    if (factoryReadinessState === 'available' || productionLinesState === 'available') {
+      return 'available';
+    }
+
+    if (factoryReadinessState === 'not-authorized' || productionLinesState === 'not-authorized') {
+      return 'not-authorized';
+    }
+
+    return 'error';
+  }
+
+  private getEmptyFactoryReadiness(): DashboardBackendFactoryReadiness {
+    return {
+      overallReadiness: 0,
+      assignmentCoveragePercent: 0,
+      attendanceDataStatus: 'Unknown',
+      totalLines: 0,
+      healthyLines: 0,
+      warningLines: 0,
+      criticalLines: 0,
+      activeWorkers: 0,
+      totalWorkers: 0,
+      attendanceRate: 0
+    };
+  }
+
+  private getEmptyAttendanceSummary(): DashboardAttendanceSummary {
+    return {
+      presentWorkers: 0,
+      lateWorkers: 0,
+      absentWorkers: 0,
+      totalWorkers: 0,
+      attendanceRate: 0
+    };
   }
 
   private buildAttendanceIndicators(summary: DashboardAttendanceSummary): AttendanceIndicator[] {
@@ -227,8 +345,8 @@ export class DashboardApiService {
     }
 
     const allStages = lines.flatMap((line) => line.stages);
-    const activeWorkers = allStages.reduce((sum, stage) => sum + (stage.workersCurrent || 0), 0);
-    const totalWorkers = allStages.reduce((sum, stage) => sum + (stage.workersRequired || 0), 0);
+    const activeWorkers = lines.reduce((sum, line) => sum + line.workersCurrent, 0);
+    const totalWorkers = lines.reduce((sum, line) => sum + line.workersRequired, 0);
     const readinessPoints = lines.map((line) => line.statusPercent || 0);
 
     return {
@@ -245,12 +363,14 @@ export class DashboardApiService {
 
   private parseFactoryReadiness(raw: Record<string, unknown>): DashboardBackendFactoryReadiness {
     return {
-      overallReadiness: this.toNumber(this.pickFirst(raw, ['overallReadiness', 'readiness', 'overallReadyPercent'])),
+      overallReadiness: this.toNumber(this.pickFirst(raw, ['readinessPercent', 'overallReadiness', 'readiness', 'overallReadyPercent'])),
+      assignmentCoveragePercent: this.toNumber(this.pickFirst(raw, ['assignmentCoveragePercent'])),
+      attendanceDataStatus: String(this.pickFirst(raw, ['attendanceDataStatus']) ?? 'Unknown'),
       totalLines: this.toNumber(this.pickFirst(raw, ['totalLines', 'linesCount'])),
       healthyLines: this.toNumber(this.pickFirst(raw, ['healthyLines', 'healthyLineCount'])),
       warningLines: this.toNumber(this.pickFirst(raw, ['warningLines', 'warningLineCount'])),
       criticalLines: this.toNumber(this.pickFirst(raw, ['criticalLines', 'criticalLineCount'])),
-      activeWorkers: this.toNumber(this.pickFirst(raw, ['activeWorkers', 'presentWorkers', 'presentCount', 'attendedWorkers'])),
+      activeWorkers: this.toNumber(this.pickFirst(raw, ['presentWorkers', 'activeWorkers', 'presentCount', 'attendedWorkers'])),
       totalWorkers: this.toNumber(this.pickFirst(raw, ['totalWorkers', 'requiredWorkers', 'expectedWorkers', 'allWorkers'])),
       attendanceRate: this.toNumber(this.pickFirst(raw, ['attendanceRate', 'attendancePercent', 'attendance_rate']))
     };
@@ -281,7 +401,7 @@ export class DashboardApiService {
       const stageWorkersCurrent = stages.reduce((sum, stage) => sum + stage.workersCurrent, 0);
       const stageWorkersRequired = stages.reduce((sum, stage) => sum + stage.workersRequired, 0);
       const workersCurrentFromLine = this.toNumber(
-        this.pickFirst(record, ['workersCurrent', 'currentWorkers', 'activeWorkers'])
+        this.pickFirst(record, ['workersCurrent', 'currentWorkers', 'activeWorkers', 'presentWorkers'])
       );
       const workersRequiredFromLine = this.toNumber(
         this.pickFirst(record, ['workersRequired', 'requiredWorkers', 'expectedWorkers'])
@@ -300,12 +420,33 @@ export class DashboardApiService {
         name,
         statusPercent,
         readinessLabel: this.toReadinessLabel(statusPercent),
+        workersCurrent,
+        workersRequired,
         stages
       };
     });
   }
 
   private parseAttendanceSummary(raw: Record<string, unknown>): DashboardAttendanceSummary {
+    const items = this.toArray(this.pickFirst(raw, ['items']))
+      .map((item) => this.normalizeObject(item) as DashboardAttendanceWorker);
+
+    if (items.length > 0) {
+      const count = (status: string) => items.filter((item) => item.attendanceStatus === status).length;
+      const presentWorkers = count('Present');
+      const lateWorkers = count('Late');
+      const absentWorkers = count('Absent');
+      const totalWorkers = items.length;
+
+      return {
+        presentWorkers,
+        lateWorkers,
+        absentWorkers,
+        totalWorkers,
+        attendanceRate: Math.round(((presentWorkers + lateWorkers) / totalWorkers) * 100)
+      };
+    }
+
     const presentWorkers = this.toNumber(this.pickFirst(raw, ['presentWorkers', 'present', 'onDuty']));
     const lateWorkers = this.toNumber(this.pickFirst(raw, ['lateWorkers', 'late', 'lateCount']));
     const absentWorkers = this.toNumber(this.pickFirst(raw, ['absentWorkers', 'absent', 'absentCount']));

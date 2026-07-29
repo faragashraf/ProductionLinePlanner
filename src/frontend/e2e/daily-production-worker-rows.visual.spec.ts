@@ -276,7 +276,7 @@ async function captureWorkerPresenceScenario(page: Page, scenario: VisualScenari
   expect(await firstTime.evaluate(element => getComputedStyle(element).unicodeBidi)).toBe('isolate');
   await expect(cells.first()).toContainText('11 ساعة 34 دقيقة');
   await expect(cells.first()).toContainText(scenario.dailyOverride ? 'إضافة يومية' : 'تسكين أساسي');
-  if (scenario.workerCount > 1) await expect(cells.nth(1)).toContainText('تعيين مؤقت');
+  if (scenario.workerCount > 1) await expect(cells.nth(1)).toContainText('تسكين مؤقت');
 
   const pageOverflow = await page.evaluate(() => ({
     scrollWidth: document.documentElement.scrollWidth,

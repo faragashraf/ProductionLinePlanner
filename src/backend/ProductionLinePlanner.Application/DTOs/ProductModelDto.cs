@@ -10,3 +10,5 @@ public sealed class ProductModelDto
     public DateTime CreatedAtUtc { get; init; }
     public DateTime UpdatedAtUtc { get; init; }
 }
+
+public sealed record ProductModelDeleteEligibilityDto(Guid ModelId, bool CanDelete, string MessageAr);

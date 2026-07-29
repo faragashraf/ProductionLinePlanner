@@ -27,3 +27,7 @@
   justify-self: end;
   min-width: 0;
 }
+
+:host ::ng-deep .plp-sub-stage-card__attendance-progress .plp-completion-bar__track {
+  background: color-mix(in oklab, var(--plp-color-info-2) 26%, var(--plp-color-surface-soft));
+}

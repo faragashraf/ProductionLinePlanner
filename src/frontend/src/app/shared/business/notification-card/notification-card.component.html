@@ -1,8 +1,14 @@
-<article class="plp-notification-card" [class]="readStateClass">
+<article class="plp-notification-card" [class]="readStateClass" [attr.tabindex]="actionable ? 0 : null" [attr.role]="actionable ? 'button' : null" (click)="actionable && activate.emit()" (keydown)="onKeydown($event)">
   <header class="plp-notification-card__head">
-    <plp-status-badge [status]="severity"></plp-status-badge>
+    <span class="plp-notification-card__identity"><i [class]="icon" aria-hidden="true"></i><plp-status-badge [status]="severity"></plp-status-badge></span>
     <span class="plp-notification-card__state">{{ isRead ? 'مقروء' : 'غير مقروء' }}</span>
   </header>
   <h3>{{ title }}</h3>
   <p>{{ message }}</p>
+  <dl *ngIf="workerName" class="plp-notification-card__metadata">
+    <div><dt>العامل</dt><dd>{{ workerName }}<span *ngIf="employeeCode"> — {{ employeeCode }}</span></dd></div>
+    <div *ngIf="attendanceTime"><dt>وقت البصمة</dt><dd>{{ attendanceTime }}</dd></div>
+    <div *ngIf="assignmentLabel"><dt>التسكين</dt><dd>{{ assignmentLabel }}</dd></div>
+  </dl>
+  <footer *ngIf="createdAtLabel"><time>{{ createdAtLabel }}</time><span *ngIf="actionable">فتح التفاصيل</span></footer>
 </article>

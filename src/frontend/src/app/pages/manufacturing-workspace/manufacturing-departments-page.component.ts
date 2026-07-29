@@ -1,13 +1,14 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnDestroy, OnInit, Optional } from '@angular/core';
 import { finalize } from 'rxjs';
 import { DepartmentItem, ManufacturingMasterDataApiService } from '../../core/services/manufacturing-master-data-api.service';
+import { ManufacturingRealtimeService } from '../../core/services/manufacturing-realtime.service';
 
 @Component({
   selector: 'app-manufacturing-departments-page',
   templateUrl: './manufacturing-departments-page.component.html',
   styleUrls: ['./manufacturing-departments-page.component.scss']
 })
-export class ManufacturingDepartmentsPageComponent implements OnInit {
+export class ManufacturingDepartmentsPageComponent implements OnInit, OnDestroy {
   departments: DepartmentItem[] = [];
   filteredDepartments: DepartmentItem[] = [];
   searchTerm = '';
@@ -17,11 +18,16 @@ export class ManufacturingDepartmentsPageComponent implements OnInit {
   errorMessage = 'تعذر تحميل بيانات الأقسام، يرجى المحاولة مرة أخرى.';
   errorRetryText = 'إعادة المحاولة';
 
-  constructor(private readonly api: ManufacturingMasterDataApiService) {}
+  private stopRealtime?: () => void;
+
+  constructor(private readonly api: ManufacturingMasterDataApiService, @Optional() private readonly manufacturingRealtime?: ManufacturingRealtimeService) {}
 
   ngOnInit(): void {
+    this.stopRealtime = this.manufacturingRealtime?.watchScreen({ screen: 'departments', refresh: () => this.loadDepartments() });
     this.loadDepartments();
   }
+
+  ngOnDestroy(): void { this.stopRealtime?.(); }
 
   get isEmpty(): boolean {
     return !this.isLoading && !this.hasError && this.filteredDepartments.length === 0 && this.searchTerm.trim().length === 0;
@@ -31,8 +37,8 @@ export class ManufacturingDepartmentsPageComponent implements OnInit {
     return !this.isLoading && !this.hasError && this.filteredDepartments.length === 0 && this.searchTerm.trim().length > 0;
   }
 
-  onSearch(event: Event): void {
-    this.searchTerm = ((event.target as HTMLInputElement).value ?? '').trim();
+  onSearchValue(value: string): void {
+    this.searchTerm = value.trim();
     this.applyFilter();
   }
 
@@ -45,9 +51,12 @@ export class ManufacturingDepartmentsPageComponent implements OnInit {
     this.loadDepartments();
   }
 
-  trackByDepartmentId(_: number, item: DepartmentItem): number {
-    return item.departmentId;
+  trackByDepartmentId(_: number, item: DepartmentItem): string | number {
+    return item.id ?? item.departmentId ?? item.code ?? item.nameAr ?? item.name ?? '';
   }
+
+  departmentCode(item: DepartmentItem): string { return item.code ?? String(item.departmentId ?? '-'); }
+  departmentName(item: DepartmentItem): string { return item.nameAr ?? item.name ?? '-'; }
 
   displayStatus(item: DepartmentItem): string {
     if (typeof item.status === 'string' && item.status.trim().length > 0) {
@@ -77,8 +86,9 @@ export class ManufacturingDepartmentsPageComponent implements OnInit {
         },
         error: (error) => {
           this.hasError = true;
-          this.departments = [];
-          this.filteredDepartments = [];
+          if (this.departments.length === 0) {
+            this.filteredDepartments = [];
+          }
           this.errorMessage = this.extractErrorMessage(error);
         }
       });
@@ -93,8 +103,8 @@ export class ManufacturingDepartmentsPageComponent implements OnInit {
 
     this.filteredDepartments = this.departments.filter((department) => {
       return (
-        String(department.departmentId).includes(normalizedSearch) ||
-        department.name.toLowerCase().includes(normalizedSearch)
+        this.departmentCode(department).toLowerCase().includes(normalizedSearch) ||
+        this.departmentName(department).toLowerCase().includes(normalizedSearch)
       );
     });
   }

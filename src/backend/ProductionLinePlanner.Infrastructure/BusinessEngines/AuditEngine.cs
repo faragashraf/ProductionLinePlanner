@@ -46,6 +46,9 @@ public sealed class AuditEngine : IAuditEngine
         "Location",
         "LineCode",
         "FactoryId",
+        "DepartmentId",
+        "OrganizationalDepartmentId",
+        "OrganizationalDepartmentConcurrencyToken",
         "SequenceOrder",
         "Role",
         "Roles",
@@ -53,40 +56,63 @@ public sealed class AuditEngine : IAuditEngine
         "Permissions",
         "PermissionNames",
         "Permission",
-        "Effect"
-        ,"OrderNumber"
-        ,"ProductionOrderId"
-        ,"ProductModelStageId"
-        ,"ProductionDate"
-        ,"PlannedQuantity"
-        ,"ProducedQuantity"
-        ,"AcceptedQuantity"
-        ,"RejectedQuantity"
-        ,"TotalWorkerEarnings"
-        ,"TotalEarnings"
-        ,"WorkerCount"
-        ,"RecordId"
-        ,"OrderId"
-        ,"EmployeeCode"
-        ,"Percentage"
-        ,"FixedAmount"
-        ,"EquivalentQuantity"
-        ,"CalculatedEarning"
-        ,"ConcurrencyToken"
-        ,"ClientRequestId"
-        ,"ApprovedBy"
-        ,"CancelledBy"
-        ,"ApprovalCancellationReason"
-        ,"SnapshotProductModelCode"
-        ,"SnapshotProductModelName"
-        ,"SnapshotStageCode"
-        ,"SnapshotStageName"
-        ,"SnapshotPiecePrice"
-        ,"SnapshotStandardSeconds"
-        ,"SnapshotCompensationMode"
-        ,"CompensationMode"
-        ,"Allocations"
-        ,"Result"
+        "Effect",
+        "EventKey",
+        "Severity",
+        "IsToastEnabled",
+        "IsInboxEnabled",
+        "IsSoundEnabled",
+        "SoundKey",
+        "RecipientRuleCount",
+        "OrderNumber",
+        "ProductionOrderId",
+        "ProductModelStageId",
+        "SourceModelId",
+        "TargetModelId",
+        "SourceProductionLineId",
+        "TargetProductionLineId",
+        "RequestedCount",
+        "AddedCount",
+        "SkippedCount",
+        "FailedCount",
+        "AddedStageIds",
+        "AddedSubStageIds",
+        "SkippedStageIds",
+        "ProductionDate",
+        "PlannedQuantity",
+        "ProducedQuantity",
+        "AcceptedQuantity",
+        "RejectedQuantity",
+        "TotalWorkerEarnings",
+        "TotalEarnings",
+        "WorkerCount",
+        "RecordId",
+        "OrderId",
+        "EmployeeCode",
+        "Percentage",
+        "FixedAmount",
+        "EquivalentQuantity",
+        "CalculatedEarning",
+        "ConcurrencyToken",
+        "ClientRequestId",
+        "ApprovedBy",
+        "CancelledBy",
+        "ApprovalCancellationReason",
+        "SnapshotProductModelCode",
+        "SnapshotProductModelName",
+        "SnapshotStageCode",
+        "SnapshotStageName",
+        "SnapshotPiecePrice",
+        "SnapshotStandardSeconds",
+        "SnapshotCompensationMode",
+        "CompensationMode",
+        "Allocations",
+        "Result",
+        "PhotoReference",
+        "Version",
+        "ContentType",
+        "Length",
+        "Source"
     };
 
     private static readonly JsonSerializerOptions AuditJsonOptions = new()

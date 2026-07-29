@@ -14,4 +14,5 @@ export class ProductionLineCardComponent {
   @Input() totalStages = 0;
   @Input() activeStage = '';
   @Input() status: FactoryStatus | string = 'info';
+  @Input() progressLabel = 'جاهزية';
 }

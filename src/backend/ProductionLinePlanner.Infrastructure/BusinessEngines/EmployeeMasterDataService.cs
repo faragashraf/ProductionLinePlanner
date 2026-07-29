@@ -1,10 +1,10 @@
 using Microsoft.EntityFrameworkCore;
-using ProductionLinePlanner.Application.Abstractions;
 using ProductionLinePlanner.Application.Common;
 using ProductionLinePlanner.Application.DTOs;
 using ProductionLinePlanner.Application.Engines;
 using ProductionLinePlanner.Application.Requests;
 using ProductionLinePlanner.Application.Services;
+using ProductionLinePlanner.Application.Workers;
 using ProductionLinePlanner.Domain.Entities;
 using ProductionLinePlanner.Domain.Enums;
 using ProductionLinePlanner.Infrastructure.Data;
@@ -13,9 +13,6 @@ namespace ProductionLinePlanner.Infrastructure.BusinessEngines;
 
 public sealed class EmployeeMasterDataService(
     AppDbContext dbContext,
-    IAttendanceEmployeeWriter attendanceEmployeeWriter,
-    IAttendanceEmployeeReader attendanceEmployeeReader,
-    IAttendanceDepartmentReader attendanceDepartmentReader,
     IAuditEngine auditEngine) : IEmployeeMasterDataService
 {
     public async Task<PagedResult<WorkerDto>> GetWorkersAsync(
@@ -31,7 +28,11 @@ public sealed class EmployeeMasterDataService(
         }
 
         var searchPattern = string.IsNullOrWhiteSpace(search) ? null : $"%{search.Trim()}%";
-        var query = dbContext.Workers.AsNoTracking().AsQueryable();
+        var query = dbContext.Workers
+            .AsNoTracking()
+            .Include(x => x.OrganizationalDepartment)
+                .ThenInclude(x => x!.Factory)
+            .AsQueryable();
         if (isActive.HasValue)
         {
             query = query.Where(x => x.IsActive == isActive.Value);
@@ -61,7 +62,10 @@ public sealed class EmployeeMasterDataService(
             return Result<WorkerDto>.Failure(new Error("ValidationError", "WorkerId is required."));
         }
 
-        var entity = await dbContext.Workers.FirstOrDefaultAsync(x => x.Id == workerId, cancellationToken);
+        var entity = await dbContext.Workers
+            .Include(x => x.OrganizationalDepartment)
+                .ThenInclude(x => x!.Factory)
+            .FirstOrDefaultAsync(x => x.Id == workerId, cancellationToken);
         if (entity is null)
         {
             return Result<WorkerDto>.Failure(new Error("NotFound", "Worker not found."));
@@ -93,7 +97,10 @@ public sealed class EmployeeMasterDataService(
             return Result<WorkerDto>.Failure(new Error("ValidationError", "No updatable fields were provided."));
         }
 
-        var entity = await dbContext.Workers.FirstOrDefaultAsync(x => x.Id == workerId, cancellationToken);
+        var entity = await dbContext.Workers
+            .Include(x => x.OrganizationalDepartment)
+                .ThenInclude(x => x!.Factory)
+            .FirstOrDefaultAsync(x => x.Id == workerId, cancellationToken);
         if (entity is null)
         {
             return Result<WorkerDto>.Failure(new Error("NotFound", "Worker not found."));
@@ -111,97 +118,50 @@ public sealed class EmployeeMasterDataService(
             return Result<WorkerDto>.Failure(new Error("ValidationError", "AttendanceDepartmentId must be greater than zero."));
         }
 
+        if (requestDepartmentId.HasValue)
+        {
+            return Result<WorkerDto>.Failure(new Error(
+                "SourceObservedOnly",
+                "Attendance department is source-observed and cannot be changed from Planner."));
+        }
+
         if (request.Phone is not null && string.IsNullOrWhiteSpace(request.Phone))
         {
             return Result<WorkerDto>.Failure(new Error("ValidationError", "Phone cannot be empty."));
         }
 
         var nameChanged = requestFullName is not null && !string.Equals(entity.FullName, requestFullName, StringComparison.Ordinal);
-        var departmentChanged = requestDepartmentId is not null && entity.AttendanceDepartmentId != requestDepartmentId.Value;
         var phoneChanged = request.Phone is not null && !string.Equals(entity.Phone, request.Phone.Trim(), StringComparison.Ordinal);
 
-        if (!nameChanged && !departmentChanged && !phoneChanged)
+        if (!nameChanged && !phoneChanged)
         {
             return Result<WorkerDto>.Failure(new Error("ValidationError", "No identity changes detected."));
         }
 
-        var updatedFromAttendance = false;
         var before = MapWorker(entity);
         var now = DateTime.UtcNow;
-        var previousDepartmentId = entity.AttendanceDepartmentId;
 
-        if (nameChanged || departmentChanged)
+        if (nameChanged)
         {
-            if (string.IsNullOrWhiteSpace(entity.AttendanceUserId))
-            {
-                return Result<WorkerDto>.Failure(new Error("ValidationError", "Worker is not linked to attendance source."));
-            }
-
-            var syncResult = await UpdateAttendanceIdentityAsync(entity.AttendanceUserId, requestFullName, requestDepartmentId, cancellationToken);
-            if (syncResult.IsFailure)
-            {
-                return Result<WorkerDto>.Failure(syncResult.Error!);
-            }
-
-            updatedFromAttendance = true;
+            entity.UpdateName(requestFullName!, now);
         }
 
-        try
+        if (phoneChanged)
         {
-            if (nameChanged)
-            {
-                entity.UpdateName(requestFullName!, now);
-            }
-
-            if (departmentChanged)
-            {
-                var department = await attendanceDepartmentReader.GetByIdAsync(requestDepartmentId!.Value, cancellationToken);
-                if (department.IsFailure || department.Value is null)
-                {
-                    return Result<WorkerDto>.Failure(new Error("NotFound", "Department was not found in attendance source."));
-                }
-
-                entity.SetAttendanceDepartmentId(requestDepartmentId, now);
-            }
-
-            if (phoneChanged)
-            {
-                entity.SetPhone(request.Phone!.Trim(), now);
-            }
-
-            dbContext.Entry(entity).Property(nameof(Worker.LastExternalSyncAt)).CurrentValue = now;
-            dbContext.Entry(entity).Property(nameof(Worker.UpdatedAtUtc)).CurrentValue = now;
-            await auditEngine.RecordAsync(
-                actorUserId,
-                AuditActionType.Update,
-                nameof(Worker),
-                entity.Id.ToString(),
-                before: before,
-                after: MapWorker(entity),
-                requestMeta: requestMeta,
-                cancellationToken: cancellationToken);
-            await dbContext.SaveChangesAsync(cancellationToken);
+            entity.SetPhone(request.Phone!.Trim(), now);
         }
-        catch
-        {
-            if (updatedFromAttendance && string.IsNullOrWhiteSpace(entity.AttendanceUserId) is false)
-            {
-                if (nameChanged)
-                {
-                    _ = await attendanceEmployeeWriter.UpdateWorkerFullNameAsync(entity.AttendanceUserId!, before.FullName, cancellationToken);
-                }
 
-                if (departmentChanged)
-                {
-                    if (previousDepartmentId.HasValue)
-                    {
-                        _ = await attendanceEmployeeWriter.UpdateWorkerDepartmentAsync(entity.AttendanceUserId!, previousDepartmentId.Value, cancellationToken);
-                    }
-                }
-            }
-
-            throw;
-        }
+        dbContext.Entry(entity).Property(nameof(Worker.UpdatedAtUtc)).CurrentValue = now;
+        await auditEngine.RecordAsync(
+            actorUserId,
+            AuditActionType.Update,
+            nameof(Worker),
+            entity.Id.ToString(),
+            before: before,
+            after: MapWorker(entity),
+            requestMeta: requestMeta,
+            cancellationToken: cancellationToken);
+        await dbContext.SaveChangesAsync(cancellationToken);
 
         var result = (await MapWorkersWithAssignmentsAsync([entity], cancellationToken)).Single();
         return Result<WorkerDto>.Success(result);
@@ -229,7 +189,10 @@ public sealed class EmployeeMasterDataService(
             return Result<WorkerDto>.Failure(new Error("ValidationError", "EmploymentStatus is invalid."));
         }
 
-        var entity = await dbContext.Workers.FirstOrDefaultAsync(x => x.Id == workerId, cancellationToken);
+        var entity = await dbContext.Workers
+            .Include(x => x.OrganizationalDepartment)
+                .ThenInclude(x => x!.Factory)
+            .FirstOrDefaultAsync(x => x.Id == workerId, cancellationToken);
         if (entity is null)
         {
             return Result<WorkerDto>.Failure(new Error("NotFound", "Worker not found."));
@@ -274,82 +237,9 @@ public sealed class EmployeeMasterDataService(
         return Result<WorkerDto>.Success(result);
     }
 
-    private async Task<Result> UpdateAttendanceIdentityAsync(
-        string attendanceUserId,
-        string? fullName,
-        int? attendanceDepartmentId,
-        CancellationToken cancellationToken)
-    {
-        var normalizedAttendanceUserId = attendanceUserId.Trim();
-        var updateNameRequired = fullName is not null;
-        var updateDepartmentRequired = attendanceDepartmentId.HasValue;
-
-        var snapshot = await attendanceEmployeeReader.GetByAttendanceUserIdAsync(normalizedAttendanceUserId, cancellationToken);
-        if (snapshot.IsFailure)
-        {
-            return Result.Failure(snapshot.Error!);
-        }
-
-        if (snapshot.Value is null)
-        {
-            return Result.Failure(new Error("NotFound", "Worker was not found in attendance source."));
-        }
-
-        var originalExternalName = snapshot.Value.Name;
-        if (updateNameRequired && string.IsNullOrWhiteSpace(originalExternalName))
-        {
-            return Result.Failure(new Error("NeedsReconciliation", "Attendance source does not provide an original name for rollback."));
-        }
-
-        if (updateNameRequired)
-        {
-            var name = fullName!.Trim();
-            if (string.IsNullOrWhiteSpace(name))
-            {
-                return Result.Failure(new Error("ValidationError", "FullName cannot be empty."));
-            }
-
-            var updateResult = await attendanceEmployeeWriter.UpdateWorkerFullNameAsync(normalizedAttendanceUserId, name, cancellationToken);
-            if (updateResult.IsFailure)
-            {
-                return Result.Failure(updateResult.Error!);
-            }
-        }
-
-        if (updateDepartmentRequired)
-        {
-            var departmentResult = await attendanceEmployeeWriter.UpdateWorkerDepartmentAsync(
-                normalizedAttendanceUserId,
-                attendanceDepartmentId!.Value,
-                cancellationToken);
-
-            if (departmentResult.IsFailure)
-            {
-                if (updateNameRequired)
-                {
-                    var rollback = await attendanceEmployeeWriter.UpdateWorkerFullNameAsync(
-                        normalizedAttendanceUserId,
-                        originalExternalName,
-                        cancellationToken);
-                    if (rollback.IsFailure)
-                    {
-                        return Result.Failure(new Error(
-                            "NeedsReconciliation",
-                            "Attendance department update failed and the name rollback also failed."));
-                    }
-                }
-
-                return Result.Failure(departmentResult.Error!);
-            }
-        }
-
-        return Result.Success();
-    }
-
     private static WorkerDto MapWorker(Worker worker, Guid? defaultSubStageId = null)
     {
-        var photoVersion = GetPhotoVersion(worker.PhotoReference);
-        var hasManagedPhoto = photoVersion is not null && IsManagedPhotoReference(worker.PhotoReference, worker.Id);
+        var hasManagedPhoto = WorkerPhotoReference.TryParse(worker.PhotoReference, worker.Id, out var photoVersion);
         return new WorkerDto
         {
             Id = worker.Id,
@@ -360,9 +250,14 @@ public sealed class EmployeeMasterDataService(
             Phone = worker.Phone,
             AttendanceDepartmentId = worker.AttendanceDepartmentId,
             LocalDepartmentName = worker.LocalDepartmentName,
+            OrganizationalDepartmentId = worker.OrganizationalDepartmentId,
+            OrganizationalDepartmentName = worker.OrganizationalDepartment?.NameAr,
+            OrganizationalFactoryId = worker.OrganizationalDepartment?.FactoryId,
+            OrganizationalFactoryName = worker.OrganizationalDepartment?.Factory?.Name,
+            OrganizationalDepartmentConcurrencyToken = worker.OrganizationalDepartmentConcurrencyToken,
             EmploymentStatus = worker.EmploymentStatus.ToString(),
             EmploymentEndDate = worker.EmploymentEndDate,
-            // Only synchronization-produced cache references are browser-visible.
+            // Only Planner-owned, hash-versioned references are browser-visible.
             // Legacy/manual strings cannot cause a live or arbitrary image request.
             PhotoReference = hasManagedPhoto ? worker.PhotoReference : null,
             HasPhoto = hasManagedPhoto,
@@ -371,20 +266,6 @@ public sealed class EmployeeMasterDataService(
             DefaultSubStageId = defaultSubStageId
         };
     }
-
-    private static string? GetPhotoVersion(string? photoReference)
-    {
-        if (string.IsNullOrWhiteSpace(photoReference)) return null;
-        var marker = "?v=";
-        var index = photoReference.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
-        return index >= 0 && index + marker.Length < photoReference.Length
-            ? photoReference[(index + marker.Length)..]
-            : null;
-    }
-
-    private static bool IsManagedPhotoReference(string? photoReference, Guid workerId) =>
-        !string.IsNullOrWhiteSpace(photoReference) &&
-        photoReference.StartsWith($"/api/workers/{workerId:D}/photo?v=", StringComparison.OrdinalIgnoreCase);
 
     private async Task<WorkerDto[]> MapWorkersWithAssignmentsAsync(IEnumerable<Worker> workers, CancellationToken cancellationToken)
     {

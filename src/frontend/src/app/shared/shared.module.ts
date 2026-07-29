@@ -1,5 +1,6 @@
 import { CommonModule } from '@angular/common';
 import { NgModule } from '@angular/core';
+import { FormsModule } from '@angular/forms';
 import { EmptyStateComponent } from './ui/empty-state/empty-state.component';
 import { ErrorStateComponent } from './ui/error-state/error-state.component';
 import { WorkerAvatarComponent } from './ui/worker-avatar/worker-avatar.component';
@@ -32,6 +33,7 @@ import { PlpProductMetadataItemComponent, PlpProductMetadataRowComponent } from 
 import { PlpResponsiveEntityRowComponent } from './product/plp-responsive-entity-row.component';
 import { WorkerAssignmentDetailsComponent } from './business/worker-assignment-details/worker-assignment-details.component';
 import { WorkerAssignmentCardComponent } from './business/worker-assignment-card/worker-assignment-card.component';
+import { ManufacturingCommandCenterFiltersComponent } from './business/manufacturing-command-center-filters/manufacturing-command-center-filters.component';
 
 @NgModule({
   declarations: [
@@ -58,10 +60,12 @@ import { WorkerAssignmentCardComponent } from './business/worker-assignment-card
     PermissionDirective,
     IamListSkeletonComponent,
     PermissionSelectionComponent,
-    WorkerAssignmentCardComponent
+    WorkerAssignmentCardComponent,
+    ManufacturingCommandCenterFiltersComponent
   ],
   imports: [
     CommonModule,
+    FormsModule,
     PlpProductEmptyStateComponent,
     PlpProductErrorStateComponent,
     PlpProductLoadingStateComponent,
@@ -101,7 +105,8 @@ import { WorkerAssignmentCardComponent } from './business/worker-assignment-card
     PlpResponsiveEntityRowComponent,
     PlpProductSectionHeaderComponent,
     WorkerAssignmentDetailsComponent,
-    WorkerAssignmentCardComponent
+    WorkerAssignmentCardComponent,
+    ManufacturingCommandCenterFiltersComponent
   ]
 })
 export class SharedModule {}

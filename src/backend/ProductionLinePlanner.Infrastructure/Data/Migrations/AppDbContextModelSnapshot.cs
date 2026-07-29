@@ -180,6 +180,73 @@ namespace ProductionLinePlanner.Infrastructure.Data.Migrations
                     b.ToTable("AssignmentTimelineEntries", (string)null);
                 });
 
+            modelBuilder.Entity("ProductionLinePlanner.Domain.Entities.AttendanceNotificationEvent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("AttemptCount")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("AttendanceRecordId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("AttendanceTimeUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("AttendanceType")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("EmployeeCode")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("nvarchar(120)");
+
+                    b.Property<string>("IdempotencyKey")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTime?>("LastAttemptAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("LastErrorCode")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<DateTime?>("ProcessedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<Guid>("WorkerId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("WorkerName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AttendanceRecordId");
+
+                    b.HasIndex("IdempotencyKey")
+                        .IsUnique();
+
+                    b.HasIndex("ProcessedAtUtc", "CreatedAtUtc");
+
+                    b.ToTable("AttendanceNotificationEvents", (string)null);
+                });
+
             modelBuilder.Entity("ProductionLinePlanner.Domain.Entities.AttendanceRecord", b =>
                 {
                     b.Property<Guid>("Id")
@@ -223,7 +290,8 @@ namespace ProductionLinePlanner.Infrastructure.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("WorkerId", "AttendanceTimeUtc");
+                    b.HasIndex("WorkerId", "AttendanceTimeUtc")
+                        .IsUnique();
 
                     b.ToTable("AttendanceRecords", (string)null);
                 });
@@ -273,6 +341,53 @@ namespace ProductionLinePlanner.Infrastructure.Data.Migrations
                     b.HasIndex("EntityType", "EntityId");
 
                     b.ToTable("AuditLogs", (string)null);
+                });
+
+            modelBuilder.Entity("ProductionLinePlanner.Domain.Entities.Department", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("nvarchar(80)")
+                        .UseCollation("SQL_Latin1_General_CP1_CI_AS");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("FactoryId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
+
+                    b.Property<string>("NameAr")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("NameEn")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<int>("SequenceOrder")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("FactoryId", "Code")
+                        .IsUnique();
+
+                    b.HasIndex("FactoryId", "SequenceOrder");
+
+                    b.ToTable("Departments", (string)null);
                 });
 
             modelBuilder.Entity("ProductionLinePlanner.Domain.Entities.Factory", b =>
@@ -358,6 +473,9 @@ namespace ProductionLinePlanner.Infrastructure.Data.Migrations
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("datetime2");
 
+                    b.Property<Guid>("DepartmentId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<bool>("IsActive")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("bit")
@@ -373,9 +491,6 @@ namespace ProductionLinePlanner.Infrastructure.Data.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 
-                    b.Property<Guid>("ProductionLineId")
-                        .HasColumnType("uniqueidentifier");
-
                     b.Property<int>("SequenceOrder")
                         .HasColumnType("int");
 
@@ -384,8 +499,10 @@ namespace ProductionLinePlanner.Infrastructure.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ProductionLineId", "SequenceOrder")
+                    b.HasIndex("DepartmentId", "Name")
                         .IsUnique();
+
+                    b.HasIndex("DepartmentId", "SequenceOrder");
 
                     b.ToTable("MainStages", (string)null);
                 });
@@ -395,18 +512,49 @@ namespace ProductionLinePlanner.Infrastructure.Data.Migrations
                     b.Property<Guid>("Id")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("CorrelationKey")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("datetime2");
+
+                    b.Property<string>("EventKey")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<bool>("IsBrowserEnabled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false);
 
                     b.Property<bool>("IsRead")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("bit")
                         .HasDefaultValue(false);
 
+                    b.Property<bool>("IsSoundEnabled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false);
+
+                    b.Property<bool>("IsToastEnabled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
+
                     b.Property<string>("Message")
                         .IsRequired()
                         .HasMaxLength(2000)
                         .HasColumnType("nvarchar(2000)");
+
+                    b.Property<string>("MetadataJson")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<string>("NavigationUrl")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
 
                     b.Property<DateTime?>("ReadAtUtc")
                         .HasColumnType("datetime2");
@@ -426,6 +574,11 @@ namespace ProductionLinePlanner.Infrastructure.Data.Migrations
                     b.Property<Guid?>("SenderUserId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<int?>("Severity")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(0);
+
                     b.Property<int>("Status")
                         .HasColumnType("int");
 
@@ -439,13 +592,151 @@ namespace ProductionLinePlanner.Infrastructure.Data.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("EventKey");
+
                     b.HasIndex("RecipientUserId");
 
                     b.HasIndex("RelatedEntityId");
 
                     b.HasIndex("SenderUserId");
 
+                    b.HasIndex("RecipientUserId", "CorrelationKey")
+                        .IsUnique()
+                        .HasFilter("[CorrelationKey] IS NOT NULL");
+
                     b.ToTable("Notifications", (string)null);
+                });
+
+            modelBuilder.Entity("ProductionLinePlanner.Domain.Entities.NotificationPolicy", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("EventKey")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<bool>("IsBrowserEnabled")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsEnabled")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsInboxEnabled")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsSoundEnabled")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsToastEnabled")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("MessageTemplateAr")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<int>("Severity")
+                        .HasColumnType("int");
+
+                    b.Property<string>("SoundKey")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("TitleTemplateAr")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("UpdatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("EventKey")
+                        .IsUnique();
+
+                    b.HasIndex("UpdatedAtUtc");
+
+                    b.HasIndex("UpdatedByUserId");
+
+                    b.ToTable("NotificationPolicies", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_NotificationPolicies_SoundKey", "([IsSoundEnabled] = 0 AND [SoundKey] IS NULL) OR ([IsSoundEnabled] = 1 AND [SoundKey] = 'default')");
+                        });
+                });
+
+            modelBuilder.Entity("ProductionLinePlanner.Domain.Entities.NotificationPolicyRecipientRule", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("CapabilityKey")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsExcludeActor")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid>("NotificationPolicyId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("PermissionKey")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<int>("RecipientKind")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("RoleId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("UserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RoleId");
+
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("NotificationPolicyId", "SortOrder")
+                        .IsUnique();
+
+                    b.ToTable("NotificationPolicyRecipientRules", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_NotificationPolicyRecipientRules_Target", "([RecipientKind] = 0 AND [UserId] IS NOT NULL AND [RoleId] IS NULL AND [PermissionKey] IS NULL AND [CapabilityKey] IS NULL AND [IsExcludeActor] = 0) OR ([RecipientKind] = 1 AND [UserId] IS NULL AND [RoleId] IS NOT NULL AND [PermissionKey] IS NULL AND [CapabilityKey] IS NULL AND [IsExcludeActor] = 0) OR ([RecipientKind] = 2 AND [UserId] IS NULL AND [RoleId] IS NULL AND [PermissionKey] IS NOT NULL AND [CapabilityKey] IS NULL AND [IsExcludeActor] = 0) OR ([RecipientKind] = 3 AND [UserId] IS NULL AND [RoleId] IS NULL AND [PermissionKey] IS NULL AND [CapabilityKey] IS NOT NULL AND [IsExcludeActor] = 0) OR ([RecipientKind] = 4 AND [UserId] IS NULL AND [RoleId] IS NULL AND [PermissionKey] IS NULL AND [CapabilityKey] IS NULL AND [IsExcludeActor] = 0) OR ([RecipientKind] = 5 AND [UserId] IS NULL AND [RoleId] IS NULL AND [PermissionKey] IS NULL AND [CapabilityKey] IS NULL AND [IsExcludeActor] = 1) OR ([RecipientKind] = 6 AND [UserId] IS NULL AND [RoleId] IS NULL AND [PermissionKey] IS NULL AND [CapabilityKey] IS NULL AND [IsExcludeActor] = 0)");
+                        });
                 });
 
             modelBuilder.Entity("ProductionLinePlanner.Domain.Entities.Permission", b =>
@@ -558,6 +849,9 @@ namespace ProductionLinePlanner.Infrastructure.Data.Migrations
                     b.Property<Guid>("ProductModelId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<Guid>("ProductionLineId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<int>("StageOrder")
                         .HasColumnType("int");
 
@@ -572,22 +866,28 @@ namespace ProductionLinePlanner.Infrastructure.Data.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("ProductionLineId");
+
                     b.HasIndex("SubStageId");
 
-                    b.HasIndex("ProductModelId", "StageOrder")
+                    b.HasIndex("ProductModelId", "ProductionLineId", "StageOrder")
                         .IsUnique();
 
-                    b.HasIndex("ProductModelId", "SubStageId")
+                    b.HasIndex("ProductModelId", "ProductionLineId", "SubStageId")
                         .IsUnique();
 
                     b.ToTable("ProductModelStages", null, t =>
                         {
+                            t.HasTrigger("TR_ProductModelStages_DepartmentGuard");
+
                             t.HasCheckConstraint("CK_ProductModelStage_PiecePrice_NonNegative", "[PiecePrice] >= 0");
 
                             t.HasCheckConstraint("CK_ProductModelStage_StageOrder_Positive", "[StageOrder] > 0");
 
                             t.HasCheckConstraint("CK_ProductModelStage_StandardSeconds_Positive", "[StandardSeconds] IS NULL OR [StandardSeconds] > 0");
                         });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
             modelBuilder.Entity("ProductionLinePlanner.Domain.Entities.ProductionDayStageResolution", b =>
@@ -630,6 +930,9 @@ namespace ProductionLinePlanner.Infrastructure.Data.Migrations
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("datetime2");
 
+                    b.Property<Guid?>("DepartmentId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<Guid>("FactoryId")
                         .HasColumnType("uniqueidentifier");
 
@@ -655,11 +958,18 @@ namespace ProductionLinePlanner.Infrastructure.Data.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("DepartmentId");
+
                     b.HasIndex("FactoryId", "LineCode")
                         .IsUnique()
                         .HasFilter("[LineCode] IS NOT NULL");
 
-                    b.ToTable("ProductionLines", (string)null);
+                    b.ToTable("ProductionLines", null, t =>
+                        {
+                            t.HasTrigger("TR_ProductionLines_ProductModelStageDepartmentGuard");
+                        });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
             modelBuilder.Entity("ProductionLinePlanner.Domain.Entities.ProductionOrder", b =>
@@ -1091,6 +1401,9 @@ namespace ProductionLinePlanner.Infrastructure.Data.Migrations
                         .HasColumnType("int")
                         .HasColumnName("SequenceOrder");
 
+                    b.Property<Guid>("DepartmentId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<bool>("IsActive")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("bit")
@@ -1109,18 +1422,24 @@ namespace ProductionLinePlanner.Infrastructure.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("Code")
+                    b.HasIndex("DepartmentId", "Code")
                         .IsUnique();
 
                     b.HasIndex("MainStageId", "DefaultOrder")
                         .IsUnique();
 
+                    b.HasIndex("MainStageId", "DepartmentId");
+
                     b.ToTable("SubStages", null, t =>
                         {
+                            t.HasTrigger("TR_SubStages_ProductModelStageDepartmentGuard");
+
                             t.HasCheckConstraint("CK_SubStage_Capacity_NonNegative", "[Capacity] >= 0");
 
                             t.HasCheckConstraint("CK_SubStage_DefaultOrder_Positive", "[SequenceOrder] > 0");
                         });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
             modelBuilder.Entity("ProductionLinePlanner.Domain.Entities.UserPermissionOverride", b =>
@@ -1201,6 +1520,15 @@ namespace ProductionLinePlanner.Infrastructure.Data.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 
+                    b.Property<Guid>("OrganizationalDepartmentConcurrencyToken")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasDefaultValueSql("NEWSEQUENTIALID()");
+
+                    b.Property<Guid?>("OrganizationalDepartmentId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<string>("Phone")
                         .HasMaxLength(40)
                         .HasColumnType("nvarchar(40)");
@@ -1216,6 +1544,8 @@ namespace ProductionLinePlanner.Infrastructure.Data.Migrations
 
                     b.HasIndex("EmployeeCode")
                         .IsUnique();
+
+                    b.HasIndex("OrganizationalDepartmentId");
 
                     b.ToTable("Workers", (string)null);
                 });
@@ -1239,6 +1569,9 @@ namespace ProductionLinePlanner.Infrastructure.Data.Migrations
                         .HasColumnType("bit")
                         .HasDefaultValue(true);
 
+                    b.Property<Guid>("ProductionLineId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<string>("Reason")
                         .HasMaxLength(250)
                         .HasColumnType("nvarchar(250)");
@@ -1257,7 +1590,9 @@ namespace ProductionLinePlanner.Infrastructure.Data.Migrations
 
                     b.HasIndex("SubStageId");
 
-                    b.HasIndex("WorkerId", "SubStageId")
+                    b.HasIndex("ProductionLineId", "SubStageId");
+
+                    b.HasIndex("WorkerId", "ProductionLineId", "SubStageId")
                         .IsUnique()
                         .HasFilter("[IsActive] = 1");
 
@@ -1340,9 +1675,10 @@ namespace ProductionLinePlanner.Infrastructure.Data.Migrations
 
                     b.Property<string>("ParticipationMode")
                         .IsRequired()
+                        .ValueGeneratedOnAdd()
                         .HasMaxLength(40)
-                        .HasDefaultValue("TemporaryMove")
-                        .HasColumnType("nvarchar(40)");
+                        .HasColumnType("nvarchar(40)")
+                        .HasDefaultValue("TemporaryMove");
 
                     b.Property<string>("Reason")
                         .IsRequired()
@@ -1433,6 +1769,17 @@ namespace ProductionLinePlanner.Infrastructure.Data.Migrations
                     b.Navigation("Worker");
                 });
 
+            modelBuilder.Entity("ProductionLinePlanner.Domain.Entities.AttendanceNotificationEvent", b =>
+                {
+                    b.HasOne("ProductionLinePlanner.Domain.Entities.AttendanceRecord", "AttendanceRecord")
+                        .WithMany()
+                        .HasForeignKey("AttendanceRecordId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("AttendanceRecord");
+                });
+
             modelBuilder.Entity("ProductionLinePlanner.Domain.Entities.AttendanceRecord", b =>
                 {
                     b.HasOne("ProductionLinePlanner.Domain.Entities.Worker", "Worker")
@@ -1455,15 +1802,26 @@ namespace ProductionLinePlanner.Infrastructure.Data.Migrations
                     b.Navigation("ActorUser");
                 });
 
-            modelBuilder.Entity("ProductionLinePlanner.Domain.Entities.MainStage", b =>
+            modelBuilder.Entity("ProductionLinePlanner.Domain.Entities.Department", b =>
                 {
-                    b.HasOne("ProductionLinePlanner.Domain.Entities.ProductionLine", "ProductionLine")
-                        .WithMany("MainStages")
-                        .HasForeignKey("ProductionLineId")
+                    b.HasOne("ProductionLinePlanner.Domain.Entities.Factory", "Factory")
+                        .WithMany("Departments")
+                        .HasForeignKey("FactoryId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.Navigation("ProductionLine");
+                    b.Navigation("Factory");
+                });
+
+            modelBuilder.Entity("ProductionLinePlanner.Domain.Entities.MainStage", b =>
+                {
+                    b.HasOne("ProductionLinePlanner.Domain.Entities.Department", "Department")
+                        .WithMany("MainStages")
+                        .HasForeignKey("DepartmentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Department");
                 });
 
             modelBuilder.Entity("ProductionLinePlanner.Domain.Entities.Notification", b =>
@@ -1484,12 +1842,60 @@ namespace ProductionLinePlanner.Infrastructure.Data.Migrations
                     b.Navigation("SenderUser");
                 });
 
+            modelBuilder.Entity("ProductionLinePlanner.Domain.Entities.NotificationPolicy", b =>
+                {
+                    b.HasOne("ProductionLinePlanner.Domain.Entities.AppUser", "CreatedByUser")
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ProductionLinePlanner.Domain.Entities.AppUser", "UpdatedByUser")
+                        .WithMany()
+                        .HasForeignKey("UpdatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("CreatedByUser");
+
+                    b.Navigation("UpdatedByUser");
+                });
+
+            modelBuilder.Entity("ProductionLinePlanner.Domain.Entities.NotificationPolicyRecipientRule", b =>
+                {
+                    b.HasOne("ProductionLinePlanner.Domain.Entities.NotificationPolicy", "NotificationPolicy")
+                        .WithMany("RecipientRules")
+                        .HasForeignKey("NotificationPolicyId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ProductionLinePlanner.Domain.Entities.AppRole", "Role")
+                        .WithMany()
+                        .HasForeignKey("RoleId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ProductionLinePlanner.Domain.Entities.AppUser", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("NotificationPolicy");
+
+                    b.Navigation("Role");
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("ProductionLinePlanner.Domain.Entities.ProductModelStage", b =>
                 {
                     b.HasOne("ProductionLinePlanner.Domain.Entities.ProductModel", "ProductModel")
                         .WithMany("Stages")
                         .HasForeignKey("ProductModelId")
                         .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ProductionLinePlanner.Domain.Entities.ProductionLine", "ProductionLine")
+                        .WithMany()
+                        .HasForeignKey("ProductionLineId")
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
                     b.HasOne("ProductionLinePlanner.Domain.Entities.SubStage", "SubStage")
@@ -1499,6 +1905,8 @@ namespace ProductionLinePlanner.Infrastructure.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("ProductModel");
+
+                    b.Navigation("ProductionLine");
 
                     b.Navigation("SubStage");
                 });
@@ -1524,11 +1932,18 @@ namespace ProductionLinePlanner.Infrastructure.Data.Migrations
 
             modelBuilder.Entity("ProductionLinePlanner.Domain.Entities.ProductionLine", b =>
                 {
+                    b.HasOne("ProductionLinePlanner.Domain.Entities.Department", "Department")
+                        .WithMany("ProductionLines")
+                        .HasForeignKey("DepartmentId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ProductionLinePlanner.Domain.Entities.Factory", "Factory")
                         .WithMany("ProductionLines")
                         .HasForeignKey("FactoryId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.Navigation("Department");
 
                     b.Navigation("Factory");
                 });
@@ -1630,7 +2045,8 @@ namespace ProductionLinePlanner.Infrastructure.Data.Migrations
                 {
                     b.HasOne("ProductionLinePlanner.Domain.Entities.MainStage", "MainStage")
                         .WithMany("SubStages")
-                        .HasForeignKey("MainStageId")
+                        .HasForeignKey("MainStageId", "DepartmentId")
+                        .HasPrincipalKey("Id", "DepartmentId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
@@ -1656,8 +2072,24 @@ namespace ProductionLinePlanner.Infrastructure.Data.Migrations
                     b.Navigation("Permission");
                 });
 
+            modelBuilder.Entity("ProductionLinePlanner.Domain.Entities.Worker", b =>
+                {
+                    b.HasOne("ProductionLinePlanner.Domain.Entities.Department", "OrganizationalDepartment")
+                        .WithMany()
+                        .HasForeignKey("OrganizationalDepartmentId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("OrganizationalDepartment");
+                });
+
             modelBuilder.Entity("ProductionLinePlanner.Domain.Entities.WorkerDefaultAssignment", b =>
                 {
+                    b.HasOne("ProductionLinePlanner.Domain.Entities.ProductionLine", "ProductionLine")
+                        .WithMany()
+                        .HasForeignKey("ProductionLineId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.HasOne("ProductionLinePlanner.Domain.Entities.SubStage", "SubStage")
                         .WithMany("DefaultAssignments")
                         .HasForeignKey("SubStageId")
@@ -1669,6 +2101,8 @@ namespace ProductionLinePlanner.Infrastructure.Data.Migrations
                         .HasForeignKey("WorkerId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.Navigation("ProductionLine");
 
                     b.Navigation("SubStage");
 
@@ -1739,14 +2173,28 @@ namespace ProductionLinePlanner.Infrastructure.Data.Migrations
                     b.Navigation("RefreshTokens");
                 });
 
+            modelBuilder.Entity("ProductionLinePlanner.Domain.Entities.Department", b =>
+                {
+                    b.Navigation("MainStages");
+
+                    b.Navigation("ProductionLines");
+                });
+
             modelBuilder.Entity("ProductionLinePlanner.Domain.Entities.Factory", b =>
                 {
+                    b.Navigation("Departments");
+
                     b.Navigation("ProductionLines");
                 });
 
             modelBuilder.Entity("ProductionLinePlanner.Domain.Entities.MainStage", b =>
                 {
                     b.Navigation("SubStages");
+                });
+
+            modelBuilder.Entity("ProductionLinePlanner.Domain.Entities.NotificationPolicy", b =>
+                {
+                    b.Navigation("RecipientRules");
                 });
 
             modelBuilder.Entity("ProductionLinePlanner.Domain.Entities.Permission", b =>
@@ -1759,11 +2207,6 @@ namespace ProductionLinePlanner.Infrastructure.Data.Migrations
             modelBuilder.Entity("ProductionLinePlanner.Domain.Entities.ProductModel", b =>
                 {
                     b.Navigation("Stages");
-                });
-
-            modelBuilder.Entity("ProductionLinePlanner.Domain.Entities.ProductionLine", b =>
-                {
-                    b.Navigation("MainStages");
                 });
 
             modelBuilder.Entity("ProductionLinePlanner.Domain.Entities.ProductionOrder", b =>

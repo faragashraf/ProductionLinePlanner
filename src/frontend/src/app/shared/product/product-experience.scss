@@ -31,6 +31,11 @@
   justify-content: space-between;
 }
 
+.plp-product-toolbar-host {
+  display: block;
+  min-inline-size: 0;
+}
+
 .plp-product-dialog__header,
 .plp-form-sheet__header,
 .plp-product-page-header {
@@ -175,9 +180,22 @@
   min-inline-size: 0;
 }
 
+.plp-product-loading__row:not(.plp-product-loading__row--with-avatar) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .plp-product-loading__body {
   display: grid;
   gap: var(--plp-space-8);
+  min-inline-size: 0;
+}
+
+// PrimeNG renders `p-skeleton` as an inline Angular host. Make the host a
+// block only within the shared loading state so its visual child receives the
+// row width and height promised by the loading layout.
+.plp-product-loading p-skeleton {
+  display: block;
+  inline-size: 100%;
   min-inline-size: 0;
 }
 
@@ -535,9 +553,13 @@ plp-product-metadata-item {
   align-items: stretch;
   background: var(--plp-color-surface-soft);
   border: var(--plp-border-muted);
+  box-sizing: border-box;
   border-radius: var(--plp-radius-md);
   flex-wrap: wrap;
+  inline-size: 100%;
   margin-block-end: var(--plp-space-16);
+  max-inline-size: 100%;
+  min-inline-size: 0;
   padding: var(--plp-space-12);
 }
 
@@ -551,6 +573,12 @@ plp-product-metadata-item {
 
 .plp-product-toolbar__search input {
   inline-size: 100%;
+}
+
+.plp-product-toolbar__clear {
+  flex: 0 0 auto;
+  min-block-size: var(--plp-touch-target-min);
+  min-inline-size: var(--plp-touch-target-min);
 }
 
 .plp-product-toolbar__actions {
@@ -613,6 +641,20 @@ plp-product-metadata-item {
 }
 
 @media (max-width: 599px) {
+  .plp-product-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+  }
+
+  .plp-product-toolbar__search,
+  .plp-product-toolbar__filters {
+    flex: 0 0 auto;
+    inline-size: 100%;
+    min-inline-size: 0;
+  }
+
   .plp-product-dialog .p-dialog-content {
     max-block-size: 60dvh;
   }
@@ -647,4 +689,45 @@ plp-product-metadata-item {
   .plp-product-toolbar__filters {
     flex: 1 1 auto;
   }
+}
+// Manufacturing stage catalogs wrap only between words. Short labels remain intact
+// while the local table scroller contains narrow viewport overflow.
+.master-page {
+  hyphens: none;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.master-page .p-datatable-thead > tr > th,
+.master-page .p-button-label,
+.master-page .plp-code {
+  hyphens: none;
+  overflow-wrap: normal;
+  white-space: nowrap;
+  word-break: normal;
+}
+
+.master-page .p-datatable-tbody > tr > td {
+  hyphens: none;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.master-page__stage-group td {
+  background: var(--plp-color-surface-soft);
+  border-block-start: var(--plp-border-muted);
+  color: var(--plp-color-text);
+  padding: .55rem .75rem !important;
+  white-space: normal;
+}
+
+.master-page__stage-group i {
+  color: var(--plp-color-primary);
+  margin-inline-end: .45rem;
+}
+
+.master-page__stage-group small {
+  color: var(--plp-color-text-soft);
+  margin-inline-start: .65rem;
+  white-space: nowrap;
 }

@@ -1,174 +1,127 @@
-import { ChangeDetectionStrategy, ChangeDetectorRef, Component, OnInit } from '@angular/core';
+import { Component, OnDestroy, OnInit } from '@angular/core';
+import { catchError, finalize, of, Subject, Subscription, takeUntil } from 'rxjs';
+import { ManufacturingDataChanged, RealtimeConnectionStatus, realtimeConnectionStatusLabel } from '../../core/models/realtime-notification.models';
+import { ManufacturingCommandCenterApiService } from '../../core/services/manufacturing-command-center-api.service';
+import { ManufacturingRealtimeService } from '../../core/services/manufacturing-realtime.service';
 import {
-  FactoryLayout,
-  MainStageLayout,
-  ProductionLineLayout,
-  SubStageLayout
-} from '../../shared/models/factory-visualization.model';
-import { FactoryMapApiData, FactoryMapApiService } from '../../core/services/factory-map-api.service';
-import { MockDataService } from '../../core/services/mock-data.service';
-import { catchError, finalize, of } from 'rxjs';
-
-type FactoryZoomLevel = 'factory' | 'line' | 'stage' | 'worker';
+  CommandCenterFilters,
+  CommandCenterLine,
+  CommandCenterLineStatusDimension,
+  ManufacturingCommandCenter,
+  commandCenterLineProblemSeverity,
+  commandCenterLineStatusDimensions,
+  commandCenterOperationLabel,
+  commandCenterScopeMatches,
+  defaultCommandCenterFilters
+} from '../../shared/models/manufacturing-command-center.model';
 
 @Component({
   selector: 'app-factory-map-page',
-  templateUrl: './factory-map-page.component.html',
-  styleUrls: ['./factory-map-page.component.scss'],
-  changeDetection: ChangeDetectionStrategy.OnPush
+  templateUrl: './factory-map-page.component.html'
 })
-export class FactoryMapPageComponent implements OnInit {
+export class FactoryMapPageComponent implements OnInit, OnDestroy {
+  filters = defaultCommandCenterFilters();
+  data: ManufacturingCommandCenter | null = null;
   isLoading = true;
-  showFallbackWarning = false;
-  isBackendDataIncomplete = false;
-  fallbackWarningMessage: string | null = null;
-  layout: FactoryLayout;
-  currentZoom: FactoryZoomLevel = 'factory';
-  private selectedLineId: string | null = null;
-  private selectedMainStageId: string | null = null;
-  private selectedSubStageId: string | null = null;
+  isRefreshing = false;
+  hasLoadError = false;
+  dataIsCurrent = false;
+  readonly expandedFactories = new Set<string>();
+  readonly expandedDepartments = new Set<string>();
+  readonly expandedLines = new Set<string>();
 
-  private readonly backendFailureWarning = 'لا يمكن الاتصال بالخادم حالياً، لذلك يتم عرض البيانات التجريبية.';
-  private readonly backendIncompleteWarning = 'لا توجد بيانات مكتملة لخريطة المصنع حالياً، لذلك يتم عرض بيانات تجريبية.';
+  private readonly destroy$ = new Subject<void>();
+  private stopRealtimeWatch?: () => void;
+  private activeLoad?: Subscription;
+  private loadVersion = 0;
 
   constructor(
-    private readonly dataService: MockDataService,
-    private readonly factoryMapApiService: FactoryMapApiService,
-    private readonly changeDetectorRef: ChangeDetectorRef
-  ) {
-    this.layout = this.dataService.getFactoryLayout();
-  }
+    private readonly api: ManufacturingCommandCenterApiService,
+    private readonly manufacturingRealtime: ManufacturingRealtimeService
+  ) {}
+
+  get realtimeStatus$() { return this.manufacturingRealtime.connectionStatus$; }
 
   ngOnInit(): void {
-    this.loadFactoryMapData();
+    this.load();
+    this.stopRealtimeWatch = this.manufacturingRealtime.watchScreen({
+      screen: 'manufacturing-command-center',
+      matches: change => this.matchesCurrentScope(change),
+      refresh: () => this.load(true)
+    });
   }
 
-  private loadFactoryMapData(): void {
-    this.isLoading = true;
-    this.factoryMapApiService
-      .loadFactoryMapData()
-      .pipe(
-        catchError(() => of(this.getConnectionFallbackData())),
-        finalize(() => {
-          this.isLoading = false;
-          this.changeDetectorRef.markForCheck();
-        })
-      )
-      .subscribe((data) => {
-        if (!data.hasBackendData || !data.hasUsableBackendData) {
-          this.layout = this.dataService.getFactoryLayout();
-          this.showFallbackWarning = true;
-          this.isBackendDataIncomplete = data.fallbackReason !== 'connection';
-          this.fallbackWarningMessage = data.fallbackReason === 'connection'
-            ? this.backendFailureWarning
-            : this.backendIncompleteWarning;
-          return;
-        }
-
-        this.layout = data.layout;
-        this.showFallbackWarning = false;
-        this.isBackendDataIncomplete = false;
-        this.fallbackWarningMessage = null;
-      });
+  ngOnDestroy(): void {
+    this.stopRealtimeWatch?.();
+    this.activeLoad?.unsubscribe();
+    this.destroy$.next();
+    this.destroy$.complete();
   }
 
-  private getConnectionFallbackData(): FactoryMapApiData {
-    return {
-      layout: this.dataService.getFactoryLayout(),
-      hasBackendData: false,
-      hasUsableBackendData: false,
-      fallbackReason: 'connection'
-    };
+  onFiltersChange(filters: CommandCenterFilters): void {
+    this.filters = filters;
+    this.dataIsCurrent = false;
+    this.load();
   }
 
-  get selectedLine(): ProductionLineLayout | undefined {
-    if (!this.selectedLineId) {
-      return undefined;
-    }
-    return this.layout.lines.find((line) => line.id === this.selectedLineId);
+  retry(): void { this.load(); }
+  operationLabel(status: string): string { return commandCenterOperationLabel(status); }
+  statusClass(status: string): string { return `state-${status.replace(/([a-z])([A-Z])/g, '$1-$2').toLowerCase()}`; }
+  realtimeLabel(status: RealtimeConnectionStatus): string { return realtimeConnectionStatusLabel(status); }
+  realtimeClass(status: RealtimeConnectionStatus): string { return `realtime-status--${status}`; }
+  lineDimensions(line: CommandCenterLine): CommandCenterLineStatusDimension[] { return commandCenterLineStatusDimensions(line); }
+  dimensionClass(dimension: CommandCenterLineStatusDimension): string { return `line-dimension--${dimension.tone}`; }
+  lineContainerClass(line: CommandCenterLine): string {
+    const severity = commandCenterLineProblemSeverity(line);
+    return severity >= 500 ? 'line-state-critical' : severity > 0 ? 'line-state-warning' : 'line-state-ok';
+  }
+  sortedLines(lines: CommandCenterLine[]): CommandCenterLine[] {
+    return [...lines].sort((first, second) => commandCenterLineProblemSeverity(second) - commandCenterLineProblemSeverity(first)
+      || first.name.localeCompare(second.name, 'ar'));
+  }
+  ratioText(percentage: number | null): string { return percentage === null ? 'لا توجد بيانات' : `${percentage}%`; }
+  isExpanded(kind: 'factory' | 'department' | 'line', id: string): boolean { return this.setFor(kind).has(id); }
+
+  setExpanded(kind: 'factory' | 'department' | 'line', id: string, event: Event): void {
+    const open = (event.currentTarget as HTMLDetailsElement).open;
+    const target = this.setFor(kind);
+    if (open) target.add(id); else target.delete(id);
   }
 
-  get selectedMainStage(): MainStageLayout | undefined {
-    if (!this.selectedMainStageId || !this.selectedLine) {
-      return undefined;
-    }
-    return this.selectedLine.stages.find((stage) => stage.id === this.selectedMainStageId);
+  trackById(_: number, item: { id?: string | null; productionOrderId?: string }): string {
+    return item.id ?? item.productionOrderId ?? String(_);
   }
 
-  get selectedSubStage(): SubStageLayout | undefined {
-    if (!this.selectedSubStageId || !this.selectedMainStage) {
-      return undefined;
-    }
-    return this.selectedMainStage.subStages.find((stage) => stage.id === this.selectedSubStageId);
+  private load(background = false): void {
+    const loadVersion = ++this.loadVersion;
+    this.activeLoad?.unsubscribe();
+    if (background && this.data) this.isRefreshing = true;
+    else this.isLoading = true;
+    this.hasLoadError = false;
+    this.activeLoad = this.api.load(this.filters).pipe(
+      catchError(() => {
+        if (loadVersion === this.loadVersion) this.hasLoadError = true;
+        return of(null);
+      }),
+      finalize(() => {
+        if (loadVersion !== this.loadVersion) return;
+        this.isLoading = false;
+        this.isRefreshing = false;
+      }),
+      takeUntil(this.destroy$)
+    ).subscribe(data => {
+      if (loadVersion !== this.loadVersion || !data) return;
+      this.data = data;
+      this.dataIsCurrent = true;
+      if (this.expandedFactories.size === 0) data.factories.forEach(factory => this.expandedFactories.add(factory.id));
+    });
   }
 
-  onLineSelected(lineId: string): void {
-    this.selectedLineId = lineId;
-    this.selectedMainStageId = null;
-    this.selectedSubStageId = null;
-    this.currentZoom = 'line';
+  private setFor(kind: 'factory' | 'department' | 'line'): Set<string> {
+    return kind === 'factory' ? this.expandedFactories : kind === 'department' ? this.expandedDepartments : this.expandedLines;
   }
 
-  onMainStageSelected(stageId: string): void {
-    if (!this.selectedLine) {
-      return;
-    }
-
-    this.selectedMainStageId = stageId;
-    this.selectedSubStageId = null;
-    this.currentZoom = 'stage';
-  }
-
-  onSubStageSelected(subStageId: string): void {
-    if (!this.selectedLine || !this.selectedMainStage) {
-      return;
-    }
-
-    this.selectedSubStageId = subStageId;
-
-    if (this.selectedSubStage) {
-      this.currentZoom = 'worker';
-    } else {
-      this.currentZoom = 'stage';
-    }
-  }
-
-  showFactory(): void {
-    this.currentZoom = 'factory';
-    this.selectedLineId = null;
-    this.selectedMainStageId = null;
-    this.selectedSubStageId = null;
-  }
-
-  showLine(): void {
-    this.currentZoom = 'line';
-    this.selectedMainStageId = null;
-    this.selectedSubStageId = null;
-  }
-
-  showStage(): void {
-    if (!this.selectedMainStage) {
-      return;
-    }
-
-    this.currentZoom = 'stage';
-    this.selectedSubStageId = null;
-  }
-
-  onStageBack(target: 'line' | 'stage'): void {
-    if (target === 'line') {
-      this.showLine();
-      return;
-    }
-
-    this.showStage();
-  }
-
-  trackByLine(_: number, line: ProductionLineLayout): string {
-    return line.id;
-  }
-
-  trackByStage(_: number, stage: MainStageLayout): string {
-    return stage.id;
+  private matchesCurrentScope(change: ManufacturingDataChanged): boolean {
+    return commandCenterScopeMatches(this.filters, change);
   }
 }

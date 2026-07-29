@@ -1,203 +1,200 @@
 import { fakeAsync, tick } from '@angular/core/testing';
-import { FormBuilder } from '@angular/forms';
-import { Observable, of, throwError } from 'rxjs';
+import { Subject, of, throwError } from 'rxjs';
+import { PermissionService } from '../../core/services/permission.service';
+import { WorkerManagementFacade } from './worker-management.facade';
+import { WorkerManagementListItem, WorkerManagementPage, WorkerManagementProfile, WorkerManagementQuery } from './worker-management.models';
 import { WorkersPageComponent } from './workers-page.component';
-import { WorkersApiData } from '../../core/services/workers-api.service';
-import { WorkersApiService } from '../../core/services/workers-api.service';
 
 describe('WorkersPageComponent', () => {
-  const samplePayload: WorkersApiData = {
-    workers: [
-      {
-        id: 'w-1',
-        code: 'E-1',
-        fullName: 'عامل تجريبي',
-        state: 'على رأس العمل',
-        employmentStatus: 'Active',
-        isActive: true
-      }
-    ],
-    hasBackendData: true,
-    hasUsableBackendData: true,
-    totalCount: 1,
-    page: 1,
-    pageSize: 10,
-    totalPages: 1,
-    supportsServerPagination: false
+  const listItem: WorkerManagementListItem = {
+    id: '11111111-1111-1111-1111-111111111111', localName: 'عامل محلي', sourceName: null,
+    photoUrl: null, badgeNumber: 'B-1', employeeCode: 'EMP-1', assignmentLabel: 'لا يوجد تسكين افتراضي نشط',
+    factoryLineLabel: 'لا يوجد تسكين حالي', sourceLinkStatus: 'linked', localProfileStatus: 'complete',
+    assignmentStatus: 'unassigned', localEmploymentStatus: 'active', factoryId: null, productionLineId: null,
+    hasIdentityConflict: false, organizationalDepartmentId: null, organizationalDepartmentName: null,
+    organizationalFactoryName: null, organizationalDepartmentConcurrencyToken: 'token-1'
   };
+  const profile: WorkerManagementProfile = {
+    id: listItem.id,
+    local: { displayName: listItem.localName, photoUrl: null, salary: null, profileStatus: 'complete', employmentStatus: 'active' },
+    source: { sourceName: null, badgeNumber: 'B-1', employeeCode: 'EMP-1', employmentStatus: null, department: null, shift: null, lastObservedAt: null, linkStatus: 'linked' },
+    assignments: [], history: [], sourcePreview: [], assignmentStatus: 'unassigned', defaultSubStageId: null
+  };
+  const page: WorkerManagementPage = { items: [listItem], totalCount: 1, page: 1, pageSize: 6, totalPages: 1 };
 
-  function createComponent(
-    loadWorkers$: Observable<WorkersApiData> = of(samplePayload)
-  ) {
-    const workersApi = jasmine.createSpyObj<WorkersApiService>('WorkersApiService', ['loadWorkers', 'updateWorker']);
-    workersApi.loadWorkers.and.returnValue(loadWorkers$);
-    workersApi.updateWorker.and.returnValue(of({ ...samplePayload.workers[0], fullName: 'عامل محدّث', phone: '01012345678' }));
+  let facade: jasmine.SpyObj<WorkerManagementFacade>;
+  let permissions: jasmine.SpyObj<PermissionService>;
 
-    return {
-      component: new WorkersPageComponent(workersApi, new FormBuilder()),
-      workersApi
-    };
-  }
-
-  function buildInput(value: string): Event {
-    return {
-      target: {
-        value
-      }
-    } as unknown as Event;
-  }
-
-  it('loads workers exactly once when opening the page', () => {
-    const { component, workersApi } = createComponent();
-
-    component.ngOnInit();
-
-    expect(workersApi.loadWorkers).toHaveBeenCalledTimes(1);
+  beforeEach(() => {
+    localStorage.clear();
+    facade = jasmine.createSpyObj<WorkerManagementFacade>('WorkerManagementFacade', [
+      'loadWorkers', 'loadProfile', 'loadActiveDepartments', 'assignDepartment'
+    ]);
+    facade.loadWorkers.and.returnValue(of(page));
+    facade.loadProfile.and.returnValue(of(profile));
+    facade.loadActiveDepartments.and.returnValue(of([{
+      id: 'department-1', name: 'قسم التشغيل', code: 'D-001', factoryId: 'factory-1',
+      factoryName: 'المصنع الرئيسي', searchLabel: 'قسم التشغيل · D-001 · المصنع الرئيسي'
+    }]));
+    facade.assignDepartment.and.returnValue(of({
+      workerId: listItem.id, departmentId: 'department-1', departmentName: 'قسم التشغيل',
+      factoryId: 'factory-1', factoryName: 'المصنع الرئيسي', concurrencyToken: 'token-2'
+    }));
+    permissions = jasmine.createSpyObj<PermissionService>('PermissionService', ['hasPermission', 'hasAll']);
+    permissions.hasPermission.and.callFake(permission => permission === 'workers.manage' || permission === 'assignments.view');
+    permissions.hasAll.and.callFake(required =>
+      (Array.isArray(required) ? required : [required]).every(permission => permissions.hasPermission(permission)));
   });
 
-  it('ignores duplicated lazy events for the same state', () => {
-    const { component, workersApi } = createComponent();
+  function createComponent(): WorkersPageComponent { return new WorkersPageComponent(facade, permissions); }
 
+  it('shows loading until the real-data facade completes', () => {
+    const response = new Subject<WorkerManagementPage>();
+    facade.loadWorkers.and.returnValue(response);
+    const component = createComponent();
     component.ngOnInit();
-    component.hasLoadedOnce = true;
-    component.isServerSidePagination = true;
-    component.first = 0;
-    component.rows = 10;
-
-    component.onLazyLoad({ first: 0, rows: 10 } as any);
-    component.onLazyLoad({ first: 0, rows: 10 } as any);
-
-    expect(workersApi.loadWorkers).toHaveBeenCalledTimes(1);
+    expect(component.isLoading).toBeTrue();
+    response.next(page);
+    response.complete();
+    expect(component.workers).toEqual([listItem]);
   });
 
-  it('sends one request when page changes', () => {
-    const { component, workersApi } = createComponent();
+  it('represents explicit empty and API error states without a fixture fallback', () => {
+    facade.loadWorkers.and.returnValue(of({ ...page, items: [], totalCount: 0 }));
+    const empty = createComponent();
+    empty.ngOnInit();
+    expect(empty.isEmpty).toBeTrue();
 
-    component.ngOnInit();
-    component.hasLoadedOnce = true;
-    component.isServerSidePagination = true;
-    component.first = 0;
-    component.rows = 10;
-
-    component.onLazyLoad({ first: 10, rows: 10 } as any);
-
-    expect(workersApi.loadWorkers).toHaveBeenCalledTimes(2);
+    facade.loadWorkers.and.returnValue(throwError(() => new Error('offline')));
+    const error = createComponent();
+    error.ngOnInit();
+    expect(error.hasError).toBeTrue();
+    expect(error.errorMessage).toContain('offline');
   });
 
-  it('debounces search into a single request', fakeAsync(() => {
-    const { component, workersApi } = createComponent();
-
+  it('sends debounced search and the supported active-status filter to the facade', fakeAsync(() => {
+    const component = createComponent();
     component.ngOnInit();
-    expect(workersApi.loadWorkers).toHaveBeenCalledTimes(1);
-
-    component.onSearch(buildInput('a'));
-    tick(100);
-    component.onSearch(buildInput('al'));
-    tick(100);
-    component.onSearch(buildInput('ali'));
-
-    expect(workersApi.loadWorkers).toHaveBeenCalledTimes(1);
-
-    tick(300);
-    expect(workersApi.loadWorkers).toHaveBeenCalledTimes(2);
+    facade.loadWorkers.calls.reset();
+    component.onSearch('EMP-1');
+    tick(250);
+    component.onEmploymentStatusChange('active');
+    const query = facade.loadWorkers.calls.mostRecent().args[0] as WorkerManagementQuery;
+    expect(query).toEqual(jasmine.objectContaining({ search: 'EMP-1', localEmploymentStatus: 'active', page: 1 }));
   }));
 
-  it('forces a new request on manual refresh', () => {
-    const { component, workersApi } = createComponent();
-
+  it('opens a real profile request and preserves the list on close', () => {
+    const component = createComponent();
     component.ngOnInit();
-    expect(workersApi.loadWorkers).toHaveBeenCalledTimes(1);
-
-    component.onRefresh();
-    expect(workersApi.loadWorkers).toHaveBeenCalledTimes(2);
-
-    component.onRefresh();
-    expect(workersApi.loadWorkers).toHaveBeenCalledTimes(3);
+    component.openProfile(listItem);
+    expect(facade.loadProfile).toHaveBeenCalledWith(listItem.id);
+    expect(component.selectedProfile).toEqual(profile);
+    component.closeProfile();
+    expect(component.workers).toEqual([listItem]);
   });
 
-  it('reloads all directory workers by the selected service-status filter', () => {
-    const { component, workersApi } = createComponent();
-
+  it('refreshes the manufacturing employees page through the shared realtime service without losing its query or page', () => {
+    let refresh: (() => void) | undefined;
+    const stop = jasmine.createSpy('stop');
+    const realtime = { watchScreen: jasmine.createSpy('watchScreen').and.callFake((watch: { refresh: () => void }) => { refresh = watch.refresh; return stop; }) };
+    const component = new WorkersPageComponent(facade, permissions, realtime as never, { url: '/manufacturing/employees' } as never);
     component.ngOnInit();
-    component.onServiceStatusChange('inactive');
+    component.search = 'عامل';
+    component.localEmploymentStatus = 'active';
+    component.page = 2;
+    facade.loadWorkers.calls.reset();
+    refresh?.();
 
-    expect(workersApi.loadWorkers).toHaveBeenCalledWith(jasmine.objectContaining({ serviceStatus: 'inactive' }));
+    expect(realtime.watchScreen).toHaveBeenCalledWith(jasmine.objectContaining({ screen: 'employees' }));
+    expect(facade.loadWorkers).toHaveBeenCalledWith(jasmine.objectContaining({ search: 'عامل', localEmploymentStatus: 'active', page: 2 }));
+    component.ngOnDestroy();
+    expect(stop).toHaveBeenCalled();
   });
 
-  it('switching Active or Former back to All clears the status constraint, resets pagination, and preserves search', () => {
-    const { component, workersApi } = createComponent();
+  it('requires both existing management permissions and updates the row once after a valid department assignment', () => {
+    const component = createComponent();
     component.ngOnInit();
-    component.searchTerm = 'علي';
-    component.first = 30;
+    component.openDepartmentDialog(listItem);
+    expect(component.departmentDialogVisible).toBeFalse();
 
-    component.onServiceStatusChange('active');
-    component.first = 20;
-    component.onServiceStatusChange('all');
+    permissions.hasPermission.and.callFake(permission =>
+      permission === 'workers.manage' || permission === 'departments.manage' || permission === 'assignments.view');
+    const messageService = { add: jasmine.createSpy('add') };
+    const permitted = new WorkersPageComponent(facade, permissions, undefined, undefined, messageService as never);
+    permitted.ngOnInit();
+    permitted.openDepartmentDialog(listItem);
+    expect(facade.loadActiveDepartments).toHaveBeenCalled();
+    expect(permitted.departmentSaveDisabled).toBeTrue();
 
-    expect(component.first).toBe(0);
-    expect(workersApi.loadWorkers).toHaveBeenCalledWith(jasmine.objectContaining({
-      page: 1,
-      search: 'علي',
-      serviceStatus: 'all'
+    permitted.selectedDepartmentId = 'department-1';
+    permitted.saveDepartmentAssignment();
+
+    expect(facade.assignDepartment).toHaveBeenCalledOnceWith(listItem.id, 'department-1', 'token-1');
+    expect(permitted.workers[0]).toEqual(jasmine.objectContaining({
+      organizationalDepartmentId: 'department-1',
+      organizationalDepartmentName: 'قسم التشغيل',
+      organizationalDepartmentConcurrencyToken: 'token-2'
     }));
-
-    component.onServiceStatusChange('inactive');
-    component.first = 10;
-    component.onServiceStatusChange('all');
-
-    expect(component.first).toBe(0);
-    expect(workersApi.loadWorkers).toHaveBeenCalledTimes(5);
+    expect(permitted.departmentDialogVisible).toBeFalse();
+    expect(messageService.add).toHaveBeenCalledTimes(1);
   });
 
-  it('opens edit in the shared sheet state and reconciles only the changed worker without reloading filters or paging', () => {
-    const { component, workersApi } = createComponent();
+  it('keeps department assignment inside the authorized row action menu', () => {
+    const menu = { toggle: jasmine.createSpy('toggle') };
+    const component = createComponent();
+
+    component.openWorkerActions(new Event('click'), listItem, menu as never);
+    expect(component.workerActionItems.map(item => item.label)).toEqual(['فتح الملف']);
+
+    permissions.hasPermission.and.returnValue(true);
+    component.openWorkerActions(new Event('click'), listItem, menu as never);
+
+    expect(component.workerActionItems.map(item => item.label)).toEqual(['فتح الملف', 'تعيين إلى قسم']);
+    expect(menu.toggle).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps an open dialog and blocks saving when another client changes the same worker', () => {
+    permissions.hasPermission.and.returnValue(true);
+    let refresh: ((change: {
+      entityId: string; workerId: string; workerIds: string[]; workerChangeKinds: ['department-assignment'];
+    }) => void) | undefined;
+    const realtime = {
+      watchScreen: jasmine.createSpy('watchScreen').and.callFake((watch: { refresh: typeof refresh }) => {
+        refresh = watch.refresh;
+        return () => undefined;
+      })
+    };
+    const component = new WorkersPageComponent(facade, permissions, realtime as never, { url: '/manufacturing/employees' } as never);
     component.ngOnInit();
-    component.searchTerm = 'عامل';
-    component.serviceStatus = 'active';
-    component.first = 20;
-    component.workers = [...samplePayload.workers];
+    component.openDepartmentDialog(listItem);
+    component.selectedDepartmentId = 'department-1';
 
-    component.openWorkerEdit(samplePayload.workers[0]);
-    component.workerForm.setValue({ fullName: 'عامل محدّث', phone: '01012345678' });
-    component.saveWorker();
+    refresh?.({
+      entityId: listItem.id,
+      workerId: listItem.id,
+      workerIds: [listItem.id],
+      workerChangeKinds: ['department-assignment']
+    });
 
-    expect(component.workerSheetVisible).toBeFalse();
-    expect(component.workerSheetMode).toBe('edit');
-    expect(workersApi.updateWorker).toHaveBeenCalledWith('w-1', { fullName: 'عامل محدّث', phone: '01012345678' });
-    expect(workersApi.loadWorkers).toHaveBeenCalledTimes(1);
-    expect(component.workers[0]).toEqual(jasmine.objectContaining({ fullName: 'عامل محدّث', phone: '01012345678' }));
-    expect(component.searchTerm).toBe('عامل');
-    expect(component.serviceStatus).toBe('active');
-    expect(component.first).toBe(20);
+    expect(component.departmentDialogVisible).toBeTrue();
+    expect(component.departmentConflict).toBeTrue();
+    expect(component.departmentDialogError).toContain('مستخدم آخر');
+    component.saveDepartmentAssignment();
+    expect(facade.assignDepartment).not.toHaveBeenCalled();
   });
 
-  it('keeps the edit sheet and entered values open after a failed targeted save', () => {
-    const { component, workersApi } = createComponent();
-    workersApi.updateWorker.and.returnValue(throwError(() => new Error('network')));
-    component.workers = [...samplePayload.workers];
-    component.openWorkerEdit(samplePayload.workers[0]);
-    component.workerForm.setValue({ fullName: 'عامل محفوظ', phone: '01000000000' });
+  it('turns an API concurrency response into a clear blocking conflict', () => {
+    permissions.hasPermission.and.returnValue(true);
+    facade.assignDepartment.and.returnValue(throwError(() => ({ status: 409 })));
+    const component = createComponent();
+    component.ngOnInit();
+    component.openDepartmentDialog(listItem);
+    component.selectedDepartmentId = 'department-1';
 
-    component.saveWorker();
+    component.saveDepartmentAssignment();
 
-    expect(component.workerSheetVisible).toBeTrue();
-    expect(component.workerForm.getRawValue()).toEqual({ fullName: 'عامل محفوظ', phone: '01000000000' });
-    expect(component.workerSaveError).toContain('network');
-  });
-
-  it('opens both details and edit through the shared sheet state without changing the loaded row set', () => {
-    const { component } = createComponent();
-    component.workers = [...samplePayload.workers];
-
-    component.openWorkerDetails(samplePayload.workers[0]);
-    expect(component.workerSheetVisible).toBeTrue();
-    expect(component.workerSheetMode).toBe('details');
-
-    component.closeWorkerSheet();
-    component.openWorkerEdit(samplePayload.workers[0]);
-    expect(component.workerSheetVisible).toBeTrue();
-    expect(component.workerSheetMode).toBe('edit');
-    expect(component.workerForm.getRawValue()).toEqual({ fullName: 'عامل تجريبي', phone: '' });
-    expect(component.workers).toEqual(samplePayload.workers);
+    expect(component.departmentConflict).toBeTrue();
+    expect(component.departmentDialogVisible).toBeTrue();
+    expect(component.departmentDialogError).toContain('أثناء التحرير');
   });
 });

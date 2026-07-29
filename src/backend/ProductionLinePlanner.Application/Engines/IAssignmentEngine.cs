@@ -46,6 +46,7 @@ public interface IAssignmentEngine
     /// across stages: a worker keeps every other active participation.
     /// </summary>
     Task<Result<StageDefaultAssignmentsUpdateResultDto>> UpdateStageDefaultAssignmentsAsync(
+        Guid productionLineId,
         Guid subStageId,
         IReadOnlyCollection<Guid>? workerIds,
         Guid actorUserId,
@@ -54,6 +55,7 @@ public interface IAssignmentEngine
 
     Task<Result<AssignmentActionResultDto>> RemoveDefaultAssignmentAsync(
         Guid workerId,
+        Guid productionLineId,
         Guid subStageId,
         string reason,
         Guid actorUserId,
@@ -97,6 +99,15 @@ public interface IAssignmentEngine
         Guid subStageId,
         DateTime? asOfUtc = null,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Returns structural staffing coverage for every active sub-stage in one batch.
+    /// The result uses the same effective-assignment rules as line staffing and
+    /// intentionally does not evaluate attendance.
+    /// </summary>
+    Task<Result<IReadOnlyCollection<SubStageAssignmentCoverageDto>>> GetActiveSubStageAssignmentCoverageAsync(
+        DateTime? asOfUtc = null,
+        CancellationToken cancellationToken = default);
 }
 
 public sealed record WorkerAssignmentState(
@@ -109,4 +120,5 @@ public sealed record WorkerAssignmentState(
     Guid? FromSubStageId,
     Guid? ToSubStageId,
     Guid? ReplacementForWorkerId,
-    TemporaryAssignmentMode? ParticipationMode = null);
+    TemporaryAssignmentMode? ParticipationMode = null,
+    Guid? ProductionLineId = null);

@@ -15,7 +15,8 @@ describe('IAM routing', () => {
     expect(admin?.data?.['requireAny']).toEqual([
       PERMISSIONS.users.view,
       PERMISSIONS.roles.view,
-      PERMISSIONS.permissions.assign
+      PERMISSIONS.permissions.assign,
+      PERMISSIONS.notifications.policiesManage
     ]);
   });
 
@@ -41,6 +42,13 @@ describe('IAM routing', () => {
 
     expect(permissions?.canActivate).toContain(PermissionCanActivateGuard);
     expect(permissions?.data?.['permission']).toBe(PERMISSIONS.permissions.assign);
+  });
+
+  it('requires notification policy permission for the policy studio route', () => {
+    const policies = IAM_ADMIN_ROUTES.find((route) => route.path === 'notification-policies');
+
+    expect(policies?.canActivate).toContain(PermissionCanActivateGuard);
+    expect(policies?.data?.['permission']).toBe(PERMISSIONS.notifications.policiesManage);
   });
 
   it('contains exact navigation routes for IAM screens', () => {
@@ -69,5 +77,28 @@ describe('IAM routing', () => {
 
     expect(workers?.loadChildren).toBeDefined();
     expect(workers?.component).toBeUndefined();
+    expect(workers?.canMatch).toContain(PermissionCanMatchGuard);
+    expect(workers?.canActivate).toContain(PermissionCanActivateGuard);
+    expect(workers?.data?.['permission']).toBe(PERMISSIONS.workers.view);
+  });
+
+  it('requires both factory-structure.view and stages.view for Factory Map', () => {
+    const shell = APP_ROUTES.find((route) => route.path === '');
+    const factoryMap = shell?.children?.find((route) => route.path === 'factory-map');
+
+    expect(factoryMap?.canActivate).toContain(PermissionCanActivateGuard);
+    expect(factoryMap?.data?.['requireAll']).toEqual([
+      PERMISSIONS.factoryStructure.view,
+      PERMISSIONS.stages.view
+    ]);
+  });
+
+  it('removes legacy stages, production-lines, and assignments routes', () => {
+    const shell = APP_ROUTES.find((route) => route.path === '');
+    const legacyPaths = ['stages', 'production-lines', 'assignments'];
+
+    legacyPaths.forEach((path) => {
+      expect(shell?.children?.some((route) => route.path === path)).toBeFalse();
+    });
   });
 });

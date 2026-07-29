@@ -19,13 +19,15 @@ public sealed class AttendanceSyncCoordinator : IAttendanceSyncService
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly AttendanceSourceOptions _sourceOptions;
     private readonly ILogger<AttendanceSyncCoordinator> _logger;
+    private readonly ICairoTimeZoneProvider _cairoTimeZoneProvider;
     private readonly Func<Task>? _afterFailedTryAddAsync;
 
     public AttendanceSyncCoordinator(
         IServiceScopeFactory scopeFactory,
         IOptions<AttendanceSourceOptions> sourceOptions,
-        ILogger<AttendanceSyncCoordinator> logger)
-        : this(scopeFactory, sourceOptions, logger, null)
+        ILogger<AttendanceSyncCoordinator> logger,
+        ICairoTimeZoneProvider cairoTimeZoneProvider)
+        : this(scopeFactory, sourceOptions, logger, cairoTimeZoneProvider, null)
     {
     }
 
@@ -33,18 +35,19 @@ public sealed class AttendanceSyncCoordinator : IAttendanceSyncService
         IServiceScopeFactory scopeFactory,
         IOptions<AttendanceSourceOptions> sourceOptions,
         ILogger<AttendanceSyncCoordinator> logger,
+        ICairoTimeZoneProvider cairoTimeZoneProvider,
         Func<Task>? afterFailedTryAddAsync)
     {
         _scopeFactory = scopeFactory;
         _sourceOptions = sourceOptions.Value;
         _logger = logger;
+        _cairoTimeZoneProvider = cairoTimeZoneProvider;
         _afterFailedTryAddAsync = afterFailedTryAddAsync;
     }
 
     public Task<Result<AttendanceSyncResultDto>> SyncTodayAsync(CancellationToken cancellationToken = default)
     {
-        var egyptTimeZone = TimeZoneInfo.FindSystemTimeZoneById("Africa/Cairo");
-        var cairoNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, egyptTimeZone);
+        var cairoNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, _cairoTimeZoneProvider.TimeZone);
         return SyncForProductionDateAsync(DateOnly.FromDateTime(cairoNow), cancellationToken);
     }
 

@@ -8,22 +8,22 @@ public class MainStage
 
     public MainStage(
         Guid id,
-        Guid productionLineId,
+        Guid departmentId,
         string name,
         int sequenceOrder,
         bool isCritical = false,
         bool isActive = true,
         DateTime? createdAtUtc = null)
     {
-        if (productionLineId == Guid.Empty)
-            throw new ArgumentException("ProductionLineId is required.", nameof(productionLineId));
+        if (departmentId == Guid.Empty)
+            throw new ArgumentException("DepartmentId is required.", nameof(departmentId));
         if (string.IsNullOrWhiteSpace(name))
             throw new ArgumentException("Main stage name is required.", nameof(name));
         if (sequenceOrder < 0)
             throw new ArgumentOutOfRangeException(nameof(sequenceOrder), "SequenceOrder must be zero or positive.");
 
         Id = id;
-        ProductionLineId = productionLineId;
+        DepartmentId = departmentId;
         Name = name.Trim();
         SequenceOrder = sequenceOrder;
         IsCritical = isCritical;
@@ -33,8 +33,8 @@ public class MainStage
     }
 
     public Guid Id { get; init; }
-    public Guid ProductionLineId { get; init; }
-    public ProductionLine? ProductionLine { get; set; }
+    public Guid DepartmentId { get; init; }
+    public Department? Department { get; set; }
     public string Name { get; private set; } = string.Empty;
     public int SequenceOrder { get; private set; }
     public bool IsCritical { get; private set; }

@@ -27,7 +27,7 @@ public sealed class AttendanceRecordConfiguration : IEntityTypeConfiguration<Att
         builder.Property(x => x.SourcePayload).HasMaxLength(4000);
         builder.Property(x => x.CreatedAtUtc).IsRequired();
 
-        builder.HasIndex(x => new { x.WorkerId, x.AttendanceTimeUtc });
+        builder.HasIndex(x => new { x.WorkerId, x.AttendanceTimeUtc }).IsUnique();
 
         builder.HasOne(x => x.Worker)
             .WithMany()

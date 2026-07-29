@@ -9,6 +9,7 @@ import { PRODUCTION_RUNTIME_Z_INDEX } from '../../shared/design-system/layering/
 import { PLP_ANGULAR_MOTION } from '../../shared/product/product-motion';
 import { PRODUCT_IDENTITY } from '../../core/config/product-identity.config';
 import { productionIconFor } from '../../shared/design-system/icons/production-icon-map';
+import { NotificationInboxService } from '../../core/services/notification-inbox.service';
 
 export type ShellNavigationMode = 'phone' | 'tablet-portrait' | 'tablet-landscape' | 'desktop';
 
@@ -22,6 +23,7 @@ export class AppShellComponent implements OnInit, OnDestroy {
   @ViewChild('overlayCloseButton') private overlayCloseButton?: ElementRef<HTMLButtonElement>;
 
   sidebarOpen = false;
+  sidebarCollapsed = false;
   navigationMode: ShellNavigationMode = 'phone';
   breadcrumbItems: MenuItem[] = [];
   readonly overlaySidebarBaseZIndex = PRODUCTION_RUNTIME_Z_INDEX.modal;
@@ -36,6 +38,7 @@ export class AppShellComponent implements OnInit, OnDestroy {
   administrationNavigationItems: AppNavigationItem[] = [];
   permissionHydrationState: PermissionHydrationState = 'idle';
   currentPageLabel = 'لوحة التحكم';
+  unreadNotificationCount = 0;
 
   private destroy$ = new Subject<void>();
 
@@ -43,11 +46,16 @@ export class AppShellComponent implements OnInit, OnDestroy {
     private readonly router: Router,
     private readonly activatedRoute: ActivatedRoute,
     private readonly authService: AuthService,
-    private readonly permissionService: PermissionService
+    private readonly permissionService: PermissionService,
+    private readonly notificationInbox: NotificationInboxService
   ) {}
 
   ngOnInit(): void {
     this.checkViewport();
+
+    this.notificationInbox.unreadCount$
+      .pipe(takeUntil(this.destroy$))
+      .subscribe(count => this.unreadNotificationCount = count);
 
     this.permissionService.hydrationState$
       .pipe(takeUntil(this.destroy$))
@@ -91,9 +99,14 @@ export class AppShellComponent implements OnInit, OnDestroy {
   @HostListener('window:resize')
   onResize(): void {
     this.checkViewport();
-    if (!this.isOverlayNavigation) {
-      this.closeSidebar();
+
+    if (this.isOverlayNavigation) {
+      this.sidebarOpen = false;
+      this.sidebarCollapsed = false;
+      return;
     }
+
+    this.sidebarOpen = false;
   }
 
   @HostListener('document:keydown.escape', ['$event'])
@@ -107,11 +120,19 @@ export class AppShellComponent implements OnInit, OnDestroy {
   toggleSidebar(): void {
     if (this.isOverlayNavigation) {
       this.sidebarOpen = !this.sidebarOpen;
+      return;
     }
+
+    this.sidebarCollapsed = !this.sidebarCollapsed;
   }
 
   closeSidebar(): void {
-    this.sidebarOpen = false;
+    if (this.isOverlayNavigation) {
+      this.sidebarOpen = false;
+      return;
+    }
+
+    this.sidebarCollapsed = true;
   }
 
   onSidebarVisibleChange(visible: boolean): void {
@@ -136,7 +157,18 @@ export class AppShellComponent implements OnInit, OnDestroy {
   }
 
   isActive(path: string): boolean {
-    return this.router.url.startsWith(path);
+    const currentPath = this.router.url.split(/[?#]/, 1)[0];
+    if (currentPath === path || currentPath.startsWith(`${path}/`)) {
+      return true;
+    }
+
+    const dashboardSuffix = '/dashboard';
+    const workspacePath = path.endsWith(dashboardSuffix)
+      ? path.slice(0, -dashboardSuffix.length)
+      : '';
+
+    return Boolean(workspacePath)
+      && (currentPath === workspacePath || currentPath.startsWith(`${workspacePath}/`));
   }
 
   logout(): void {
@@ -157,7 +189,7 @@ export class AppShellComponent implements OnInit, OnDestroy {
   }
 
   get hasPersistentNavigation(): boolean {
-    return this.navigationMode === 'tablet-landscape' || this.navigationMode === 'desktop';
+    return !this.isOverlayNavigation;
   }
 
   get currentUserName(): string {
@@ -217,13 +249,14 @@ export class AppShellComponent implements OnInit, OnDestroy {
 
   private checkViewport(): void {
     const viewportWidth = typeof window === 'undefined' ? 0 : window.innerWidth;
+    const viewportHeight = typeof window === 'undefined' ? 0 : window.innerHeight;
 
     if (viewportWidth >= 1024) {
       this.navigationMode = 'desktop';
       return;
     }
 
-    if (viewportWidth >= 768) {
+    if (viewportWidth >= 768 && viewportWidth > viewportHeight) {
       this.navigationMode = 'tablet-landscape';
       return;
     }

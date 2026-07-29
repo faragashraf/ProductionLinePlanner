@@ -1,6 +1,4 @@
 using Microsoft.EntityFrameworkCore;
-using ProductionLinePlanner.Application.Common;
-using ProductionLinePlanner.Application.Engines;
 using ProductionLinePlanner.Domain.Entities;
 using ProductionLinePlanner.Domain.Enums;
 using ProductionLinePlanner.Infrastructure.BusinessEngines;
@@ -31,13 +29,13 @@ public sealed class LineStaffingEngineTests
         var defaultStage = plan.Stages.Single(stage => stage.SubStageId == fixture.DefaultSubStage.Id);
         var temporaryStage = plan.Stages.Single(stage => stage.SubStageId == fixture.TemporarySubStage.Id);
         Assert.Equal(2, defaultStage.DefaultAssignedWorkersCount);
-        Assert.Equal(1, defaultStage.EffectiveAssignedWorkersCount);
-        Assert.Equal(1, temporaryStage.EffectiveAssignedWorkersCount);
-        Assert.Equal(1, temporaryStage.TemporaryAssignedWorkersCount);
+        Assert.Equal(2, defaultStage.EffectiveAssignedWorkersCount);
+        Assert.Equal(0, temporaryStage.EffectiveAssignedWorkersCount);
+        Assert.Equal(0, temporaryStage.TemporaryAssignedWorkersCount);
         Assert.Equal("SharedPercentage", temporaryStage.CompensationMode);
         Assert.Equal(.38m, temporaryStage.PiecePrice);
         Assert.True(temporaryStage.IsFinancialReviewPending);
-        Assert.True(plan.StaffingPlanComplete);
+        Assert.False(plan.StaffingPlanComplete);
     }
 
     [Fact]
@@ -51,50 +49,25 @@ public sealed class LineStaffingEngineTests
         Assert.Equal(2, result.Value!.Count);
         Assert.All(result.Value, worker => Assert.True(worker.IsOnActiveService));
         Assert.DoesNotContain(result.Value, worker => worker.WorkerId == fixture.FormerWorker.Id || worker.WorkerId == fixture.InactiveWorker.Id);
-        Assert.Contains(result.Value, worker => worker.WorkerId == fixture.TemporarilyMovedWorker.Id && worker.EffectiveAssignmentType == "Temporary");
+        Assert.Contains(result.Value, worker => worker.WorkerId == fixture.TemporarilyMovedWorker.Id && worker.EffectiveAssignmentType == "Default");
     }
 
     [Fact]
-    public async Task Temporary_assignment_overrides_only_inside_its_window_then_the_worker_returns_to_the_preserved_default()
+    public async Task Historical_temporary_assignment_is_not_included_in_the_permanent_staffing_read_model()
     {
         await using var fixture = await StaffingFixture.CreateAsync();
 
-        var duringTemporary = await fixture.Engine.GetLineStaffingPlanAsync(
+        var result = await fixture.Engine.GetLineStaffingPlanAsync(
             fixture.Factory.Id, fixture.Line.Id, fixture.Model.Id, fixture.ReferenceDate);
-        var afterTemporary = await fixture.Engine.GetLineStaffingPlanAsync(
-            fixture.Factory.Id, fixture.Line.Id, fixture.Model.Id, fixture.ReferenceDate.AddDays(2));
 
-        Assert.True(duringTemporary.IsSuccess);
-        Assert.True(afterTemporary.IsSuccess);
-        var duringWorker = duringTemporary.Value!.Workers.Single(worker => worker.WorkerId == fixture.TemporarilyMovedWorker.Id);
-        var afterWorker = afterTemporary.Value!.Workers.Single(worker => worker.WorkerId == fixture.TemporarilyMovedWorker.Id);
-        Assert.Equal("Temporary", duringWorker.EffectiveAssignmentType);
-        Assert.Equal(fixture.TemporarySubStage.Id, duringWorker.EffectiveSubStageId);
-        Assert.Equal(fixture.DefaultSubStage.Id, afterWorker.EffectiveSubStageId);
-        Assert.Equal("Default", afterWorker.EffectiveAssignmentType);
-        Assert.Equal(fixture.DefaultSubStage.Id, afterWorker.DefaultSubStageId);
+        Assert.True(result.IsSuccess);
+        var worker = result.Value!.Workers.Single(worker => worker.WorkerId == fixture.TemporarilyMovedWorker.Id);
+        Assert.Equal("Default", worker.EffectiveAssignmentType);
+        Assert.Equal(fixture.DefaultSubStage.Id, worker.EffectiveSubStageId);
+        Assert.DoesNotContain(worker.Participations, participation => participation.AssignmentType != "Default");
+        Assert.DoesNotContain(result.Value.Stages.Single(stage => stage.SubStageId == fixture.TemporarySubStage.Id).EffectiveWorkerIds, id => id == fixture.TemporarilyMovedWorker.Id);
         Assert.True((await fixture.Db.WorkerDefaultAssignments.SingleAsync(assignment => assignment.WorkerId == fixture.TemporarilyMovedWorker.Id)).IsActive);
         Assert.Equal("Active", (await fixture.Db.WorkerTemporaryAssignments.SingleAsync()).Status);
-    }
-
-    [Fact]
-    public async Task Effective_assignment_uses_default_before_the_temporary_period_and_after_its_end()
-    {
-        await using var fixture = await StaffingFixture.CreateAsync();
-
-        var before = await fixture.Engine.GetLineStaffingPlanAsync(
-            fixture.Factory.Id, fixture.Line.Id, fixture.Model.Id, fixture.ReferenceDate.AddDays(-2));
-        var inside = await fixture.Engine.GetLineStaffingPlanAsync(
-            fixture.Factory.Id, fixture.Line.Id, fixture.Model.Id, fixture.ReferenceDate);
-        var after = await fixture.Engine.GetLineStaffingPlanAsync(
-            fixture.Factory.Id, fixture.Line.Id, fixture.Model.Id, fixture.ReferenceDate.AddDays(2));
-
-        Assert.True(before.IsSuccess);
-        Assert.True(inside.IsSuccess);
-        Assert.True(after.IsSuccess);
-        Assert.Equal("Default", before.Value!.Workers.Single(x => x.WorkerId == fixture.TemporarilyMovedWorker.Id).EffectiveAssignmentType);
-        Assert.Equal("Temporary", inside.Value!.Workers.Single(x => x.WorkerId == fixture.TemporarilyMovedWorker.Id).EffectiveAssignmentType);
-        Assert.Equal("Default", after.Value!.Workers.Single(x => x.WorkerId == fixture.TemporarilyMovedWorker.Id).EffectiveAssignmentType);
     }
 
     [Fact]
@@ -103,7 +76,7 @@ public sealed class LineStaffingEngineTests
         await using var fixture = await StaffingFixture.CreateAsync();
         fixture.Db.WorkerDefaultAssignments.Add(new WorkerDefaultAssignment(
             Guid.NewGuid(), fixture.TemporarilyMovedWorker.Id, fixture.TemporarySubStage.Id, Guid.NewGuid(),
-            new DateTime(2026, 7, 10, 9, 0, 0, DateTimeKind.Utc)));
+            new DateTime(2026, 7, 10, 9, 0, 0, DateTimeKind.Utc), productionLineId: fixture.Line.Id));
         await fixture.Db.SaveChangesAsync();
 
         var result = await fixture.Engine.GetLineStaffingPlanAsync(
@@ -122,9 +95,8 @@ public sealed class LineStaffingEngineTests
     public async Task Stage_refresh_after_removing_the_last_worker_returns_needs_staffing_and_cleared_worker_state()
     {
         await using var fixture = await StaffingFixture.CreateAsync();
-        var lastAssignment = await fixture.Db.WorkerDefaultAssignments
-            .SingleAsync(assignment => assignment.WorkerId != fixture.TemporarilyMovedWorker.Id);
-        lastAssignment.Deactivate(DateTime.UtcNow);
+        var assignments = await fixture.Db.WorkerDefaultAssignments.ToArrayAsync();
+        foreach (var assignment in assignments) assignment.Deactivate(DateTime.UtcNow);
         await fixture.Db.SaveChangesAsync();
 
         var result = await fixture.Engine.GetLineStaffingStageRefreshAsync(
@@ -140,7 +112,7 @@ public sealed class LineStaffingEngineTests
         Assert.Empty(result.Value.Stage.EffectiveWorkerIds);
         Assert.Equal(2, result.Value.Workers.Count);
         Assert.DoesNotContain(
-            result.Value.Workers.Single(worker => worker.WorkerId == lastAssignment.WorkerId).Participations,
+            result.Value.Workers.Single(worker => worker.WorkerId == fixture.DefaultWorker.Id).Participations,
             participation => participation.SubStageId == fixture.DefaultSubStage.Id);
     }
 
@@ -155,6 +127,7 @@ public sealed class LineStaffingEngineTests
             SubStage defaultSubStage,
             SubStage temporarySubStage,
             Worker temporarilyMovedWorker,
+            Worker defaultWorker,
             Worker formerWorker,
             Worker inactiveWorker,
             DateOnly referenceDate)
@@ -167,6 +140,7 @@ public sealed class LineStaffingEngineTests
             DefaultSubStage = defaultSubStage;
             TemporarySubStage = temporarySubStage;
             TemporarilyMovedWorker = temporarilyMovedWorker;
+            DefaultWorker = defaultWorker;
             FormerWorker = formerWorker;
             InactiveWorker = inactiveWorker;
             ReferenceDate = referenceDate;
@@ -180,6 +154,7 @@ public sealed class LineStaffingEngineTests
         public SubStage DefaultSubStage { get; }
         public SubStage TemporarySubStage { get; }
         public Worker TemporarilyMovedWorker { get; }
+        public Worker DefaultWorker { get; }
         public Worker FormerWorker { get; }
         public Worker InactiveWorker { get; }
         public DateOnly ReferenceDate { get; }
@@ -192,8 +167,9 @@ public sealed class LineStaffingEngineTests
             var actorId = Guid.NewGuid();
             var referenceDate = new DateOnly(2026, 7, 13);
             var factory = new Factory(Guid.NewGuid(), "Factory", "FAC");
-            var line = new ProductionLine(Guid.NewGuid(), factory.Id, "Line", 1);
-            var mainStage = new MainStage(Guid.NewGuid(), line.Id, "Main", 1);
+            var department = new Department(Guid.NewGuid(), factory.Id, "OPS", "التشغيل", "Operations", 1);
+            var line = new ProductionLine(Guid.NewGuid(), factory.Id, "Line", 1, departmentId: department.Id);
+            var mainStage = new MainStage(Guid.NewGuid(), department.Id, "Main", 1);
             var defaultSubStage = new SubStage(Guid.NewGuid(), mainStage.Id, "Default", "DEF", 1, 1);
             var temporarySubStage = new SubStage(Guid.NewGuid(), mainStage.Id, "Temporary", "TMP", 1, 2);
             var model = new ProductModel(Guid.NewGuid(), "MODEL", "Model");
@@ -204,13 +180,13 @@ public sealed class LineStaffingEngineTests
             var inactive = new Worker(Guid.NewGuid(), "103", "Inactive worker");
             inactive.Suspend();
 
-            db.AddRange(factory, line, mainStage, defaultSubStage, temporarySubStage, model, moved, defaultWorker, former, inactive);
+            db.AddRange(factory, department, line, mainStage, defaultSubStage, temporarySubStage, model, moved, defaultWorker, former, inactive);
             db.ProductModelStages.AddRange(
-                new ProductModelStage(Guid.NewGuid(), model.Id, defaultSubStage.Id, 1, .38m, 10m, CompensationMode.SharedPercentage),
-                new ProductModelStage(Guid.NewGuid(), model.Id, temporarySubStage.Id, 2, .38m, 10m, CompensationMode.SharedPercentage));
+                new ProductModelStage(Guid.NewGuid(), model.Id, line.Id, defaultSubStage.Id, 1, .38m, 10m, CompensationMode.SharedPercentage),
+                new ProductModelStage(Guid.NewGuid(), model.Id, line.Id, temporarySubStage.Id, 2, .38m, 10m, CompensationMode.SharedPercentage));
             db.WorkerDefaultAssignments.AddRange(
-                new WorkerDefaultAssignment(Guid.NewGuid(), moved.Id, defaultSubStage.Id, actorId, new DateTime(2026, 7, 10, 8, 0, 0, DateTimeKind.Utc)),
-                new WorkerDefaultAssignment(Guid.NewGuid(), defaultWorker.Id, defaultSubStage.Id, actorId, new DateTime(2026, 7, 10, 8, 0, 0, DateTimeKind.Utc)));
+                new WorkerDefaultAssignment(Guid.NewGuid(), moved.Id, defaultSubStage.Id, actorId, new DateTime(2026, 7, 10, 8, 0, 0, DateTimeKind.Utc), productionLineId: line.Id),
+                new WorkerDefaultAssignment(Guid.NewGuid(), defaultWorker.Id, defaultSubStage.Id, actorId, new DateTime(2026, 7, 10, 8, 0, 0, DateTimeKind.Utc), productionLineId: line.Id));
             db.WorkerTemporaryAssignments.Add(new WorkerTemporaryAssignment(
                 Guid.NewGuid(), moved.Id, defaultSubStage.Id, temporarySubStage.Id,
                 new DateTime(2026, 7, 12, 0, 0, 0, DateTimeKind.Utc),
@@ -218,34 +194,21 @@ public sealed class LineStaffingEngineTests
                 actorId, "Temporary staffing", status: "Active"));
             await db.SaveChangesAsync();
 
-            var assignmentEngine = new AssignmentEngine(db, new NoopAuditEngine());
             return new StaffingFixture(
                 db,
-                new LineStaffingEngine(db, assignmentEngine),
+                new LineStaffingEngine(db),
                 factory,
                 line,
                 model,
                 defaultSubStage,
                 temporarySubStage,
                 moved,
+                defaultWorker,
                 former,
                 inactive,
                 referenceDate);
         }
 
         public ValueTask DisposeAsync() => Db.DisposeAsync();
-    }
-
-    private sealed class NoopAuditEngine : IAuditEngine
-    {
-        public Task<Result> RecordAsync(
-            Guid actorUserId,
-            AuditActionType actionType,
-            string entityType,
-            string entityId,
-            object? before = null,
-            object? after = null,
-            string? requestMeta = null,
-            CancellationToken cancellationToken = default) => Task.FromResult(Result.Success());
     }
 }

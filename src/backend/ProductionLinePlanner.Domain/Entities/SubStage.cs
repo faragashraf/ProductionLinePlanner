@@ -12,7 +12,8 @@ public class SubStage
         int capacity,
         int defaultOrder,
         bool isActive = true,
-        DateTime? createdAtUtc = null)
+        DateTime? createdAtUtc = null,
+        Guid departmentId = default)
     {
         if (mainStageId == Guid.Empty)
             throw new ArgumentException("MainStageId is required.", nameof(mainStageId));
@@ -27,6 +28,7 @@ public class SubStage
 
         Id = id;
         MainStageId = mainStageId;
+        DepartmentId = departmentId;
         Name = name.Trim();
         Code = code.Trim();
         Capacity = capacity;
@@ -39,6 +41,11 @@ public class SubStage
     public Guid Id { get; init; }
     public Guid MainStageId { get; init; }
     public MainStage? MainStage { get; set; }
+    /// <summary>
+    /// Integrity key used to enforce department-scoped stage-code uniqueness and
+    /// a composite FK to MainStage. Ownership is still navigated through MainStage.
+    /// </summary>
+    public Guid DepartmentId { get; private set; }
     public string Name { get; private set; } = string.Empty;
     public string Code { get; private set; } = string.Empty;
     public int Capacity { get; private set; }
@@ -56,6 +63,20 @@ public class SubStage
 
     public List<WorkerDefaultAssignment> DefaultAssignments { get; } = [];
 
+    /// <summary>
+    /// Binds the integrity key to the owning MainStage department. The composite
+    /// database FK prevents this value from diverging from MainStage.DepartmentId.
+    /// </summary>
+    public void SetDepartment(Guid departmentId)
+    {
+        if (departmentId == Guid.Empty)
+            throw new ArgumentException("DepartmentId is required.", nameof(departmentId));
+        if (DepartmentId != Guid.Empty && DepartmentId != departmentId)
+            throw new InvalidOperationException("A stage cannot be moved to a different department.");
+
+        DepartmentId = departmentId;
+    }
+
     public void UpdateCapacity(int capacity, DateTime? atUtc = null)
     {
         if (capacity < 0)
@@ -65,14 +86,11 @@ public class SubStage
         UpdatedAtUtc = atUtc ?? DateTime.UtcNow;
     }
 
-    public void Rename(string code, string name, DateTime? atUtc = null)
+    public void Rename(string name, DateTime? atUtc = null)
     {
-        if (string.IsNullOrWhiteSpace(code))
-            throw new ArgumentException("Code is required.", nameof(code));
         if (string.IsNullOrWhiteSpace(name))
             throw new ArgumentException("Sub stage name is required.", nameof(name));
 
-        Code = code.Trim();
         Name = name.Trim();
         UpdatedAtUtc = atUtc ?? DateTime.UtcNow;
     }

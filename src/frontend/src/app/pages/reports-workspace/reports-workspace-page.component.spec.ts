@@ -1,5 +1,8 @@
 import { HttpErrorResponse } from '@angular/common/http';
 import { of, throwError } from 'rxjs';
+import { PERMISSIONS } from '../../core/config/permission-identifiers';
+import { PermissionService } from '../../core/services/permission.service';
+import { FinancialReportResult, ProductionFinancialReportApiService } from '../../core/services/production-financial-report-api.service';
 import { ProductionQuantitiesReportApiService, QuantitiesReportResult } from '../../core/services/production-quantities-report-api.service';
 import { ManufacturingMasterDataApiService } from '../../core/services/manufacturing-master-data-api.service';
 import { ProductionCostRecordingApiService } from '../../core/services/production-cost-recording-api.service';
@@ -44,8 +47,37 @@ describe('ReportsWorkspacePageComponent', () => {
     sortBy: 'ProductionDate',
     sortDirection: 'Ascending'
   };
+  const financialResult: FinancialReportResult = {
+    ...result,
+    summary: {
+      totalPhysicalProducedQuantity: 480,
+      totalPhysicalAcceptedQuantity: 450,
+      totalPhysicalRejectedQuantity: 30,
+      recordCount: 3,
+      stageCount: 2,
+      workerCount: 4,
+      totalProductionEarnings: 250,
+      totalStageProductionCost: 250,
+      averageProductionEarningPerWorker: 62.5,
+      averageCostPerPhysicalUnit: 0.52,
+      incompleteFinancialRecordCount: 0,
+      financialDataStatus: 'Complete',
+      currencyCode: 'EGP'
+    },
+    rows: result.rows.map(row => ({
+      ...row,
+      stageProductionCost: 250,
+      productionEarning: null,
+      stageUnitPrice: 0.52,
+      workerPercentage: null,
+      compensationMode: 'SharedPercentage',
+      financialDataStatus: 'Complete'
+    }))
+  };
 
   let reports: jasmine.SpyObj<ProductionQuantitiesReportApiService>;
+  let financialReports: jasmine.SpyObj<ProductionFinancialReportApiService>;
+  let permissions: jasmine.SpyObj<PermissionService>;
   let state: ReportsWorkspaceStateService;
   let component: ReportsWorkspacePageComponent;
 
@@ -53,9 +85,14 @@ describe('ReportsWorkspacePageComponent', () => {
     localStorage.removeItem('plp.reports-workspace.filters.v1');
     reports = jasmine.createSpyObj<ProductionQuantitiesReportApiService>('ProductionQuantitiesReportApiService', ['query']);
     reports.query.and.returnValue(of(result));
+    financialReports = jasmine.createSpyObj<ProductionFinancialReportApiService>('ProductionFinancialReportApiService', ['query']);
+    financialReports.query.and.returnValue(of(financialResult));
+    permissions = jasmine.createSpyObj<PermissionService>('PermissionService', ['hasAll']);
+    permissions.hasAll.and.callFake(required => required.includes(PERMISSIONS.reports.financialView));
     state = new ReportsWorkspaceStateService();
     component = new ReportsWorkspacePageComponent(
       reports,
+      financialReports,
       {
         factories: () => of([]),
         allProductionLines: () => of([]),
@@ -66,7 +103,8 @@ describe('ReportsWorkspacePageComponent', () => {
         listWorkers: () => of([]),
         listOrders: () => of([])
       } as unknown as ProductionCostRecordingApiService,
-      state
+      state,
+      permissions
     );
   });
 
@@ -77,6 +115,7 @@ describe('ReportsWorkspacePageComponent', () => {
 
     expect(reports.query).not.toHaveBeenCalled();
     expect(component.loadState).toBe('idle');
+    expect(component.presentationMode).toBe('QuantitiesOnly');
     expect(component.filters.from).toMatch(/^\d{4}-\d{2}-01$/);
 
     component.applyFilters();
@@ -116,6 +155,114 @@ describe('ReportsWorkspacePageComponent', () => {
     expect(component.filters).toEqual(jasmine.objectContaining({ factoryId: '', productionLineId: '', status: 'Approved', view: 'Details', page: 1 }));
     expect(component.loadState).toBe('idle');
     expect(reports.query).toHaveBeenCalledTimes(1);
+  });
+
+  it('switches to the financial endpoint without losing applied filters, sorting, or pagination', () => {
+    component.ngOnInit();
+    component.onFiltersChange({ ...component.filters, factoryId: 'factory-1', workerId: 'worker-1' });
+    component.applyFilters();
+    component.onLazyLoad({ rows: 20, first: 20, sortField: 'StageCode', sortOrder: 1 });
+
+    component.changePresentationMode('QuantitiesAndFinancials');
+
+    expect(component.presentationMode).toBe('QuantitiesAndFinancials');
+    expect(financialReports.query).toHaveBeenCalledOnceWith(jasmine.objectContaining({
+      factoryId: 'factory-1', workerId: 'worker-1', page: 2, pageSize: 20, sortBy: 'StageCode', sortDirection: 'Ascending'
+    }));
+    expect(localStorage.getItem('plp.reports-workspace.filters.v1')).toContain('QuantitiesAndFinancials');
+    expect(component.result?.summary.totalPhysicalProducedQuantity).toBe(480);
+    expect(component.columns.map(column => column.label)).toContain('تكلفة المرحلة');
+    expect(component.rowValue(component.rows[0], 'stageCost')).toContain('EGP');
+    expect(component.rowValue(component.rows[0], 'compensation')).toBe('توزيع نسبي');
+  });
+
+  it('maps financial values by report grain without relabelling worker participation as physical production', () => {
+    component.ngOnInit();
+    component.applyFilters();
+    component.changePresentationMode('QuantitiesAndFinancials');
+    component.changeView('ByWorker');
+    component.result = {
+      ...financialResult,
+      view: 'ByWorker',
+      summary: { ...financialResult.summary, totalPhysicalProducedQuantity: 500, totalProductionEarnings: 175.0005 },
+      rows: [{
+        ...financialResult.rows[0],
+        source: { sourceType: 'Worker', workerId: 'worker-1' },
+        workerCode: 'W-01', workerName: 'عامل التشغيل', producedQuantity: null, acceptedQuantity: null, rejectedQuantity: null,
+        workerAllocatedQuantity: 166.667, recordCount: 1, stageCount: 1, workerCount: 1,
+        stageProductionCost: null, productionEarning: 58.3335, stageUnitPrice: null, workerPercentage: null,
+        compensationMode: 'SharedPercentage', financialDataStatus: 'Complete'
+      }]
+    };
+
+    expect(component.result.summary.totalPhysicalProducedQuantity).toBe(500);
+    expect(component.columns.map(column => column.label)).toContain('أرباح الإنتاج');
+    expect(component.columns.map(column => column.label)).not.toContain('إجمالي الإنتاج');
+    expect(component.rowValue(component.rows[0], 'allocated')).toContain('١٦٦٫٦٦٧');
+    expect(component.rowValue(component.rows[0], 'earnings')).toContain('EGP');
+
+    component.changeView('StageWorkers');
+    component.result = {
+      ...financialResult,
+      view: 'StageWorkers',
+      summary: { ...financialResult.summary, totalPhysicalProducedQuantity: 500, totalProductionEarnings: 175.0005 },
+      rows: [{
+        ...component.rows[0],
+        source: { sourceType: 'StageProductionWorkerAllocation', stageProductionRecordId: 'record-1', stageProductionWorkerAllocationId: 'allocation-1', workerId: 'worker-1' },
+        stageCode: 'ST-01', stageName: 'مرحلة التجميع', producedQuantity: 500, acceptedQuantity: 500,
+        workerAllocatedQuantity: 166.667, stageProductionCost: null, productionEarning: 58.3335, stageUnitPrice: 0.35, workerPercentage: 33.3333,
+        compensationMode: 'SharedPercentage', financialDataStatus: 'Complete'
+      }]
+    };
+
+    expect(component.result!.summary.totalPhysicalProducedQuantity).toBe(500);
+    expect(component.columns.map(column => column.label)).toContain('أرباح الإنتاج');
+    expect(component.columns.map(column => column.label)).toContain('نسبة التوزيع');
+    expect(component.rowValue(component.rows[0], 'produced')).toBe('٥٠٠');
+    expect(component.rowValue(component.rows[0], 'earnings')).toContain('EGP');
+    expect(component.rowValue(component.rows[0], 'percentage')).toBe('٣٣٫٣٣٪');
+    expect(component.rowValue(component.rows[0], 'unitPrice')).toContain('EGP');
+  });
+
+  it('keeps missing financial amounts explicit instead of rendering zero, NaN, or undefined', () => {
+    component.ngOnInit();
+    component.applyFilters();
+    component.changePresentationMode('QuantitiesAndFinancials');
+    component.result = {
+      ...financialResult,
+      summary: { ...financialResult.summary, totalProductionEarnings: null, totalStageProductionCost: null, financialDataStatus: 'Incomplete', incompleteFinancialRecordCount: 1 },
+      rows: [{ ...financialResult.rows[0], stageProductionCost: null, productionEarning: null, financialDataStatus: 'Incomplete' }]
+    };
+
+    expect(component.rowValue(component.rows[0], 'stageCost')).toBe('—');
+    expect(component.rowValue(component.rows[0], 'financialStatus')).toBe('بيانات مالية غير مكتملة');
+  });
+
+  it('keeps financial mode disabled and never requests the financial API without permission', () => {
+    permissions.hasAll.and.returnValue(false);
+    localStorage.setItem('plp.reports-workspace.filters.v1', JSON.stringify({ presentationMode: 'QuantitiesAndFinancials' }));
+
+    component.ngOnInit();
+    component.changePresentationMode('QuantitiesAndFinancials');
+
+    expect(component.canUseFinancialMode).toBeFalse();
+    expect(component.presentationMode).toBe('QuantitiesOnly');
+    expect(financialReports.query).not.toHaveBeenCalled();
+    expect(component.modeDescription).toContain('صلاحية عرض القيم المالية');
+  });
+
+  it('falls back to quantities with a clear message when financial access is rejected', () => {
+    financialReports.query.and.returnValue(throwError(() => new HttpErrorResponse({ status: 403 })));
+    component.ngOnInit();
+    component.applyFilters();
+    reports.query.calls.reset();
+
+    component.changePresentationMode('QuantitiesAndFinancials');
+
+    expect(financialReports.query).toHaveBeenCalled();
+    expect(component.presentationMode).toBe('QuantitiesOnly');
+    expect(component.modeMessage).toContain('تم الرجوع إلى الكميات فقط');
+    expect(reports.query).toHaveBeenCalledOnceWith(jasmine.objectContaining({ status: 'Approved', view: 'Details' }));
   });
 
   it('uses the quantity projection values without treating worker allocations as stage production', () => {

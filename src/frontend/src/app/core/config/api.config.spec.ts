@@ -20,9 +20,9 @@ describe('application URL configuration', () => {
     expect(buildHubUrl('production')).toBe('/hubs/production');
   });
 
-  it('keeps production URL configuration explicit and same-origin', () => {
+  it('uses the dedicated IIS API origin in production', () => {
     expect(productionEnvironment.production).toBeTrue();
-    expect(productionEnvironment.apiBaseUrl).toBe('/api');
-    expect(productionEnvironment.hubBaseUrl).toBe('/hubs');
+    expect(productionEnvironment.apiBaseUrl).toBe('http://192.168.1.99:9000');
+    expect(productionEnvironment.hubBaseUrl).toBe('http://192.168.1.99:9000');
   });
 });

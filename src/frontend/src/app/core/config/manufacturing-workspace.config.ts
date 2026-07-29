@@ -9,15 +9,16 @@ export interface ManufacturingWorkspaceItem extends PermissionRequirementDescrip
   icon: string;
 }
 
-// Recording needs read access for its existing orders/records lookups and record access
-// for draft/preview actions. Keep this shared so the tab, route, and contextual action
-// cannot drift into separate permission rules.
 export const PRODUCTION_RECORDING_ACCESS: PermissionRequirementDescriptor = {
   requireAll: [PERMISSIONS.production.view, PERMISSIONS.production.record]
 };
 
 export const DAILY_PRODUCTION_OPERATIONS_ACCESS: PermissionRequirementDescriptor = {
-  requireAll: [PERMISSIONS.production.view, PERMISSIONS.production.record]
+  requireAny: [
+    PERMISSIONS.production.view,
+    PERMISSIONS.production.record,
+    PERMISSIONS.production.approve
+  ]
 };
 
 export const REPORTS_WORKSPACE_ACCESS: PermissionRequirementDescriptor = {
@@ -85,24 +86,16 @@ export const MANUFACTURING_WORKSPACE_ITEMS: readonly ManufacturingWorkspaceItem[
   },
   {
     id: 'models',
-    label: 'النماذج',
-    description: 'كتالوج نماذج المنتجات سيظهر هنا.',
+    label: 'الموديلات',
+    description: 'كتالوج موديلات المنتجات سيظهر هنا.',
     route: '/manufacturing/models',
     icon: 'pi-box',
     permission: PERMISSIONS.models.view
   },
   {
-    id: 'compensation',
-    label: 'تكلفة المراحل',
-    description: 'إعدادات وطرق احتساب تكلفة المراحل ستظهر هنا.',
-    route: '/manufacturing/compensation',
-    icon: 'pi-wallet',
-    permission: PERMISSIONS.compensation.view
-  },
-  {
     id: 'line-staffing',
     label: 'تسكين الخط',
-    description: 'تخطيط التعيين الدائم والمؤقت لعمال الخط دون ربطه بحضور اليوم.',
+    description: 'تخطيط التسكين الدائم والمؤقت لعمال الخط دون ربطه بحضور اليوم.',
     route: '/manufacturing/line-staffing',
     icon: 'pi-users',
     ...LINE_STAFFING_ACCESS
@@ -114,14 +107,6 @@ export const MANUFACTURING_WORKSPACE_ITEMS: readonly ManufacturingWorkspaceItem[
     route: '/manufacturing/daily-production-operations',
     icon: 'pi-calendar-plus',
     ...DAILY_PRODUCTION_OPERATIONS_ACCESS
-  },
-  {
-    id: 'production-recording',
-    label: 'تسجيل الإنتاج',
-    description: 'تسجيل مرحلة مفردة متوافق مع السجلات السابقة.',
-    route: '/manufacturing/production-recording',
-    icon: 'pi-play-circle',
-    ...PRODUCTION_RECORDING_ACCESS
   },
   {
     id: 'reports',

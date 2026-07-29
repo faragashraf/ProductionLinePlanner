@@ -166,7 +166,7 @@ When an older document conflicts with executable code, this document treats curr
 - Both salary and production earnings are EGP in Reports V1. A non-EGP salary segment is not comparable and must produce a review/mismatch status, never a converted value.
 - Salary baseline uses calendar-day proration only: for every calendar month and intersecting effective salary segment, `monthly salary * covered calendar days / calendar days in that month`.
 - The report spans multiple months by summing every covered month/segment. Actual attendance days, scheduled working days, and other payroll divisors are not used.
-- Salary visibility requires both `reports.financial.view` and the Owner-approved `reports.worker-salary.view`. Salary-bearing export/print also requires `reports.financial.export`.
+- Salary visibility requires `reports.production.view`, `reports.financial.view`, and the Owner-approved `reports.worker-salary.view`. Salary-bearing export/print also requires `reports.financial.export`.
 - Financial UI shows both `الراتب الأساسي الشهري المرجعي` and `الراتب الأساسي المحتسب للفترة`; it never compares daily/weekly earnings to a full monthly amount without the period baseline.
 - The approved primary labels are `أرباح الإنتاج`, `أرباح الإنتاج كنسبة من الراتب`, `الراتب الأساسي للفترة`, and `إجمالي الراتب الأساسي + أرباح الإنتاج`. `القيمة المضافة` is not a primary standalone label.
 - `إجمالي الراتب الأساسي + أرباح الإنتاج` is analytical only. It always includes `قيمة تحليلية لا تمثل صافي كشف الرواتب النهائي.` and never represents payroll, deductions, taxes, absence, overtime, or a pay-slip amount.
@@ -289,12 +289,12 @@ The following are conceptual names requested for the capability, mapped to the r
 | Concept | Proposed catalog identifier | Purpose |
 |---|---|---|
 | ViewProductionReports | `reports.production.view` | Query quantities-only summaries, rows, and source references without financial fields. |
-| ViewFinancialReports | `reports.financial.view` | **Owner-approved Reports V1 identifier.** Query financial summaries, prices, modes, and entitlements. Must also imply or require production report view. |
+| ViewFinancialReports | `reports.financial.view` | **Owner-approved Reports V1 identifier.** Query financial summaries, prices, modes, and entitlements. Requires `reports.production.view` as well. |
 | ExportProductionReports | `reports.production.export` | Export quantities-only Excel/PDF and print quantities views. |
-| ExportFinancialReports | `reports.financial.export` | **Owner-approved Reports V1 identifier.** Export or print any report containing financial values. Must also require financial view. |
+| ExportFinancialReports | `reports.financial.export` | **Owner-approved Reports V1 identifier.** Export or print any report containing financial values. Must also require both report-view permissions. |
 | ViewWorkerSalaryReports | `reports.worker-salary.view` | **Owner-approved Reports V1 identifier.** Receive base salary, salary segments, period baseline, salary comparison, and salary-data status. Requires financial report view. |
 
-`reports.production.view` and `reports.production.export` remain **Proposed**. `reports.financial.view`, `reports.financial.export`, and `reports.worker-salary.view` are Owner-approved for Reports V1 but are not implemented in the catalog. Role assignments and defaults remain an **Open Decision**; no role should be assumed merely from its name.
+`reports.production.view` and `reports.financial.view` are implemented catalog permissions and both protect the financial-report endpoint. `reports.production.export`, `reports.financial.export`, and `reports.worker-salary.view` remain Owner-approved Reports V1 contracts pending their respective implementation slices. Role assignments and defaults remain an **Open Decision**; no role should be assumed merely from its name.
 
 ### 6.3 No-leak rules
 
@@ -383,7 +383,7 @@ The following are conceptual names requested for the capability, mapped to the r
 ### 9.2 QuantitiesAndFinancials
 
 - Adds financial summary cards and financial row extensions to the same selected business view.
-- Requires `reports.financial.view`; export/print additionally requires `reports.financial.export`.
+- Requires both `reports.production.view` and `reports.financial.view`; export/print additionally requires `reports.financial.export`.
 - Switching modes executes a new Backend query. It never reveals already-loaded hidden fields.
 - Production earnings and salary are separate sensitivity tiers. Financial mode may show earnings to a financial-report user while omitting the entire salary-comparison extension unless the salary permission is also effective.
 
@@ -645,10 +645,10 @@ Route separation is recommended over one polymorphic response because it makes a
 | Endpoint | Permission | Response |
 |---|---|---|
 | `GET /api/reports/production/quantities` | `reports.production.view` | Quantity-only summary/rows; no financial properties |
-| `GET /api/reports/production/financials` | `reports.financial.view` | Financial response with quantity base and financial extension |
-| `GET /api/reports/production/financials/workers/salary-comparisons` | `reports.financial.view` + `reports.worker-salary.view` | Salary-sensitive worker-grain comparison projection |
+| `GET /api/reports/production/financials` | `reports.production.view` + `reports.financial.view` | Financial response with quantity base and financial extension |
+| `GET /api/reports/production/financials/workers/salary-comparisons` | `reports.production.view` + `reports.financial.view` + `reports.worker-salary.view` | Salary-sensitive worker-grain comparison projection |
 | `GET /api/reports/production/quantities/sources/{sourceId}` | `reports.production.view` | Quantity source detail |
-| `GET /api/reports/production/financials/sources/{sourceId}` | `reports.financial.view` | Authorized financial source detail |
+| `GET /api/reports/production/financials/sources/{sourceId}` | `reports.production.view` + `reports.financial.view` | Authorized financial source detail |
 | `POST /api/reports/production/quantities/exports/excel` | view + `reports.production.export` | Generated quantity workbook |
 | `POST /api/reports/production/financials/exports/excel` | view + `reports.financial.export` | Generated financial workbook |
 | Equivalent PDF endpoints | matching export permission | Server-generated PDF |
@@ -948,7 +948,7 @@ Do not audit full rows, worker names, salaries, entitlements, raw filter display
 
 1. **Physical production grain:** What authoritative rule defines “إجمالي الإنتاج” across multiple stage records: a terminal stage, a separate completed-output record, or a Daily Operations order-level quantity restricted to that workflow? **Recommendation:** do not ship the card until this is explicit.
 2. **Historical worker evidence:** Must Reports V1 show exact assignment type, daily override, attendance window, and worker minutes as they were at record creation? **Recommendation:** yes; add a minimal immutable allocation evidence snapshot in a later implementation phase rather than reconstructing mutable history.
-3. **Report permission catalog and roles:** Approve or rename the remaining proposed report identifiers, place the Owner-approved `reports.financial.view`, `reports.financial.export`, and `reports.worker-salary.view` in the catalog, and approve all system-role assignments.
+3. **Report permissions and roles:** Approve or rename the remaining proposed export/salary identifiers and approve system-role assignments. `reports.production.view` and `reports.financial.view` are now catalogued and jointly protect the financial-report endpoint.
 4. **Legacy daily report:** Remove, deprecate, or immediately restrict `/api/production/reports/daily` to financial permission? **Recommendation:** restrict/deprecate in Phase 1 before the new UI is exposed.
 5. **Statuses:** Should users with production report permission be allowed to query Draft/Cancelled operational details, or should this require an audit/approval permission? **Recommendation:** Approved-only totals; explicit operational status access with clear labels.
 6. **Department/photo history:** Is current department/photo sufficient in the worker card, clearly labelled Current, or must it be snapshotted? **Recommendation:** current presentation is sufficient; do not embed photos in exports.

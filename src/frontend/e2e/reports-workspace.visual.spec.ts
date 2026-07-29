@@ -3,9 +3,9 @@ import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 
 const visualOutput = path.join(process.cwd(), 'test-results', 'reports-workspace');
-const permissions = ['reports.production.view', 'production.view', 'factory-structure.view', 'models.view', 'workers.view'];
+const quantitiesPermissions = ['reports.production.view', 'production.view', 'factory-structure.view', 'models.view', 'workers.view'];
 
-type ReportScenario = 'data' | 'empty' | 'forbidden';
+type ReportScenario = 'data' | 'empty' | 'forbidden' | 'financial-forbidden';
 
 const report = {
   summary: {
@@ -87,24 +87,56 @@ function reportForView(view: string | null): typeof report {
   return { ...report, view: view === 'ByStage' ? 'ByStage' : 'Details' };
 }
 
+function financialReportForView(view: string | null) {
+  const quantityResult = reportForView(view);
+  return {
+    ...quantityResult,
+    summary: {
+      totalPhysicalProducedQuantity: 500,
+      totalPhysicalAcceptedQuantity: 500,
+      totalPhysicalRejectedQuantity: 0,
+      recordCount: 3,
+      stageCount: 3,
+      workerCount: 3,
+      totalProductionEarnings: 750,
+      totalStageProductionCost: 750,
+      averageProductionEarningPerWorker: 250,
+      averageCostPerPhysicalUnit: 1.5,
+      incompleteFinancialRecordCount: 0,
+      financialDataStatus: 'Complete',
+      currencyCode: 'EGP'
+    },
+    rows: quantityResult.rows.map(row => ({
+      ...row,
+      stageProductionCost: 250,
+      productionEarning: row.workerAllocatedQuantity ? 125 : null,
+      compensationMode: 'SharedPercentage',
+      financialDataStatus: 'Complete'
+    }))
+  };
+}
+
 test.beforeAll(async () => {
   await mkdir(visualOutput, { recursive: true });
 });
 
-async function openReports(page: Page, scenario: ReportScenario = 'data'): Promise<void> {
+async function openReports(page: Page, scenario: ReportScenario = 'data', financialAccess = false): Promise<void> {
+  const currentPermissions = financialAccess
+    ? [...quantitiesPermissions, 'reports.financial.view']
+    : quantitiesPermissions;
   await page.addInitScript(({ currentPermissions }) => {
     localStorage.setItem('plp.accessToken', 'reports-visual-qa-token');
     localStorage.setItem('plp.currentUser', JSON.stringify({
       id: 'reports-visual-user', fullName: 'مراجع التقارير', email: 'reports.visual@local.test',
       roles: ['Administrator'], permissions: currentPermissions
     }));
-  }, { currentPermissions: permissions });
+  }, { currentPermissions });
 
   await page.route('**/api/**', async route => {
     const pathname = new URL(route.request().url()).pathname;
     let data: unknown;
     if (pathname.endsWith('/api/auth/me')) {
-      data = { id: 'reports-visual-user', fullName: 'مراجع التقارير', email: 'reports.visual@local.test', roles: ['Administrator'], permissions };
+      data = { id: 'reports-visual-user', fullName: 'مراجع التقارير', email: 'reports.visual@local.test', roles: ['Administrator'], permissions: currentPermissions };
     } else if (pathname.endsWith('/api/reports/production/quantities')) {
       if (scenario === 'forbidden') {
         await route.fulfill({
@@ -118,6 +150,12 @@ async function openReports(page: Page, scenario: ReportScenario = 'data'): Promi
       data = scenario === 'empty'
         ? { ...reportResult, rows: [], totalCount: 0, totalPages: 0 }
         : reportResult;
+    } else if (pathname.endsWith('/api/reports/production/financials')) {
+      if (scenario === 'financial-forbidden') {
+        await route.fulfill({ status: 403, contentType: 'application/json', body: JSON.stringify({ success: false, data: null, error: { message: 'Forbidden' } }) });
+        return;
+      }
+      data = financialReportForView(new URL(route.request().url()).searchParams.get('view'));
     } else if (pathname.includes('/api/factories')) {
       data = { items: [{ id: 'factory-1', name: 'مصنع الاختبار', code: 'F-01', isActive: true }] };
     } else if (pathname.includes('/api/production-lines')) {
@@ -168,6 +206,7 @@ async function scrollToTop(page: Page): Promise<void> {
 async function verifyWorkspace(page: Page, expectedColumns: number, fileName: string): Promise<void> {
   await expect(page.getByRole('heading', { name: 'تقارير الإنتاج' })).toBeVisible();
   await expect(page.getByText('الكميات فقط', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'الكميات والقيم المالية' })).toBeDisabled();
   await expect(page.locator('plp-statistic-card')).toHaveCount(4);
   await expect(page.locator('plp-statistic-card').nth(0).locator('.plp-statistic-card__value')).toHaveText('٥٠٠');
   await expect(page.locator('plp-statistic-card').nth(1).locator('.plp-statistic-card__value')).toHaveText('٣');
@@ -246,6 +285,45 @@ test('reports workspace on Android tablet portrait', async ({ page }) => {
   await openReports(page);
   await applyFilters(page);
   await verifyWorkspace(page, 2, 'tablet-portrait-800x1280.png');
+});
+
+test('reports workspace selects the authorized financial projection without changing the current result layout', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await openReports(page, 'data', true);
+  await applyFilters(page);
+
+  const financialRequest = page.waitForRequest(request => new URL(request.url()).pathname.endsWith('/api/reports/production/financials'));
+  await page.getByRole('button', { name: 'الكميات والقيم المالية' }).click();
+  await financialRequest;
+
+  await expect(page.locator('[data-reports-workspace="quantities-and-financials"]')).toBeVisible();
+  await expect(page.getByText('وضع القيم المالية مفعّل ضمن نفس نطاق الفلاتر، ويعرض قيم المراحل وأرباح العمال من اللقطات المحفوظة.')).toBeVisible();
+  await expect(page.locator('.reports-workspace__table [data-report-source]')).toHaveCount(3);
+  await page.screenshot({ path: path.join(visualOutput, 'financial-desktop-1440x900.png'), fullPage: true });
+});
+
+test('reports workspace returns to quantities when the authorized financial request is forbidden', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await openReports(page, 'financial-forbidden', true);
+  await applyFilters(page);
+  await page.getByRole('button', { name: 'الكميات والقيم المالية' }).click();
+
+  await expect(page.locator('[data-reports-workspace="quantities-only"]')).toBeVisible();
+  await expect(page.getByText('تم الرجوع إلى الكميات فقط لأن صلاحية عرض القيم المالية غير متاحة.')).toBeVisible();
+  await expect(page.locator('.reports-workspace__table [data-report-source]')).toHaveCount(3);
+  await page.screenshot({ path: path.join(visualOutput, 'financial-forbidden-desktop-1440x900.png'), fullPage: true });
+});
+
+test('reports workspace keeps the presentation selector contained on mobile', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await openReports(page);
+  const selector = page.locator('.reports-workspace__mode-selector');
+  await expect(selector).toBeVisible();
+  const bounds = await selector.boundingBox();
+  expect(bounds).not.toBeNull();
+  expect(bounds!.x).toBeGreaterThanOrEqual(0);
+  expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(390);
+  await page.screenshot({ path: path.join(visualOutput, 'mobile-390x844.png'), fullPage: true });
 });
 
 test('reports workspace distinguishes an empty response from an unapplied filter state', async ({ page }) => {

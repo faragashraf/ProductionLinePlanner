@@ -1,0 +1,122 @@
+<section class="worker-profile plp-workspace-detail" data-workspace-view="profile" [attr.aria-label]="'ملف العامل ' + worker.local.displayName">
+  <div class="worker-profile__back-row">
+    <button pButton pRipple type="button" class="p-button-text" [icon]="backIcon" label="العودة إلى قائمة العاملين" (click)="closed.emit()"></button>
+    <span class="worker-profile__demo-note"><i class="pi pi-database" aria-hidden="true"></i> بيانات محلية حقيقية من قاعدة التطبيق</span>
+  </div>
+
+  <header class="worker-profile__hero">
+    <div class="worker-profile__identity">
+      <plp-worker-avatar
+        [fullName]="worker.local.displayName"
+        [code]="worker.source.employeeCode || worker.source.badgeNumber || ''"
+        [photoReference]="worker.local.photoUrl"
+        [hasPhoto]="!!worker.local.photoUrl"
+        size="lg"
+      ></plp-worker-avatar>
+      <div class="worker-profile__identity-copy">
+        <span class="worker-profile__ownership-label"><i class="pi pi-home" aria-hidden="true"></i> بيانات محلية</span>
+        <h1>{{ worker.local.displayName }}</h1>
+        <p class="worker-profile__source-name">مرجع الهوية الخارجي محفوظ محليًا للعرض فقط؛ لا تقرأ هذه الشاشة نظام البصمة مباشرةً.</p>
+        <div class="worker-profile__badges" aria-label="حالات ملف العامل">
+          <plp-status-badge [status]="localProfileStatus().tone" [label]="localProfileStatus().label"></plp-status-badge>
+          <plp-status-badge [status]="sourceLinkStatus().tone" [label]="sourceLinkStatus().label"></plp-status-badge>
+          <span class="worker-profile__code" *ngIf="worker.source.badgeNumber">Badge <bdi>{{ worker.source.badgeNumber }}</bdi></span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <section class="worker-profile__ownership-grid" aria-label="حدود ملكية البيانات">
+    <article><i class="pi pi-home" aria-hidden="true"></i><div><strong>بيانات محلية</strong><span>الاسم المعروض، الصورة، والحالة المحلية.</span></div></article>
+    <article><i class="pi pi-eye" aria-hidden="true"></i><div><strong>مرجع خارجي</strong><span>المعرفات المحفوظة في قاعدة التطبيق للعرض فقط.</span></div></article>
+    <article><i class="pi pi-sitemap" aria-hidden="true"></i><div><strong>بيانات تشغيلية</strong><span>التسكين والمرحلة من قاعدة ProductionLinePlanner.</span></div></article>
+  </section>
+
+  <plp-section-navigation [sections]="sections" [activeId]="activeSection" (requested)="selectSection($event)"></plp-section-navigation>
+
+  <section *ngIf="activeSection === 'local'" class="worker-profile__section" data-profile-section="local">
+    <plp-product-section-header title="البيانات المحلية" description="التعديلات هنا تحفظ إلى قاعدة بيانات ProductionLinePlanner ولا تكتب إلى ZKTime."></plp-product-section-header>
+
+    <div class="worker-profile__local-summary">
+      <article><span>الراتب المحلي الحالي</span><strong class="plp-price">{{ formattedSalary }}</strong><small>لا يُعرض هنا دون صلاحية compensation منفصلة.</small></article>
+      <article><span>حالة العمل المحلية</span><plp-status-badge [status]="employmentStatus().tone" [label]="employmentStatus().label"></plp-status-badge></article>
+      <article><span>الصورة المحلية</span><strong>{{ worker.local.photoUrl ? 'متاحة محليًا' : 'لا توجد — يظهر البديل القياسي' }}</strong></article>
+    </div>
+
+    <form class="worker-profile__draft-form" [formGroup]="draftForm" (ngSubmit)="saveDraft()" aria-label="البيانات المحلية">
+      <label for="workerLocalName">
+        <span>الاسم العربي/المحلي المعروض</span>
+        <input id="workerLocalName" pInputText type="text" formControlName="displayName" maxlength="200" [readonly]="!canManage || isSaving" aria-describedby="workerLocalNameHelp workerLocalNameError">
+        <small id="workerLocalNameHelp">يحفظ في قاعدة التطبيق ولا يغيّر مرجع الاسم الخارجي.</small>
+        <small id="workerLocalNameError" class="worker-profile__validation" *ngIf="draftForm.controls.displayName.invalid && draftForm.controls.displayName.touched" role="alert">الاسم المحلي مطلوب وبحد أقصى 200 حرف.</small>
+      </label>
+      <label for="workerLocalEmploymentStatus">
+        <span>حالة العمل المحلية</span>
+        <select id="workerLocalEmploymentStatus" formControlName="employmentStatus" [attr.disabled]="!canManage || isSaving ? '' : null">
+          <option *ngFor="let option of localStatusOptions" [value]="option.value">{{ option.label }}</option>
+        </select>
+        <small>تُحفظ محليًا ولا تُستنتج من الحضور أو المصدر الخارجي.</small>
+      </label>
+
+      <div class="worker-profile__photo-draft" aria-label="إدارة الصورة المحلية">
+        <img *ngIf="photoPreviewUrl" [src]="photoPreviewUrl" alt="معاينة الصورة المختارة" style="width:4rem;height:4rem;object-fit:cover;border-radius:999px">
+        <plp-worker-avatar *ngIf="!photoPreviewUrl" [fullName]="worker.local.displayName" [photoReference]="worker.local.photoUrl" [hasPhoto]="!!worker.local.photoUrl" size="md"></plp-worker-avatar>
+        <div>
+          <strong>{{ selectedPhoto ? 'معاينة قبل الرفع' : 'الصورة المحلية' }}</strong>
+          <span>JPEG وPNG وBMP فقط، بحد أقصى 5 MiB. تتحقق الخدمة من البنية الفعلية للملف.</span>
+          <span *ngIf="selectedPhoto">{{ selectedPhoto.name }}</span>
+        </div>
+        <input #photoInput id="workerPhotoInput" type="file" accept="image/jpeg,image/png,image/bmp" style="position:absolute;width:1px;height:1px;opacity:0" [disabled]="!canManage || isPhotoBusy" (change)="onPhotoSelected(photoInput)">
+        <label for="workerPhotoInput" class="p-button p-component p-button-outlined" [class.p-disabled]="!canManage || isPhotoBusy"><i class="pi pi-upload" aria-hidden="true"></i><span>{{ worker.local.photoUrl ? 'اختيار بديل' : 'اختيار صورة' }}</span></label>
+        <button pButton pRipple type="button" icon="pi pi-cloud-upload" [label]="worker.local.photoUrl ? 'استبدال الصورة' : 'رفع الصورة'" [disabled]="!canManage || !selectedPhoto || isPhotoBusy" (click)="uploadSelectedPhoto()"></button>
+        <button *ngIf="worker.local.photoUrl" pButton pRipple type="button" class="p-button-danger p-button-outlined" icon="pi pi-trash" label="حذف الصورة" [disabled]="!canManage || isPhotoBusy" (click)="deletePhoto()"></button>
+        <p class="worker-profile__draft-message" *ngIf="photoMessage" role="status">{{ photoMessage }}</p>
+        <p class="worker-profile__validation" *ngIf="photoError" role="alert">{{ photoError }}</p>
+      </div>
+
+      <p class="worker-profile__permission-note" *ngIf="!canManage" role="note">لديك صلاحية العرض فقط؛ تتطلب التعديلات والصور `workers.manage`.</p>
+      <p class="worker-profile__draft-message" *ngIf="saveMessage" role="status">{{ saveMessage }}</p>
+      <p class="worker-profile__validation" *ngIf="saveError" role="alert">{{ saveError }}</p>
+      <div class="plp-action-group" *ngIf="canManage">
+        <button pButton pRipple type="submit" icon="pi pi-save" label="حفظ البيانات المحلية" [disabled]="draftForm.invalid || !hasDraftChanges || isSaving"></button>
+        <button pButton pRipple type="button" class="p-button-text" icon="pi pi-replay" label="إلغاء التغييرات" [disabled]="!hasDraftChanges || isSaving" (click)="resetDraft()"></button>
+      </div>
+    </form>
+  </section>
+
+  <section *ngIf="activeSection === 'source'" class="worker-profile__section" data-profile-section="source">
+    <plp-product-section-header title="مرجع الهوية الخارجي" description="هذه قيم مخزنة داخل قاعدة التطبيق. لا يُنفذ أي اتصال مباشر بنظام البصمة من هذه الشاشة."></plp-product-section-header>
+    <div class="worker-profile__source-note" role="note"><i class="pi pi-eye" aria-hidden="true"></i><span>كل الحقول للقراءة فقط ولا يمكنها الكتابة إلى ZKTime.</span></div>
+    <div class="worker-profile__readonly-grid">
+      <label>BadgeNumber<input pInputText readonly [value]="sourceValue(worker.source.badgeNumber)" dir="ltr"></label>
+      <label>EmployeeCode<input pInputText readonly [value]="sourceValue(worker.source.employeeCode)" dir="ltr"></label>
+      <label>الاسم المرصود<input pInputText readonly [value]="sourceValue(worker.source.sourceName)" dir="auto"></label>
+      <label>آخر قراءة مسجلة<input pInputText readonly [value]="formattedObservedAt"></label>
+    </div>
+  </section>
+
+  <section *ngIf="activeSection === 'operations'" class="worker-profile__section" data-profile-section="operations">
+    <plp-product-section-header title="التسكين والتشغيل" description="التسكين يُدار من مساحة التسكين المتخصصة؛ لا توجد بيانات وهمية في هذا الملف."></plp-product-section-header>
+    <div class="worker-profile__section-status">
+      <plp-status-badge [status]="assignmentStatusMeta().tone" [label]="assignmentStatusMeta().label"></plp-status-badge>
+      <a *ngIf="canViewAssignments" routerLink="/manufacturing/line-staffing" class="worker-profile__assignment-link">الانتقال إلى مساحة التسكين <i class="pi pi-arrow-left" aria-hidden="true"></i></a>
+      <span *ngIf="!canViewAssignments">رابط مساحة التسكين مخفي لعدم توفر `assignments.view`.</span>
+    </div>
+    <plp-product-empty-state *ngIf="!worker.defaultSubStageId" title="لا يوجد تسكين افتراضي نشط" description="غياب التسكين لا يغير هوية العامل أو حالته المحلية." icon="pi-map"></plp-product-empty-state>
+    <div *ngIf="worker.defaultSubStageId" class="worker-profile__source-note" role="note"><i class="pi pi-sitemap" aria-hidden="true"></i><span>يوجد تسكين افتراضي مرتبط بمرحلة محلية. تفاصيل المصنع والخط غير متاحة في API العاملين الحالية؛ استخدم مساحة التسكين عند توفر الصلاحية.</span></div>
+  </section>
+
+  <section *ngIf="activeSection === 'history'" class="worker-profile__section" data-profile-section="history">
+    <plp-product-section-header title="السجل" description="لا تعرض هذه الشاشة تاريخًا مصطنعًا. سجل التدقيق التفصيلي له مساحة وصلاحية منفصلتان."></plp-product-section-header>
+    <plp-product-empty-state *ngIf="worker.history.length === 0" title="سجل العرض غير متاح" description="لا توجد بيانات سجل مخولة لهذا الملف ضمن واجهة العاملين." icon="pi-history"></plp-product-empty-state>
+    <ol class="worker-profile__timeline" *ngIf="worker.history.length > 0">
+      <li *ngFor="let entry of worker.history"><span class="worker-profile__timeline-icon"><i [class]="historyIcon(entry.kind)" aria-hidden="true"></i></span><div><strong>{{ entry.title }}</strong><p>{{ entry.detail }}</p><small>{{ formatHistoryDate(entry.occurredAt) }} — {{ entry.actorLabel }}</small></div></li>
+    </ol>
+  </section>
+
+  <section *ngIf="activeSection === 'source-preview'" class="worker-profile__section" data-profile-section="source-preview">
+    <plp-product-section-header title="بيانات غير متاحة" description="لا تُجلب معاينة Sync أو بيانات مصدر مباشرة في هذه الشاشة؛ ذلك يمنع تجاوز حدود الملكية."></plp-product-section-header>
+    <plp-product-empty-state *ngIf="worker.sourcePreview.length === 0" title="لا توجد معاينة مصدر" description="استخدم عملية Worker Master Sync المخولة عند الحاجة، ولن تستبدل الاسم المحلي أو الصورة المحلية." icon="pi-shield"></plp-product-empty-state>
+    <div class="worker-profile__preview-list" *ngIf="worker.sourcePreview.length > 0"><article *ngFor="let item of worker.sourcePreview"><plp-status-badge [status]="previewStatus(item).tone" [label]="previewStatus(item).label"></plp-status-badge><div><strong>{{ item.title }}</strong><p>{{ item.detail }}</p></div></article></div>
+  </section>
+</section>

@@ -38,14 +38,11 @@ public class ProductModel
 
     public List<ProductModelStage> Stages { get; } = [];
 
-    public void Rename(string code, string name, string? description = null, DateTime? atUtc = null)
+    public void Rename(string name, string? description = null, DateTime? atUtc = null)
     {
-        if (string.IsNullOrWhiteSpace(code))
-            throw new ArgumentException("Code is required.", nameof(code));
         if (string.IsNullOrWhiteSpace(name))
             throw new ArgumentException("Name is required.", nameof(name));
 
-        Code = code.Trim();
         Name = name.Trim();
         Description = string.IsNullOrWhiteSpace(description) ? null : description.Trim();
         UpdatedAtUtc = atUtc ?? DateTime.UtcNow;

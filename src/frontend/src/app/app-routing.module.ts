@@ -2,10 +2,6 @@ import { NgModule } from '@angular/core';
 import { RouterModule, Routes } from '@angular/router';
 import { DashboardPageComponent } from './pages/dashboard-page/dashboard-page.component';
 import { FactoryMapPageComponent } from './pages/factory-map-page/factory-map-page.component';
-import { ProductionLinesPageComponent } from './pages/production-lines-page/production-lines-page.component';
-import { StagesPageComponent } from './pages/stages-page/stages-page.component';
-import { AssignmentsPageComponent } from './pages/assignments-page/assignments-page.component';
-import { NotificationsPageComponent } from './pages/notifications-page/notifications-page.component';
 import { LoginPageComponent } from './pages/login-page/login-page.component';
 import { AppShellComponent } from './layout/app-shell/app-shell.component';
 import { AccessDeniedPageComponent } from './pages/access-denied-page/access-denied-page.component';
@@ -41,41 +37,25 @@ export const APP_ROUTES: Routes = [
         path: 'factory-map',
         component: FactoryMapPageComponent,
         canActivate: [PermissionCanActivateGuard],
-        data: { title: 'خريطة المصنع', breadcrumb: 'خريطة المصنع', permission: PERMISSIONS.factoryStructure.view }
-      },
-      {
-        path: 'production-lines',
-        component: ProductionLinesPageComponent,
-        canActivate: [PermissionCanActivateGuard],
         data: {
-          title: 'خطوط الإنتاج',
-          breadcrumb: 'خطوط الإنتاج',
-          permission: PERMISSIONS.factoryStructure.view
-        }
-      },
-      {
-        path: 'stages',
-        component: StagesPageComponent,
-        canActivate: [PermissionCanActivateGuard],
-        data: {
-          title: 'المراحل',
-          breadcrumb: 'المراحل',
-          permission: PERMISSIONS.stages.view
+          title: 'خريطة المصنع',
+          breadcrumb: 'خريطة المصنع',
+          requireAll: [PERMISSIONS.factoryStructure.view, PERMISSIONS.stages.view]
         }
       },
       {
         path: 'workers',
-        loadChildren: () => import('./pages/workers-page/workers-page.module').then((module) => module.WorkersPageModule)
+        loadChildren: () => import('./pages/workers-page/workers-page.module').then((module) => module.WorkersPageModule),
+        canMatch: [PermissionCanMatchGuard],
+        canActivate: [PermissionCanActivateGuard],
+        data: { title: 'إدارة العاملين', breadcrumb: 'إدارة العاملين', permission: PERMISSIONS.workers.view }
       },
       {
-        path: 'assignments',
-        component: AssignmentsPageComponent,
+        path: 'attendance/workforce',
+        loadChildren: () => import('./pages/attendance-workforce-page/attendance-workforce-page.module').then((module) => module.AttendanceWorkforcePageModule),
+        canMatch: [PermissionCanMatchGuard],
         canActivate: [PermissionCanActivateGuard],
-        data: {
-          title: 'التعيينات',
-          breadcrumb: 'التعيينات',
-          permission: PERMISSIONS.assignments.view
-        }
+        data: { title: 'الحضور والتسكين اليومي', breadcrumb: 'الحضور والتسكين اليومي', requireAll: [PERMISSIONS.attendance.view, PERMISSIONS.assignments.view] }
       },
       {
         path: 'admin',
@@ -83,10 +63,14 @@ export const APP_ROUTES: Routes = [
         canMatch: [PermissionCanMatchGuard],
         canActivate: [PermissionCanActivateGuard],
         data: {
-          requireAny: [PERMISSIONS.users.view, PERMISSIONS.roles.view, PERMISSIONS.permissions.assign]
+          requireAny: [PERMISSIONS.users.view, PERMISSIONS.roles.view, PERMISSIONS.permissions.assign, PERMISSIONS.notifications.policiesManage]
         }
       },
-      { path: 'notifications', component: NotificationsPageComponent, data: { title: 'الإشعارات', breadcrumb: 'الإشعارات' } },
+      {
+        path: 'notifications',
+        loadChildren: () => import('./pages/notifications-page/notifications-page.module').then((module) => module.NotificationsPageModule),
+        data: { title: 'الإشعارات', breadcrumb: 'الإشعارات' }
+      },
       { path: '**', redirectTo: 'dashboard' }
     ]
   },

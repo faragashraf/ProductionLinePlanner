@@ -1,10 +1,21 @@
-<article class="plp-sub-stage-card">
+<article
+  class="plp-sub-stage-card"
+  title="يعرض هذا المؤشر تغطية التسكين الهيكلية ولا يعكس حضور العاملين اليومي."
+>
   <header>
     <h4>{{ name }}</h4>
-    <plp-status-badge [status]="status" [compact]="true"></plp-status-badge>
+    <plp-status-badge [status]="status" [label]="staffingStatusLabel" [compact]="true"></plp-status-badge>
   </header>
-  <plp-completion-bar [value]="percentage" [status]="status" label="نسبة تغطية"></plp-completion-bar>
+  <plp-completion-bar [value]="percentage" [status]="status" label="تغطية التسكين"></plp-completion-bar>
   <plp-product-metadata-row [label]="'بيانات مرحلة ' + name">
-    <plp-product-metadata-item label="العاملون" [value]="workersCurrent + ' / ' + workersRequired"></plp-product-metadata-item>
+    <plp-product-metadata-item label="المسكنون" [value]="workersSummary"></plp-product-metadata-item>
+    <plp-product-metadata-item label="الحضور اليوم" [value]="attendanceSummary"></plp-product-metadata-item>
   </plp-product-metadata-row>
+  <plp-completion-bar
+    *ngIf="attendancePercentage !== null"
+    class="plp-sub-stage-card__attendance-progress"
+    [value]="attendancePercentage"
+    [status]="attendanceStatusTone"
+    label="نسبة الحضور"
+  ></plp-completion-bar>
 </article>

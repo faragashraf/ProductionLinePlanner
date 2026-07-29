@@ -7,6 +7,10 @@ import { TableModule } from 'primeng/table';
 import { DialogModule } from 'primeng/dialog';
 import { CalendarModule } from 'primeng/calendar';
 import { DropdownModule } from 'primeng/dropdown';
+import { TreeModule } from 'primeng/tree';
+import { ContextMenuModule } from 'primeng/contextmenu';
+import { OverlayPanelModule } from 'primeng/overlaypanel';
+import { TooltipModule } from 'primeng/tooltip';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { SharedModule } from '../../shared/shared.module';
 import { ManufacturingWorkspaceLayoutComponent } from './manufacturing-workspace-layout.component';
@@ -15,7 +19,9 @@ import { ProductionCostRecordingPageComponent } from './production-cost-recordin
 import { ManufacturingMasterDataPageComponent } from './manufacturing-master-data-page.component';
 import { ManufacturingDepartmentsPageComponent } from './manufacturing-departments-page.component';
 import { FactoryStructureFoundationPageComponent } from './factory-structure-foundation-page.component';
-import { ManufacturingCompensationPageComponent } from './manufacturing-compensation-page.component';
+import { FactoryStructureTreeViewComponent } from './factory-structure-tree-view.component';
+import { FactoryStructureTreeSelectorComponent } from './factory-structure-tree-selector.component';
+import { ManufacturingFilterCardComponent } from './manufacturing-filter-card.component';
 import { LineStaffingWorkspacePageComponent } from './line-staffing-workspace-page.component';
 import { DailyProductionOperationsPageComponent } from './daily-production-operations-page.component';
 import { ManufacturingWorkspaceRoutingModule } from './manufacturing-workspace-routing.module';
@@ -27,6 +33,7 @@ import { PlpDialogComponent } from '../../shared/product/plp-dialog.component';
 import { PlpFormSheetComponent } from '../../shared/product/plp-form-sheet.component';
 import { PlpSectionNavigationComponent } from '../../shared/product/plp-section-navigation.component';
 import { PlpFormComponent } from '../../shared/product/plp-form.component';
+import { PlpProductToolbarComponent } from '../../shared/product/plp-toolbar.component';
 import { ReportsWorkspacePageComponent } from '../reports-workspace/reports-workspace-page.component';
 import { ReportsFilterBarComponent } from '../reports-workspace/reports-filter-bar.component';
 import { ReportsSummaryCardsComponent } from '../reports-workspace/reports-summary-cards.component';
@@ -40,7 +47,9 @@ import { ReportsResultsToolbarComponent } from '../reports-workspace/reports-res
     ManufacturingMasterDataPageComponent,
     ManufacturingDepartmentsPageComponent,
     FactoryStructureFoundationPageComponent,
-    ManufacturingCompensationPageComponent,
+    FactoryStructureTreeViewComponent,
+    FactoryStructureTreeSelectorComponent,
+    ManufacturingFilterCardComponent,
     LineStaffingWorkspacePageComponent,
     DailyProductionOperationsPageComponent,
     ReportsWorkspacePageComponent,
@@ -58,6 +67,10 @@ import { ReportsResultsToolbarComponent } from '../reports-workspace/reports-res
     DialogModule,
     CalendarModule,
     DropdownModule,
+    TreeModule,
+    ContextMenuModule,
+    OverlayPanelModule,
+    TooltipModule,
     FormsModule,
     ReactiveFormsModule,
     PlpResponsiveTableDirective,
@@ -68,6 +81,7 @@ import { ReportsResultsToolbarComponent } from '../reports-workspace/reports-res
     PlpFormSheetComponent,
     PlpSectionNavigationComponent,
     PlpFormComponent,
+    PlpProductToolbarComponent,
     ManufacturingWorkspaceRoutingModule
   ]
 })

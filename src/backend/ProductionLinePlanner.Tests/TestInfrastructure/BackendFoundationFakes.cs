@@ -7,88 +7,6 @@ using System.Security.Cryptography;
 
 namespace ProductionLinePlanner.Tests;
 
-public sealed class FakeAttendanceEmployeeWriter : IAttendanceEmployeeWriter
-{
-    private readonly Dictionary<string, AttendanceEmployeeRecord?> _employees;
-    private readonly Func<string, string, CancellationToken, Task<Result>> _updateWorkerFullNameAsync;
-    private readonly Func<string, int, CancellationToken, Task<Result>> _updateWorkerDepartmentAsync;
-
-    public FakeAttendanceEmployeeWriter(
-        Dictionary<string, AttendanceEmployeeRecord?>? employees = null,
-        Func<string, string, CancellationToken, Task<Result>>? updateWorkerFullNameAsync = null,
-        Func<string, int, CancellationToken, Task<Result>>? updateWorkerDepartmentAsync = null)
-    {
-        _employees = employees ?? [];
-        _updateWorkerFullNameAsync = updateWorkerFullNameAsync ?? DefaultUpdateWorkerFullNameAsync;
-        _updateWorkerDepartmentAsync = updateWorkerDepartmentAsync ?? DefaultUpdateWorkerDepartmentAsync;
-    }
-
-    public List<(string AttendanceUserId, string FullName)> FullNameUpdates { get; } = [];
-    public List<(string AttendanceUserId, int DepartmentId)> DepartmentUpdates { get; } = [];
-
-    public Task<Result> UpdateWorkerFullNameAsync(
-        string attendanceUserId,
-        string fullName,
-        CancellationToken cancellationToken = default)
-    {
-        return _updateWorkerFullNameAsync(attendanceUserId, fullName, cancellationToken);
-    }
-
-    public Task<Result> UpdateWorkerDepartmentAsync(
-        string attendanceUserId,
-        int departmentId,
-        CancellationToken cancellationToken = default)
-    {
-        return _updateWorkerDepartmentAsync(attendanceUserId, departmentId, cancellationToken);
-    }
-
-    private Task<Result> DefaultUpdateWorkerFullNameAsync(string attendanceUserId, string fullName, CancellationToken cancellationToken)
-    {
-        _ = cancellationToken;
-        FullNameUpdates.Add((attendanceUserId, fullName));
-
-        if (!_employees.TryGetValue(attendanceUserId, out var record))
-        {
-            return Task.FromResult(Result.Failure(new Error("NotFound", "Worker was not found in attendance source.")));
-        }
-
-        if (record is null)
-        {
-            return Task.FromResult(Result.Failure(new Error("NotFound", "Worker was not found in attendance source.")));
-        }
-
-        _employees[attendanceUserId] = record with
-        {
-            Name = fullName
-        };
-
-        return Task.FromResult(Result.Success());
-    }
-
-    private Task<Result> DefaultUpdateWorkerDepartmentAsync(string attendanceUserId, int departmentId, CancellationToken cancellationToken)
-    {
-        _ = cancellationToken;
-        DepartmentUpdates.Add((attendanceUserId, departmentId));
-
-        if (!_employees.TryGetValue(attendanceUserId, out var record))
-        {
-            return Task.FromResult(Result.Failure(new Error("NotFound", "Worker was not found in attendance source.")));
-        }
-
-        if (record is null)
-        {
-            return Task.FromResult(Result.Failure(new Error("NotFound", "Worker was not found in attendance source.")));
-        }
-
-        _employees[attendanceUserId] = record with
-        {
-            DepartmentId = departmentId
-        };
-
-        return Task.FromResult(Result.Success());
-    }
-}
-
 public sealed class FakeAttendanceEmployeeReader : IAttendanceEmployeeReader, IAttendanceWorkerPhotoReader
 {
     private readonly Dictionary<string, AttendanceEmployeeRecord?> _employees;
@@ -191,84 +109,6 @@ public sealed class FakeAttendanceDepartmentReader : IAttendanceDepartmentReader
     }
 }
 
-public sealed class FakeAttendanceDepartmentWriter : IAttendanceDepartmentWriter
-{
-    private readonly Dictionary<int, AttendanceDepartmentRecord> _departments;
-    private readonly Func<string, CancellationToken, Task<Result<AttendanceDepartmentRecord>>> _createDepartmentAsync;
-    private readonly Func<int, string, CancellationToken, Task<Result>> _updateDepartmentNameAsync;
-
-    public FakeAttendanceDepartmentWriter(
-        Dictionary<int, AttendanceDepartmentRecord>? departments = null,
-        Func<string, CancellationToken, Task<Result<AttendanceDepartmentRecord>>>? createDepartmentAsync = null,
-        Func<int, string, CancellationToken, Task<Result>>? updateDepartmentNameAsync = null)
-    {
-        _departments = departments ?? [];
-        _createDepartmentAsync = createDepartmentAsync ?? DefaultCreateDepartmentAsync;
-        _updateDepartmentNameAsync = updateDepartmentNameAsync ?? DefaultUpdateDepartmentNameAsync;
-    }
-
-    public int NextDepartmentId { get; set; } = 1;
-    public List<string> CreatedDepartments { get; } = [];
-    public List<(int DepartmentId, string Name)> UpdatedDepartments { get; } = [];
-
-    public Task<Result<AttendanceDepartmentRecord>> CreateDepartmentAsync(
-        string name,
-        CancellationToken cancellationToken = default)
-    {
-        return _createDepartmentAsync(name, cancellationToken);
-    }
-
-    public Task<Result> UpdateDepartmentNameAsync(
-        int departmentId,
-        string name,
-        CancellationToken cancellationToken = default)
-    {
-        return _updateDepartmentNameAsync(departmentId, name, cancellationToken);
-    }
-
-    private Task<Result<AttendanceDepartmentRecord>> DefaultCreateDepartmentAsync(string name, CancellationToken cancellationToken)
-    {
-        _ = cancellationToken;
-        var trimmed = name.Trim();
-
-        if (string.IsNullOrWhiteSpace(trimmed))
-        {
-            return Task.FromResult(Result<AttendanceDepartmentRecord>.Failure(new Error("ValidationError", "Department name is required.")));
-        }
-
-        if (_departments.Values.Any(x => string.Equals(x.Name, trimmed, StringComparison.OrdinalIgnoreCase)))
-        {
-            return Task.FromResult(Result<AttendanceDepartmentRecord>.Failure(new Error("Conflict", "Department name must be unique.")));
-        }
-
-        var id = NextDepartmentId++;
-        var created = new AttendanceDepartmentRecord(id, trimmed);
-        _departments[id] = created;
-        CreatedDepartments.Add(trimmed);
-        return Task.FromResult(Result<AttendanceDepartmentRecord>.Success(created));
-    }
-
-    private Task<Result> DefaultUpdateDepartmentNameAsync(int departmentId, string name, CancellationToken cancellationToken)
-    {
-        _ = cancellationToken;
-        var trimmed = name.Trim();
-
-        if (_departments.TryGetValue(departmentId, out var existing) is false)
-        {
-            return Task.FromResult(Result.Failure(new Error("NotFound", "Department not found.")));
-        }
-
-        if (_departments.Values.Any(x => x.DepartmentId != departmentId && string.Equals(x.Name, trimmed, StringComparison.OrdinalIgnoreCase)))
-        {
-            return Task.FromResult(Result.Failure(new Error("Conflict", "Department name must be unique.")));
-        }
-
-        _departments[departmentId] = existing with { Name = trimmed };
-        UpdatedDepartments.Add((departmentId, trimmed));
-        return Task.FromResult(Result.Success());
-    }
-}
-
 public sealed class RecordingAuditEngine : IAuditEngine
 {
     public sealed record AuditCall(
@@ -298,45 +138,53 @@ public sealed class RecordingAuditEngine : IAuditEngine
     }
 }
 
-public sealed class InMemoryWorkerPhotoCache : IWorkerPhotoCache
+public sealed class InMemoryWorkerPhotoStorage : IWorkerPhotoStorage
 {
-    private readonly Dictionary<Guid, WorkerPhotoCacheEntry> _entries = [];
+    private readonly Dictionary<(Guid WorkerId, string Version), WorkerPhotoStorageObject> entries = [];
 
-    public int GetCalls { get; private set; }
+    public int ReadCalls { get; private set; }
     public int StoreCalls { get; private set; }
-    public int RemoveCalls { get; private set; }
+    public int DeleteCalls { get; private set; }
 
-    public Task<WorkerPhotoCacheEntry?> GetAsync(Guid workerId, CancellationToken cancellationToken = default)
+    public Task<WorkerPhotoStorageObject?> ReadAsync(
+        Guid workerId,
+        string version,
+        CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        GetCalls++;
-        return Task.FromResult(_entries.TryGetValue(workerId, out var entry) ? entry : null);
+        ReadCalls++;
+        return Task.FromResult(entries.TryGetValue((workerId, version), out var entry) ? entry : null);
     }
 
-    public Task<WorkerPhotoCacheStoreResult> StoreAsync(Guid workerId, byte[] photo, CancellationToken cancellationToken = default)
+    public Task<WorkerPhotoStorageWriteResult> StoreAsync(
+        Guid workerId,
+        string version,
+        ReadOnlyMemory<byte> content,
+        CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         StoreCalls++;
-        if (!WorkerPhotoFormat.TryGetContentType(photo, out var contentType))
+        if (!WorkerPhotoFormat.TryDetect(content.Span, out var format))
         {
-            throw new InvalidOperationException("Worker photo format is invalid or unsupported.");
+            throw new InvalidOperationException("Worker photo content is invalid or unsupported.");
         }
 
-        var version = Convert.ToHexString(SHA256.HashData(photo)).ToLowerInvariant()[..16];
-        if (_entries.TryGetValue(workerId, out var current) && current.Version == version)
+        var actualVersion = Convert.ToHexString(SHA256.HashData(content.Span)).ToLowerInvariant();
+        if (!actualVersion.Equals(version, StringComparison.OrdinalIgnoreCase))
         {
-            return Task.FromResult(new WorkerPhotoCacheStoreResult(contentType, version, false, false, true));
+            throw new InvalidOperationException("Worker photo version does not match its content.");
         }
 
-        _entries[workerId] = new WorkerPhotoCacheEntry(photo.ToArray(), contentType, version);
-        return Task.FromResult(new WorkerPhotoCacheStoreResult(contentType, version, current is null, current is not null, false));
+        var created = !entries.ContainsKey((workerId, actualVersion));
+        entries[(workerId, actualVersion)] = new WorkerPhotoStorageObject(content.ToArray(), format.ContentType, actualVersion);
+        return Task.FromResult(new WorkerPhotoStorageWriteResult(created));
     }
 
-    public Task RemoveAsync(Guid workerId, CancellationToken cancellationToken = default)
+    public Task DeleteAsync(Guid workerId, string version, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        RemoveCalls++;
-        _entries.Remove(workerId);
+        DeleteCalls++;
+        entries.Remove((workerId, version));
         return Task.CompletedTask;
     }
 }

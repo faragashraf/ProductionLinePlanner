@@ -19,7 +19,7 @@
 ## Ownership
 
 - Backend: `ProductionLinePlanner.Domain`, `ProductionLinePlanner.Infrastructure`, `ProductionLinePlanner.Api`.
-- Frontend: `src/frontend/src/app/pages/factory-map-page`, `production-lines-page`, `stages-page`.
+- Frontend: `src/frontend/src/app/pages/factory-map-page` و`pages/manufacturing-workspace` لإدارة البنية والمراحل.
 - Data platform: `AppDbContext` في `src/backend/ProductionLinePlanner.Infrastructure/Data`.
 
 ## Source of Truth

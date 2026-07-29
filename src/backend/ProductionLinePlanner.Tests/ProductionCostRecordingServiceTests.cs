@@ -10,6 +10,7 @@ using ProductionLinePlanner.Domain.Entities;
 using ProductionLinePlanner.Domain.Enums;
 using ProductionLinePlanner.Infrastructure.BusinessEngines;
 using ProductionLinePlanner.Infrastructure.Data;
+using ProductionLinePlanner.Tests.TestInfrastructure;
 
 namespace ProductionLinePlanner.Tests;
 
@@ -504,8 +505,8 @@ public sealed class ProductionCostRecordingServiceTests
     {
         await using var fixture = await Fixture.CreateAsync("SharedPercentage", 1m, 17m, useRealAudit: true);
         var extraSubStage = new SubStage(Guid.NewGuid(), fixture.MainStage.Id, "Inspect", "INS", 1, 2);
-        var extraStage = new ProductModelStage(Guid.NewGuid(), fixture.Model.Id, extraSubStage.Id, 2, 1m, 17m, CompensationMode.SharedPercentage);
-        fixture.Db.AddRange(extraSubStage, extraStage, new WorkerDefaultAssignment(Guid.NewGuid(), fixture.WorkerA.Id, extraSubStage.Id, fixture.ActorId, DateTime.UtcNow));
+        var extraStage = new ProductModelStage(Guid.NewGuid(), fixture.Model.Id, fixture.Line.Id, extraSubStage.Id, 2, 1m, 17m, CompensationMode.SharedPercentage);
+        fixture.Db.AddRange(extraSubStage, extraStage, new WorkerDefaultAssignment(Guid.NewGuid(), fixture.WorkerA.Id, extraSubStage.Id, fixture.ActorId, DateTime.UtcNow, productionLineId: fixture.Line.Id));
         await fixture.Db.SaveChangesAsync();
         var productionDate = fixture.Today.AddDays(1);
 
@@ -542,13 +543,13 @@ public sealed class ProductionCostRecordingServiceTests
             })
             .ToArray();
         var productStages = additionalStages.Select((item, index) => new ProductModelStage(
-            Guid.NewGuid(), fixture.Model.Id, item.SubStage.Id, index + 2, 1m, 17m, CompensationMode.SharedPercentage)).ToArray();
+            Guid.NewGuid(), fixture.Model.Id, fixture.Line.Id, item.SubStage.Id, index + 2, 1m, 17m, CompensationMode.SharedPercentage)).ToArray();
         fixture.Db.AddRange(additionalStages.Select(item => item.SubStage));
         fixture.Db.AddRange(productStages);
-        fixture.Db.AddRange(productStages.Select(stage => new WorkerDefaultAssignment(Guid.NewGuid(), fixture.WorkerA.Id, stage.SubStageId, fixture.ActorId, DateTime.UtcNow)));
+        fixture.Db.AddRange(productStages.Select(stage => new WorkerDefaultAssignment(Guid.NewGuid(), fixture.WorkerA.Id, stage.SubStageId, fixture.ActorId, DateTime.UtcNow, productionLineId: fixture.Line.Id)));
         // The original stage has three workers. Adding A to every additional stage
         // plus B to seven stages produces 66 stages and exactly 75 allocations.
-        fixture.Db.AddRange(productStages.Take(7).Select(stage => new WorkerDefaultAssignment(Guid.NewGuid(), fixture.WorkerB.Id, stage.SubStageId, fixture.ActorId, DateTime.UtcNow)));
+        fixture.Db.AddRange(productStages.Take(7).Select(stage => new WorkerDefaultAssignment(Guid.NewGuid(), fixture.WorkerB.Id, stage.SubStageId, fixture.ActorId, DateTime.UtcNow, productionLineId: fixture.Line.Id)));
         await fixture.Db.SaveChangesAsync();
 
         var productionDate = fixture.Today.AddDays(1);
@@ -640,7 +641,7 @@ public sealed class ProductionCostRecordingServiceTests
         await fixture.Db.SaveChangesAsync();
         originalAssignment.Deactivate(DateTime.UtcNow);
         await fixture.Db.SaveChangesAsync();
-        fixture.Db.Add(new WorkerDefaultAssignment(Guid.NewGuid(), fixture.WorkerA.Id, movedSubStage.Id, fixture.ActorId, DateTime.UtcNow, "Moved after record"));
+        fixture.Db.Add(new WorkerDefaultAssignment(Guid.NewGuid(), fixture.WorkerA.Id, movedSubStage.Id, fixture.ActorId, DateTime.UtcNow, "Moved after record", productionLineId: fixture.Line.Id));
         await fixture.Db.SaveChangesAsync();
         var report = await fixture.Service.DailyReportAsync(fixture.Today, fixture.Today, null, null, null, default);
         Assert.Equal("MODEL-A", report.Single().ModelCode);
@@ -661,9 +662,9 @@ public sealed class ProductionCostRecordingServiceTests
     public async Task Production_stage_must_belong_to_the_order_line()
     {
         await using var fixture = await Fixture.CreateAsync("SharedPercentage", 0.50m, 17m);
-        var otherMain = new MainStage(Guid.NewGuid(), fixture.Line.Id, "Other main", 2);
+        var otherMain = new MainStage(Guid.NewGuid(), fixture.MainStage.DepartmentId, "Other main", 2);
         var otherSubStage = new SubStage(Guid.NewGuid(), otherMain.Id, "Other sub", "OTHER", 1, 1);
-        var otherStage = new ProductModelStage(Guid.NewGuid(), fixture.Model.Id, otherSubStage.Id, 2, 0.50m, 17m, CompensationMode.SharedPercentage);
+        var otherStage = new ProductModelStage(Guid.NewGuid(), fixture.Model.Id, fixture.Line.Id, otherSubStage.Id, 2, 0.50m, 17m, CompensationMode.SharedPercentage);
         fixture.Db.AddRange(otherMain, otherSubStage, otherStage);
         await fixture.Db.SaveChangesAsync();
 
@@ -674,17 +675,50 @@ public sealed class ProductionCostRecordingServiceTests
         Assert.Equal("OTHER", valid.StageCode);
 
         var otherFactory = new Factory(Guid.NewGuid(), "Other factory", "OTHER-F");
-        var otherLine = new ProductionLine(Guid.NewGuid(), otherFactory.Id, "Other line", 1);
-        var unrelatedMain = new MainStage(Guid.NewGuid(), otherLine.Id, "Unrelated main", 1);
+        var otherDepartment = new Department(Guid.NewGuid(), otherFactory.Id, "OTHER", "قسم آخر", "Other", 1);
+        var otherLine = new ProductionLine(Guid.NewGuid(), otherFactory.Id, "Other line", 1, departmentId: otherDepartment.Id);
+        var unrelatedMain = new MainStage(Guid.NewGuid(), otherDepartment.Id, "Unrelated main", 1);
         var unrelatedSub = new SubStage(Guid.NewGuid(), unrelatedMain.Id, "Unrelated sub", "UNRELATED", 1, 1);
-        var unrelatedStage = new ProductModelStage(Guid.NewGuid(), fixture.Model.Id, unrelatedSub.Id, 3, 0.50m, 17m, CompensationMode.SharedPercentage);
-        fixture.Db.AddRange(otherFactory, otherLine, unrelatedMain, unrelatedSub, unrelatedStage);
+        var unrelatedStage = new ProductModelStage(Guid.NewGuid(), fixture.Model.Id, otherLine.Id, unrelatedSub.Id, 3, 0.50m, 17m, CompensationMode.SharedPercentage);
+        fixture.Db.AddRange(otherFactory, otherDepartment, otherLine, unrelatedMain, unrelatedSub, unrelatedStage);
         await fixture.Db.SaveChangesAsync();
 
         await Assert.ThrowsAsync<ProductionConflictException>(() => fixture.Service.CreateDraftAsync(
             new CreateStageProductionRecordRequest(fixture.Order.Id, unrelatedStage.Id, fixture.Today, 10m, 10m, 0m, Guid.NewGuid(), null, [fixture.Allocation(fixture.WorkerA.Id, 100m)]),
             fixture.ActorId,
             default));
+    }
+
+    [Fact]
+    public async Task One_model_loads_its_own_stage_subset_for_each_selected_operating_line()
+    {
+        await using var fixture = await Fixture.CreateAsync("SharedPercentage", 0.50m, 17m);
+        var secondLine = new ProductionLine(Guid.NewGuid(), fixture.Factory.Id, "Second fixture line", 2, departmentId: fixture.MainStage.DepartmentId);
+        var secondMainStage = new MainStage(Guid.NewGuid(), fixture.MainStage.DepartmentId, "Second fixture main", 2);
+        var secondSubStage = new SubStage(Guid.NewGuid(), secondMainStage.Id, "Second fixture sub", "SECOND", 1, 1, departmentId: secondMainStage.DepartmentId);
+        var secondModelStage = new ProductModelStage(Guid.NewGuid(), fixture.Model.Id, secondLine.Id, secondSubStage.Id, 2, 0.50m, 17m, CompensationMode.SharedPercentage);
+        fixture.Db.AddRange(secondLine, secondMainStage, secondSubStage, secondModelStage);
+        await fixture.Db.SaveChangesAsync();
+
+        var firstLineOperations = await fixture.Service.LoadDailyOperationsAsync(
+            fixture.Factory.Id,
+            fixture.Line.Id,
+            fixture.Model.Id,
+            fixture.Today,
+            default);
+        var secondLineOperations = await fixture.Service.LoadDailyOperationsAsync(
+            fixture.Factory.Id,
+            secondLine.Id,
+            fixture.Model.Id,
+            fixture.Today,
+            default);
+
+        Assert.Equal(fixture.Model.Id, firstLineOperations.ProductModelId);
+        Assert.Equal(fixture.Model.Id, secondLineOperations.ProductModelId);
+        Assert.Equal(fixture.Line.Id, firstLineOperations.ProductionLineId);
+        Assert.Equal(secondLine.Id, secondLineOperations.ProductionLineId);
+        Assert.Equal([fixture.Stage.Id], firstLineOperations.Stages.Select(stage => stage.ProductModelStageId));
+        Assert.Equal([secondModelStage.Id], secondLineOperations.Stages.Select(stage => stage.ProductModelStageId));
     }
 
     [Fact]
@@ -769,17 +803,17 @@ public sealed class ProductionCostRecordingServiceTests
         public static async Task<Fixture> CreateAsync(string mode, decimal price, decimal seconds, IAuditEngine? audit = null, bool useRealAudit = false)
         {
             var connection = new SqliteConnection("Data Source=:memory:"); connection.CreateCollation("SQL_Latin1_General_CP1_CI_AS", (left, right) => string.Compare(left, right, StringComparison.OrdinalIgnoreCase)); await connection.OpenAsync(); var db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options); await db.Database.EnsureCreatedAsync();
-            var factory = new Factory(Guid.NewGuid(), "Fixture Factory", "FIX"); var line = new ProductionLine(Guid.NewGuid(), factory.Id, "Fixture Line", 1); var mainStage = new MainStage(Guid.NewGuid(), line.Id, "Fixture Main", 1); var model = new ProductModel(Guid.NewGuid(), "MODEL-A", "Model A"); var subStage = new SubStage(Guid.NewGuid(), mainStage.Id, "Sew", "SEW", 1, 1);
-            var stage = new ProductModelStage(Guid.NewGuid(), model.Id, subStage.Id, 1, price, seconds, Enum.Parse<CompensationMode>(mode));
+            var factory = new Factory(Guid.NewGuid(), "Fixture Factory", "FIX"); var department = new Department(Guid.NewGuid(), factory.Id, "OPS", "التشغيل", "Operations", 1); var line = new ProductionLine(Guid.NewGuid(), factory.Id, "Fixture Line", 1, departmentId: department.Id); var mainStage = new MainStage(Guid.NewGuid(), department.Id, "Fixture Main", 1); var model = new ProductModel(Guid.NewGuid(), "MODEL-A", "Model A"); var subStage = new SubStage(Guid.NewGuid(), mainStage.Id, "Sew", "SEW", 1, 1);
+            var stage = new ProductModelStage(Guid.NewGuid(), model.Id, line.Id, subStage.Id, 1, price, seconds, Enum.Parse<CompensationMode>(mode));
             var a = new Worker(Guid.NewGuid(), "A", "Worker A"); var b = new Worker(Guid.NewGuid(), "B", "Worker B"); var c = new Worker(Guid.NewGuid(), "C", "Worker C"); var left = new Worker(Guid.NewGuid(), "L", "Left Worker", employmentStatus: EmploymentStatus.LeftEmployment);
             var actor = Guid.NewGuid();
-            db.AddRange(factory, line, mainStage, model, subStage, stage, a, b, c, left, new AppUser(actor, "Audit User", $"audit-{actor:N}@example.test", "hash"));
+            db.AddRange(factory, department, line, mainStage, model, subStage, stage, a, b, c, left, new AppUser(actor, "Audit User", $"audit-{actor:N}@example.test", "hash"));
             await db.SaveChangesAsync();
             var assignedAt = DateTime.UtcNow.AddMinutes(-1);
             db.AddRange(
-                new WorkerDefaultAssignment(Guid.NewGuid(), a.Id, subStage.Id, actor, assignedAt, "Fixture assignment"),
-                new WorkerDefaultAssignment(Guid.NewGuid(), b.Id, subStage.Id, actor, assignedAt, "Fixture assignment"),
-                new WorkerDefaultAssignment(Guid.NewGuid(), c.Id, subStage.Id, actor, assignedAt, "Fixture assignment"));
+                new WorkerDefaultAssignment(Guid.NewGuid(), a.Id, subStage.Id, actor, assignedAt, "Fixture assignment", productionLineId: line.Id),
+                new WorkerDefaultAssignment(Guid.NewGuid(), b.Id, subStage.Id, actor, assignedAt, "Fixture assignment", productionLineId: line.Id),
+                new WorkerDefaultAssignment(Guid.NewGuid(), c.Id, subStage.Id, actor, assignedAt, "Fixture assignment", productionLineId: line.Id));
             await db.SaveChangesAsync();
             var service = CreateService(db, audit ?? (useRealAudit ? new AuditEngine(db) : new RecordingAuditEngine()));
             var fixture = new Fixture(connection, db, factory, line, mainStage, model, subStage, stage, a, b, c, left, service, actor, DateOnly.FromDateTime(DateTime.UtcNow));
@@ -800,7 +834,7 @@ public sealed class ProductionCostRecordingServiceTests
         public ProductionCostRecordingService CreateService(IAuditEngine audit, IAttendanceEngine? attendance = null, IPermissionService? permissions = null) => CreateService(Db, audit, attendance, permissions);
 
         private static ProductionCostRecordingService CreateService(AppDbContext db, IAuditEngine audit, IAttendanceEngine? attendance = null, IPermissionService? permissions = null) =>
-            new(db, audit, new AssignmentEngine(db, audit), attendance ?? new PresentAttendanceEngine(), permissions ?? new AssignmentOverridePermissionService());
+            new(db, audit, new AssignmentEngine(db, audit), attendance ?? new PresentAttendanceEngine(), permissions ?? new AssignmentOverridePermissionService(), TestCairoTimeZoneProvider.Instance);
     }
     private sealed class Client(AppDbContext db, ProductionCostRecordingService service) : IAsyncDisposable
     {

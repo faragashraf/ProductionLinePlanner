@@ -13,4 +13,12 @@ export interface WorkerPageItem {
   photoReference?: string;
   hasPhoto?: boolean;
   photoVersion?: string;
+  attendanceUserId?: string;
+  badgeNumber?: string;
+  defaultSubStageId?: string;
+  organizationalDepartmentId?: string;
+  organizationalDepartmentName?: string;
+  organizationalFactoryId?: string;
+  organizationalFactoryName?: string;
+  organizationalDepartmentConcurrencyToken?: string;
 }

@@ -67,8 +67,28 @@ describe('navigation filtering', () => {
     expect(items).toContain('manufacturing-workspace');
     expect(items).toContain('workers');
     expect(items).toContain('factory-map');
-    expect(items).toContain('stages');
-    expect(items).toContain('assignments');
+    expect(items).not.toContain('stages');
+    expect(items).not.toContain('production-lines');
+    expect(items).not.toContain('assignments');
     expect(items).not.toContain('models');
+  });
+
+  it('hides Factory Map unless both its hierarchy permissions are granted', () => {
+    const onlyFactoryStructure = service([PERMISSIONS.factoryStructure.view])
+      .filterNavigation(APP_NAVIGATION_ITEMS)
+      .map((item) => item.id);
+    const completeAccess = service([PERMISSIONS.factoryStructure.view, PERMISSIONS.stages.view])
+      .filterNavigation(APP_NAVIGATION_ITEMS)
+      .map((item) => item.id);
+
+    expect(onlyFactoryStructure).not.toContain('factory-map');
+    expect(completeAccess).toContain('factory-map');
+  });
+
+  it('places the worker management workspace behind workers.view', () => {
+    const workers = APP_NAVIGATION_ITEMS.find(item => item.id === 'workers');
+    expect(workers?.label).toBe('إدارة العاملين');
+    expect(workers?.route).toBe('/workers');
+    expect(workers?.permission).toBe(PERMISSIONS.workers.view);
   });
 });

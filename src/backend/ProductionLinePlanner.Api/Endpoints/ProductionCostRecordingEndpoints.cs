@@ -22,7 +22,7 @@ public static class ProductionCostRecordingEndpoints
         var lookups = app.MapGroup("/api/production/lookups").RequireAuthorization().WithTags("Production lookups");
         lookups.MapGet("/models", async (AppDbContext db, CancellationToken ct) => Results.Ok(ApiResponse.Success(new { items = await db.ProductModels.AsNoTracking().Where(x => x.IsActive).OrderBy(x => x.Code).Select(x => new { x.Id, x.Code, x.Name, x.IsActive, x.Description }).ToArrayAsync(ct) }))).RequirePermission("production.record").RequireRateLimiting(ApiRateLimitPolicies.NormalRead);
         lookups.MapGet("/workers", async (AppDbContext db, CancellationToken ct) => Results.Ok(ApiResponse.Success(new { items = await db.Workers.AsNoTracking().Where(x => x.IsActive && x.EmploymentStatus == EmploymentStatus.Active).OrderBy(x => x.EmployeeCode).Select(x => new { x.Id, x.EmployeeCode, x.FullName, EmploymentStatus = x.EmploymentStatus.ToString(), x.IsActive }).ToArrayAsync(ct) }))).RequirePermission("production.record").RequireRateLimiting(ApiRateLimitPolicies.NormalRead);
-        lookups.MapGet("/models/{modelId:guid}/stages", async (Guid modelId, AppDbContext db, CancellationToken ct) => Results.Ok(ApiResponse.Success(await db.ProductModelStages.AsNoTracking().Where(x => x.ProductModelId == modelId && x.IsActive).Include(x => x.SubStage).OrderBy(x => x.StageOrder).Select(x => new { x.Id, x.SubStageId, SubStageCode = x.SubStage!.Code, SubStageName = x.SubStage.Name, x.StageOrder, x.PiecePrice, x.StandardSeconds, CompensationMode = x.CompensationMode.ToString(), x.IsRequired, x.IsActive }).ToArrayAsync(ct)))).RequirePermission("production.record").RequireRateLimiting(ApiRateLimitPolicies.NormalRead);
+        lookups.MapGet("/models/{modelId:guid}/production-lines/{productionLineId:guid}/stages", async (Guid modelId, Guid productionLineId, AppDbContext db, CancellationToken ct) => Results.Ok(ApiResponse.Success(await db.ProductModelStages.AsNoTracking().Where(x => x.ProductModelId == modelId && x.ProductionLineId == productionLineId && x.IsActive).Include(x => x.SubStage).OrderBy(x => x.StageOrder).Select(x => new { x.Id, x.ProductionLineId, x.SubStageId, SubStageCode = x.SubStage!.Code, SubStageName = x.SubStage.Name, x.StageOrder, x.PiecePrice, x.StandardSeconds, CompensationMode = x.CompensationMode.ToString(), x.IsRequired, x.IsActive }).ToArrayAsync(ct)))).RequirePermission("production.record").RequireRateLimiting(ApiRateLimitPolicies.NormalRead);
         app.MapGet("/api/production/readiness", async (
             Guid productModelId,
             Guid productionLineId,
@@ -123,6 +123,30 @@ public static class ProductionCostRecordingEndpoints
             .RequirePermission("production.approve")
             .RequireRateLimiting(ApiRateLimitPolicies.CriticalProductionWrite)
             .WithName("ApproveDailyProductionOperation");
+        dailyOperations.MapPost("/{productionOrderId:guid}/cancel-approval", async (
+            Guid productionOrderId,
+            DailyProductionApprovalCancellationRequest request,
+            IProductionCostRecordingService service,
+            ICurrentUserService user,
+            CancellationToken ct) =>
+        {
+            if (productionOrderId == Guid.Empty)
+            {
+                return ApiResponse.Failure("ValidationError", "معرّف تشغيل اليوم مطلوب.", StatusCodes.Status400BadRequest);
+            }
+
+            if (string.IsNullOrWhiteSpace(request.Reason) || request.StageApprovals is null || request.StageApprovals.Count == 0 ||
+                request.StageApprovals.Any(stage => stage.StageProductionRecordId == Guid.Empty || stage.ConcurrencyToken == Guid.Empty) ||
+                request.StageApprovals.Select(stage => stage.StageProductionRecordId).Distinct().Count() != request.StageApprovals.Count)
+            {
+                return ApiResponse.Failure("ValidationError", "سبب إلغاء الاعتماد ورموز تزامن جميع مراحل التشغيل مطلوبة.", StatusCodes.Status400BadRequest);
+            }
+
+            return Results.Ok(ApiResponse.Success(await service.CancelDailyOperationApprovalAsync(productionOrderId, request, RequireUser(user), ct)));
+        })
+            .RequirePermission("production.approve")
+            .RequireRateLimiting(ApiRateLimitPolicies.CriticalProductionWrite)
+            .WithName("CancelDailyProductionOperationApproval");
         // The generic workbook workflow is intentionally deferred for the first
         // real-data pilot. Keep the earlier capability dormant unless it is
         // deliberately enabled in a later release.

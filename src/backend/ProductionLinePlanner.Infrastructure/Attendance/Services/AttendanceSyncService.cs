@@ -6,11 +6,12 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using ProductionLinePlanner.Application.Common;
 using ProductionLinePlanner.Application.DTOs;
+using ProductionLinePlanner.Application.Abstractions;
 using ProductionLinePlanner.Application.Services;
 using ProductionLinePlanner.Domain.Entities;
 using ProductionLinePlanner.Domain.Enums;
-using ProductionLinePlanner.Infrastructure.Attendance.Entities;
 using ProductionLinePlanner.Infrastructure.Data;
+using ProductionLinePlanner.Application.Realtime;
 
 namespace ProductionLinePlanner.Infrastructure.Attendance.Services;
 
@@ -19,23 +20,31 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
     private const string TempStatusActive = "Active";
     private const string TempStatusScheduled = "Scheduled";
     private const string SyncAbsentStatus = "sync-no-source";
-    private static readonly TimeZoneInfo EgyptTimeZone = TimeZoneInfo.FindSystemTimeZoneById("Africa/Cairo");
 
     private readonly AppDbContext _appDbContext;
-    private readonly AttendanceDbContext _attendanceDbContext;
+    private readonly IAttendanceSource _attendanceSource;
     private readonly AttendanceSourceOptions _sourceOptions;
     private readonly ILogger<AttendanceSyncService> _logger;
+    private readonly ICairoTimeZoneProvider _cairoTimeZoneProvider;
+    private readonly IWorkerInitialSyncService _workerSyncService;
+    private readonly IManufacturingRealtimeChangeContext? _realtimeChangeContext;
 
     public AttendanceSyncService(
         AppDbContext appDbContext,
-        AttendanceDbContext attendanceDbContext,
+        IAttendanceSource attendanceSource,
         IOptions<AttendanceSourceOptions> sourceOptions,
-        ILogger<AttendanceSyncService> logger)
+        ILogger<AttendanceSyncService> logger,
+        ICairoTimeZoneProvider cairoTimeZoneProvider,
+        IWorkerInitialSyncService workerSyncService,
+        IManufacturingRealtimeChangeContext? realtimeChangeContext = null)
     {
         _appDbContext = appDbContext;
-        _attendanceDbContext = attendanceDbContext;
+        _attendanceSource = attendanceSource;
         _sourceOptions = sourceOptions.Value;
         _logger = logger;
+        _cairoTimeZoneProvider = cairoTimeZoneProvider;
+        _workerSyncService = workerSyncService;
+        _realtimeChangeContext = realtimeChangeContext;
     }
 
     public async Task<Result<AttendanceWorkerStateDto[]>> GetTodayAttendanceAsync(
@@ -297,7 +306,7 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
 
     public Task<Result<AttendanceSyncResultDto>> SyncTodayAsync(CancellationToken cancellationToken = default)
     {
-        var cairoNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, EgyptTimeZone);
+        var cairoNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, _cairoTimeZoneProvider.TimeZone);
         return SyncForProductionDateAsync(DateOnly.FromDateTime(cairoNow), cancellationToken);
     }
 
@@ -308,6 +317,7 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
         AttendanceSyncExecutionContext context,
         CancellationToken cancellationToken = default)
     {
+        using var realtimeScope = _realtimeChangeContext?.Begin("ZkTimeSync", context.CorrelationId, context.ProductionDate);
         var startedAtUtc = DateTime.UtcNow;
         var stopwatch = Stopwatch.StartNew();
         using var internalTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(Math.Max(1, _sourceOptions.SyncReadTimeoutSeconds)));
@@ -393,34 +403,36 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
             return Result<AttendanceSyncResultDto>.Failure(new Error("ValidationError", "Production date is required."));
         }
 
+        var workerSyncResult = await _workerSyncService.SyncWorkersForAttendanceAsync(cancellationToken);
+        if (workerSyncResult.IsFailure)
+        {
+            _logger.LogError(
+                "Attendance sync stopped because worker identity synchronization failed. correlationId={CorrelationId}, date={SyncDate}, errorCode={ErrorCode}",
+                context.CorrelationId,
+                productionDate,
+                workerSyncResult.Error?.Code);
+            return Result<AttendanceSyncResultDto>.Failure(new Error(
+                "WorkerSyncFailed",
+                "Worker synchronization must complete before attendance can be matched."));
+        }
+
         var (startUtc, endUtc, startLocal, endLocal) = GetEgyptDayBounds(productionDate);
 
-        List<AttendanceSourceUserInfo> sourceUserInfos;
-        List<AttendanceSourceCheckInOut> sourceCheckIns;
         List<Worker> workers;
+        var sourceBatchResult = await _attendanceSource.ClaimAsync(startLocal, endLocal, cancellationToken);
+        if (sourceBatchResult.IsFailure)
+        {
+            return Result<AttendanceSyncResultDto>.Failure(sourceBatchResult.Error!);
+        }
+
+        var sourceBatch = sourceBatchResult.Value!;
+        var sourceCheckIns = sourceBatch.Punches.ToArray();
 
         try
         {
-            if (_attendanceDbContext.Database.IsRelational())
-            {
-                _attendanceDbContext.Database.SetCommandTimeout(Math.Max(1, _sourceOptions.SyncReadCommandTimeoutSeconds));
-            }
-
-            sourceUserInfos = await _attendanceDbContext.UserInfos
-                .AsNoTracking()
-                .Select(x => new AttendanceSourceUserInfo
-                {
-                    UserId = x.UserId,
-                    BadgeNumber = x.BadgeNumber
-                })
-                .ToListAsync(cancellationToken);
-            sourceCheckIns = await _attendanceDbContext.CheckInOuts
-                .AsNoTracking()
-                .Where(x => x.CheckTime >= startLocal && x.CheckTime < endLocal && x.UserId != null)
-                .ToListAsync(cancellationToken);
             workers = await _appDbContext.Workers
                 .AsNoTracking()
-                .Where(x => x.IsActive && x.EmploymentStatus == EmploymentStatus.Active)
+                .Where(x => !string.IsNullOrWhiteSpace(x.AttendanceUserId) || !string.IsNullOrWhiteSpace(x.BadgeNumber))
                 .ToListAsync(cancellationToken);
         }
         catch (OperationCanceledException)
@@ -433,12 +445,15 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
         }
         catch (Exception exception)
         {
-            _logger.LogError(exception, "Failed to read attendance source data during sync.");
+            await RetryAttendanceBatchAsync(sourceBatch, "ApplicationWorkerReadFailed");
+            _logger.LogError(exception, "Failed to read application workers during attendance sync.");
             return Result<AttendanceSyncResultDto>.Failure(new Error("AttendanceSourceError", "Unable to connect to attendance source or read required tables."));
         }
 
-        var sourceUsersCount = sourceUserInfos.Count;
-        var sourceCheckInsCount = sourceCheckIns.Count;
+        try
+        {
+        var sourceUsersCount = sourceBatch.SourceUsersCount;
+        var sourceCheckInsCount = sourceCheckIns.Length;
         _logger.LogInformation(
             "Attendance sync source reads completed. correlationId={CorrelationId}, date={SyncDate}, trigger={TriggerType}, sourceUsers={SourceUsersCount}, sourceCheckIns={SourceCheckInsCount}, workersRead={WorkersReadCount}",
             context.CorrelationId,
@@ -448,11 +463,16 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
             sourceCheckInsCount,
             workers.Count);
 
+        // Identity resolution intentionally includes inactive workers. A resolved inactive worker is a
+        // business skip, not an unresolvable identity or an attendance record candidate. Daily
+        // attendance summaries continue to be built only for active employees.
         var mappedWorkers = workers
-            .Where(x => !string.IsNullOrWhiteSpace(x.AttendanceUserId) || !string.IsNullOrWhiteSpace(x.BadgeNumber))
+            .Where(x => x.IsActive &&
+                        x.EmploymentStatus == EmploymentStatus.Active &&
+                        (!x.EmploymentEndDate.HasValue || DateOnly.FromDateTime(x.EmploymentEndDate.Value) >= productionDate))
             .ToArray();
 
-        if (mappedWorkers.Length == 0)
+        if (workers.Count == 0)
         {
             _logger.LogWarning(
                 "Attendance sync completed with no mapped workers. sourceUsers={SourceUsersCount}, sourceCheckIns={SourceCheckInsCount}, date={SyncDate}",
@@ -465,6 +485,21 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
                 .Where(x => !string.IsNullOrWhiteSpace(x))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .Count();
+
+            var emptyBatchAcknowledgement = await _attendanceSource.CompleteAsync(
+                sourceBatch,
+                sourceCheckIns
+                    .Where(punch => punch.SourceRecordId.HasValue)
+                    .Select(punch => SourceProcessingOutcome.Retry(
+                        punch.SourceRecordId!.Value,
+                        "WorkerIdentityNotResolved"))
+                    .ToArray(),
+                cancellationToken);
+            if (emptyBatchAcknowledgement.IsFailure)
+            {
+                await RetryAttendanceBatchAsync(sourceBatch, "AttendanceAcknowledgementFailed");
+                return Result<AttendanceSyncResultDto>.Failure(emptyBatchAcknowledgement.Error!);
+            }
 
             return Result<AttendanceSyncResultDto>.Success(new AttendanceSyncResultDto
             {
@@ -482,41 +517,112 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
             });
         }
 
-        var attendanceUserMap = BuildIdentityLookup(mappedWorkers, x => x.AttendanceUserId);
-        var badgeMap = BuildIdentityLookup(mappedWorkers, x => x.BadgeNumber);
-        var badgeBySourceUserId = sourceUserInfos
+        var attendanceUserMap = BuildIdentityLookup(workers, x => x.AttendanceUserId);
+        var badgeMap = BuildIdentityLookup(workers, x => x.BadgeNumber);
+        var workersById = workers.ToDictionary(worker => worker.Id);
+        var badgeBySourceUserId = sourceCheckIns
             .Where(x => x.UserId is not null)
             .GroupBy(x => NormalizeIdentity(x.UserId!.ToString()))
             .Where(g => g.Key is not null)
             .ToDictionary(g => g.Key!, g => NormalizeIdentity(g.First().BadgeNumber), StringComparer.OrdinalIgnoreCase);
 
         var validCheckIns = sourceCheckIns
-            .Where(x => x.UserId is not null && x.CheckTime != default)
+            .Where(x => ValidateSourcePunch(x) is null)
             .Select(x => new
             {
                 WorkerUserId = NormalizeSourceIdentity(x.UserId)!,
-                CheckTimeUtc = ToUtcFromEgyptSourceTime(x.CheckTime),
-                RawSourceIdentifier = $"{NormalizeSourceIdentity(x.UserId)!}:{x.CheckTime:O}:{NormalizeIdentity(x.CheckType)}"
+                x.CheckTimeLocal,
+                CheckTimeUtc = ToUtcFromEgyptSourceTime(x.CheckTimeLocal),
+                CheckType = GetPunchType(x.CheckType)!.Value,
+                RawSourceIdentifier = x.SourceRawId,
+                x.SourceRecordId
             })
             .Where(x => !string.IsNullOrWhiteSpace(x.WorkerUserId))
             .ToList();
 
-        var matchedByWorker = new Dictionary<Guid, (DateTime FirstIn, DateTime LastOut, string SourceRawId)>();
+        var matchedByWorker = new Dictionary<Guid, AttendanceWindow>();
         var unmatchedSourceUsers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var processingOutcomes = sourceCheckIns
+            .Where(punch => punch.SourceRecordId.HasValue)
+            .Select(punch => (Punch: punch, Error: ValidateSourcePunch(punch)))
+            .Where(item => item.Error is not null)
+            .ToDictionary(
+                item => item.Punch.SourceRecordId!.Value,
+                item => SourceProcessingOutcome.Failed(item.Punch.SourceRecordId!.Value, item.Error!));
 
         foreach (var item in validCheckIns.OrderBy(x => x.CheckTimeUtc))
         {
             var sourceUserId = item.WorkerUserId;
-            if (!TryResolveWorkerId(sourceUserId, attendanceUserMap, badgeMap, badgeBySourceUserId, out var workerId))
+            var identityResolution = TryResolveWorkerId(
+                sourceUserId,
+                attendanceUserMap,
+                badgeMap,
+                badgeBySourceUserId,
+                out var workerId);
+            if (identityResolution != WorkerIdentityResolution.Resolved)
             {
                 unmatchedSourceUsers.Add(sourceUserId);
+                if (item.SourceRecordId.HasValue)
+                {
+                    processingOutcomes[item.SourceRecordId.Value] = identityResolution == WorkerIdentityResolution.Ambiguous
+                        ? SourceProcessingOutcome.Failed(item.SourceRecordId.Value, "WorkerIdentityAmbiguous")
+                        : SourceProcessingOutcome.Retry(item.SourceRecordId.Value, "WorkerIdentityNotResolved");
+                }
                 continue;
             }
 
-            if (!matchedByWorker.TryGetValue(workerId, out var window))
-                matchedByWorker[workerId] = (item.CheckTimeUtc, item.CheckTimeUtc, item.RawSourceIdentifier);
-            else if (item.CheckTimeUtc > window.LastOut)
-                matchedByWorker[workerId] = (window.FirstIn, item.CheckTimeUtc, window.SourceRawId);
+            var worker = workersById[workerId];
+            if (!worker.IsActive || worker.EmploymentStatus != EmploymentStatus.Active)
+            {
+                if (item.SourceRecordId.HasValue)
+                {
+                    processingOutcomes[item.SourceRecordId.Value] = SourceProcessingOutcome.Skipped(
+                        item.SourceRecordId.Value,
+                        "WorkerInactive");
+                }
+                continue;
+            }
+
+            if (worker.EmploymentEndDate.HasValue &&
+                DateOnly.FromDateTime(item.CheckTimeLocal) > DateOnly.FromDateTime(worker.EmploymentEndDate.Value))
+            {
+                if (item.SourceRecordId.HasValue)
+                {
+                    processingOutcomes[item.SourceRecordId.Value] = SourceProcessingOutcome.Skipped(
+                        item.SourceRecordId.Value,
+                        "AttendanceAfterEmploymentEnd");
+                }
+                continue;
+            }
+
+            if (item.SourceRecordId.HasValue)
+            {
+                processingOutcomes[item.SourceRecordId.Value] = SourceProcessingOutcome.Processed(item.SourceRecordId.Value);
+            }
+
+            if (item.CheckType == PunchType.In)
+            {
+                if (!matchedByWorker.TryGetValue(workerId, out var window))
+                {
+                    matchedByWorker[workerId] = new AttendanceWindow(item.CheckTimeUtc, null, item.RawSourceIdentifier);
+                }
+                else if (item.CheckTimeUtc < window.FirstInUtc)
+                {
+                    matchedByWorker[workerId] = window with
+                    {
+                        FirstInUtc = item.CheckTimeUtc,
+                        SourceRawId = item.RawSourceIdentifier,
+                        LastOutUtc = window.LastOutUtc is { } lastOut && lastOut > item.CheckTimeUtc ? lastOut : null
+                    };
+                }
+            }
+            else if (matchedByWorker.TryGetValue(workerId, out var window) && item.CheckTimeUtc > window.FirstInUtc)
+            {
+                if (!window.LastOutUtc.HasValue || item.CheckTimeUtc > window.LastOutUtc.Value)
+                {
+                    matchedByWorker[workerId] = window with { LastOutUtc = item.CheckTimeUtc };
+                }
+            }
         }
 
         var matchedWorkersCount = matchedByWorker.Count;
@@ -547,20 +653,21 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
 
             if (matchedByWorker.TryGetValue(worker.Id, out var match))
             {
-                statusTime = match.FirstIn;
-                status = CalculateStatus(match.FirstIn, startLocal);
+                statusTime = match.FirstInUtc;
+                status = CalculateStatus(match.FirstInUtc, startLocal);
                 sourceRawId = match.SourceRawId;
                 sourcePayload = JsonSerializer.Serialize(new
                 {
-                    FirstInUtc = match.FirstIn,
-                    LastOutUtc = match.LastOut > match.FirstIn ? match.LastOut : (DateTime?)null
+                    FirstInUtc = match.FirstInUtc,
+                    LastOutUtc = match.LastOutUtc
                 });
             }
 
             if (!existingByWorker.TryGetValue(worker.Id, out var existing))
             {
+                var attendanceRecordId = Guid.NewGuid();
                 var record = new AttendanceRecord(
-                    id: Guid.NewGuid(),
+                    id: attendanceRecordId,
                     workerId: worker.Id,
                     attendanceTimeUtc: statusTime,
                     attendanceStatus: status,
@@ -572,6 +679,14 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
                     createdAtUtc: syncRunAt);
 
                 _appDbContext.AttendanceRecords.Add(record);
+                if (matchedByWorker.TryGetValue(worker.Id, out var insertedMatch))
+                {
+                    QueueAttendanceNotification(record, worker, WorkerAttendanceNotificationType.CheckIn, insertedMatch.FirstInUtc);
+                    if (insertedMatch.LastOutUtc.HasValue)
+                    {
+                        QueueAttendanceNotification(record, worker, WorkerAttendanceNotificationType.CheckOut, insertedMatch.LastOutUtc.Value);
+                    }
+                }
                 insertCount++;
                 continue;
             }
@@ -582,6 +697,7 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
                 continue;
             }
 
+            var previousWindow = ReadAttendanceWindow(existing.SourcePayload);
             existing.UpdateAttendanceStatus(
                 statusTime,
                 status,
@@ -591,10 +707,49 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
                 worker.AttendanceUserId,
                 worker.BadgeNumber,
                 syncRunAt);
+            if (matchedByWorker.TryGetValue(worker.Id, out var updatedMatch))
+            {
+                if (previousWindow.FirstInUtc is null)
+                {
+                    QueueAttendanceNotification(existing, worker, WorkerAttendanceNotificationType.CheckIn, updatedMatch.FirstInUtc);
+                }
+                if (updatedMatch.LastOutUtc.HasValue && previousWindow.LastOutUtc is null)
+                {
+                    QueueAttendanceNotification(existing, worker, WorkerAttendanceNotificationType.CheckOut, updatedMatch.LastOutUtc.Value);
+                }
+            }
             updateCount++;
         }
 
         await _appDbContext.SaveChangesAsync(cancellationToken);
+
+        var claimedInboxIds = sourceCheckIns
+            .Where(punch => punch.SourceRecordId.HasValue)
+            .Select(punch => punch.SourceRecordId!.Value)
+            .ToHashSet();
+        var unresolvedClaimedInboxIds = claimedInboxIds
+            .Except(processingOutcomes.Keys)
+            .ToArray();
+        foreach (var inboxId in unresolvedClaimedInboxIds)
+        {
+            processingOutcomes[inboxId] = SourceProcessingOutcome.Failed(inboxId, "AttendanceResolutionMissing");
+        }
+        if (unresolvedClaimedInboxIds.Length > 0)
+        {
+            _logger.LogError(
+                "Attendance staging resolution did not produce an explicit outcome for every claimed row. unresolvedClaimedCount={UnresolvedClaimedCount}",
+                unresolvedClaimedInboxIds.Length);
+        }
+
+        var acknowledgement = await _attendanceSource.CompleteAsync(
+            sourceBatch,
+            processingOutcomes.Values.ToArray(),
+            cancellationToken);
+        if (acknowledgement.IsFailure)
+        {
+            await RetryAttendanceBatchAsync(sourceBatch, "AttendanceAcknowledgementFailed");
+            return Result<AttendanceSyncResultDto>.Failure(acknowledgement.Error!);
+        }
 
         var workersWithoutAttendanceCount = mappedWorkers.Count(worker => !matchedByWorker.ContainsKey(worker.Id));
 
@@ -659,6 +814,76 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
             UpdatedRecords = updateCount,
             SkippedRecords = unchangedCount
         });
+        }
+        catch (OperationCanceledException)
+        {
+            await RetryAttendanceBatchAsync(sourceBatch, "AttendanceProcessingCancelled");
+            throw;
+        }
+        catch (Exception exception)
+        {
+            await RetryAttendanceBatchAsync(sourceBatch, "AttendanceProcessingFailed");
+            _logger.LogError(
+                exception,
+                "Attendance staging processing failed after rows were claimed. claimedCount={ClaimedCount}, leaseId={LeaseId}",
+                sourceCheckIns.Count(punch => punch.SourceRecordId.HasValue),
+                sourceBatch.LeaseId);
+            return Result<AttendanceSyncResultDto>.Failure(new Error(
+                "AttendanceProcessingFailed",
+                "Attendance staging rows were released for retry after processing failed."));
+        }
+    }
+
+    private async Task RetryAttendanceBatchAsync(AttendanceSourceBatch batch, string errorCode)
+    {
+        var outcomes = batch.Punches
+            .Where(punch => punch.SourceRecordId.HasValue)
+            .Select(punch => SourceProcessingOutcome.Retry(punch.SourceRecordId!.Value, errorCode))
+            .ToArray();
+        var result = await _attendanceSource.CompleteAsync(batch, outcomes, CancellationToken.None);
+        if (result.IsFailure)
+        {
+            _logger.LogWarning("Attendance staging rows could not be released for retry after processing failed.");
+        }
+    }
+
+    private void QueueAttendanceNotification(
+        AttendanceRecord attendanceRecord,
+        Worker worker,
+        WorkerAttendanceNotificationType attendanceType,
+        DateTime attendanceTimeUtc)
+    {
+        var idempotencyKey = $"attendance:{attendanceRecord.Id:D}:{attendanceType}";
+        _appDbContext.AttendanceNotificationEvents.Add(new AttendanceNotificationEvent(
+            Guid.NewGuid(),
+            attendanceRecord.Id,
+            worker.Id,
+            worker.FullName,
+            worker.EmployeeCode ?? worker.BadgeNumber ?? worker.AttendanceUserId ?? worker.Id.ToString("D"),
+            attendanceType,
+            DateTime.SpecifyKind(attendanceTimeUtc, DateTimeKind.Utc),
+            _sourceOptions.SourceName,
+            idempotencyKey));
+    }
+
+    private static (DateTime? FirstInUtc, DateTime? LastOutUtc) ReadAttendanceWindow(string? sourcePayload)
+    {
+        if (string.IsNullOrWhiteSpace(sourcePayload)) return (null, null);
+        try
+        {
+            using var json = JsonDocument.Parse(sourcePayload);
+            DateTime? first = json.RootElement.TryGetProperty("FirstInUtc", out var firstValue) && firstValue.TryGetDateTime(out var parsedFirst)
+                ? DateTime.SpecifyKind(parsedFirst, DateTimeKind.Utc)
+                : null;
+            DateTime? last = json.RootElement.TryGetProperty("LastOutUtc", out var lastValue) && lastValue.ValueKind != JsonValueKind.Null && lastValue.TryGetDateTime(out var parsedLast)
+                ? DateTime.SpecifyKind(parsedLast, DateTimeKind.Utc)
+                : null;
+            return (first, last);
+        }
+        catch (JsonException)
+        {
+            return (null, null);
+        }
     }
 
     private static string? NormalizeIdentity(string? value)
@@ -676,10 +901,10 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
         return NormalizeIdentity(value?.ToString());
     }
 
-    private static DateTime GetDateOnly(DateTime? dateUtc)
+    private DateTime GetDateOnly(DateTime? dateUtc)
     {
         var utc = dateUtc ?? DateTime.UtcNow;
-        var cairo = TimeZoneInfo.ConvertTimeFromUtc(utc.Kind == DateTimeKind.Utc ? utc : utc.ToUniversalTime(), EgyptTimeZone);
+        var cairo = TimeZoneInfo.ConvertTimeFromUtc(utc.Kind == DateTimeKind.Utc ? utc : utc.ToUniversalTime(), _cairoTimeZoneProvider.TimeZone);
         return GetEgyptDayBounds(DateOnly.FromDateTime(cairo)).StartUtc;
     }
 
@@ -707,7 +932,7 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
         return result;
     }
 
-    private static bool TryResolveWorkerId(
+    private static WorkerIdentityResolution TryResolveWorkerId(
         string sourceUserId,
         Dictionary<string, List<Guid>> attendanceUserLookup,
         Dictionary<string, List<Guid>> badgeLookup,
@@ -716,29 +941,84 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
     {
         workerId = Guid.Empty;
 
-        if (attendanceUserLookup.TryGetValue(sourceUserId, out var byAttendanceUserId) && byAttendanceUserId.Count == 1)
+        attendanceUserLookup.TryGetValue(sourceUserId, out var byAttendanceUserId);
+        var sourceBadge = sourceBadgeByUserId.TryGetValue(sourceUserId, out var badge)
+            ? badge
+            : null;
+        var byBadge = !string.IsNullOrWhiteSpace(sourceBadge) && badgeLookup.TryGetValue(sourceBadge, out var badgeMatches)
+            ? badgeMatches
+            : null;
+
+        if (byAttendanceUserId?.Count > 1 || byBadge?.Count > 1)
         {
-            workerId = byAttendanceUserId[0];
-            return true;
+            return WorkerIdentityResolution.Ambiguous;
         }
 
-        if (sourceBadgeByUserId.TryGetValue(sourceUserId, out var sourceBadge) &&
-            !string.IsNullOrWhiteSpace(sourceBadge) &&
-            badgeLookup.TryGetValue(sourceBadge, out var byBadge) &&
-            byBadge.Count == 1)
+        if (byAttendanceUserId?.Count == 1)
+        {
+            if (byBadge?.Count == 1 && byBadge[0] != byAttendanceUserId[0])
+            {
+                return WorkerIdentityResolution.Ambiguous;
+            }
+
+            workerId = byAttendanceUserId[0];
+            return WorkerIdentityResolution.Resolved;
+        }
+
+        if (byBadge?.Count == 1)
         {
             workerId = byBadge[0];
-            return true;
+            return WorkerIdentityResolution.Resolved;
         }
 
-        return false;
+        return WorkerIdentityResolution.NotResolved;
     }
+
+    private static string? ValidateSourcePunch(AttendanceSourcePunch punch)
+    {
+        if (punch.UserId is null)
+        {
+            return "MissingSourceUserId";
+        }
+
+        if (punch.CheckTimeLocal == default)
+        {
+            return "MissingCheckTime";
+        }
+
+        if (string.IsNullOrWhiteSpace(punch.CheckType))
+        {
+            return "InvalidCheckType";
+        }
+
+        if (GetPunchType(punch.CheckType) is null)
+        {
+            return "UnsupportedCheckType";
+        }
+
+        return string.IsNullOrWhiteSpace(punch.SourceRawId) ? "InvalidSourcePayload" : null;
+    }
+
+    private enum WorkerIdentityResolution
+    {
+        NotResolved,
+        Resolved,
+        Ambiguous
+    }
+
+    private enum PunchType
+    {
+        In,
+        Out
+    }
+
+    private sealed record AttendanceWindow(DateTime FirstInUtc, DateTime? LastOutUtc, string SourceRawId);
 
     private AttendanceStatus CalculateStatus(DateTime checkTimeUtc, DateTime productionStartLocal)
     {
         var shiftStart = productionStartLocal.Add(_sourceOptions.DayStartTime);
         var lateThreshold = shiftStart.AddMinutes(_sourceOptions.LateThresholdMinutes);
-        var localCheckTime = TimeZoneInfo.ConvertTimeFromUtc(checkTimeUtc, EgyptTimeZone);
+        var localCheckTime = TimeZoneInfo.ConvertTimeFromUtc(checkTimeUtc, _cairoTimeZoneProvider.TimeZone);
         return localCheckTime <= lateThreshold ? AttendanceStatus.Present : AttendanceStatus.Late;
     }
 
@@ -753,7 +1033,7 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
             return new Dictionary<Guid, AttendanceRecord>();
         }
 
-        var localDate = TimeZoneInfo.ConvertTimeFromUtc(forDate, EgyptTimeZone);
+        var localDate = TimeZoneInfo.ConvertTimeFromUtc(forDate, _cairoTimeZoneProvider.TimeZone);
         var endUtc = GetEgyptDayBounds(DateOnly.FromDateTime(localDate)).EndUtc;
         var records = await _appDbContext.AttendanceRecords
             .AsNoTracking()
@@ -767,22 +1047,29 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
             .ToDictionary(g => g.Key, g => g.First());
     }
 
-    private static (DateTime StartUtc, DateTime EndUtc, DateTime StartLocal, DateTime EndLocal) GetEgyptDayBounds(DateOnly date)
+    private (DateTime StartUtc, DateTime EndUtc, DateTime StartLocal, DateTime EndLocal) GetEgyptDayBounds(DateOnly date)
     {
         var startLocal = date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified);
         var endLocal = startLocal.AddDays(1);
         return (
-            TimeZoneInfo.ConvertTimeToUtc(startLocal, EgyptTimeZone),
-            TimeZoneInfo.ConvertTimeToUtc(endLocal, EgyptTimeZone),
+            TimeZoneInfo.ConvertTimeToUtc(startLocal, _cairoTimeZoneProvider.TimeZone),
+            TimeZoneInfo.ConvertTimeToUtc(endLocal, _cairoTimeZoneProvider.TimeZone),
             startLocal,
             endLocal);
     }
 
-    private static DateTime ToUtcFromEgyptSourceTime(DateTime sourceTime)
+    private static PunchType? GetPunchType(string? checkType) => checkType?.Trim() switch
+    {
+        var value when string.Equals(value, "I", StringComparison.OrdinalIgnoreCase) => PunchType.In,
+        var value when string.Equals(value, "O", StringComparison.OrdinalIgnoreCase) => PunchType.Out,
+        _ => null
+    };
+
+    private DateTime ToUtcFromEgyptSourceTime(DateTime sourceTime)
     {
         if (sourceTime.Kind == DateTimeKind.Utc) return sourceTime;
         var local = DateTime.SpecifyKind(sourceTime, DateTimeKind.Unspecified);
-        return TimeZoneInfo.ConvertTimeToUtc(local, EgyptTimeZone);
+        return TimeZoneInfo.ConvertTimeToUtc(local, _cairoTimeZoneProvider.TimeZone);
     }
 
     private async Task<HashSet<Guid>> GetVisibleWorkerIdsForScopeAsync(
@@ -808,11 +1095,14 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
             return new HashSet<Guid>();
         }
 
-        var assignments = await ResolveCurrentAssignmentsAsync(allActiveWorkerIds, dateUtc, cancellationToken);
-
-        return assignments
-            .Where(x => x.Value.EffectiveSubStageId is not null && scopeSubStageIds.Contains(x.Value.EffectiveSubStageId.Value))
-            .Select(x => x.Key)
+        return (await _appDbContext.WorkerDefaultAssignments.AsNoTracking()
+                .Where(assignment => assignment.IsActive
+                    && allActiveWorkerIds.Contains(assignment.WorkerId)
+                    && scopeSubStageIds.Contains(assignment.SubStageId)
+                    && (!lineId.HasValue || assignment.ProductionLineId == lineId.Value))
+                .Select(assignment => assignment.WorkerId)
+                .Distinct()
+                .ToArrayAsync(cancellationToken))
             .ToHashSet();
     }
 
@@ -820,7 +1110,7 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
     {
         var subStageIds = await (from subStage in _appDbContext.SubStages.AsNoTracking()
                                 join main in _appDbContext.MainStages.AsNoTracking() on subStage.MainStageId equals main.Id
-                                join line in _appDbContext.ProductionLines.AsNoTracking() on main.ProductionLineId equals line.Id
+                                join line in _appDbContext.ProductionLines.AsNoTracking() on main.DepartmentId equals line.DepartmentId
                                 where subStage.IsActive && main.IsActive && line.IsActive
                                 select new
                                 {

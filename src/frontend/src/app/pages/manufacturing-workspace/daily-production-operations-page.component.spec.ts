@@ -8,7 +8,9 @@ import { ProductionCostRecordingApiService } from '../../core/services/productio
 import { ManufacturingMasterDataApiService } from '../../core/services/manufacturing-master-data-api.service';
 import { AttendanceApiService } from '../../core/services/attendance-api.service';
 import { PermissionService } from '../../core/services/permission.service';
+import { PERMISSIONS } from '../../core/config/permission-identifiers';
 import { FormSubmissionValidationService } from '../../shared/forms/form-submission-validation.service';
+import { ExcelExportError } from '../../shared/utils/excel-export.service';
 import { ManufacturingWorkspaceModule } from './manufacturing-workspace.module';
 
 describe('DailyProductionOperationsPageComponent unified preview', () => {
@@ -16,6 +18,12 @@ describe('DailyProductionOperationsPageComponent unified preview', () => {
   let production: jasmine.SpyObj<any>;
   let masterData: jasmine.SpyObj<any>;
   let attendance: jasmine.SpyObj<any>;
+  let realtime: jasmine.SpyObj<any>;
+  let excelExport: jasmine.SpyObj<any>;
+  let messages: jasmine.SpyObj<any>;
+  let stopRealtime: jasmine.Spy;
+  let watchConfig: { refresh: () => void; matches?: (change: any) => boolean };
+  let grantedPermissions: Set<string>;
 
   const preview: DailyProductionPreview = {
     productionDate: '2026-07-16',
@@ -32,15 +40,36 @@ describe('DailyProductionOperationsPageComponent unified preview', () => {
   };
 
   beforeEach(() => {
-    production = jasmine.createSpyObj('ProductionCostRecordingApiService', ['previewDailyOperations', 'loadDailyOperations', 'saveDailyDraft']);
-    masterData = jasmine.createSpyObj('ManufacturingMasterDataApiService', ['factories', 'allProductionLines', 'models']);
+    grantedPermissions = new Set([
+      PERMISSIONS.production.view,
+      PERMISSIONS.production.record,
+      PERMISSIONS.production.approve,
+      PERMISSIONS.assignments.manage
+    ]);
+    production = jasmine.createSpyObj('ProductionCostRecordingApiService', ['previewDailyOperations', 'loadDailyOperations', 'saveDailyDraft', 'approveDailyOperation', 'cancelDailyOperationApproval']);
+    masterData = jasmine.createSpyObj('ManufacturingMasterDataApiService', ['factories', 'departments', 'allProductionLines', 'models', 'modelStages']);
+    masterData.departments.and.returnValue(of([]));
+    masterData.allProductionLines.and.returnValue(of([]));
+    masterData.modelStages.and.returnValue(of([{ id: 'stage-1', subStageId: 'sub-stage-1', stageOrder: 1, piecePrice: .5, standardSeconds: 30, compensationMode: 'SharedPercentage', isRequired: true, isActive: true }]));
     attendance = jasmine.createSpyObj('AttendanceApiService', ['syncForProductionDate']);
+    stopRealtime = jasmine.createSpy('stopRealtime');
+    realtime = jasmine.createSpyObj('ManufacturingRealtimeService', ['watchScreen', 'registerLocalOperation']);
+    excelExport = jasmine.createSpyObj('ExcelExportService', ['exportWorkbook']);
+    excelExport.exportWorkbook.and.resolveTo();
+    messages = jasmine.createSpyObj('MessageService', ['add']);
+    realtime.watchScreen.and.callFake((config: any) => {
+      watchConfig = config;
+      return stopRealtime;
+    });
     component = new DailyProductionOperationsPageComponent(
       masterData,
       attendance,
       production,
-      { hasPermission: () => true } as any,
-      { serverMessage: (error: any, fallback: string) => error?.error?.detail ?? fallback } as any
+      { hasPermission: (permission: string) => grantedPermissions.has(permission) } as any,
+      { serverMessage: (error: any, fallback: string) => error?.error?.detail ?? fallback } as any,
+      realtime,
+      excelExport,
+      messages
     );
     component.operations = {
       factoryId: 'factory-1', factoryName: 'Factory', productionLineId: 'line-1', productionLineName: 'Line',
@@ -56,7 +85,7 @@ describe('DailyProductionOperationsPageComponent unified preview', () => {
     component.lineQuantity = 500;
     component.stages = [{
       productModelStageId: 'stage-1', subStageId: 'sub-stage-1', mainStageName: 'Main', stageCode: 'S1',
-      stageName: 'مرحلة 1', stageOrder: 1, piecePrice: .5, compensationMode: 'SharedPercentage',
+      stageName: 'مرحلة 1', stageOrder: 1, piecePrice: .5, standardSeconds: 30, compensationMode: 'SharedPercentage',
       staffingStatus: 'Staffed', attendanceStatus: 'Ready', hasAbsentWorkers: false, hasNoSourceCheckInWorkers: false,
       isFinancialReviewPending: false, isReady: true,
       workers: [{ workerId: 'worker-1', workerCode: 'W1', workerName: 'عامل 1', isOnActiveService: true,
@@ -82,6 +111,135 @@ describe('DailyProductionOperationsPageComponent unified preview', () => {
     expect(component.attendanceSyncing).toBeTrue();
     pending.complete();
     expect(component.attendanceSyncing).toBeFalse();
+  });
+
+  it('reloads current operations for a matching daily-production realtime event without local edits', () => {
+    masterData.factories.and.returnValue(of([]));
+    production.loadDailyOperations.and.returnValue(of(component.operations));
+    component.attendanceSyncedForDate = component.productionDate;
+
+    component.ngOnInit();
+    expect(watchConfig.matches?.(dailyChange())).toBeTrue();
+    watchConfig.refresh();
+
+    expect(production.loadDailyOperations).toHaveBeenCalledTimes(1);
+    expect(masterData.modelStages).toHaveBeenCalledWith('model-1', 'line-1');
+  });
+
+  it('does not reload current operations for a different daily-production context', () => {
+    masterData.factories.and.returnValue(of([]));
+    production.loadDailyOperations.and.returnValue(of(component.operations));
+    component.attendanceSyncedForDate = component.productionDate;
+
+    component.ngOnInit();
+    expect(watchConfig.matches?.(dailyChange({ productionLineId: 'another-line' }))).toBeFalse();
+    expect(watchConfig.matches?.(dailyChange({ productionDate: '2000-01-01' }))).toBeFalse();
+
+    expect(production.loadDailyOperations).not.toHaveBeenCalled();
+  });
+
+  it('reloads readiness for batched worker and attendance invalidations while preserving the selected context', () => {
+    masterData.factories.and.returnValue(of([]));
+    production.loadDailyOperations.and.returnValue(of(component.operations));
+    component.attendanceSyncedForDate = component.productionDate;
+    const selectedLine = component.selectedProductionLineId;
+    const selectedModel = component.selectedProductModelId;
+
+    component.ngOnInit();
+    expect(watchConfig.matches?.(dailyChange({ entityType: 'Worker', productionDate: null, productionLineId: null, productModelId: null }))).toBeTrue();
+    expect(watchConfig.matches?.(dailyChange({ entityType: 'AttendanceRecord', productionDate: null, productionLineId: null, productModelId: null }))).toBeTrue();
+    expect(watchConfig.matches?.(dailyChange({
+      entityType: 'AttendanceRecord', productionDate: '2026-07-20', affectedAttendanceDates: ['2026-07-20'],
+      productionLineId: null, productModelId: null
+    }))).toBeFalse();
+    watchConfig.refresh();
+
+    expect(production.loadDailyOperations).toHaveBeenCalledTimes(1);
+    expect(component.selectedProductionLineId).toBe(selectedLine);
+    expect(component.selectedProductModelId).toBe(selectedModel);
+  });
+
+  it('reloads current operations only for a permanent-assignment event affecting a displayed stage in the same factory and line', () => {
+    masterData.factories.and.returnValue(of([]));
+    production.loadDailyOperations.and.returnValue(of(component.operations));
+    component.attendanceSyncedForDate = component.productionDate;
+
+    component.ngOnInit();
+    const matching = dailyChange({
+      entityType: 'WorkerDefaultAssignment',
+      changeType: 'permanent-assignment-created',
+      factoryId: component.selectedFactoryId,
+      productionLineId: component.selectedProductionLineId,
+      productModelId: null,
+      productionDate: null,
+      subStageId: component.stages[0].subStageId,
+      mainStageId: 'main-stage-1',
+      workerId: 'worker-2'
+    });
+
+    expect(watchConfig.matches?.(matching)).toBeTrue();
+    watchConfig.refresh();
+    expect(production.loadDailyOperations).toHaveBeenCalledTimes(1);
+    expect(watchConfig.matches?.({ ...matching, subStageId: 'unrelated-stage' })).toBeFalse();
+    expect(watchConfig.matches?.({ ...matching, factoryId: 'other-factory' })).toBeFalse();
+    expect(watchConfig.matches?.({ ...matching, productionLineId: 'other-line' })).toBeFalse();
+  });
+
+  it('shows a reload notice instead of overwriting matching local edits', () => {
+    masterData.factories.and.returnValue(of([]));
+    component.attendanceSyncedForDate = component.productionDate;
+    component.stageChanged();
+
+    component.ngOnInit();
+    expect(watchConfig.matches?.(dailyChange())).toBeTrue();
+    watchConfig.refresh();
+
+    expect(component.hasPendingRemoteUpdate).toBeTrue();
+    expect(component.remoteUpdateMessage).toContain('تعديلاتك غير المحفوظة');
+    expect(production.loadDailyOperations).not.toHaveBeenCalled();
+  });
+
+  it('protects unsaved daily edits from a matching permanent-assignment event', () => {
+    masterData.factories.and.returnValue(of([]));
+    component.attendanceSyncedForDate = component.productionDate;
+    component.stageChanged();
+
+    component.ngOnInit();
+    const change = dailyChange({
+      entityType: 'WorkerDefaultAssignment',
+      changeType: 'permanent-assignment-cancelled',
+      productModelId: null,
+      productionDate: null,
+      subStageId: component.stages[0].subStageId,
+      workerId: 'worker-1'
+    });
+    expect(watchConfig.matches?.(change)).toBeTrue();
+    watchConfig.refresh();
+
+    expect(component.hasPendingRemoteUpdate).toBeTrue();
+    expect(production.loadDailyOperations).not.toHaveBeenCalled();
+  });
+
+  it('releases the daily-production realtime watcher on destroy', () => {
+    masterData.factories.and.returnValue(of([]));
+
+    component.ngOnInit();
+    component.ngOnDestroy();
+
+    expect(stopRealtime).toHaveBeenCalledTimes(1);
+  });
+
+  it('loads the global model catalog after selecting an operating line without rewriting model stages', () => {
+    const activeModel = { id: 'model-2', code: 'M2', name: 'Model 2', isActive: true };
+    masterData.models.and.returnValue(of([activeModel, { id: 'inactive-model', code: 'M0', name: 'Inactive', isActive: false }]));
+
+    component.selectProductionLine('line-2');
+
+    expect(masterData.models).toHaveBeenCalledWith();
+    expect(component.activeProductModels).toEqual([activeModel]);
+    expect(component.selectedProductModelId).toBe('');
+    expect(component.stages).toEqual([]);
+    expect(masterData.modelStages).not.toHaveBeenCalled();
   });
 
   it('sends exactly one request for repeated clicks while preview is active and renders its response without a page reload', () => {
@@ -129,6 +287,27 @@ describe('DailyProductionOperationsPageComponent unified preview', () => {
     expect(component.preview).toEqual(preview);
   });
 
+  function dailyChange(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      eventId: 'event-1',
+      entityType: 'ProductionOrder',
+      changeType: 'Updated',
+      entityId: 'order-1',
+      occurredAtUtc: new Date().toISOString(),
+      actorUserId: null,
+      correlationId: null,
+      factoryId: component.selectedFactoryId,
+      departmentId: null,
+      productionLineId: component.selectedProductionLineId,
+      mainStageId: null,
+      productModelId: component.selectedProductModelId,
+      subStageId: null,
+      productionDate: component.productionDate,
+      workerId: null,
+      ...overrides
+    };
+  }
+
   it('updates the minute-weighted quantity preview immediately when line quantity changes', () => {
     const stage = component.stages[0];
     stage.workers[0].percentage = 25;
@@ -138,6 +317,44 @@ describe('DailyProductionOperationsPageComponent unified preview', () => {
 
     expect(component.calculatedWorkerQuantity(stage, stage.workers[0])).toBe(50);
     expect(component.exclusionReasonLabel('NoTemporalIntersection')).toBe('لا يوجد تقاطع زمني');
+  });
+
+  it('uses the established 0-100 percentage contract and projects worker quantities returned by the unified preview', () => {
+    const stage = component.stages[0];
+    stage.workers = [
+      { ...stage.workers[0], workerId: 'worker-1', workerCode: 'W1', percentage: 25, quantity: 250 },
+      { ...stage.workers[0], workerId: 'worker-2', workerCode: 'W2', workerName: 'عامل 2', percentage: 75, quantity: 750 }
+    ];
+    component.lineQuantity = 1000;
+    production.previewDailyOperations.and.returnValue(of({
+      ...preview,
+      lineQuantity: 1000,
+      stages: [{
+        ...preview.stages[0],
+        stageQuantity: 1000,
+        workers: [
+          { ...preview.stages[0].workers[0], workerId: 'worker-1', workerCode: 'W1', percentage: 25, equivalentQuantity: 250 },
+          { ...preview.stages[0].workers[0], workerId: 'worker-2', workerCode: 'W2', workerName: 'عامل 2', percentage: 75, equivalentQuantity: 750 }
+        ]
+      }]
+    }));
+
+    component.calculatePreview();
+
+    const request = production.previewDailyOperations.calls.mostRecent().args[0];
+    expect(request.stages[0].workers.map((worker: any) => worker.percentage)).toEqual([25, 75]);
+    expect(component.stageAllocationRows[0].workers.filter(worker => worker.isCalculated).map(worker => worker.allocatedQuantity)).toEqual([250, 750]);
+    expect(component.stageAllocationRows[0].workers.reduce((total, worker) => total + worker.allocatedQuantity, 0)).toBe(1000);
+    expect(component.previewStatus).toBe('success');
+  });
+
+  it('treats a decimal percentage as a percentage point value under the 0-100 contract', () => {
+    const worker = component.stages[0].workers[0];
+
+    component.updateWorkerPercentage(component.stages[0], worker, .25);
+
+    expect(worker.percentage).toBe(.25);
+    expect(worker.quantity).toBe(1.25);
   });
 
   it('imports assigned ready, absent, and incomplete-attendance workers into the stage without manual selection', () => {
@@ -157,6 +374,7 @@ describe('DailyProductionOperationsPageComponent unified preview', () => {
     component.loadTodayOperations();
 
     expect(production.loadDailyOperations).toHaveBeenCalledTimes(1);
+    expect(component.stages[0].standardSeconds).toBe(30);
     expect(component.stages[0].workers.map(worker => worker.workerId)).toEqual(['worker-1', 'worker-2', 'worker-3']);
     expect(component.stages[0].workers.map(worker => worker.includedInProduction)).toEqual([true, false, false]);
     expect(component.dailyStaffingLabel(component.stages[0].workers[1])).toBe('مسكن — غائب');
@@ -317,25 +535,335 @@ describe('DailyProductionOperationsPageComponent unified preview', () => {
     expect(component.savedDraftDetail).toContain('تم حفظ 2 مرحلة');
   });
 
-  it('loads an existing draft and refuses to overwrite it silently', () => {
+  it('allows an explicit correction of the existing daily draft without creating a second draft', () => {
     component.operations!.existingDraft = {
       productionOrderId: 'order-1', orderNumber: 'DLY-1', productionDate: component.productionDate,
-      recordedAtUtc: '2026-07-16T13:00:00Z', lineQuantity: 500, wasAlreadySaved: true, stages: []
+      recordedAtUtc: '2026-07-16T13:00:00Z', lineQuantity: 500, wasAlreadySaved: true,
+      stages: [{ id: 'record-1', concurrencyToken: 'token-1', status: 'Draft' }] as any
     };
+    component.preview = preview;
+    (component as any).previewRevision = (component as any).revision;
+    (component as any).previewSource = 'calculated';
+    component.previewStatus = 'success';
+    production.saveDailyDraft.and.returnValue(of({ ...component.operations!.existingDraft, wasAlreadySaved: false }));
 
     component.saveDailyDraft();
 
-    expect(production.saveDailyDraft).not.toHaveBeenCalled();
-    expect(component.error).toContain('لن تُكتب فوقها بصمت');
+    expect(production.saveDailyDraft).toHaveBeenCalledTimes(1);
+    expect(component.savedDraft?.productionOrderId).toBe('order-1');
   });
+
+  it('keeps navigation available for a view-only user while blocking data edits', () => {
+    grantedPermissions = new Set([PERMISSIONS.production.view]);
+    component.selectedStageId = '';
+    const worker = component.stages[0].workers[0];
+
+    component.selectStage('stage-1');
+    component.stageSearch = 'S1';
+    component.updateWorkerPercentage(component.stages[0], worker, 50);
+
+    expect(component.canView).toBeTrue();
+    expect(component.isReadOnly).toBeTrue();
+    expect(component.selectedStage?.productModelStageId).toBe('stage-1');
+    expect(component.filteredStages).toHaveSize(1);
+    expect(worker.percentage).toBe(100);
+  });
+
+  it('builds the stage filter from the loaded model-line operations and sorts it by stage order', () => {
+    const laterStage = component.stages[0];
+    const earlierStage = { ...laterStage, productModelStageId: 'stage-2', stageCode: 'S2', stageName: 'مرحلة 2', stageOrder: 0, workers: [] };
+    component.stages = [laterStage, earlierStage];
+
+    expect(component.dailyStageOptions.map(stage => stage.productModelStageId)).toEqual(['stage-2', 'stage-1']);
+
+    component.selectDailyStageFilter('stage-2');
+
+    expect(component.filteredStages.map(stage => stage.productModelStageId)).toEqual(['stage-2']);
+    expect(component.selectedStageId).toBe('stage-2');
+    expect(production.loadDailyOperations).not.toHaveBeenCalled();
+  });
+
+  it('treats the stage filter as display-only and clears it without changing draft allocations', () => {
+    const stage = component.stages[0];
+    const worker = stage.workers[0];
+    worker.quantity = 321;
+    component.savedDraft = approvedDailyDraft();
+    const draftSnapshot = component.savedDraft;
+
+    component.selectDailyStageFilter(stage.productModelStageId);
+    component.clearDailyFilters();
+
+    expect(component.selectedStageFilterId).toBe('');
+    expect(component.filteredStages).toEqual([stage]);
+    expect(worker.quantity).toBe(321);
+    expect(component.savedDraft).toBe(draftSnapshot);
+    expect(production.loadDailyOperations).not.toHaveBeenCalled();
+  });
+
+  it('keeps a successful unified preview current when only the display-stage filter changes and marks it stale after a calculation input changes', () => {
+    production.previewDailyOperations.and.returnValue(of(preview));
+    component.calculatePreview();
+    const previewSnapshot = component.preview;
+
+    component.selectDailyStageFilter('stage-1');
+
+    expect(component.previewStatus).toBe('success');
+    expect(component.preview).toBe(previewSnapshot);
+    expect(component.canExportExcel).toBeTrue();
+
+    component.lineQuantity = 501;
+    component.lineQuantityChanged();
+
+    expect(component.previewStatus).toBe('stale');
+    expect(component.preview).toBeNull();
+    expect(component.canExportExcel).toBeFalse();
+  });
+
+  it('builds all four accounting sheets from the full unified preview regardless of the display-stage filter', () => {
+    const secondStage = {
+      ...component.stages[0], productModelStageId: 'stage-2', stageCode: 'S2', stageName: 'مرحلة 2', stageOrder: 2,
+      workers: [{ ...component.stages[0].workers[0], workerId: 'worker-2', workerCode: 'W2', workerName: 'عامل 2' }]
+    };
+    component.stages.push(secondStage);
+    production.previewDailyOperations.and.returnValue(of({
+      ...preview,
+      stages: [preview.stages[0], {
+        ...preview.stages[0], productModelStageId: 'stage-2', stageCode: 'S2', stageName: 'مرحلة 2',
+        workers: [{ ...preview.stages[0].workers[0], workerId: 'worker-2', workerCode: 'W2', workerName: 'عامل 2' }]
+      }],
+      workerTotals: [preview.workerTotals[0], { ...preview.workerTotals[0], workerId: 'worker-2', workerCode: 'W2', workerName: 'عامل 2' }]
+    }));
+    component.calculatePreview();
+    component.selectDailyStageFilter('stage-1');
+
+    const workbook = component.dailyProductionExcelWorkbook()!;
+
+    expect(workbook.worksheets.map(sheet => sheet.name)).toEqual(['تفاصيل الإنتاج', 'ملخص المراحل', 'ملخص العمال', 'بيانات التشغيل']);
+    expect(workbook.worksheets[0].rows).toHaveSize(3);
+    expect(workbook.worksheets[1].rows).toHaveSize(3);
+    expect(workbook.worksheets[3].rows[0]['عدد المراحل']).toBe(2);
+  });
+
+  it('labels unsaved, draft, and approved exports from the current operation state without changing the preview rows', () => {
+    production.previewDailyOperations.and.returnValue(of(preview));
+    component.calculatePreview();
+    const statusValue = () => component.dailyProductionExcelWorkbook()!.worksheets[3].rows[0]['حالة التشغيل'];
+
+    expect(statusValue()).toBe('غير محفوظة');
+
+    component.savedDraft = {
+      productionOrderId: 'order-1', orderNumber: 'DLY-1', productionDate: component.productionDate,
+      recordedAtUtc: '2026-07-16T13:00:00Z', lineQuantity: 500, wasAlreadySaved: false,
+      stages: [{ id: 'record-1', concurrencyToken: 'draft-token', status: 'Draft' }] as any
+    };
+    expect(statusValue()).toBe('مسودة');
+
+    component.savedDraft = approvedDailyDraft();
+    expect(statusValue()).toBe('معتمدة');
+  });
+
+  it('exports one detail row per worker with preview quantities and accounting values and times', () => {
+    component.stages[0].piecePrice = .6;
+    component.stages[0].standardSeconds = 30;
+    component.stages[0].workers = [
+      { ...component.stages[0].workers[0], workerId: 'worker-1', workerCode: 'W1', workerName: 'عامل 1', percentage: 25 },
+      { ...component.stages[0].workers[0], workerId: 'worker-2', workerCode: 'W2', workerName: 'عامل 2', percentage: 75 }
+    ];
+    component.preview = {
+      ...preview,
+      lineQuantity: 1000,
+      totalWorkerEntitlements: 600,
+      stages: [{
+        ...preview.stages[0], stageQuantity: 1000, stageCost: 600,
+        workers: [
+          { workerId: 'worker-1', workerCode: 'W1', workerName: 'عامل 1', percentage: 25, equivalentQuantity: 250, calculatedEarning: 150 },
+          { workerId: 'worker-2', workerCode: 'W2', workerName: 'عامل 2', percentage: 75, equivalentQuantity: 750, calculatedEarning: 450 }
+        ]
+      }],
+      workerTotals: [
+        { workerId: 'worker-1', workerCode: 'W1', workerName: 'عامل 1', totalEntitlement: 150 },
+        { workerId: 'worker-2', workerCode: 'W2', workerName: 'عامل 2', totalEntitlement: 450 }
+      ]
+    };
+    component.previewStatus = 'success';
+
+    const workbook = component.dailyProductionExcelWorkbook()!;
+    const details = workbook.worksheets[0].rows;
+    const stageSummary = workbook.worksheets[1].rows;
+
+    expect(details[0]['كمية العامل في المرحلة']).toBe(250);
+    expect(details[0]['سعر القطعة']).toBe(.6);
+    expect(details[0]['قيمة إنتاج العامل']).toBe(150);
+    expect(details[0]['إجمالي الزمن القياسي للعامل بالثواني']).toBe(7500);
+    expect(details[0]['إجمالي الزمن بالدقائق']).toBe(125);
+    expect(details[1]['كمية العامل في المرحلة']).toBe(750);
+    expect(details[1]['قيمة إنتاج العامل']).toBe(450);
+    expect(details[1]['إجمالي الزمن القياسي للعامل بالثواني']).toBe(22500);
+    expect(details[1]['إجمالي الزمن بالدقائق']).toBe(375);
+    expect(stageSummary[0]['إجمالي قيمة المرحلة']).toBe(600);
+    expect(stageSummary[0]['إجمالي الزمن']).toBe(30000);
+    expect(details[2]['قيمة إنتاج العامل']).toBe(600);
+    expect(details[2]['إجمالي الزمن بالدقائق']).toBe(500);
+  });
+
+  it('exports only a successful preview, prevents duplicate clicks, and leaves production state unchanged', async () => {
+    const pending = new Subject<void>();
+    excelExport.exportWorkbook.and.returnValue(new Promise<void>(resolve => pending.subscribe({ complete: resolve })));
+    production.previewDailyOperations.and.returnValue(of(preview));
+    component.calculatePreview();
+    const stagesSnapshot = component.stages;
+    const draftSnapshot = component.savedDraft;
+
+    const first = component.exportDailyProductionExcel();
+    const second = component.exportDailyProductionExcel();
+
+    expect(excelExport.exportWorkbook).toHaveBeenCalledTimes(1);
+    expect(component.exportingExcel).toBeTrue();
+    pending.complete();
+    await Promise.all([first, second]);
+    expect(component.exportingExcel).toBeFalse();
+    expect(component.stages).toBe(stagesSnapshot);
+    expect(component.savedDraft).toBe(draftSnapshot);
+    expect(component.successMessage).toBe('تم إنشاء ملف Excel بنجاح.');
+  });
+
+  it('reports an export failure without invalidating or mutating the unified preview', async () => {
+    const consoleError = spyOn(console, 'error');
+    production.previewDailyOperations.and.returnValue(of(preview));
+    const exportFailure = new ExcelExportError('serializing-workbook', new Error('buffer failed'));
+    excelExport.exportWorkbook.and.rejectWith(exportFailure);
+    component.calculatePreview();
+    const previewSnapshot = component.preview;
+
+    await component.exportDailyProductionExcel();
+
+    expect(component.preview).toBe(previewSnapshot);
+    expect(component.previewStatus).toBe('success');
+    expect(component.error).toContain('تعذر إنشاء ملف Excel');
+    expect(messages.add).toHaveBeenCalledWith(jasmine.objectContaining({ severity: 'error' }));
+    expect(consoleError).toHaveBeenCalledWith('Excel export failed at serializing-workbook.', exportFailure);
+  });
+
+  it('restores a valid stage display filter after an operations reload and ignores a stale one', () => {
+    component.attendanceSyncedForDate = component.productionDate;
+    component.selectedStageFilterId = 'stage-1';
+    production.loadDailyOperations.and.returnValue(of({ ...component.operations!, stages: component.stages }));
+
+    component.loadTodayOperations();
+
+    expect(component.selectedStageFilterId).toBe('stage-1');
+    expect(component.filteredStages.map(stage => stage.productModelStageId)).toEqual(['stage-1']);
+
+    component.selectedStageFilterId = 'removed-stage';
+    component.loadTodayOperations();
+
+    expect(component.selectedStageFilterId).toBe('');
+    expect(production.loadDailyOperations).toHaveBeenCalledTimes(2);
+  });
+
+  it('invalidates only the stage filter when the model context changes through the existing reset path', () => {
+    component.selectedStageFilterId = 'stage-1';
+    component.stageFilter = 'ready';
+    component.stageSearch = 'S1';
+
+    component.selectProductModel('model-2');
+
+    expect(component.selectedStageFilterId).toBe('');
+    expect(component.stageFilter).toBe('ready');
+    expect(component.stageSearch).toBe('S1');
+    expect(component.selectedProductModelId).toBe('model-2');
+  });
+
+  it('lets an approver-only user cancel an approved operation without enabling draft edits', () => {
+    grantedPermissions = new Set([PERMISSIONS.production.approve]);
+    component.savedDraft = approvedDailyDraft();
+    const worker = component.stages[0].workers[0];
+
+    component.openDailyApprovalCancellationDialog();
+    component.updateWorkerQuantity(component.stages[0], worker, 250);
+    component.saveDailyDraft();
+
+    expect(component.canView).toBeTrue();
+    expect(component.canEditDraft).toBeFalse();
+    expect(component.canCancelDailyOperationApproval).toBeTrue();
+    expect(component.dailyApprovalCancellationDialogVisible).toBeTrue();
+    expect(worker.quantity).toBe(500);
+    expect(production.saveDailyDraft).not.toHaveBeenCalled();
+  });
+
+  it('allows an editor to change a draft but prevents direct edits after approval', () => {
+    grantedPermissions = new Set([PERMISSIONS.production.view, PERMISSIONS.production.record]);
+    const worker = component.stages[0].workers[0];
+
+    component.updateWorkerPercentage(component.stages[0], worker, 50);
+    expect(component.canEditDraft).toBeTrue();
+    expect(worker.percentage).toBe(50);
+
+    component.savedDraft = approvedDailyDraft();
+    component.updateWorkerPercentage(component.stages[0], worker, 25);
+
+    expect(component.isApproved).toBeTrue();
+    expect(component.isReadOnly).toBeTrue();
+    expect(worker.percentage).toBe(50);
+  });
+
+  it('requires approved-stage concurrency data before exposing cancellation', () => {
+    grantedPermissions = new Set([PERMISSIONS.production.approve]);
+    component.savedDraft = { ...approvedDailyDraft(), stages: [{ id: 'record-1', concurrencyToken: '', status: 'Approved' }] as any };
+
+    expect(component.canCancelDailyOperationApproval).toBeFalse();
+  });
+
+  it('shows daily approval cancellation only for an approved daily operation and requires a reason', () => {
+    component.savedDraft = approvedDailyDraft();
+
+    expect(component.canCancelDailyOperationApproval).toBeTrue();
+    component.openDailyApprovalCancellationDialog();
+    component.confirmDailyApprovalCancellation();
+
+    expect(component.dailyApprovalCancellationDialogVisible).toBeTrue();
+    expect(component.error).toContain('سبب إلغاء اعتماد تشغيل اليوم مطلوب');
+    expect(production.cancelDailyOperationApproval).not.toHaveBeenCalled();
+  });
+
+  it('cancels all approved daily stages once and reloads the corrected daily context', () => {
+    component.savedDraft = approvedDailyDraft();
+    component.attendanceSyncedForDate = component.productionDate;
+    production.cancelDailyOperationApproval.and.returnValue(of({ productionOrderId: 'order-1', orderStatus: 'Draft', cancelledAtUtc: '2026-07-16T14:00:00Z', cancelledStageCount: 1 }));
+    production.loadDailyOperations.and.returnValue(of(component.operations));
+
+    component.openDailyApprovalCancellationDialog();
+    component.dailyApprovalCancellationReason = 'تصحيح كمية التشغيل';
+    component.confirmDailyApprovalCancellation();
+    component.confirmDailyApprovalCancellation();
+
+    expect(production.cancelDailyOperationApproval).toHaveBeenCalledTimes(1);
+    expect(production.cancelDailyOperationApproval).toHaveBeenCalledWith(
+      'order-1',
+      [{ stageProductionRecordId: 'record-1', concurrencyToken: 'approved-token' }],
+      'تصحيح كمية التشغيل',
+      undefined
+    );
+    expect(production.loadDailyOperations).toHaveBeenCalledTimes(1);
+  });
+
+  function approvedDailyDraft() {
+    return {
+      productionOrderId: 'order-1', orderNumber: 'DLY-1', productionDate: '2026-07-16',
+      recordedAtUtc: '2026-07-16T13:00:00Z', lineQuantity: 500, wasAlreadySaved: false,
+      stages: [{ id: 'record-1', concurrencyToken: 'approved-token', status: 'Approved' }] as any
+    };
+  }
 });
 
 describe('DailyProductionOperationsPageComponent visual hierarchy', () => {
   it('uses contained stage scrolling and structured stage, worker, preview, and entitlement regions', () => {
     const production = jasmine.createSpyObj('ProductionCostRecordingApiService', ['previewDailyOperations', 'loadDailyOperations', 'saveDailyDraft']);
-    const masterData = jasmine.createSpyObj('ManufacturingMasterDataApiService', ['factories', 'allProductionLines', 'models']);
+    const masterData = jasmine.createSpyObj('ManufacturingMasterDataApiService', ['factories', 'departments', 'allProductionLines', 'models']);
     const attendance = jasmine.createSpyObj('AttendanceApiService', ['syncForProductionDate']);
     masterData.factories.and.returnValue(of([]));
+    masterData.departments.and.returnValue(of([]));
+    masterData.allProductionLines.and.returnValue(of([]));
 
     TestBed.configureTestingModule({
       imports: [ManufacturingWorkspaceModule, HttpClientTestingModule, NoopAnimationsModule],
@@ -393,6 +921,16 @@ describe('DailyProductionOperationsPageComponent visual hierarchy', () => {
       workerTotals: [{ workerId: 'worker-1', workerCode: 'W-001', workerName: 'Worker One', totalEntitlement: 250 }],
       warnings: []
     };
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.daily-production-operations__preview-overview')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('.daily-production-operations__legacy-table')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.daily-production-operations__excel-export')).toBeNull();
+
+    component.previewStatus = 'success';
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.daily-production-operations__excel-export')).not.toBeNull();
+
+    component.renderLegacyDailyProductionTables = true;
     fixture.detectChanges();
 
     const text = fixture.nativeElement.textContent as string;
@@ -454,9 +992,11 @@ describe('DailyProductionOperationsPageComponent visual hierarchy', () => {
     expect(stableFooter.querySelectorAll('.daily-production-operations__stage-summary > div')).toHaveSize(4);
     expect(stableFooter.querySelector('.daily-production-operations__stage-preview')).not.toBeNull();
     expect(stableFooter.textContent).toContain('استعادة توزيع دقائق العمل');
-    const contextFields = fixture.nativeElement.querySelectorAll('.daily-production-operations__context-field') as NodeListOf<HTMLElement>;
-    expect(contextFields).toHaveSize(6);
-    contextFields.forEach(field => expect(field.querySelector('.daily-production-operations__field-label')).not.toBeNull());
+    expect(fixture.nativeElement.querySelector('app-manufacturing-filter-card')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('app-factory-structure-tree-selector')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('.daily-production-operations__context-actions')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('.daily-production-operations__stage-filter.app-searchable-select')).not.toBeNull();
+    expect(fixture.nativeElement.textContent).toContain('المرحلة');
     expect(getComputedStyle(fixture.nativeElement.querySelector('.daily-production-operations')).overflowX).toBe('clip');
     expect(fixture.nativeElement.querySelectorAll('.daily-production-operations__staffing-badge')).toHaveSize(2);
     expect(text).toContain('مسكن وجاهز');
@@ -643,9 +1183,11 @@ describe('DailyProductionOperationsPageComponent visual hierarchy', () => {
 
   it('expands both projection tables with touch and keyboard accessible controls', () => {
     const production = jasmine.createSpyObj('ProductionCostRecordingApiService', ['previewDailyOperations', 'loadDailyOperations', 'saveDailyDraft']);
-    const masterData = jasmine.createSpyObj('ManufacturingMasterDataApiService', ['factories', 'allProductionLines', 'models']);
+    const masterData = jasmine.createSpyObj('ManufacturingMasterDataApiService', ['factories', 'departments', 'allProductionLines', 'models']);
     const attendance = jasmine.createSpyObj('AttendanceApiService', ['syncForProductionDate']);
     masterData.factories.and.returnValue(of([]));
+    masterData.departments.and.returnValue(of([]));
+    masterData.allProductionLines.and.returnValue(of([]));
     TestBed.configureTestingModule({
       imports: [ManufacturingWorkspaceModule, HttpClientTestingModule, NoopAnimationsModule],
       providers: [
@@ -658,6 +1200,7 @@ describe('DailyProductionOperationsPageComponent visual hierarchy', () => {
     });
     const fixture = TestBed.createComponent(DailyProductionOperationsPageComponent);
     const component = fixture.componentInstance;
+    component.renderLegacyDailyProductionTables = true;
     const readyWorker = {
       workerId: 'worker-1', workerCode: 'W-001', workerName: 'عامل 1', isOnActiveService: true,
       effectiveAssignmentType: 'Default', attendanceStatus: 'Present', hasSourceCheckIn: true, isPresent: true,

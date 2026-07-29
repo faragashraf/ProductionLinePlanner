@@ -1,4 +1,5 @@
 using ProductionLinePlanner.Domain.Enums;
+using ProductionLinePlanner.Domain.Notifications;
 
 namespace ProductionLinePlanner.Domain.Entities;
 
@@ -16,7 +17,15 @@ public class Notification
         string? relatedEntityType = null,
         Guid? relatedEntityId = null,
         NotificationStatus status = NotificationStatus.Unread,
-        DateTime? createdAtUtc = null)
+        DateTime? createdAtUtc = null,
+        string? eventKey = null,
+        NotificationSeverity? severity = null,
+        bool isToastEnabled = true,
+        bool isSoundEnabled = false,
+        bool isBrowserEnabled = false,
+        string? navigationUrl = null,
+        string? metadataJson = null,
+        string? correlationKey = null)
     {
         if (recipientUserId == Guid.Empty)
             throw new ArgumentException("RecipientUserId is required.", nameof(recipientUserId));
@@ -34,6 +43,14 @@ public class Notification
         RelatedWorkerId = relatedWorkerId;
         RelatedEntityType = string.IsNullOrWhiteSpace(relatedEntityType) ? null : relatedEntityType.Trim();
         RelatedEntityId = relatedEntityId;
+        EventKey = string.IsNullOrWhiteSpace(eventKey) ? null : eventKey.Trim();
+        Severity = severity;
+        IsToastEnabled = isToastEnabled;
+        IsSoundEnabled = isSoundEnabled;
+        IsBrowserEnabled = isBrowserEnabled;
+        NavigationUrl = NormalizeOptional(navigationUrl, 300, nameof(navigationUrl));
+        MetadataJson = NormalizeOptional(metadataJson, 4000, nameof(metadataJson));
+        CorrelationKey = NormalizeOptional(correlationKey, 200, nameof(correlationKey));
         IsRead = status is NotificationStatus.Read;
         ReadAtUtc = IsRead ? createdAtUtc ?? DateTime.UtcNow : null;
         CreatedAtUtc = createdAtUtc ?? DateTime.UtcNow;
@@ -51,6 +68,14 @@ public class Notification
     public Guid? RelatedWorkerId { get; private set; }
     public string? RelatedEntityType { get; private set; }
     public Guid? RelatedEntityId { get; private set; }
+    public string? EventKey { get; private set; }
+    public NotificationSeverity? Severity { get; private set; }
+    public bool IsToastEnabled { get; private set; }
+    public bool IsSoundEnabled { get; private set; }
+    public bool IsBrowserEnabled { get; private set; }
+    public string? NavigationUrl { get; private set; }
+    public string? MetadataJson { get; private set; }
+    public string? CorrelationKey { get; private set; }
     public bool IsRead { get; private set; }
     public DateTime? ReadAtUtc { get; private set; }
     public DateTime CreatedAtUtc { get; private set; }
@@ -62,5 +87,14 @@ public class Notification
         Status = NotificationStatus.Read;
         ReadAtUtc = readAtUtc ?? DateTime.UtcNow;
         UpdatedAtUtc = readAtUtc ?? DateTime.UtcNow;
+    }
+
+    private static string? NormalizeOptional(string? value, int maximumLength, string parameterName)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        var normalized = value.Trim();
+        if (normalized.Length > maximumLength)
+            throw new ArgumentException($"{parameterName} cannot exceed {maximumLength} characters.", parameterName);
+        return normalized;
     }
 }

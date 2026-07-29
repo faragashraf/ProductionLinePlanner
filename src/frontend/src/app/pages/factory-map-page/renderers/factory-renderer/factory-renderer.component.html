@@ -5,6 +5,9 @@
     [readinessPercent]="layout.readinessPercent ?? 0"
     [workersCurrent]="layout.workersCurrent ?? 0"
     [workersRequired]="layout.workersRequired ?? 0"
+    metadataLabel="المسكنون"
+    [metadataValue]="getWorkersSummary()"
+    progressLabel="تغطية التسكين"
     [status]="layout.status ?? 'info'"
   ></plp-factory-card>
 
@@ -14,23 +17,27 @@
       <p class="plp-factory-renderer__subtitle">اضغط على أي خط للوصول إلى مستوى المراحل.</p>
     </header>
 
-    <plp-responsive-grid class="plp-factory-renderer__lines-grid" [minItemWidth]="142" [gap]="'var(--plp-spacing-1)'">
-      <button
-        type="button"
-        class="plp-factory-renderer__line-button"
-        *ngFor="let line of layout.lines; trackBy: trackByLine"
-        (click)="onLineSelected(line.id)"
-        [attr.aria-label]="'فتح ' + line.name"
-      >
-        <plp-production-line-card
-          [lineName]="line.name"
-          [statusText]="line.statusText"
-          [readinessPercent]="line.readinessPercent ?? 0"
-          [totalStages]="line.stages.length"
-          [activeStage]="line.activeStageName"
-          [status]="line.status ?? 'info'"
-        ></plp-production-line-card>
-      </button>
-    </plp-responsive-grid>
+    <section class="plp-factory-renderer__department" *ngFor="let group of lineGroups; trackBy: trackByGroup">
+      <h3>{{ group.name }}</h3>
+      <plp-responsive-grid class="plp-factory-renderer__lines-grid" [minItemWidth]="142" [gap]="'var(--plp-spacing-1)'">
+        <button
+          type="button"
+          class="plp-factory-renderer__line-button"
+          *ngFor="let line of group.lines; trackBy: trackByLine"
+          (click)="onLineSelected(line.id)"
+          [attr.aria-label]="'فتح ' + line.name"
+        >
+          <plp-production-line-card
+            [lineName]="line.name"
+            [statusText]="line.statusText"
+            [readinessPercent]="line.readinessPercent ?? 0"
+            [totalStages]="line.stages.length"
+            [activeStage]="line.activeStageName"
+            [status]="line.status ?? 'info'"
+            progressLabel="تغطية التسكين"
+          ></plp-production-line-card>
+        </button>
+      </plp-responsive-grid>
+    </section>
   </section>
 </section>

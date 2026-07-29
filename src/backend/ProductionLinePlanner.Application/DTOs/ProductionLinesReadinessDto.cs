@@ -13,8 +13,9 @@ public sealed class ProductionLinesReadinessDto
     public int AbsentWorkers { get; init; }
     public int UnassignedWorkers { get; init; }
     public decimal ReadinessPercent { get; init; }
+    public decimal AssignmentCoveragePercent { get; init; }
+    public string AttendanceDataStatus { get; init; } = "Unknown";
     public ReadinessStatus Status { get; init; }
     public DateTime CalculatedAtUtc { get; init; }
     public ProductionLineReadinessItemDto[] Items { get; init; } = [];
 }
-

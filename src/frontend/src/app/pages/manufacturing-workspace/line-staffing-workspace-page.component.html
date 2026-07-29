@@ -1,194 +1,454 @@
-<section class="line-staffing-page" dir="rtl" [attr.aria-busy]="planLoading || assignmentSaving">
+<section
+  class="line-staffing-page"
+  dir="rtl"
+  [attr.aria-busy]="planLoading || assignmentSaving"
+>
   <plp-page-header
     title="تسكين خط الإنتاج"
-    description="خطة تنظيمية للتعيين الدائم والمؤقت. حضور اليوم لا يدخل في هذه الشاشة."
+    description="خطة تنظيمية للتسكين الدائم. حضور اليوم لا يدخل في هذه الشاشة."
     [compact]="true"
   ></plp-page-header>
 
-  <plp-toolbar-shell title="مسار خطة التسكين" description="اختر المصنع ثم الخط ثم الموديل، وبعدها حمّل كل مراحل الموديل في مساحة واحدة.">
+  <plp-toolbar-shell
+    title="مسار خطة التسكين"
+    description="اختر المصنع ثم القسم ثم الخط والموديل، وبعدها حمّل مراحل رحلة الموديل المعدّة مسبقًا."
+  >
     <div toolbar-actions>
-      <button pButton type="button" class="p-button-sm p-button-outlined" icon="pi pi-refresh" label="تحديث المراحل" [disabled]="!hasCompleteContext || planLoading" (click)="loadProductStages(true)"></button>
+      <button
+        pButton
+        type="button"
+        class="p-button-sm p-button-outlined"
+        icon="pi pi-refresh"
+        label="تحديث المراحل"
+        [disabled]="!hasCompleteContext || planLoading"
+        (click)="loadProductStages(true)"
+      ></button>
     </div>
   </plp-toolbar-shell>
 
   <plp-section-navigation
-    *ngIf="plan"
+    *ngIf="hasLoadedModelJourney"
     class="line-staffing-page__section-navigation"
     [sections]="sectionNavigationItems"
     [activeId]="activeStaffingSection"
     (requested)="requestStaffingSection($event)"
   ></plp-section-navigation>
 
-  <div #tabletContent class="line-staffing-page__tablet-content" [style.--line-staffing-workspace-height.px]="tabletWorkspaceHeightPx">
-    <p class="line-staffing-page__error" *ngIf="planError" role="alert">{{ planError }}</p>
-    <p class="line-staffing-page__success" *ngIf="successMessage" role="status">{{ successMessage }}</p>
+  <div
+    #tabletContent
+    class="line-staffing-page__tablet-content"
+    [style.--line-staffing-workspace-height.px]="tabletWorkspaceHeightPx"
+  >
+    <div class="line-staffing-page__error" *ngIf="planError" role="alert">
+      <span>{{ planError }}</span>
+      <button
+        pButton
+        type="button"
+        class="p-button-sm p-button-text"
+        label="إعادة المحاولة"
+        (click)="retryContextLoad()"
+      ></button>
+    </div>
+    <p class="line-staffing-page__success" *ngIf="successMessage" role="status">
+      {{ successMessage }}
+    </p>
+    <p class="line-staffing-page__warning" *ngIf="hasPendingRemoteUpdate" role="alert">
+      {{ remoteUpdateMessage }}
+      <button pButton type="button" class="p-button-sm p-button-text" label="تحديث الآن" (click)="reloadFromRemoteUpdate()"></button>
+    </p>
 
     <div #staffingChoices class="line-staffing-page__section-target">
-      <p-card header="سياق التسكين">
-        <div class="line-staffing-page__context">
-      <label>1. المصنع
-        <select [ngModel]="selectedFactoryId" (ngModelChange)="selectFactory($event)" [ngModelOptions]="{ standalone: true }" [disabled]="factoriesLoading">
-          <option value="">{{ factoriesLoading ? 'جارٍ تحميل المصانع…' : 'اختر المصنع' }}</option>
-          <option *ngFor="let factory of factories; trackBy: trackById" [value]="factory.id">{{ factory.code }} — {{ factory.name }}</option>
-        </select>
-      </label>
-
-      <label *ngIf="selectedFactoryId">2. خط الإنتاج
-        <select [ngModel]="selectedProductionLineId" (ngModelChange)="selectProductionLine($event)" [ngModelOptions]="{ standalone: true }" [disabled]="linesLoading">
-          <option value="">{{ linesLoading ? 'جارٍ تحميل الخطوط…' : 'اختر خط الإنتاج' }}</option>
-          <option *ngFor="let line of visibleProductionLines; trackBy: trackById" [value]="line.id">{{ line.lineCode || '—' }} — {{ line.name }}</option>
-        </select>
-      </label>
-
-      <label *ngIf="selectedProductionLineId">3. المنتج / الموديل
-        <select [ngModel]="selectedProductModelId" (ngModelChange)="selectProductModel($event)" [ngModelOptions]="{ standalone: true }" [disabled]="modelsLoading">
-          <option value="">{{ modelsLoading ? 'جارٍ تحميل الموديلات…' : 'اختر الموديل' }}</option>
-          <option *ngFor="let model of activeProductModels; trackBy: trackById" [value]="model.id">{{ model.code }} — {{ model.name }}</option>
-        </select>
-      </label>
-
+      <app-manufacturing-filter-card
+        title="فلاتر تسكين الخط"
+        searchLabel="البحث في مراحل الموديل"
+        searchPlaceholder="ابحث باسم أو كود المرحلة"
+        [searchValue]="stageSearch"
+        statusLabel="حالة التسكين"
+        [statusOptions]="[{ label: 'الكل', value: 'all' }, { label: 'دون عمال', value: 'without-workers' }, { label: 'تسكين دائم', value: 'default' }, { label: 'يحتاج مراجعة', value: 'review' }]"
+        [statusValue]="stageFilter"
+        [clearDisabled]="!staffingFiltersActive"
+        (searchValueChange)="stageSearch = $event"
+        (statusValueChange)="stageFilter = $any($event)"
+        (clearFilters)="clearStaffingFilters()"
+      >
+        <app-factory-structure-tree-selector filter-structure [nodes]="staffingStructureTreeNodes" [(selectedNode)]="selectedStaffingStructureNode" [loading]="factoriesLoading || departmentsLoading || linesLoading" (nodeSelect)="selectStaffingStructure($event)" (selectedNodeChange)="!$event && clearStaffingFilters()"></app-factory-structure-tree-selector>
+        <div filter-extra>
+          <label>الموديل
+            <select [ngModel]="selectedProductModelId" (ngModelChange)="selectProductModel($event)" [disabled]="!selectedProductionLineId || modelsLoading">
+              <option value="">{{ modelsLoading ? 'جارٍ التحميل…' : 'اختر الموديل' }}</option>
+              <option *ngFor="let model of activeProductModels; trackBy: trackById" [value]="model.id">{{ model.code }} — {{ model.name }}</option>
+            </select>
+          </label>
         </div>
-        <p class="line-staffing-page__note" *ngIf="!selectedFactoryId">ابدأ باختيار المصنع. لا يتم تحميل أي بيانات تابعة قبل اكتمال المسار السابق.</p>
-        <p class="line-staffing-page__note" *ngIf="selectedFactoryId && !selectedProductionLineId">اختر خط الإنتاج أولًا.</p>
-        <p class="line-staffing-page__note" *ngIf="selectedProductionLineId && !selectedProductModelId">اختر الموديل ثم اضغط «تحميل مراحل الموديل».</p>
-        <button pButton type="button" icon="pi pi-list" label="تحميل مراحل الموديل" [disabled]="!hasCompleteContext || planLoading" (click)="loadProductStages()"></button>
-      </p-card>
+      </app-manufacturing-filter-card>
+      <div class="line-staffing-page__context-actions">
+        <p class="line-staffing-page__note" *ngIf="!selectedFactoryId">
+          ابدأ باختيار المصنع. لا يتم تحميل أي بيانات تابعة قبل اكتمال المسار
+          السابق.
+        </p>
+        <p
+          class="line-staffing-page__note"
+          *ngIf="selectedFactoryId && !selectedDepartmentId"
+        >
+          اختر القسم أولًا. الخطوط غير المرتبطة بقسم لا تدخل مسار التسكين حتى
+          تُربط إداريًا.
+        </p>
+        <p
+          class="line-staffing-page__note"
+          *ngIf="selectedDepartmentId && !selectedProductionLineId"
+        >
+          اختر خط الإنتاج التابع للقسم أولًا.
+        </p>
+        <p
+          class="line-staffing-page__note"
+          *ngIf="selectedProductionLineId && !selectedProductModelId"
+        >
+          اختر الموديل ثم اضغط «تحميل مراحل الموديل».
+        </p>
+        <button
+          pButton
+          type="button"
+          icon="pi pi-list"
+          label="تحميل مراحل الموديل"
+          [disabled]="!hasCompleteContext || planLoading"
+          (click)="loadProductStages()"
+        ></button>
+      </div>
     </div>
 
-    <plp-loading-skeleton *ngIf="planLoading && !plan" [lines]="8" [showAvatar]="false"></plp-loading-skeleton>
+    <plp-loading-skeleton
+      *ngIf="planLoading && !plan"
+      [lines]="8"
+      [showAvatar]="false"
+    ></plp-loading-skeleton>
 
     <ng-container *ngIf="plan">
-      <div #staffingSummary class="line-staffing-page__section-target">
-        <p-card header="ملخص تسكين الموديل والخط">
-      <div class="line-staffing-page__summary-head">
-        <div>
-          <h2>{{ plan.productModelCode }} — {{ plan.productModelName }}</h2>
-          <p>المصنع: {{ plan.factoryName }} · الخط: {{ plan.productionLineName }}</p>
+      <ng-container *ngIf="hasLoadedModelJourney; else noModelJourney">
+        <div #staffingSummary class="line-staffing-page__section-target">
+          <p-card header="ملخص تسكين الموديل والخط">
+            <div class="line-staffing-page__summary-head">
+              <div>
+                <h2>
+                  {{ plan.productModelCode }} — {{ plan.productModelName }}
+                </h2>
+                <p>
+                  المصنع: {{ plan.factoryName }} · الخط:
+                  {{ plan.productionLineName }}
+                </p>
+              </div>
+              <plp-status-badge
+                [status]="plan.staffingPlanComplete ? 'ready' : 'warning'"
+                [label]="
+                  plan.staffingPlanComplete
+                    ? 'خطة التسكين مكتملة'
+                    : 'تحتاج متابعة'
+                "
+              ></plp-status-badge>
+            </div>
+            <div class="line-staffing-page__metrics">
+              <span
+                >إجمالي المراحل: <strong>{{ plan.totalStages }}</strong></span
+              >
+              <span
+                >بها عمال: <strong>{{ plan.stagesWithWorkers }}</strong></span
+              >
+              <span
+                >بدون عمال:
+                <strong>{{ plan.stagesWithoutWorkers }}</strong></span
+              >
+              <span
+                >مراحل تحتاج مراجعة تكلفة:
+                <strong>{{
+                  plan.stagesNeedingCompensationReview
+                }}</strong></span
+              >
+            </div>
+            <div class="line-staffing-page__summary-notes">
+              <span [class.is-ready]="plan.staffingPlanComplete"
+                >خطة التسكين:
+                {{
+                  plan.staffingPlanComplete ? "مكتملة" : "تحتاج تسكينًا"
+                }}</span
+              >
+              <span>الحضور التشغيلي: لم يُفحص بعد</span>
+              <span [class.is-warning]="plan.financialConfigurationPending"
+                >إعدادات تكلفة المراحل:
+                {{
+                  plan.financialConfigurationPending
+                    ? "تحتاج مراجعة"
+                    : "لا توجد مراجعة معلقة"
+                }}</span
+              >
+            </div>
+            <p class="line-staffing-page__note">
+              هذه الخلاصة لا تعني جاهزية إنتاج يومية؛ فالحضور الفعلي لتاريخ
+              الإنتاج سيُفحص في عمليات الإنتاج اليومية لاحقًا.
+            </p>
+          </p-card>
         </div>
-        <plp-status-badge [status]="plan.staffingPlanComplete ? 'ready' : 'warning'" [label]="plan.staffingPlanComplete ? 'خطة التسكين مكتملة' : 'تحتاج متابعة' "></plp-status-badge>
-      </div>
-      <div class="line-staffing-page__metrics">
-        <span>إجمالي المراحل: <strong>{{ plan.totalStages }}</strong></span>
-        <span>بها عمال: <strong>{{ plan.stagesWithWorkers }}</strong></span>
-        <span>بدون عمال: <strong>{{ plan.stagesWithoutWorkers }}</strong></span>
-        <span>بها تعيين مؤقت: <strong>{{ plan.stagesWithTemporaryAssignments }}</strong></span>
-        <span>مراحل تحتاج مراجعة تكلفة: <strong>{{ plan.stagesNeedingCompensationReview }}</strong></span>
-      </div>
-      <div class="line-staffing-page__summary-notes">
-        <span [class.is-ready]="plan.staffingPlanComplete">خطة التسكين: {{ plan.staffingPlanComplete ? 'مكتملة' : 'تحتاج تسكينًا' }}</span>
-        <span>الحضور التشغيلي: لم يُفحص بعد</span>
-        <span [class.is-warning]="plan.financialConfigurationPending">إعدادات تكلفة المراحل: {{ plan.financialConfigurationPending ? 'تحتاج مراجعة' : 'لا توجد مراجعة معلقة' }}</span>
-      </div>
-      <p class="line-staffing-page__note">هذه الخلاصة لا تعني جاهزية إنتاج يومية؛ فالحضور الفعلي لتاريخ الإنتاج سيُفحص في عمليات الإنتاج اليومية لاحقًا.</p>
-        </p-card>
-      </div>
 
-      <section #workspace class="line-staffing-page__workspace line-staffing-page__section-target" [class.is-refreshing]="planLoading">
-      <section class="line-staffing-page__stage-region" aria-label="مراحل الموديل">
-      <p-card header="مراحل الموديل">
-        <div class="line-staffing-page__filters">
-          <input pInputText type="search" [(ngModel)]="stageSearch" [ngModelOptions]="{ standalone: true }" placeholder="بحث بالكود أو اسم المرحلة">
-          <select [(ngModel)]="stageFilter" [ngModelOptions]="{ standalone: true }" aria-label="تصفية مراحل التسكين">
-            <option value="all">كل المراحل</option>
-            <option value="without-workers">بدون عمال</option>
-            <option value="default">بها تعيين دائم</option>
-            <option value="temporary">بها تعيين مؤقت</option>
-            <option value="review">تحتاج مراجعة</option>
-          </select>
-          <div class="line-staffing-page__stage-navigation" aria-label="التنقل بين المراحل">
-            <button pButton type="button" class="p-button-sm p-button-text" label="المرحلة السابقة" [disabled]="!canNavigateStages(-1)" (click)="previousStage()"></button>
-            <button pButton type="button" class="p-button-sm p-button-text" label="المرحلة التالية" [disabled]="!canNavigateStages(1)" (click)="nextStage()"></button>
-            <button pButton type="button" class="p-button-sm p-button-text" label="السابقة التي تحتاج متابعة" [disabled]="!canNavigateStages(-1, true)" (click)="previousProblemStage()"></button>
-            <button pButton type="button" class="p-button-sm p-button-text" label="التالية التي تحتاج متابعة" [disabled]="!canNavigateStages(1, true)" (click)="nextProblemStage()"></button>
-          </div>
-        </div>
-
-        <div #stageList class="line-staffing-page__stage-list" *ngIf="filteredStages.length; else noStages">
-          <button
-            type="button"
-            *ngFor="let stage of filteredStages; trackBy: trackById"
-            [attr.id]="'staffing-stage-' + stage.subStageId"
-            class="line-staffing-page__stage"
-            [class.is-selected]="stage.subStageId === selectedSubStageId"
-            (click)="selectStage(stage.subStageId)"
+        <section
+          #workspace
+          class="line-staffing-page__workspace line-staffing-page__section-target"
+          [class.is-refreshing]="planLoading"
+        >
+          <section
+            class="line-staffing-page__stage-region"
+            aria-label="مراحل الموديل"
           >
-            <div>
-              <strong>{{ stage.stageCode }} — {{ stage.stageName }}</strong>
-              <small>{{ stage.mainStageName }} · {{ stage.workerStatusText }}</small>
-            </div>
-            <div class="line-staffing-page__stage-meta">
-              <span>دائم: {{ stage.defaultAssignedWorkersCount }}</span>
-              <span>فعّال: {{ stage.effectiveAssignedWorkersCount }}</span>
-              <span *ngIf="stage.temporaryAssignedWorkersCount">مؤقت: {{ stage.temporaryAssignedWorkersCount }}</span>
-              <span>{{ compensationStatusLabel(stage) }}</span>
-              <plp-status-badge [status]="stageStatusTone(stage)" [label]="stageStatusLabel(stage)" [compact]="true"></plp-status-badge>
-            </div>
-          </button>
-        </div>
-        <ng-template #noStages><plp-empty-state title="لا توجد مراحل مطابقة" description="عدّل البحث أو عامل التصفية لعرض مراحل الموديل."></plp-empty-state></ng-template>
-      </p-card>
-      </section>
-
-      <aside #selectedStagePanel class="line-staffing-page__selected-region" aria-label="عمال المرحلة المحددة">
-        <p-card header="عمال المرحلة المحددة" *ngIf="selectedStage as stage; else stageGuidance">
-          <div class="line-staffing-page__selected-stage-panel">
-            <div class="line-staffing-page__selected-stage-command">
-              <div class="line-staffing-page__selected-stage">
-                <div>
-                  <h2>{{ stage.stageCode }} — {{ stage.stageName }}</h2>
-                  <p>{{ stage.mainStageName }} · {{ stage.workerStatusText }}</p>
-                </div>
-                <div class="line-staffing-page__selected-stage-badges">
-                  <plp-status-badge [status]="stageStatusTone(stage)" [label]="stageStatusLabel(stage)"></plp-status-badge>
-                  <plp-status-badge [status]="stage.isFinancialReviewPending ? 'warning' : 'ready'" [label]="stage.isFinancialReviewPending ? stageCostTerminology.provisional : 'إعداد تكلفة المرحلة متاح'"></plp-status-badge>
+            <p-card header="مراحل الموديل">
+              <div class="line-staffing-page__filters">
+                <div
+                  class="line-staffing-page__stage-navigation"
+                  aria-label="التنقل بين المراحل"
+                >
+                  <button
+                    pButton
+                    type="button"
+                    class="p-button-sm p-button-text p-button-icon-only"
+                    icon="pi pi-arrow-right"
+                    pTooltip="المرحلة السابقة"
+                    tooltipPosition="top"
+                    aria-label="المرحلة السابقة"
+                    [disabled]="!canNavigateStages(-1)"
+                    (click)="previousStage()"
+                  ></button>
+                  <button
+                    pButton
+                    type="button"
+                    class="p-button-sm p-button-text p-button-icon-only"
+                    icon="pi pi-arrow-left"
+                    pTooltip="المرحلة التالية"
+                    tooltipPosition="top"
+                    aria-label="المرحلة التالية"
+                    [disabled]="!canNavigateStages(1)"
+                    (click)="nextStage()"
+                  ></button>
+                  <button
+                    pButton
+                    type="button"
+                    class="p-button-sm p-button-text p-button-icon-only"
+                    icon="pi pi-angle-double-right"
+                    pTooltip="المرحلة السابقة التي تحتاج متابعة"
+                    tooltipPosition="top"
+                    aria-label="المرحلة السابقة التي تحتاج متابعة"
+                    [disabled]="!canNavigateStages(-1, true)"
+                    (click)="previousProblemStage()"
+                  ></button>
+                  <button
+                    pButton
+                    type="button"
+                    class="p-button-sm p-button-text p-button-icon-only"
+                    icon="pi pi-angle-double-left"
+                    pTooltip="المرحلة التالية التي تحتاج متابعة"
+                    tooltipPosition="top"
+                    aria-label="المرحلة التالية التي تحتاج متابعة"
+                    [disabled]="!canNavigateStages(1, true)"
+                    (click)="nextProblemStage()"
+                  ></button>
                 </div>
               </div>
-              <p class="line-staffing-page__note" *ngIf="stage.hasAuthoritativeRequiredWorkerCount">العدد المخطط المعتمد لهذه المرحلة: {{ stage.requiredWorkers }}. لا يتم اختراع عدد مطلوب عندما لا يكون محفوظًا.</p>
-              <p class="line-staffing-page__note" *ngIf="!stage.hasAuthoritativeRequiredWorkerCount">لا يوجد عدد عمال مطلوب معتمد؛ تظهر أعداد التعيين الفعلية فقط.</p>
-              <p class="line-staffing-page__note" *ngIf="stage.isFinancialReviewPending">{{ stageCostTerminology.provisionalHelp }}</p>
-              <p class="line-staffing-page__note" *ngIf="stage.compensationMode === 'SharedPercentage'">طريقة احتساب التكلفة الحالية هي توزيع نسبي: عند تسجيل دفعة بعامل واحد تكون النسبة المطلوبة 100٪. لا تغيّر هذه الشاشة إعداد تكلفة المرحلة أو المراجعة المالية.</p>
 
-              <div class="line-staffing-page__actions" *ngIf="canManageAssignments">
-                <button pButton type="button" class="p-button-sm" label="إضافة إلى المرحلة" icon="pi pi-user-plus" (click)="openDefaultAssignment()"></button>
-                <button pButton type="button" class="p-button-sm p-button-outlined" label="مشاركة مؤقتة" icon="pi pi-clock" (click)="openTemporaryAssignment()"></button>
+              <div
+                #stageList
+                class="line-staffing-page__stage-list"
+                *ngIf="filteredStages.length; else noStages"
+              >
+                <button
+                  type="button"
+                  *ngFor="let stage of filteredStages; trackBy: trackById"
+                  [attr.id]="'staffing-stage-' + stage.subStageId"
+                  class="line-staffing-page__stage"
+                  [class.is-selected]="stage.subStageId === selectedSubStageId"
+                  (click)="selectStage(stage.subStageId)"
+                >
+                  <div>
+                    <strong
+                      >{{ stage.stageCode }} — {{ stage.stageName }}</strong
+                    >
+                    <small>{{ stage.workerStatusText }}</small>
+                  </div>
+                  <div class="line-staffing-page__stage-meta">
+                    <span>دائم: {{ stage.defaultAssignedWorkersCount }}</span>
+                    <span
+                      >فعّال: {{ stage.effectiveAssignedWorkersCount }}</span
+                    >
+                    <span>{{ compensationStatusLabel(stage) }}</span>
+                    <plp-status-badge
+                      [status]="stageStatusTone(stage)"
+                      [label]="stageStatusLabel(stage)"
+                      [compact]="true"
+                    ></plp-status-badge>
+                  </div>
+                </button>
               </div>
-            </div>
+              <ng-template #noStages
+                ><plp-empty-state
+                  title="لا توجد مراحل مطابقة"
+                  description="عدّل البحث أو عامل التصفية لعرض مراحل الموديل."
+                ></plp-empty-state
+              ></ng-template>
+            </p-card>
+          </section>
 
-            <div class="line-staffing-page__workers" *ngIf="selectedStageWorkers.length; else noAssignedWorkers">
-              <article *ngFor="let worker of selectedStageWorkers; trackBy: trackById" class="line-staffing-page__worker-card">
-                <plp-worker-avatar
-                  [fullName]="worker.fullName"
-                  [code]="worker.employeeCode"
-                  [hasPhoto]="worker.hasPhoto"
-                  [photoReference]="worker.photoReference"
-                  [photoVersion]="worker.photoVersion"
-                  size="md"
-                ></plp-worker-avatar>
-                <div class="line-staffing-page__worker-data">
-                  <plp-worker-assignment-details
-                    [fullName]="worker.fullName"
-                    [employeeCode]="worker.employeeCode"
-                    [productionLineName]="plan.productionLineName"
-                    [isOnActiveService]="worker.isOnActiveService"
-                    [stageNames]="workerParticipationStageNames(worker)"
-                  ></plp-worker-assignment-details>
-                  <small>{{ worker.departmentName || 'دون قسم مسجل' }} · {{ workerAssignmentLabel(worker) }}</small>
-                </div>
-                <div class="line-staffing-page__worker-actions" *ngIf="canManageAssignments">
-                  <button pButton type="button" class="p-button-sm p-button-text" label="نقل" (click)="openMove(worker)"></button>
-                  <button pButton type="button" class="p-button-sm p-button-text" label="استبدال" [disabled]="participationForStage(worker)?.assignmentType !== 'Default'" (click)="openReplacement(worker)"></button>
-                  <button pButton type="button" class="p-button-sm p-button-text p-button-danger" [label]="participationForStage(worker)?.assignmentType === 'Temporary' || participationForStage(worker)?.assignmentType === 'Replacement' ? 'إلغاء المؤقت' : 'إلغاء التعيين'" (click)="openCancellation(worker)"></button>
-                </div>
-              </article>
-            </div>
-            <ng-template #noAssignedWorkers><plp-empty-state title="لا يوجد عمال معينون" description="أضف تعيينًا دائمًا أو مؤقتًا لهذه المرحلة دون مغادرة مساحة التسكين."></plp-empty-state></ng-template>
+          <aside
+            #selectedStagePanel
+            class="line-staffing-page__selected-region"
+            aria-label="عمال المرحلة المحددة"
+          >
+            <p-card
+              header="عمال المرحلة المحددة"
+              *ngIf="selectedStage as stage; else stageGuidance"
+            >
+              <div class="line-staffing-page__selected-stage-panel">
+                <div class="line-staffing-page__selected-stage-command">
+                  <div class="line-staffing-page__selected-stage">
+                    <div>
+                      <h2>{{ stage.stageCode }} — {{ stage.stageName }}</h2>
+                      <p>{{ stage.workerStatusText }}</p>
+                    </div>
+                    <div class="line-staffing-page__selected-stage-badges">
+                      <plp-status-badge
+                        [status]="stageStatusTone(stage)"
+                        [label]="stageStatusLabel(stage)"
+                      ></plp-status-badge>
+                      <plp-status-badge
+                        [status]="
+                          stage.isFinancialReviewPending ? 'warning' : 'ready'
+                        "
+                        [label]="
+                          stage.isFinancialReviewPending
+                            ? stageCostTerminology.provisional
+                            : 'إعداد تكلفة المرحلة متاح'
+                        "
+                      ></plp-status-badge>
+                    </div>
+                  </div>
+                  <p
+                    class="line-staffing-page__note"
+                    *ngIf="stage.hasAuthoritativeRequiredWorkerCount"
+                  >
+                    العدد المخطط المعتمد لهذه المرحلة:
+                    {{ stage.requiredWorkers }}. لا يتم اختراع عدد مطلوب عندما
+                    لا يكون محفوظًا.
+                  </p>
+                  <p
+                    class="line-staffing-page__note"
+                    *ngIf="!stage.hasAuthoritativeRequiredWorkerCount"
+                  >
+                    لا يوجد عدد تسكين مرحلة معتمد؛ تظهر أعداد التسكين الفعلية
+                    فقط.
+                  </p>
+                  <p
+                    class="line-staffing-page__note"
+                    *ngIf="stage.isFinancialReviewPending"
+                  >
+                    {{ stageCostTerminology.provisionalHelp }}
+                  </p>
+                  <p
+                    class="line-staffing-page__note"
+                    *ngIf="stage.compensationMode === 'SharedPercentage'"
+                  >
+                    طريقة احتساب التكلفة الحالية هي توزيع نسبي: عند تسجيل دفعة
+                    بعامل واحد تكون النسبة المطلوبة 100٪. لا تغيّر هذه الشاشة
+                    إعداد تكلفة المرحلة أو المراجعة المالية.
+                  </p>
 
-            <p class="line-staffing-page__note" *ngIf="!canManageAssignments">تملك صلاحية العرض فقط. حفظ تغييرات التسكين يتطلب صلاحية إدارة التعيينات.</p>
-          </div>
+                  <div
+                    class="line-staffing-page__actions"
+                    *ngIf="canManageAssignments"
+                  >
+                    <button
+                      pButton
+                      type="button"
+                      class="p-button-sm"
+                      label="إضافة إلى المرحلة"
+                      icon="pi pi-user-plus"
+                      (click)="openDefaultAssignment()"
+                    ></button>
+                  </div>
+                </div>
+
+                <div
+                  class="line-staffing-page__workers"
+                  *ngIf="selectedStageWorkers.length; else noAssignedWorkers"
+                >
+                  <article
+                    *ngFor="
+                      let worker of selectedStageWorkers;
+                      trackBy: trackById
+                    "
+                    class="line-staffing-page__worker-card"
+                  >
+                    <plp-worker-avatar
+                      [fullName]="worker.fullName"
+                      [code]="worker.employeeCode"
+                      [hasPhoto]="worker.hasPhoto"
+                      [photoReference]="worker.photoReference"
+                      [photoVersion]="worker.photoVersion"
+                      size="md"
+                    ></plp-worker-avatar>
+                    <div class="line-staffing-page__worker-data">
+                      <plp-worker-assignment-details
+                        [fullName]="worker.fullName"
+                        [employeeCode]="worker.employeeCode"
+                        [productionLineName]="plan.productionLineName"
+                        [isOnActiveService]="worker.isOnActiveService"
+                        [stageNames]="workerParticipationStageNames(worker)"
+                      ></plp-worker-assignment-details>
+                      <small
+                        >{{ worker.departmentName || "دون قسم مسجل" }} ·
+                        {{ workerAssignmentLabel(worker) }}</small
+                      >
+                    </div>
+                    <div
+                      class="line-staffing-page__worker-actions"
+                      *ngIf="canManageAssignments"
+                    >
+                      <button
+                        pButton
+                        type="button"
+                        class="p-button-sm p-button-text p-button-danger"
+                        label="إلغاء التسكين"
+                        (click)="openCancellation(worker)"
+                      ></button>
+                    </div>
+                  </article>
+                </div>
+                <ng-template #noAssignedWorkers
+                  ><plp-empty-state
+                    title="لا يوجد عمال مسكنون"
+                    description="أضف تسكينًا دائمًا لهذه المرحلة دون مغادرة مساحة التسكين."
+                  ></plp-empty-state
+                ></ng-template>
+
+                <p
+                  class="line-staffing-page__note"
+                  *ngIf="!canManageAssignments"
+                >
+                  تملك صلاحية العرض فقط. حفظ تغييرات التسكين يتطلب صلاحية إدارة
+                  التسكين.
+                </p>
+              </div>
+            </p-card>
+            <ng-template #stageGuidance
+              ><p-card header="عمال المرحلة المحددة"
+                ><p class="line-staffing-page__note">
+                  اختر مرحلة من قائمة الموديل لعرض عمالها وإدارة التسكين.
+                </p></p-card
+              ></ng-template
+            >
+          </aside>
+        </section>
+      </ng-container>
+      <ng-template #noModelJourney>
+        <p-card header="مراحل الموديل">
+          <plp-empty-state
+            title="لا توجد رحلة مراحل مهيأة لهذا الموديل"
+            description="انتقل إلى شاشة الموديلات لإعداد رحلة الموديل وترتيب مراحلها، ثم عُد لتحميلها للتسكين."
+          ></plp-empty-state>
         </p-card>
-        <ng-template #stageGuidance><p-card header="عمال المرحلة المحددة"><p class="line-staffing-page__note">اختر مرحلة من قائمة الموديل لعرض عمالها وإدارة التسكين.</p></p-card></ng-template>
-      </aside>
-      </section>
+      </ng-template>
     </ng-container>
   </div>
 
@@ -207,25 +467,79 @@
     (visibleChange)="!$event && closeAssignmentDialog()"
     (save)="saveAssignment()"
   >
-    <plp-form [formGroup]="assignmentForm" [columns]="2" [busy]="assignmentSaving" (submitted)="onAssignmentFormSubmitted()">
-      <p class="line-staffing-page__dialog-note line-staffing-page__wide" *ngIf="assignmentDialogMode === 'default'">حدّد عمال المرحلة دفعة واحدة. الاختيار يضيف مشاركة دائمة لهذه المرحلة فقط، وإلغاء الاختيار يزيل مشاركة هذا العامل من هذه المرحلة فقط دون تغيير مراحله الأخرى. لا يلزم سبب للإضافة.</p>
-      <p class="line-staffing-page__dialog-note line-staffing-page__wide" *ngIf="assignmentDialogMode === 'temporary'">حدّد بوضوح هل المشاركة المؤقتة إضافية أم نقل مؤقت من مرحلة مصدر. انتهاء الفترة يزيل المشاركة المؤقتة فقط.</p>
-      <p class="line-staffing-page__dialog-note line-staffing-page__wide" *ngIf="assignmentDialogMode === 'replacement' && pendingWorker">العامل المستبدَل: {{ pendingWorker.employeeCode }} — {{ pendingWorker.fullName }}. يبقى سجل تعيينه الدائم محفوظًا.</p>
-      <p class="line-staffing-page__dialog-note line-staffing-page__wide" *ngIf="assignmentDialogMode === 'move' && pendingWorker">العامل: {{ pendingWorker.employeeCode }} — {{ pendingWorker.fullName }}. النقل يسري الآن ويُراجع المصدر في الخادم قبل الحفظ.</p>
-      <p class="line-staffing-page__dialog-note line-staffing-page__wide" *ngIf="(assignmentDialogMode === 'remove-default' || assignmentDialogMode === 'cancel-temporary') && pendingWorker">العامل: {{ pendingWorker.employeeCode }} — {{ pendingWorker.fullName }}. لن يتغير أي سجل إنتاج تاريخي.</p>
+    <plp-form
+      [formGroup]="assignmentForm"
+      [columns]="2"
+      [busy]="assignmentSaving"
+      (submitted)="onAssignmentFormSubmitted()"
+    >
+      <p
+        class="line-staffing-page__dialog-note line-staffing-page__wide"
+        *ngIf="assignmentDialogMode === 'default'"
+      >
+        حدّد عمال المرحلة دفعة واحدة. الاختيار يضيف مشاركة دائمة لهذه المرحلة
+        فقط، وإلغاء الاختيار يزيل مشاركة هذا العامل من هذه المرحلة فقط دون تغيير
+        مراحله الأخرى. لا يلزم سبب للإضافة.
+      </p>
+      <p
+        class="line-staffing-page__dialog-note line-staffing-page__wide"
+        *ngIf="assignmentDialogMode === 'remove-default' && pendingWorker"
+      >
+        العامل: {{ pendingWorker.employeeCode }} — {{ pendingWorker.fullName }}.
+        لن يتغير أي سجل إنتاج تاريخي.
+      </p>
       <ng-container *ngIf="isBulkDefaultAssignmentDialog">
-        <label class="line-staffing-page__wide">بحث العامل
-          <input pInputText type="search" [(ngModel)]="workerSearch" [ngModelOptions]="{ standalone: true }" placeholder="الكود أو الاسم">
+        <label class="line-staffing-page__wide"
+          >بحث العامل
+          <input
+            pInputText
+            type="search"
+            [(ngModel)]="workerSearch"
+            [ngModelOptions]="{ standalone: true }"
+            placeholder="الكود أو الاسم"
+          />
         </label>
-        <label>القسم
-          <select [(ngModel)]="departmentFilter" [ngModelOptions]="{ standalone: true }"><option value="">كل الأقسام</option><option *ngFor="let department of departments" [value]="department">{{ department }}</option></select>
+        <label
+          >القسم
+          <select
+            [(ngModel)]="departmentFilter"
+            [ngModelOptions]="{ standalone: true }"
+          >
+            <option value="">كل الأقسام</option>
+            <option
+              *ngFor="let department of workerDepartments"
+              [value]="department"
+            >
+              {{ department }}
+            </option>
+          </select>
         </label>
-        <p class="line-staffing-page__dialog-note line-staffing-page__wide">{{ selectedDefaultWorkersCount }} عامل محدد للتسكين الدائم في هذه المرحلة. العامل المشارك في مراحل أخرى يظل قابلًا للاختيار.</p>
-        <section class="line-staffing-page__candidate-list line-staffing-page__wide" aria-label="اختيار عمال المرحلة">
-          <plp-loading-skeleton *ngIf="workerDirectoryLoading" [lines]="5" [showAvatar]="true"></plp-loading-skeleton>
-          <div class="line-staffing-page__error" *ngIf="workerDirectoryError" role="alert">
+        <p class="line-staffing-page__dialog-note line-staffing-page__wide">
+          {{ selectedDefaultWorkersCount }} عامل محدد للتسكين الدائم في هذه
+          المرحلة. العامل المشارك في مراحل أخرى يظل قابلًا للاختيار.
+        </p>
+        <section
+          class="line-staffing-page__candidate-list line-staffing-page__wide"
+          aria-label="اختيار عمال المرحلة"
+        >
+          <plp-loading-skeleton
+            *ngIf="workerDirectoryLoading"
+            [lines]="5"
+            [showAvatar]="true"
+          ></plp-loading-skeleton>
+          <div
+            class="line-staffing-page__error"
+            *ngIf="workerDirectoryError"
+            role="alert"
+          >
             <span>{{ workerDirectoryError }}</span>
-            <button pButton type="button" class="p-button-sm p-button-text" label="إعادة المحاولة" (click)="retryActiveStaffingWorkers()"></button>
+            <button
+              pButton
+              type="button"
+              class="p-button-sm p-button-text"
+              label="إعادة المحاولة"
+              (click)="retryActiveStaffingWorkers()"
+            ></button>
           </div>
           <plp-worker-assignment-card
             *ngFor="let worker of availableWorkers; trackBy: trackById"
@@ -241,79 +555,51 @@
             [photoReference]="worker.photoReference"
             [photoVersion]="worker.photoVersion"
             [statusMessage]="defaultWorkerAssignmentStateLabel(worker)"
-            [unavailableMessage]="defaultWorkerSelectionUnavailableMessage(worker) || ''"
+            [unavailableMessage]="
+              defaultWorkerSelectionUnavailableMessage(worker) || ''
+            "
             (selectionChange)="toggleDefaultWorker(worker, $event)"
           ></plp-worker-assignment-card>
-          <p class="line-staffing-page__note" *ngIf="!workerDirectoryLoading && !workerDirectoryError && !availableWorkers.length">لا توجد نتائج مطابقة للبحث أو القسم المحدد.</p>
+          <p
+            class="line-staffing-page__note"
+            *ngIf="
+              !workerDirectoryLoading &&
+              !workerDirectoryError &&
+              !availableWorkers.length
+            "
+          >
+            لا توجد نتائج مطابقة للبحث أو القسم المحدد.
+          </p>
         </section>
       </ng-container>
 
-      <ng-container *ngIf="dialogNeedsWorkerPicker">
-        <label class="line-staffing-page__wide">بحث العامل
-          <input pInputText type="search" [(ngModel)]="workerSearch" [ngModelOptions]="{ standalone: true }" placeholder="الكود أو الاسم">
-        </label>
-        <label>القسم
-          <select [(ngModel)]="departmentFilter" [ngModelOptions]="{ standalone: true }"><option value="">كل الأقسام</option><option *ngFor="let department of departments" [value]="department">{{ department }}</option></select>
-        </label>
-        <p class="line-staffing-page__dialog-note">مصدر هذه القائمة دليل العمال بالخدمة الفعالة. لا تستخدم حالة الحضور اليومية في التسكين التنظيمي.</p>
-        <section class="line-staffing-page__candidate-list line-staffing-page__wide" aria-label="العمال المتاحون للتسكين">
-          <plp-loading-skeleton *ngIf="workerDirectoryLoading" [lines]="5" [showAvatar]="true"></plp-loading-skeleton>
-          <div class="line-staffing-page__error" *ngIf="workerDirectoryError" role="alert">
-            <span>{{ workerDirectoryError }}</span>
-            <button pButton type="button" class="p-button-sm p-button-text" label="إعادة المحاولة" (click)="retryActiveStaffingWorkers()"></button>
-          </div>
-          <plp-worker-assignment-card
-            *ngFor="let worker of availableWorkers; trackBy: trackById"
-            selectionMode="single"
-            [selected]="assignmentForm.controls.workerId.value === worker.workerId"
-            [disabled]="!!workerSelectionUnavailableMessage(worker)"
-            [fullName]="worker.fullName"
-            [employeeCode]="worker.employeeCode"
-            [productionLineName]="plan?.productionLineName || ''"
-            [isOnActiveService]="worker.isOnActiveService"
-            [stageNames]="workerParticipationStageNames(worker)"
-            [hasPhoto]="worker.hasPhoto"
-            [photoReference]="worker.photoReference"
-            [photoVersion]="worker.photoVersion"
-            [statusMessage]="workerTemporaryAssignmentMessage(worker) || ''"
-            [unavailableMessage]="workerSelectionUnavailableMessage(worker) && !workerTemporaryAssignmentMessage(worker) ? workerSelectionUnavailableMessage(worker) || '' : ''"
-            (selectionChange)="selectDialogWorker(worker)"
-          ></plp-worker-assignment-card>
-          <p class="line-staffing-page__note" *ngIf="!workerDirectoryLoading && !workerDirectoryError && !availableWorkers.length">لا توجد نتائج مطابقة للبحث أو القسم المحدد.</p>
-        </section>
-        <p class="line-staffing-page__move-warning line-staffing-page__wide" *ngIf="selectedDialogWorker && workerElsewhereWarning(selectedDialogWorker)">{{ workerElsewhereWarning(selectedDialogWorker) }}</p>
-        <p class="line-staffing-page__dialog-note line-staffing-page__wide" *ngIf="assignmentDialogMode === 'temporary' && selectedDialogWorker">يمكن للمشاركة المؤقتة الإضافية أن تتعايش مع كل المشاركات الدائمة. النقل المؤقت يختار مرحلة مصدر واحدة فقط.</p>
-      </ng-container>
-
-      <label *ngIf="dialogNeedsTargetStage">إلى مرحلة
-        <select formControlName="targetSubStageId"><option value="">اختر المرحلة</option><option *ngFor="let stage of plan?.stages || []; trackBy: trackById" [value]="stage.subStageId" [disabled]="isMoveTargetUnavailable(stage.subStageId)">{{ stage.stageCode }} — {{ stage.stageName }}</option></select>
+      <label *ngIf="dialogRequiresReason" class="line-staffing-page__wide"
+        >السبب
+        <input
+          pInputText
+          formControlName="reason"
+          maxlength="500"
+          placeholder="سبب واضح للتغيير أو الإلغاء"
+        />
       </label>
 
-      <ng-container *ngIf="dialogNeedsTemporaryPeriod">
-        <label>وقت البداية
-          <p-calendar formControlName="startTime" [timeOnly]="true" hourFormat="24" [showIcon]="true" inputId="assignment-start-time"></p-calendar>
-        </label>
-        <label>وقت النهاية
-          <p-calendar formControlName="endTime" [timeOnly]="true" hourFormat="24" [showIcon]="true" inputId="assignment-end-time"></p-calendar>
-        </label>
-        <label *ngIf="assignmentDialogMode === 'temporary'">نوع المشاركة المؤقتة
-          <select formControlName="temporaryParticipationMode"><option value="AdditionalParticipation">مشاركة مؤقتة إضافية</option><option value="TemporaryMove">نقل مؤقت من مرحلة مصدر</option></select>
-        </label>
-        <label *ngIf="assignmentDialogMode === 'temporary' && temporaryParticipationMode === 'TemporaryMove'">مرحلة المصدر
-          <select formControlName="temporarySourceSubStageId"><option value="">اختر المرحلة المصدر</option><option *ngFor="let participation of temporarySourceParticipations" [value]="participation.subStageId">{{ participation.subStageName || participation.subStageId }}</option></select>
-        </label>
-        <label *ngIf="assignmentDialogMode === 'replacement'">مرحلة مصدر العامل البديل
-          <select formControlName="temporarySourceSubStageId"><option value="">اختر المرحلة المصدر</option><option *ngFor="let participation of temporarySourceParticipations" [value]="participation.subStageId">{{ participation.subStageName || participation.subStageId }}</option></select>
-        </label>
-      </ng-container>
-
-      <label *ngIf="dialogRequiresReason" [class.line-staffing-page__wide]="!dialogNeedsTemporaryPeriod && !dialogNeedsTargetStage">السبب
-        <input pInputText formControlName="reason" maxlength="500" placeholder="سبب واضح للتغيير أو الإلغاء">
-      </label>
-
-      <ul class="line-staffing-page__validation-summary line-staffing-page__wide" *ngIf="assignmentMissingRequirements.length || assignmentValidationSummary" role="alert">
-        <li *ngFor="let message of assignmentMissingRequirements">{{ message }}</li>
-        <li *ngIf="assignmentValidationSummary && !assignmentMissingRequirements.length">{{ assignmentValidationSummary }}</li>
+      <ul
+        class="line-staffing-page__validation-summary line-staffing-page__wide"
+        *ngIf="
+          assignmentMissingRequirements.length || assignmentValidationSummary
+        "
+        role="alert"
+      >
+        <li *ngFor="let message of assignmentMissingRequirements">
+          {{ message }}
+        </li>
+        <li
+          *ngIf="
+            assignmentValidationSummary && !assignmentMissingRequirements.length
+          "
+        >
+          {{ assignmentValidationSummary }}
+        </li>
       </ul>
     </plp-form>
   </plp-form-sheet>

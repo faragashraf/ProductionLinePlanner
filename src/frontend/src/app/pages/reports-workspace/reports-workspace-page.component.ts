@@ -1,14 +1,20 @@
 import { HttpErrorResponse } from '@angular/common/http';
-import { Component, OnDestroy, OnInit } from '@angular/core';
-import { Subject, catchError, finalize, forkJoin, of, takeUntil } from 'rxjs';
+import { Component, OnDestroy, OnInit, Optional } from '@angular/core';
+import { Observable, Subject, catchError, finalize, forkJoin, of, takeUntil } from 'rxjs';
 import { FactoryItem, ManufacturingMasterDataApiService, ModelStageItem, ProductModelItem, ProductionLineOption } from '../../core/services/manufacturing-master-data-api.service';
 import { ProductionOrder, ProductionCostRecordingApiService, WorkerOption } from '../../core/services/production-cost-recording-api.service';
-import { ProductionQuantitiesReportApiService, QuantitiesReportResult, QuantitiesReportRow, QuantitiesReportSortBy, QuantitiesReportView } from '../../core/services/production-quantities-report-api.service';
-import { ReportsWorkspaceFilters, ReportsWorkspaceViewOption } from './reports-workspace.models';
+import { ProductionFinancialReportApiService } from '../../core/services/production-financial-report-api.service';
+import { ProductionQuantitiesReportApiService, QuantitiesReportSortBy, QuantitiesReportView } from '../../core/services/production-quantities-report-api.service';
+import { PERMISSIONS } from '../../core/config/permission-identifiers';
+import { PermissionService } from '../../core/services/permission.service';
+import { compensationModeLabel, financialStatusLabel, formatEgp, formatPercentage, isFinancialRow } from './reports-financial-presentation';
+import { ReportPresentationMode, ReportsWorkspaceFilters, ReportsWorkspaceResult, ReportsWorkspaceRow, ReportsWorkspaceViewOption } from './reports-workspace.models';
 import { ReportsWorkspaceStateService } from './reports-workspace-state.service';
+import { ManufacturingRealtimeService } from '../../core/services/manufacturing-realtime.service';
+import { ManufacturingDataChanged } from '../../core/models/realtime-notification.models';
 
 interface ReportsColumn {
-  key: 'stage' | 'worker' | 'date' | 'status' | 'produced' | 'accepted' | 'rejected' | 'allocated' | 'records' | 'stages' | 'workers';
+  key: 'stage' | 'worker' | 'date' | 'status' | 'produced' | 'accepted' | 'rejected' | 'allocated' | 'records' | 'stages' | 'workers' | 'stageCost' | 'earnings' | 'unitPrice' | 'percentage' | 'compensation' | 'financialStatus';
   label: string;
   sortBy?: QuantitiesReportSortBy;
   numeric?: boolean;
@@ -37,8 +43,11 @@ export class ReportsWorkspacePageComponent implements OnInit, OnDestroy {
   stages: ModelStageItem[] = [];
   workers: WorkerOption[] = [];
   orders: ProductionOrder[] = [];
-  result: QuantitiesReportResult | null = null;
+  result: ReportsWorkspaceResult | null = null;
+  presentationMode: ReportPresentationMode = 'QuantitiesOnly';
   loading = false;
+  modeLoading = false;
+  modeMessage = '';
   lookupsLoading = false;
   stageLoading = false;
   error = '';
@@ -49,27 +58,55 @@ export class ReportsWorkspacePageComponent implements OnInit, OnDestroy {
 
   private requestVersion = 0;
   private readonly destroy$ = new Subject<void>();
+  private stopRealtime?: () => void;
 
   constructor(
-    private readonly reports: ProductionQuantitiesReportApiService,
+    private readonly quantitiesReports: ProductionQuantitiesReportApiService,
+    private readonly financialReports: ProductionFinancialReportApiService,
     private readonly masterData: ManufacturingMasterDataApiService,
     private readonly production: ProductionCostRecordingApiService,
-    private readonly state: ReportsWorkspaceStateService
+    private readonly state: ReportsWorkspaceStateService,
+    private readonly permissions: PermissionService,
+    @Optional() private readonly manufacturingRealtime?: ManufacturingRealtimeService
   ) {}
 
   ngOnInit(): void {
-    this.filters = this.state.restore(this.defaultFilters());
+    const restored = this.state.restore(this.defaultFilters(), this.canUseFinancialMode);
+    this.filters = restored.filters;
+    this.presentationMode = restored.presentationMode;
+    this.stopRealtime = this.manufacturingRealtime?.watchScreen({
+      screen: 'reports',
+      matches: change => this.matchesRealtimeScope(change),
+      refresh: () => this.loadReport(true)
+    });
     this.loadLookups();
-    if (this.filters.productModelId) this.loadStages(this.filters.productModelId);
+    if (this.filters.productModelId && this.filters.productionLineId) this.loadStages(this.filters.productModelId, this.filters.productionLineId);
   }
 
   ngOnDestroy(): void {
+    this.stopRealtime?.();
     this.destroy$.next();
     this.destroy$.complete();
   }
 
-  get rows(): QuantitiesReportRow[] {
+  get rows(): ReportsWorkspaceRow[] {
     return this.result?.rows ?? [];
+  }
+
+  get canUseFinancialMode(): boolean {
+    return this.permissions.hasAll([PERMISSIONS.reports.productionView, PERMISSIONS.reports.financialView]);
+  }
+
+  get isFinancialMode(): boolean {
+    return this.presentationMode === 'QuantitiesAndFinancials';
+  }
+
+  get modeDescription(): string {
+    if (this.modeMessage) return this.modeMessage;
+    if (!this.canUseFinancialMode) return 'تحتاج صلاحية عرض القيم المالية لتفعيل هذا الوضع.';
+    return this.isFinancialMode
+      ? 'يعرض قيم المرحلة وأرباح العمال من اللقطات المالية المحفوظة ضمن الفلاتر الحالية.'
+      : 'يعرض هذا الوضع الكميات التشغيلية فقط دون قيم مالية.';
   }
 
   get columns(): readonly ReportsColumn[] {
@@ -81,14 +118,16 @@ export class ReportsWorkspacePageComponent implements OnInit, OnDestroy {
           { key: 'workers', label: 'العمال', sortBy: 'WorkerCount', numeric: true },
           { key: 'produced', label: 'كمية المرحلة', sortBy: 'ProducedQuantity', numeric: true },
           { key: 'accepted', label: 'المقبول', sortBy: 'AcceptedQuantity', numeric: true },
-          { key: 'rejected', label: 'المرفوض', sortBy: 'RejectedQuantity', numeric: true }
+          { key: 'rejected', label: 'المرفوض', sortBy: 'RejectedQuantity', numeric: true },
+          ...this.financialColumns('ByStage')
         ];
       case 'ByWorker':
         return [
           { key: 'worker', label: 'العامل', sortBy: 'WorkerCode' },
           { key: 'stages', label: 'المراحل', sortBy: 'StageCount', numeric: true },
           { key: 'records', label: 'السجلات', sortBy: 'RecordCount', numeric: true },
-          { key: 'allocated', label: 'حصة العامل', sortBy: 'WorkerAllocatedQuantity', numeric: true }
+          { key: 'allocated', label: 'حصة العامل', sortBy: 'WorkerAllocatedQuantity', numeric: true },
+          ...this.financialColumns('ByWorker')
         ];
       case 'WorkerStages':
       case 'StageWorkers':
@@ -97,7 +136,8 @@ export class ReportsWorkspacePageComponent implements OnInit, OnDestroy {
           { key: 'worker', label: 'العامل', sortBy: 'WorkerCode' },
           { key: 'date', label: 'التاريخ', sortBy: 'ProductionDate' },
           { key: 'allocated', label: 'حصة العامل', sortBy: 'WorkerAllocatedQuantity', numeric: true },
-          { key: 'produced', label: 'كمية المرحلة', numeric: true }
+          { key: 'produced', label: 'كمية المرحلة', numeric: true },
+          ...this.financialColumns('Participation')
         ];
       default:
         return [
@@ -107,7 +147,8 @@ export class ReportsWorkspacePageComponent implements OnInit, OnDestroy {
           { key: 'produced', label: 'كمية المرحلة', sortBy: 'ProducedQuantity', numeric: true },
           { key: 'accepted', label: 'المقبول', sortBy: 'AcceptedQuantity', numeric: true },
           { key: 'rejected', label: 'المرفوض', sortBy: 'RejectedQuantity', numeric: true },
-          { key: 'workers', label: 'العمال', numeric: true }
+          { key: 'workers', label: 'العمال', numeric: true },
+          ...this.financialColumns('Details')
         ];
     }
   }
@@ -131,7 +172,7 @@ export class ReportsWorkspacePageComponent implements OnInit, OnDestroy {
       productModelId: factoryChanged || lineChanged ? '' : next.productModelId,
       productModelStageId: factoryChanged || lineChanged || modelChanged ? '' : next.productModelStageId
     };
-    if (modelChanged) this.loadStages(this.filters.productModelId);
+    if (modelChanged) this.loadStages(this.filters.productModelId, this.filters.productionLineId);
   }
 
   applyFilters(): void {
@@ -142,7 +183,7 @@ export class ReportsWorkspacePageComponent implements OnInit, OnDestroy {
       return;
     }
     this.filters = { ...this.filters, page: 1, sortBy: undefined, sortDirection: 'Ascending' };
-    this.state.save(this.filters);
+    this.persistState();
     this.hasAppliedFilters = true;
     this.loadReport();
   }
@@ -158,13 +199,24 @@ export class ReportsWorkspacePageComponent implements OnInit, OnDestroy {
     this.errorTitle = '';
     this.loadState = 'idle';
     this.hasAppliedFilters = false;
+    this.presentationMode = 'QuantitiesOnly';
+    this.modeLoading = false;
+    this.modeMessage = '';
   }
 
   changeView(view: QuantitiesReportView): void {
     if (view === this.filters.view) return;
     this.filters = { ...this.filters, view, page: 1, sortBy: undefined, sortDirection: 'Ascending' };
-    this.state.save(this.filters);
+    this.persistState();
     if (this.hasAppliedFilters) this.loadReport();
+  }
+
+  changePresentationMode(mode: ReportPresentationMode): void {
+    if (mode === this.presentationMode || (mode === 'QuantitiesAndFinancials' && !this.canUseFinancialMode)) return;
+    this.presentationMode = mode;
+    this.modeMessage = '';
+    this.persistState();
+    if (this.hasAppliedFilters) this.loadReport(true);
   }
 
   refresh(): void {
@@ -183,7 +235,7 @@ export class ReportsWorkspacePageComponent implements OnInit, OnDestroy {
     this.loadReport();
   }
 
-  rowValue(row: QuantitiesReportRow, column: ReportsColumn['key']): string {
+  rowValue(row: ReportsWorkspaceRow, column: ReportsColumn['key']): string {
     switch (column) {
       case 'stage': return [row.stageCode, row.stageName].filter(Boolean).join(' · ') || '—';
       case 'worker': return [row.workerCode, row.workerName].filter(Boolean).join(' · ') || '—';
@@ -196,10 +248,16 @@ export class ReportsWorkspacePageComponent implements OnInit, OnDestroy {
       case 'records': return this.quantity(row.recordCount);
       case 'stages': return this.quantity(row.stageCount);
       case 'workers': return this.quantity(row.workerCount);
+      case 'stageCost': return isFinancialRow(row) ? formatEgp(row.stageProductionCost) : '—';
+      case 'earnings': return isFinancialRow(row) ? formatEgp(row.productionEarning) : '—';
+      case 'unitPrice': return isFinancialRow(row) ? formatEgp(row.stageUnitPrice) : '—';
+      case 'percentage': return isFinancialRow(row) ? formatPercentage(row.workerPercentage) : '—';
+      case 'compensation': return isFinancialRow(row) ? compensationModeLabel(row.compensationMode) : '—';
+      case 'financialStatus': return isFinancialRow(row) ? financialStatusLabel(row.financialDataStatus) : '—';
     }
   }
 
-  rowKey(row: QuantitiesReportRow): string {
+  rowKey(row: ReportsWorkspaceRow): string {
     return row.source.stageProductionWorkerAllocationId || row.source.stageProductionRecordId || row.source.productModelStageId || row.source.workerId || `${row.stageCode}-${row.workerCode}`;
   }
 
@@ -209,6 +267,38 @@ export class ReportsWorkspacePageComponent implements OnInit, OnDestroy {
 
   statusLabel(status: string): string {
     return status === 'Approved' ? 'معتمد' : status === 'Draft' ? 'مسودة' : status === 'Cancelled' ? 'ملغى' : status;
+  }
+
+  private financialColumns(view: 'Details' | 'ByStage' | 'ByWorker' | 'Participation'): readonly ReportsColumn[] {
+    if (!this.isFinancialMode) return [];
+
+    switch (view) {
+      case 'Details':
+        return [
+          { key: 'stageCost', label: 'تكلفة المرحلة', numeric: true },
+          { key: 'unitPrice', label: 'سعر الوحدة', numeric: true },
+          { key: 'compensation', label: 'طريقة الاحتساب' },
+          { key: 'financialStatus', label: 'حالة البيانات المالية' }
+        ];
+      case 'ByStage':
+        return [
+          { key: 'stageCost', label: 'قيمة المرحلة', numeric: true },
+          { key: 'financialStatus', label: 'حالة البيانات المالية' }
+        ];
+      case 'ByWorker':
+        return [
+          { key: 'earnings', label: 'أرباح الإنتاج', numeric: true },
+          { key: 'financialStatus', label: 'حالة البيانات المالية' }
+        ];
+      case 'Participation':
+        return [
+          { key: 'earnings', label: 'أرباح الإنتاج', numeric: true },
+          { key: 'percentage', label: 'نسبة التوزيع', numeric: true },
+          { key: 'unitPrice', label: 'سعر الوحدة', numeric: true },
+          { key: 'compensation', label: 'طريقة الاحتساب' },
+          { key: 'financialStatus', label: 'حالة البيانات المالية' }
+        ];
+    }
   }
 
   private loadLookups(): void {
@@ -228,27 +318,39 @@ export class ReportsWorkspacePageComponent implements OnInit, OnDestroy {
     });
   }
 
-  private loadStages(productModelId: string): void {
-    if (!productModelId) {
+  private loadStages(productModelId: string, productionLineId: string): void {
+    if (!productModelId || !productionLineId) {
       this.stages = [];
       return;
     }
     this.stageLoading = true;
-    this.masterData.modelStages(productModelId)
+    this.masterData.modelStages(productModelId, productionLineId)
       .pipe(catchError(() => of([] as ModelStageItem[])), finalize(() => this.stageLoading = false), takeUntil(this.destroy$))
       .subscribe(stages => this.stages = stages.filter(stage => stage.isActive));
   }
 
-  private loadReport(): void {
+  private loadReport(preserveCurrentResult = false): void {
     if (!this.filters.from || !this.filters.to) return;
     const request = ++this.requestVersion;
+    const useFinancialProjection = this.isFinancialMode && this.canUseFinancialMode;
     this.loading = true;
+    this.modeLoading = preserveCurrentResult && this.result !== null;
     this.error = '';
     this.errorTitle = '';
-    this.result = null;
-    this.loadState = 'loading';
-    this.reports.query(this.filters)
-      .pipe(finalize(() => { if (request === this.requestVersion) this.loading = false; }), takeUntil(this.destroy$))
+    if (!this.modeLoading) {
+      this.result = null;
+      this.loadState = 'loading';
+    }
+    const reportRequest: Observable<ReportsWorkspaceResult> = useFinancialProjection
+      ? this.financialReports.query(this.filters)
+      : this.quantitiesReports.query(this.filters);
+    reportRequest
+      .pipe(finalize(() => {
+        if (request === this.requestVersion) {
+          this.loading = false;
+          this.modeLoading = false;
+        }
+      }), takeUntil(this.destroy$))
       .subscribe({
         next: result => {
           if (request !== this.requestVersion) return;
@@ -258,8 +360,15 @@ export class ReportsWorkspacePageComponent implements OnInit, OnDestroy {
         },
         error: (error: unknown) => {
           if (request !== this.requestVersion) return;
-          this.result = null;
           const status = error instanceof HttpErrorResponse ? error.status : (error as { status?: number })?.status;
+          if (status === 403 && useFinancialProjection) {
+            this.presentationMode = 'QuantitiesOnly';
+            this.modeMessage = 'تم الرجوع إلى الكميات فقط لأن صلاحية عرض القيم المالية غير متاحة.';
+            this.persistState();
+            this.loadReport(true);
+            return;
+          }
+          this.result = null;
           if (status === 401) {
             this.loadState = 'unauthorized';
             this.errorTitle = 'انتهت جلسة الدخول';
@@ -274,9 +383,24 @@ export class ReportsWorkspacePageComponent implements OnInit, OnDestroy {
           }
           this.loadState = 'error';
           this.errorTitle = 'تعذر تحميل التقرير';
-          this.error = 'تعذر تحميل تقرير الكميات. تحقق من الفلاتر والاتصال ثم أعد المحاولة.';
+          this.error = useFinancialProjection
+            ? 'تعذر تحميل تقرير القيم المالية. تحقق من الفلاتر والاتصال ثم أعد المحاولة.'
+            : 'تعذر تحميل تقرير الكميات. تحقق من الفلاتر والاتصال ثم أعد المحاولة.';
         }
       });
+  }
+
+  private persistState(): void {
+    this.state.save(this.filters, this.presentationMode, this.canUseFinancialMode);
+  }
+
+  private matchesRealtimeScope(change: ManufacturingDataChanged): boolean {
+    if (!this.hasAppliedFilters || (change.entityType !== 'ProductionOrder' && change.entityType !== 'StageProductionRecord')) return false;
+    if (change.productionDate && (change.productionDate < this.filters.from || change.productionDate > this.filters.to)) return false;
+    if (this.filters.factoryId && change.factoryId && change.factoryId !== this.filters.factoryId) return false;
+    if (this.filters.productionLineId && change.productionLineId && change.productionLineId !== this.filters.productionLineId) return false;
+    if (this.filters.productModelId && change.productModelId && change.productModelId !== this.filters.productModelId) return false;
+    return true;
   }
 
   private defaultFilters(): ReportsWorkspaceFilters {

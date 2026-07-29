@@ -1,13 +1,24 @@
-<section class="reports-workspace plp-page-frame" data-reports-workspace="quantities-only">
+<section class="reports-workspace plp-page-frame" [attr.data-reports-workspace]="isFinancialMode ? 'quantities-and-financials' : 'quantities-only'">
   <header class="reports-workspace__topbar">
     <div>
       <p class="reports-workspace__eyebrow">مركز التقارير التشغيلية</p>
       <h1>تقارير الإنتاج</h1>
-      <p>راجع كميات سجلات المراحل ومشاركة العاملين من مصدر واحد، دون قيم مالية في هذا الوضع.</p>
+      <p>{{ isFinancialMode ? 'وضع القيم المالية مفعّل ضمن نفس نطاق الفلاتر، ويعرض قيم المراحل وأرباح العمال من اللقطات المحفوظة.' : 'راجع كميات سجلات المراحل ومشاركة العاملين من مصدر واحد، دون قيم مالية في هذا الوضع.' }}</p>
     </div>
-    <div class="reports-workspace__mode" aria-label="وضع العرض الحالي">
-      <i class="pi pi-shield" aria-hidden="true"></i>
-      <span>الكميات فقط</span>
+    <div class="reports-workspace__presentation" aria-label="وضع عرض التقرير">
+      <div class="reports-workspace__mode-selector" role="group" aria-label="اختيار وضع عرض التقرير">
+        <button pButton type="button" class="reports-workspace__mode-option p-button-sm" [class.p-button-outlined]="presentationMode !== 'QuantitiesOnly'" [attr.aria-pressed]="presentationMode === 'QuantitiesOnly'" (click)="changePresentationMode('QuantitiesOnly')">
+          <i class="pi pi-box" aria-hidden="true"></i>
+          <span>الكميات فقط</span>
+        </button>
+        <button pButton type="button" class="reports-workspace__mode-option p-button-sm" [class.p-button-outlined]="presentationMode !== 'QuantitiesAndFinancials'" [attr.aria-pressed]="isFinancialMode" [disabled]="loading || !canUseFinancialMode" [attr.aria-describedby]="!canUseFinancialMode ? 'reports-financial-mode-help' : null" (click)="changePresentationMode('QuantitiesAndFinancials')">
+          <i class="pi" [ngClass]="canUseFinancialMode ? 'pi-chart-line' : 'pi-lock'" aria-hidden="true"></i>
+          <span>الكميات والقيم المالية</span>
+        </button>
+      </div>
+      <p id="reports-financial-mode-help" class="reports-workspace__mode-help" [class.is-loading]="modeLoading" aria-live="polite">
+        <i *ngIf="modeLoading" class="pi pi-spin pi-spinner" aria-hidden="true"></i>{{ modeDescription }}
+      </p>
     </div>
   </header>
 
@@ -42,7 +53,7 @@
     (reset)="resetFilters()"
   ></app-reports-filter-bar>
 
-  <app-reports-summary-cards *ngIf="result && loadState !== 'error' && loadState !== 'unauthorized'" [summary]="result.summary" [loading]="loading"></app-reports-summary-cards>
+  <app-reports-summary-cards *ngIf="result && loadState !== 'error' && loadState !== 'unauthorized'" [summary]="result.summary" [financialMode]="isFinancialMode" [loading]="loading"></app-reports-summary-cards>
 
   <section class="reports-workspace__results" aria-labelledby="reports-results-title">
     <div class="reports-workspace__results-heading">

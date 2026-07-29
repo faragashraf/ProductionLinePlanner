@@ -11,7 +11,7 @@
     <div class="plp-factory-card__readiness">
       <plp-readiness-ring [value]="clampedReadiness" [status]="resolvedStatus" [size]="56"></plp-readiness-ring>
       <p class="plp-factory-card__readiness-percent">{{ clampedReadiness }}%</p>
-      <plp-completion-bar [value]="clampedReadiness" [status]="resolvedStatus" label="جاهزية" class="plp-factory-card__readiness-bar"></plp-completion-bar>
+      <plp-completion-bar [value]="clampedReadiness" [status]="resolvedStatus" [label]="progressLabel" class="plp-factory-card__readiness-bar"></plp-completion-bar>
     </div>
   </div>
 

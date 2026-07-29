@@ -19,6 +19,14 @@ export interface LayoutNode {
   readinessPercent?: number;
   workersCurrent?: number;
   workersRequired?: number;
+  workerRequirementDefined?: boolean;
+  staffingSummaryAvailable?: boolean;
+  attendanceSummaryAvailable?: boolean;
+  presentAssignedWorkers?: number;
+  absentAssignedWorkers?: number;
+  attendanceStatus?: string;
+  attendanceSummaryText?: string;
+  assignmentParticipationsCount?: number;
   position?: LayoutPosition;
   description?: string;
 }
@@ -30,6 +38,8 @@ export interface FactoryLayout extends LayoutNode {
 
 export interface ProductionLineLayout extends LayoutNode {
   type: 'line';
+  departmentId?: string | null;
+  departmentName?: string | null;
   statusText: string;
   activeStageId: string;
   activeStageName: string;

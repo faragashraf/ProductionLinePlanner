@@ -36,6 +36,7 @@ public static class PermissionCatalog
 
         new("stages.view", "stages", "عرض المراحل", "View stages", false),
         new("stages.manage", "stages", "إدارة المراحل", "Manage stages", true),
+        new("stages.delete", "stages", "حذف المراحل غير المستخدمة", "Delete unused stages", true),
         new("stages.import", "stages", "استيراد مراحل", "Import stages", true),
         new("stages.export", "stages", "تصدير المراحل", "Export stages", true),
 
@@ -56,6 +57,7 @@ public static class PermissionCatalog
         new("roles.manage", "roles", "إدارة الأدوار", "Manage roles", true),
 
         new("permissions.assign", "permissions", "إدارة التعريفات الممنوحة", "Assign permission overrides", true),
+        new(NotificationPolicyPermissions.Manage, "notifications", "إدارة سياسات الإشعارات", "Manage notification policies", true),
         new("audit.view", "audit", "عرض سجل المراجعة", "View audit logs", true)
     ];
 

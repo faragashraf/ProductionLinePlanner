@@ -21,12 +21,21 @@ import { productionIconFor } from '../design-system/icons/production-icon-map';
           type="search"
           (input)="onSearch($event)"
         />
+        <button
+          *ngIf="clearEnabled && searchValue"
+          type="button"
+          class="p-button p-component p-button-text p-button-sm plp-product-toolbar__clear"
+          [attr.aria-label]="clearLabel"
+          [title]="clearLabel"
+          (click)="clearSearch()"
+        ><i class="pi pi-times" aria-hidden="true"></i></button>
       </div>
       <div class="plp-product-toolbar__filters"><ng-content select="[plp-toolbar-filters]"></ng-content></div>
       <div class="plp-product-toolbar__actions plp-action-group"><ng-content select="[plp-toolbar-actions]"></ng-content></div>
     </section>
   `,
-  changeDetection: ChangeDetectionStrategy.OnPush
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  host: { class: 'plp-product-toolbar-host' }
 })
 export class PlpProductToolbarComponent {
   @Input() searchEnabled = true;
@@ -34,6 +43,8 @@ export class PlpProductToolbarComponent {
   @Input() searchPlaceholder = 'بحث';
   @Input() searchLabel = 'بحث في النتائج';
   @Input() searchInputId = 'plp-toolbar-search';
+  @Input() clearEnabled = false;
+  @Input() clearLabel = 'مسح البحث';
   @Input() density: 'standard' | 'compact' = 'standard';
   @Output() searchValueChange = new EventEmitter<string>();
 
@@ -41,5 +52,9 @@ export class PlpProductToolbarComponent {
 
   onSearch(event: Event): void {
     this.searchValueChange.emit((event.target as HTMLInputElement).value);
+  }
+
+  clearSearch(): void {
+    this.searchValueChange.emit('');
   }
 }

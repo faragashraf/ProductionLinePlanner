@@ -1,8 +1,8 @@
 export const environment = {
   production: true,
-  // Production hosting must expose the API and hubs through the same origin.
-  // Keeping these explicit paths avoids a browser-side dependency on an
-  // internal API host while preserving deployments mounted below a host name.
-  apiBaseUrl: '/api',
-  hubBaseUrl: '/hubs'
+  // IIS hosts the static application and API as separate LAN sites. These are
+  // origins, not IIS physical-path segments, so the Angular base href remains
+  // `/` and the URL builders append `/api` or `/hubs` as appropriate.
+  apiBaseUrl: 'http://192.168.1.99:9000',
+  hubBaseUrl: 'http://192.168.1.99:9000'
 };

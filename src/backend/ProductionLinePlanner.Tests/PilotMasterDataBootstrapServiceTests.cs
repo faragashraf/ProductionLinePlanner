@@ -126,6 +126,35 @@ public sealed class PilotMasterDataBootstrapServiceTests
     }
 
     [Fact]
+    public async Task Bootstrap_allows_the_same_stage_code_owned_by_another_department()
+    {
+        await using var fixture = await BootstrapFixture.CreateAsync(includeWorker: true);
+        var otherFactory = new Factory(Guid.NewGuid(), "Other factory", "OTHER");
+        var otherDepartment = new Department(Guid.NewGuid(), otherFactory.Id, "OTHER", "قسم آخر", "Other", 1);
+        var otherLine = new ProductionLine(Guid.NewGuid(), otherFactory.Id, "Other line", 1, "OTHER-LINE", departmentId: otherDepartment.Id);
+        var otherMainStage = new MainStage(Guid.NewGuid(), otherDepartment.Id, "Other group", 1);
+        fixture.Db.AddRange(
+            otherFactory,
+            otherDepartment,
+            otherLine,
+            otherMainStage,
+            new SubStage(Guid.NewGuid(), otherMainStage.Id, "Other stage", "STG001", 1, 1, departmentId: otherMainStage.DepartmentId));
+        await fixture.Db.SaveChangesAsync();
+        var input = fixture.CreateInput(salary: 100m);
+
+        var preview = await fixture.Service.PreviewAsync(input);
+        var applied = await fixture.Service.ApplyAsync(input, fixture.ActorId, confirmed: true);
+
+        Assert.True(preview.CanApply);
+        Assert.False(applied.WasAlreadyCurrent);
+        var matchingStages = await fixture.Db.SubStages.AsNoTracking()
+            .Where(stage => stage.Code == "STG001")
+            .ToArrayAsync();
+        Assert.Equal(2, matchingStages.Length);
+        Assert.Equal(2, matchingStages.Select(stage => stage.DepartmentId).Distinct().Count());
+    }
+
+    [Fact]
     public async Task Bootstrap_rolls_back_all_local_changes_when_auditing_fails()
     {
         await using var fixture = await BootstrapFixture.CreateAsync(includeWorker: true, throwingAudit: true);

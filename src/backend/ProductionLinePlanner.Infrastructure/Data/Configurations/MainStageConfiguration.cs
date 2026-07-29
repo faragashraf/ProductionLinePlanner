@@ -12,7 +12,7 @@ public sealed class MainStageConfiguration : IEntityTypeConfiguration<MainStage>
         builder.HasKey(x => x.Id);
 
         builder.Property(x => x.Id).ValueGeneratedNever();
-        builder.Property(x => x.ProductionLineId).IsRequired();
+        builder.Property(x => x.DepartmentId).IsRequired();
         builder.Property(x => x.Name).IsRequired().HasMaxLength(200);
         builder.Property(x => x.SequenceOrder).IsRequired();
         builder.Property(x => x.IsCritical).HasDefaultValue(false);
@@ -20,16 +20,19 @@ public sealed class MainStageConfiguration : IEntityTypeConfiguration<MainStage>
         builder.Property(x => x.CreatedAtUtc).IsRequired();
         builder.Property(x => x.UpdatedAtUtc).IsRequired();
 
-        builder.HasIndex(x => new { x.ProductionLineId, x.SequenceOrder }).IsUnique();
+        builder.HasIndex(x => new { x.DepartmentId, x.Name }).IsUnique();
+        builder.HasIndex(x => new { x.DepartmentId, x.SequenceOrder });
+        builder.HasAlternateKey(x => new { x.Id, x.DepartmentId });
 
-        builder.HasOne(x => x.ProductionLine)
+        builder.HasOne(x => x.Department)
             .WithMany(x => x.MainStages)
-            .HasForeignKey(x => x.ProductionLineId)
+            .HasForeignKey(x => x.DepartmentId)
             .OnDelete(DeleteBehavior.Restrict);
 
         builder.HasMany(x => x.SubStages)
             .WithOne(x => x.MainStage)
-            .HasForeignKey(x => x.MainStageId)
+            .HasForeignKey(x => new { x.MainStageId, x.DepartmentId })
+            .HasPrincipalKey(x => new { x.Id, x.DepartmentId })
             .OnDelete(DeleteBehavior.Restrict);
     }
 }

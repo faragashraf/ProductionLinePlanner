@@ -1,183 +1,93 @@
-<section class="page-frame factory-visualization-page">
-  <plp-page-header title="مؤشر التمثيل البصري للمصنع" description="هيكلية بياناتية تفاعلية تدعم التنقل بين مستويات المصنع دون استدعاء backend." [compact]="true">
-    <plp-product-metadata-row
-      *ngIf="!isLoading"
-      header-metadata
-      plp-page-metadata
-      label="ملخص خريطة المصنع"
-    >
-      <plp-product-metadata-item label="المصنع" [value]="layout.name"></plp-product-metadata-item>
-      <plp-product-metadata-item label="خطوط التشغيل" [value]="layout.lines.length"></plp-product-metadata-item>
-    </plp-product-metadata-row>
-    <div header-actions>
-      <button
-        type="button"
-        class="p-button p-button-sm p-button-text"
-        (click)="showFactory()"
-        *ngIf="currentZoom !== 'factory'"
-      >
-        العودة لمستوى المصنع
-      </button>
-    </div>
-  </plp-page-header>
+<main class="factory-command" dir="rtl">
+  <header class="factory-command__header">
+    <div><span>Factory / Department / Line</span><h1>خريطة المصنع التشغيلية</h1><p>كل حالة أدناه ناتجة عن تشغيل مسجل، رحلة موديل، تسكين دائم، وحضور اليوم.</p></div>
+    <small *ngIf="data && dataIsCurrent">
+      <ng-container *ngIf="realtimeStatus$ | async as realtimeStatus">
+        <i class="realtime-status__dot" [ngClass]="realtimeClass(realtimeStatus)" aria-hidden="true"></i>
+        <strong>{{ realtimeLabel(realtimeStatus) }}</strong>
+      </ng-container>
+      <span>{{ isRefreshing ? 'جارٍ جلب التحديث · ' : '' }}آخر تحديث ناجح {{ data.calculatedAtUtc | date:'yyyy/MM/dd، HH:mm' }}</span>
+    </small>
+  </header>
 
-  <p
-    class="plp-inline-state plp-inline-state--loading"
-    *ngIf="isLoading"
-  >
-    <i class="pi pi-spin pi-spinner" aria-hidden="true"></i>
-    جارٍ تحميل خريطة المصنع…
-  </p>
+  <app-manufacturing-command-center-filters [catalog]="data?.filterCatalog ?? null" [filters]="filters" [loading]="isLoading" (filtersChange)="onFiltersChange($event)"></app-manufacturing-command-center-filters>
 
-  <p
-    class="plp-inline-state"
-    [class.plp-inline-state--warning]="showFallbackWarning && !isBackendDataIncomplete"
-    [class.plp-inline-state--incomplete]="isBackendDataIncomplete && !isLoading"
-    *ngIf="showFallbackWarning && !isLoading"
-  >
-    {{ fallbackWarningMessage }}
-  </p>
+  <section class="factory-command__loading-notice" *ngIf="isLoading && data && !dataIsCurrent" role="status"><i class="pi pi-spin pi-spinner" aria-hidden="true"></i><div><strong>جارٍ تحديث بيانات النطاق المختار…</strong><span>تم إخفاء الخريطة السابقة حتى يكتمل الطلب.</span></div></section>
+  <section class="factory-command__error" *ngIf="hasLoadError && !dataIsCurrent" role="alert"><strong>تعذر تحميل خريطة النطاق المحدد.</strong><span>لا نعرض خريطة النطاق السابق بدلًا منها.</span><button type="button" (click)="retry()">إعادة المحاولة</button></section>
+  <section class="factory-command__notice" *ngIf="hasLoadError && dataIsCurrent">تعذر التحديث اللحظي؛ بقيت آخر خريطة موثوقة لنفس النطاق وحالة التوسيع كما هما. <button type="button" (click)="retry()">إعادة المحاولة</button></section>
+  <section class="factory-command__loading" *ngIf="isLoading && !dataIsCurrent"><div></div><div></div><div></div></section>
 
-  <div *ngIf="!isLoading">
-    <nav class="factory-visualization-page__path" aria-label="مسار التنقل" role="navigation">
-      <button
-        type="button"
-        class="factory-visualization-page__path-button"
-        (click)="showFactory()"
-        [class.factory-visualization-page__path-button--active]="currentZoom === 'factory'"
-        [attr.aria-current]="currentZoom === 'factory' ? 'page' : null"
-      >
-        مصنع: {{ layout.name }}
-      </button>
+  <ng-container *ngIf="dataIsCurrent">
+  <ng-container *ngIf="data as current">
+    <section class="factory-command__scope"><strong>{{ current.scope.productionDate }}</strong><span>{{ current.lineSummary.activeLines }} خط نشط</span><span>{{ current.lineSummary.problemLines }} خط بمشكلة</span><span>{{ current.operations.linesWithOperation }} خط لديه تشغيل</span></section>
+    <section class="factory-command__empty" *ngIf="!isLoading && !current.factories.length"><i class="pi pi-sitemap"></i><h2>لا توجد عقد ضمن النطاق الحالي</h2><p>غيّر الفلاتر لعرض بنية تشغيلية أخرى.</p></section>
 
-      <span *ngIf="selectedLine" class="factory-visualization-page__path-sep">/</span>
-      <button
-        *ngIf="selectedLine"
-        type="button"
-        class="factory-visualization-page__path-button"
-        [class.factory-visualization-page__path-button--active]="currentZoom === 'line'"
-        [attr.aria-current]="currentZoom === 'line' ? 'page' : null"
-        (click)="showLine()"
-        [disabled]="currentZoom === 'factory'"
-      >
-        {{ selectedLine.name }}
-      </button>
+    <section class="factory-tree" *ngIf="current.factories.length" aria-label="الهيكل التشغيلي للمصنع">
+      <details class="factory-node" *ngFor="let factory of current.factories; trackBy: trackById" [open]="isExpanded('factory', factory.id)" (toggle)="setExpanded('factory', factory.id, $event)">
+        <summary>
+          <span class="node-icon"><i class="pi pi-building"></i></span>
+          <span class="node-title"><strong>{{ factory.name }}</strong><small>{{ factory.code }} · مصنع</small></span>
+          <span class="node-stat"><strong>{{ factory.activeDepartments }}</strong><small>قسم نشط</small></span>
+          <span class="node-stat"><strong>{{ factory.activeLines }}</strong><small>خط نشط</small></span>
+          <span class="node-stat state-ready"><strong>{{ factory.presentPermanentlyAssignedWorkers }}</strong><small>حاضر مسكن</small></span>
+          <span class="node-stat state-data-incomplete"><strong>{{ factory.problemLines }}</strong><small>خط بمشكلة</small></span>
+          <span class="node-operations"><em class="state-draft">{{ factory.draftOperations }} مسودة</em><em class="state-approved">{{ factory.approvedOperations }} معتمد</em></span>
+        </summary>
 
-      <span *ngIf="selectedMainStage" class="factory-visualization-page__path-sep">/</span>
-      <button
-        *ngIf="selectedMainStage"
-        type="button"
-        class="factory-visualization-page__path-button"
-        [class.factory-visualization-page__path-button--active]="currentZoom === 'stage' || currentZoom === 'worker'"
-        [attr.aria-current]="currentZoom === 'stage' ? 'page' : null"
-        [disabled]="currentZoom === 'factory' || currentZoom === 'line'"
-        (click)="showStage()"
-      >
-        {{ selectedMainStage.name }}
-      </button>
+        <div class="department-list">
+          <details class="department-node" *ngFor="let department of factory.departments" [open]="department.id && isExpanded('department', department.id)" (toggle)="setExpanded('department', department.id ?? 'unassigned-' + factory.id, $event)">
+            <summary>
+              <span class="node-icon"><i class="pi pi-sitemap"></i></span>
+              <span class="node-title"><strong>{{ department.name }}</strong><small>{{ department.code || 'بحاجة ربط تنظيمي' }}</small></span>
+              <span class="node-stat"><strong>{{ department.activeLines }}</strong><small>خط</small></span>
+              <span class="node-stat state-ready"><strong>{{ department.readyLines }}</strong><small>دون مشكلة جاهزية</small></span>
+              <span class="node-stat state-staffing-shortage"><strong>{{ department.notReadyLines }}</strong><small>تحتاج مراجعة جاهزية</small></span>
+              <span class="node-stat"><strong>{{ department.presentPermanentlyAssignedWorkers }}/{{ department.permanentlyAssignedWorkers }}</strong><small>حاضر/مسكن</small></span>
+            </summary>
 
-      <span *ngIf="selectedSubStage && currentZoom === 'worker'" class="factory-visualization-page__path-sep">/</span>
-      <button
-        *ngIf="selectedSubStage && currentZoom === 'worker'"
-        type="button"
-        class="factory-visualization-page__path-button factory-visualization-page__path-button--active"
-        aria-current="page"
-      >
-        {{ selectedSubStage.name }}
-      </button>
-    </nav>
+            <p class="department-node__note">{{ department.workforceAttributionNote }}</p>
+            <div class="line-list">
+              <details class="line-node" *ngFor="let line of sortedLines(department.lines); trackBy: trackById" [ngClass]="lineContainerClass(line)" [open]="isExpanded('line', line.id)" (toggle)="setExpanded('line', line.id, $event)">
+                <summary>
+                  <span class="line-node__identity"><strong>{{ line.name }}</strong><small>{{ line.code || 'بلا كود' }}</small></span>
+                  <div class="line-dimensions" aria-label="أبعاد حالة الخط">
+                    <span *ngFor="let dimension of lineDimensions(line)" [ngClass]="dimensionClass(dimension)"><small>{{ dimension.label }}</small><strong>{{ dimension.value }}</strong></span>
+                  </div>
+                  <span><strong>{{ line.presentPermanentlyAssignedWorkers }}/{{ line.requiredWorkers }}</strong><small>حاضر مسكن / احتياج الرحلة</small></span>
+                  <span><strong>{{ line.stagesCoveredByPresentWorker }}/{{ line.journeyStages }}</strong><small>مراحل بها حاضر / الرحلة</small></span>
+                  <time>{{ line.lastReliableUpdateUtc | date:'HH:mm' }}</time>
+                </summary>
 
-    <section *ngIf="currentZoom === 'factory'" class="factory-map-overview" aria-label="نظرة عامة على المصنع">
-      <article class="factory-map-summary">
-        <div class="factory-map-summary__main">
-          <div class="factory-map-summary__title-row">
-            <h2>{{ layout.name }}</h2>
-            <plp-status-badge [status]="layout.status ?? 'info'" [compact]="true"></plp-status-badge>
-          </div>
-          <p class="factory-map-summary__description">{{ layout.description }}</p>
-          <plp-product-metadata-row class="factory-map-summary__meta" [label]="'بيانات مصنع ' + layout.name">
-            <plp-product-metadata-item label="العاملون" [value]="(layout.workersCurrent ?? 0) + ' / ' + (layout.workersRequired ?? 0)"></plp-product-metadata-item>
-            <plp-product-metadata-item label="خطوط التشغيل" [value]="layout.lines.length"></plp-product-metadata-item>
-          </plp-product-metadata-row>
+                <div class="line-node__body">
+                  <ul class="line-alerts" *ngIf="line.alerts.length"><li *ngFor="let alert of line.alerts"><i class="pi pi-exclamation-circle"></i>{{ alert }}</li></ul>
+                  <section class="no-operation" *ngIf="!line.operations.length"><strong>لا يوجد تشغيل اليوم</strong><span>لا توجد كمية أو موديل أو مراحل مسجلة لعرضها.</span></section>
+
+                  <article class="operation" *ngFor="let operation of line.operations; trackBy: trackById">
+                    <header>
+                      <div><strong>{{ operation.productModelCode }} - {{ operation.productModelName }}</strong><small>تشغيل {{ current.scope.productionDate }}</small></div>
+                      <em [class]="statusClass(operation.status)">{{ operationLabel(operation.status) }}</em>
+                    </header>
+                    <div class="operation__facts">
+                      <div><span>الكمية المخططة</span><strong>{{ operation.finalLineQuantity | number:'1.0-3' }}</strong><small>قيمة ProductionOrder.PlannedQuantity المحفوظة، وليست إنتاجًا فعليًا مقاسًا</small></div>
+                      <div><span>أجور العمال المسجلة</span><strong>{{ operation.recordedStageValue | number:'1.2-2' }}</strong><small>مجموع TotalWorkerEarnings، وليس قيمة أوكمية إنتاج</small></div>
+                      <div><span>اكتمال تسجيل المراحل</span><strong>{{ ratioText(operation.stageRegistrationCoverage.percentage) }}</strong><small>{{ operation.registeredStages }} ÷ {{ operation.journeyStages }}</small></div>
+                      <div><span>آخر تحديث موثوق</span><strong>{{ operation.lastReliableUpdateUtc | date:'HH:mm' }}</strong><small>{{ operation.lastReliableUpdateUtc | date:'yyyy/MM/dd' }}</small></div>
+                    </div>
+                    <div class="stage-grid">
+                      <article class="stage" *ngFor="let stage of operation.stages" [class.stage--alert]="stage.alerts.length">
+                        <header><span>{{ stage.stageOrder }}</span><div><strong>{{ stage.stageName }}</strong><small>{{ stage.mainStageName }} · {{ stage.stageCode }}</small></div></header>
+                        <dl><div><dt>الحاضرون المسكنون</dt><dd>{{ stage.presentPermanentlyAssignedWorkers }}/{{ stage.requiredWorkers }}</dd></div><div><dt>تسجيل المرحلة</dt><dd>{{ stage.isRegistered ? 'مسجلة' : 'غير مسجلة' }}</dd></div><div><dt>السعر/الزمن</dt><dd>{{ stage.hasPrice && stage.hasStandardTime ? 'مكتمل' : 'ناقص' }}</dd></div></dl>
+                        <ul *ngIf="stage.alerts.length"><li *ngFor="let alert of stage.alerts">{{ alert }}</li></ul>
+                      </article>
+                    </div>
+                  </article>
+                </div>
+              </details>
+            </div>
+          </details>
         </div>
-
-        <div class="factory-map-summary__readiness" aria-label="جاهزية المصنع">
-          <strong>{{ layout.readinessPercent ?? 0 }}%</strong>
-          <span>جاهزية المصنع</span>
-          <plp-completion-bar
-            [value]="layout.readinessPercent ?? 0"
-            [status]="layout.status ?? 'info'"
-            label="التقدم"
-          ></plp-completion-bar>
-        </div>
-      </article>
-
-      <section class="factory-map-lines" aria-label="خطوط الإنتاج">
-        <button
-          type="button"
-          class="factory-map-line-card"
-          *ngFor="let line of layout.lines; trackBy: trackByLine"
-          (click)="onLineSelected(line.id)"
-          [attr.aria-label]="'فتح ' + line.name"
-        >
-          <header class="factory-map-line-card__header">
-            <h3>{{ line.name }}</h3>
-            <plp-status-badge [status]="line.status ?? 'info'" [label]="line.statusText" [compact]="true"></plp-status-badge>
-          </header>
-
-          <div class="factory-map-line-card__readiness">
-            <strong>{{ line.readinessPercent ?? 0 }}%</strong>
-            <plp-completion-bar
-              [value]="line.readinessPercent ?? 0"
-              [status]="line.status ?? 'info'"
-              label="جاهزية"
-            ></plp-completion-bar>
-          </div>
-
-          <plp-product-metadata-row class="factory-map-line-card__details" [label]="'بيانات خط ' + line.name">
-            <plp-product-metadata-item label="العاملون" [value]="(line.workersCurrent ?? 0) + ' / ' + (line.workersRequired ?? 0)"></plp-product-metadata-item>
-            <plp-product-metadata-item label="المرحلة النشطة" [value]="line.activeStageName || 'غير محدد'"></plp-product-metadata-item>
-          </plp-product-metadata-row>
-
-          <div class="factory-map-line-card__stages" aria-label="مراحل الخط">
-            <span
-              class="factory-map-line-card__stage-chip"
-              *ngFor="let stage of line.stages | slice: 0 : 4; trackBy: trackByStage"
-            >
-              {{ stage.name }}
-            </span>
-            <span class="factory-map-line-card__stage-chip factory-map-line-card__stage-chip--more" *ngIf="line.stages.length > 4">
-              +{{ line.stages.length - 4 }}
-            </span>
-          </div>
-        </button>
-      </section>
+      </details>
     </section>
-
-    <plp-line-renderer
-      *ngIf="currentZoom === 'line' && selectedLine"
-      [line]="selectedLine"
-      (backToFactory)="showFactory()"
-      (mainStageSelected)="onMainStageSelected($event)"
-    ></plp-line-renderer>
-
-    <plp-stage-renderer
-      *ngIf="currentZoom === 'stage' && selectedLine && selectedMainStage"
-      [line]="selectedLine"
-      [mainStage]="selectedMainStage"
-      [mode]="'stage'"
-      (back)="onStageBack($event)"
-      (subStageSelected)="onSubStageSelected($event)"
-    ></plp-stage-renderer>
-
-    <plp-stage-renderer
-      *ngIf="currentZoom === 'worker' && selectedLine && selectedMainStage && selectedSubStage"
-      [line]="selectedLine"
-      [mainStage]="selectedMainStage"
-      [subStage]="selectedSubStage"
-      [mode]="'worker'"
-      (back)="onStageBack($event)"
-      (subStageSelected)="onSubStageSelected($event)"
-    ></plp-stage-renderer>
-  </div>
-</section>
+  </ng-container>
+  </ng-container>
+</main>

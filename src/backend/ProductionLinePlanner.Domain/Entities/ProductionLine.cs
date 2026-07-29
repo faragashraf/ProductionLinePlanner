@@ -13,7 +13,8 @@ public class ProductionLine
         int sequenceOrder,
         string? lineCode = null,
         bool isActive = true,
-        DateTime? createdAtUtc = null)
+        DateTime? createdAtUtc = null,
+        Guid? departmentId = null)
     {
         if (factoryId == Guid.Empty)
             throw new ArgumentException("FactoryId is required.", nameof(factoryId));
@@ -25,6 +26,7 @@ public class ProductionLine
         Id = id;
         FactoryId = factoryId;
         Name = name.Trim();
+        DepartmentId = departmentId;
         SequenceOrder = sequenceOrder;
         LineCode = string.IsNullOrWhiteSpace(lineCode) ? null : lineCode.Trim();
         IsActive = isActive;
@@ -35,6 +37,8 @@ public class ProductionLine
     public Guid Id { get; init; }
     public Guid FactoryId { get; init; }
     public Factory? Factory { get; set; }
+    public Guid? DepartmentId { get; private set; }
+    public Department? Department { get; private set; }
     public string Name { get; private set; } = string.Empty;
     public string? LineCode { get; private set; }
     public int SequenceOrder { get; private set; }
@@ -42,13 +46,17 @@ public class ProductionLine
     public DateTime CreatedAtUtc { get; private set; }
     public DateTime UpdatedAtUtc { get; private set; }
 
-    public List<MainStage> MainStages { get; } = [];
-
     public void SetSequenceOrder(int sequenceOrder, DateTime? atUtc = null)
     {
         if (sequenceOrder < 0)
             throw new ArgumentOutOfRangeException(nameof(sequenceOrder), "SequenceOrder must be zero or positive.");
         SequenceOrder = sequenceOrder;
+        UpdatedAtUtc = atUtc ?? DateTime.UtcNow;
+    }
+
+    public void SetDepartment(Guid? departmentId, DateTime? atUtc = null)
+    {
+        DepartmentId = departmentId;
         UpdatedAtUtc = atUtc ?? DateTime.UtcNow;
     }
 

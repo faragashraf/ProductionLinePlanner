@@ -5,10 +5,12 @@ import { BehaviorSubject, Subject, of, throwError } from 'rxjs';
 import { AssignmentsApiService, LineStaffingPlan } from '../../core/services/assignments-api.service';
 import { ManufacturingMasterDataApiService } from '../../core/services/manufacturing-master-data-api.service';
 import { PermissionService } from '../../core/services/permission.service';
+import { ManufacturingRealtimeService } from '../../core/services/manufacturing-realtime.service';
 import { FormSubmissionValidationService } from '../../shared/forms/form-submission-validation.service';
 import { LineStaffingWorkspacePageComponent } from './line-staffing-workspace-page.component';
 
 const factoryId = '43dde27f-7ee3-4e90-9f3b-582fc90a3b0';
+const departmentId = '3adcd4d8-06da-4e9a-a2d8-5c1ac48274d9';
 const lineId = 'c0550d1f-4bf7-432c-b19b-672763d490fc';
 const modelId = '46593736-2fe2-450d-84a1-f304b712e07f';
 const defaultStageId = 'c0ec408d-74ab-4299-88cd-1a7543cc335b';
@@ -21,23 +23,33 @@ describe('LineStaffingWorkspacePageComponent', () => {
   let route: ActivatedRoute;
   let routeFragments: BehaviorSubject<string | null>;
   let component: LineStaffingWorkspacePageComponent;
+  let realtime: jasmine.SpyObj<ManufacturingRealtimeService>;
+  let stopRealtime: jasmine.Spy;
+  let realtimeWatch: { refresh: (change?: any) => void; matches?: (change: any) => boolean };
 
   beforeEach(() => {
-    masterData = jasmine.createSpyObj<ManufacturingMasterDataApiService>('ManufacturingMasterDataApiService', ['factories', 'allProductionLines', 'models']);
-    assignments = jasmine.createSpyObj<AssignmentsApiService>('AssignmentsApiService', ['getLineStaffingPlan', 'getLineStaffingStageRefresh', 'getActiveLineStaffingWorkers', 'updateStageDefaultAssignments', 'removeDefaultAssignment', 'cancelTemporaryAssignment', 'createTemporaryAssignment', 'createReplacementAssignment', 'moveCurrentAssignment']);
+    masterData = jasmine.createSpyObj<ManufacturingMasterDataApiService>('ManufacturingMasterDataApiService', ['factories', 'departments', 'allProductionLines', 'productionLinesForDepartment', 'models']);
+    assignments = jasmine.createSpyObj<AssignmentsApiService>('AssignmentsApiService', ['getLineStaffingPlan', 'getLineStaffingStageRefresh', 'getActiveLineStaffingWorkers', 'updateStageDefaultAssignments', 'removeDefaultAssignment']);
     masterData.factories.and.returnValue(of([{ id: factoryId, code: 'F1', name: 'المصنع', isActive: true }]));
-    masterData.allProductionLines.and.returnValue(of([{ id: lineId, factoryId, name: 'خط الخياطة', sequenceOrder: 1, isActive: true }]));
+    masterData.departments.and.returnValue(of([{ id: departmentId, factoryId, code: 'SEW', nameAr: 'الخياطة', isActive: true }]));
+    masterData.productionLinesForDepartment.and.returnValue(of([{ id: lineId, factoryId, departmentId, name: 'خط الخياطة', sequenceOrder: 1, isActive: true }]));
+    masterData.allProductionLines.and.returnValue(of([{ id: lineId, factoryId, departmentId, name: 'خط الخياطة', sequenceOrder: 1, isActive: true }]));
     masterData.models.and.returnValue(of([{ id: modelId, code: 'GER', name: 'جرومان', isActive: true }]));
     assignments.getLineStaffingPlan.and.callFake(() => of(plan()));
     assignments.getLineStaffingStageRefresh.and.callFake(() => of(stageRefresh()));
     assignments.getActiveLineStaffingWorkers.and.returnValue(of(plan().workers));
     assignments.updateStageDefaultAssignments.and.returnValue(of({ subStageId: defaultStageId, addedWorkersCount: 1, removedWorkersCount: 0, activeWorkerIds: ['worker-one', 'worker-two'] }));
     assignments.removeDefaultAssignment.and.returnValue(of({} as any));
-    assignments.cancelTemporaryAssignment.and.returnValue(of({} as any));
     routeFragments = new BehaviorSubject<string | null>(null);
     route = { fragment: routeFragments.asObservable() } as ActivatedRoute;
     router = jasmine.createSpyObj<Router>('Router', ['navigate']);
     router.navigate.and.returnValue(Promise.resolve(true));
+    stopRealtime = jasmine.createSpy('stopRealtime');
+    realtime = jasmine.createSpyObj<ManufacturingRealtimeService>('ManufacturingRealtimeService', ['watchScreen', 'registerLocalOperation']);
+    realtime.watchScreen.and.callFake((watch: any) => {
+      realtimeWatch = watch;
+      return stopRealtime;
+    });
     component = new LineStaffingWorkspacePageComponent(
       masterData,
       assignments,
@@ -45,7 +57,8 @@ describe('LineStaffingWorkspacePageComponent', () => {
       new FormBuilder(),
       new FormSubmissionValidationService(),
       route,
-      router
+      router,
+      realtime,
     );
   });
 
@@ -54,12 +67,13 @@ describe('LineStaffingWorkspacePageComponent', () => {
     document.body.classList.remove('plp-line-staffing-tablet-scroll-lock');
   });
 
-  it('loads all model stages only after Factory → Line → Model and the explicit load action', () => {
+  it('loads model stages only after Factory → Department → Line → Model and the explicit load action', () => {
     component.ngOnInit();
     expect(masterData.factories).toHaveBeenCalledTimes(1);
     expect(assignments.getLineStaffingPlan).not.toHaveBeenCalled();
 
     component.selectFactory(factoryId);
+    component.selectDepartment(departmentId);
     component.selectProductionLine(lineId);
     component.selectProductModel(modelId);
     expect(assignments.getLineStaffingPlan).not.toHaveBeenCalled();
@@ -71,12 +85,90 @@ describe('LineStaffingWorkspacePageComponent', () => {
     expect(component.selectedStage?.subStageId).toBe(defaultStageId);
   });
 
-  it('keeps the staffing form date-free and exposes time-only assignment controls', () => {
-    expect('referenceDate' in component).toBeFalse();
-    expect(component.assignmentForm.contains('startTime')).toBeTrue();
-    expect(component.assignmentForm.contains('endTime')).toBeTrue();
-    expect(component.assignmentForm.contains('startAtLocal')).toBeFalse();
-    expect(component.assignmentForm.contains('endAtLocal')).toBeFalse();
+  it('refreshes only the changed permanent-assignment stage for the same factory and production line', () => {
+    initialize(component);
+    const matching = permanentAssignmentChange({ subStageId: temporaryStageId });
+
+    expect(realtimeWatch.matches?.(matching)).toBeTrue();
+    realtimeWatch.refresh(matching);
+
+    expect(assignments.getLineStaffingStageRefresh).toHaveBeenCalledWith(factoryId, lineId, modelId, temporaryStageId, component.staffingReferenceDate);
+    expect(realtimeWatch.matches?.(permanentAssignmentChange({ productionLineId: 'other-line' }))).toBeFalse();
+    expect(realtimeWatch.matches?.(permanentAssignmentChange({ factoryId: 'other-factory' }))).toBeFalse();
+  });
+
+  it('keeps unsaved staffing dialog selections and shows a refresh notice for a matching remote event', () => {
+    initialize(component);
+    component.openDefaultAssignment();
+    component.toggleDefaultWorker(component.availableWorkers[1], true);
+    const matching = permanentAssignmentChange();
+
+    expect(realtimeWatch.matches?.(matching)).toBeTrue();
+    realtimeWatch.refresh(matching);
+
+    expect(component.assignmentDialogVisible).toBeTrue();
+    expect(component.hasPendingRemoteUpdate).toBeTrue();
+    expect(assignments.getLineStaffingStageRefresh).not.toHaveBeenCalled();
+  });
+
+  it('releases the line-staffing realtime watcher on destroy', () => {
+    component.ngOnInit();
+    component.ngOnDestroy();
+
+    expect(stopRealtime).toHaveBeenCalledTimes(1);
+  });
+
+  it('loads the reusable factory tree once and derives the selected factory, department, and line context', () => {
+    component.ngOnInit();
+    expect(masterData.departments).toHaveBeenCalledWith(undefined, false);
+    expect(masterData.allProductionLines).toHaveBeenCalledTimes(1);
+    expect(component.activeDepartments.map(department => department.id)).toEqual([departmentId]);
+    const lineNode = component.staffingStructureTreeNodes[0].children![0].children![0] as any;
+    component.selectStaffingStructure(lineNode);
+    expect(component.selectedFactoryId).toBe(factoryId);
+    expect(component.selectedDepartmentId).toBe(departmentId);
+    expect(component.selectedProductionLineId).toBe(lineId);
+    expect(component.visibleProductionLines.map(line => line.id)).toEqual([lineId]);
+  });
+
+  it('clears dependent context and a loaded journey when a higher context value changes', () => {
+    initialize(component);
+    expect(component.plan).not.toBeNull();
+
+    component.selectDepartment('');
+
+    expect(component.selectedProductionLineId).toBe('');
+    expect(component.selectedProductModelId).toBe('');
+    expect(component.selectedSubStageId).toBe('');
+    expect(component.plan).toBeNull();
+  });
+
+  it('does not include unassigned lines in the staffing choices', () => {
+    masterData.allProductionLines.and.returnValue(of([
+      { id: lineId, factoryId, departmentId, name: 'خط الخياطة', sequenceOrder: 1, isActive: true },
+      { id: 'legacy-line', factoryId, departmentId: null, name: 'خط قديم', sequenceOrder: 2, isActive: true }
+    ]));
+    component.ngOnInit();
+    component.selectFactory(factoryId);
+    component.selectDepartment(departmentId);
+
+    expect(component.visibleProductionLines.map(line => line.id)).toEqual([lineId]);
+  });
+
+  it('keeps the model journey empty state distinct when the selected model has no configured stages', () => {
+    assignments.getLineStaffingPlan.and.returnValue(of({ ...plan(), stages: [], totalStages: 0, stagesWithWorkers: 0, stagesWithoutWorkers: 0 }));
+    initialize(component);
+
+    expect(component.plan).not.toBeNull();
+    expect(component.hasLoadedModelJourney).toBeFalse();
+    expect(component.selectedStage).toBeNull();
+  });
+
+  it('keeps the staffing form permanent-only with no temporary fields or mode selector state', () => {
+    expect(component.assignmentForm.contains('workerId')).toBeTrue();
+    expect(component.assignmentForm.contains('startTime')).toBeFalse();
+    expect(component.assignmentForm.contains('endTime')).toBeFalse();
+    expect(component.assignmentForm.contains('temporaryParticipationMode')).toBeFalse();
   });
 
   it('loads every active staffing worker immediately without an attendance prerequisite and filters stages in place', () => {
@@ -101,7 +193,7 @@ describe('LineStaffingWorkspacePageComponent', () => {
     component.toggleDefaultWorker(component.availableWorkers[1], true);
     component.saveAssignment();
 
-    expect(assignments.updateStageDefaultAssignments).toHaveBeenCalledWith(defaultStageId, ['worker-one', 'worker-two']);
+    expect(assignments.updateStageDefaultAssignments).toHaveBeenCalledWith(lineId, defaultStageId, ['worker-one', 'worker-two']);
     expect(component.assignmentDialogVisible).toBeFalse();
     expect(component.successMessage).toContain('تم تحديث عمال المرحلة');
     expect(component.selectedSubStageId).toBe(defaultStageId);
@@ -135,29 +227,13 @@ describe('LineStaffingWorkspacePageComponent', () => {
     expect(assignments.getActiveLineStaffingWorkers).toHaveBeenCalledTimes(workerDirectoryRequests);
   });
 
-  it('routes every scoped assignment action through the one shared sheet state and retains worker context', () => {
+  it('exposes only permanent assignment and permanent cancellation through the shared sheet', () => {
     initialize(component);
     const assignedWorker = component.plan!.workers[0];
 
     component.openDefaultAssignment();
     expect(component.assignmentDialogVisible).toBeTrue();
     expect(component.assignmentDialogMode).toBe('default');
-    component.closeAssignmentDialog();
-
-    component.openTemporaryAssignment();
-    expect(component.assignmentDialogVisible).toBeTrue();
-    expect(component.assignmentDialogMode).toBe('temporary');
-    component.closeAssignmentDialog();
-
-    component.openReplacement(assignedWorker);
-    expect(component.assignmentDialogVisible).toBeTrue();
-    expect(component.assignmentDialogMode).toBe('replacement');
-    expect(component.assignmentDialogSubtitle).toContain(assignedWorker.employeeCode);
-    component.closeAssignmentDialog();
-
-    component.openMove(assignedWorker);
-    expect(component.assignmentDialogVisible).toBeTrue();
-    expect(component.assignmentDialogMode).toBe('move');
     component.closeAssignmentDialog();
 
     component.openCancellation(assignedWorker);
@@ -225,7 +301,7 @@ describe('LineStaffingWorkspacePageComponent', () => {
     component.toggleDefaultWorker(component.availableWorkers[0], false);
     component.saveAssignment();
 
-    expect(assignments.updateStageDefaultAssignments).toHaveBeenCalledWith(defaultStageId, []);
+    expect(assignments.updateStageDefaultAssignments).toHaveBeenCalledWith(lineId, defaultStageId, []);
   });
 
   it('does not require a reason when adding a permanent participation to another stage', () => {
@@ -238,37 +314,6 @@ describe('LineStaffingWorkspacePageComponent', () => {
 
     component.toggleDefaultWorker(component.availableWorkers[1], false);
     expect(component.assignmentMissingRequirements).not.toContain('سبب تغيير التعيين الدائم مطلوب');
-  });
-
-  it('keeps temporary assignment in the shared form state until reason and a valid period are supplied', () => {
-    initialize(component);
-    component.openTemporaryAssignment();
-    component.selectDialogWorker(component.availableWorkers[1]);
-
-    expect(component.assignmentDialogVisible).toBeTrue();
-    expect(component.assignmentMissingRequirements).toContain('سبب التعيين المؤقت مطلوب');
-    expect(component.assignmentMissingRequirements).toContain('وقت النهاية مطلوب');
-
-    component.assignmentForm.controls.startTime.setValue(null);
-    expect(component.assignmentMissingRequirements).toContain('وقت البداية مطلوب');
-
-    component.assignmentForm.patchValue({
-      startTime: new Date(2026, 6, 16, 8, 0),
-      endTime: new Date(2026, 6, 16, 12, 0),
-      reason: 'تغطية مؤقتة'
-    });
-
-    expect(component.assignmentMissingRequirements).toEqual([]);
-    expect(component.assignmentDialogVisible).toBeTrue();
-  });
-
-  it('shows temporary-assignment candidates before an end date is entered instead of silently filtering them away', () => {
-    initialize(component);
-    component.openTemporaryAssignment();
-
-    expect(assignments.getActiveLineStaffingWorkers).toHaveBeenCalledWith(component.staffingReferenceDate);
-    expect(component.availableWorkers.map(worker => worker.employeeCode)).toEqual(['100', '101']);
-    expect(component.assignmentForm.controls.endTime.value).toBeNull();
   });
 
   it('navigates both directions through the current filter and problem stages without reloading the plan', () => {
@@ -641,7 +686,7 @@ describe('LineStaffingWorkspacePageComponent', () => {
     expect(component.selectedStageWorkers).toEqual([]);
     expect(component.selectedStage?.effectiveAssignedWorkersCount).toBe(0);
     expect(component.selectedStage?.staffingStatus).toBe('NeedsStaffing');
-    expect(component.selectedStage?.workerStatusText).toBe('لا يوجد عمال معينون');
+    expect(component.selectedStage?.workerStatusText).toBe('لا يوجد عمال مسكنون');
   });
 
   it('keeps the previous worker details when cancellation fails', () => {
@@ -659,7 +704,7 @@ describe('LineStaffingWorkspacePageComponent', () => {
     expect(assignments.getLineStaffingStageRefresh).not.toHaveBeenCalled();
   });
 
-  it('keeps a worker assigned to another stage selectable as an additional participation', () => {
+  it('keeps a worker assigned to another stage selectable for permanent assignment', () => {
     initialize(component);
     component.selectStage(temporaryStageId);
     component.openDefaultAssignment();
@@ -669,15 +714,13 @@ describe('LineStaffingWorkspacePageComponent', () => {
     expect(component.workerParticipationStageNames(worker)).toEqual(['تجميع']);
   });
 
-  it('keeps worker search and selection behavior unchanged with structured participation metadata', () => {
+  it('keeps permanent worker search behavior without opening a non-permanent dialog', () => {
     initialize(component);
-    component.openTemporaryAssignment();
+    component.openDefaultAssignment();
     component.workerSearch = '101';
 
     expect(component.availableWorkers.map(worker => worker.workerId)).toEqual(['worker-two']);
-    component.selectDialogWorker(component.availableWorkers[0]);
-    expect(component.selectedDialogWorker?.workerId).toBe('worker-two');
-    expect(component.workerParticipationStageNames(component.selectedDialogWorker!)).toEqual([]);
+    expect(component.assignmentDialogMode).toBe('default');
   });
 
   it('uses only the independently scrollable stage list for explicit next-stage navigation without moving focus', fakeAsync(() => {
@@ -723,7 +766,7 @@ describe('LineStaffingWorkspacePageComponent', () => {
     expect(selectedPanel.scrollTop).toBe(74);
   }));
 
-  it('labels provisional SharedPercentage setup as a temporary stage-cost configuration', () => {
+  it('labels provisional SharedPercentage setup as a stage-cost configuration', () => {
     initialize(component);
 
     expect(component.compensationStatusLabel(component.selectedStage!)).toBe('إعداد تكلفة المرحلة مؤقت');
@@ -733,9 +776,31 @@ describe('LineStaffingWorkspacePageComponent', () => {
 function initialize(component: LineStaffingWorkspacePageComponent): void {
   component.ngOnInit();
   component.selectFactory(factoryId);
+  component.selectDepartment(departmentId);
   component.selectProductionLine(lineId);
   component.selectProductModel(modelId);
   component.loadProductStages();
+}
+
+function permanentAssignmentChange(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    eventId: 'permanent-assignment-event',
+    entityType: 'WorkerDefaultAssignment',
+    changeType: 'permanent-assignment-created',
+    entityId: 'assignment-1',
+    occurredAtUtc: new Date().toISOString(),
+    actorUserId: 'actor-1',
+    correlationId: null,
+    factoryId,
+    departmentId,
+    productionLineId: lineId,
+    mainStageId: 'main-stage-1',
+    productModelId: null,
+    subStageId: defaultStageId,
+    productionDate: null,
+    workerId: 'worker-1',
+    ...overrides,
+  };
 }
 
 function selectionEvent(checked: boolean): Event {
@@ -800,7 +865,7 @@ function cancelledStageRefresh() {
     effectiveAssignedWorkersCount: 0,
     temporaryAssignedWorkersCount: 0,
     staffingStatus: 'NeedsStaffing',
-    workerStatusText: 'لا يوجد عمال معينون',
+    workerStatusText: 'لا يوجد عمال مسكنون',
     effectiveWorkerIds: []
   };
   return {
@@ -882,7 +947,7 @@ function plan(): LineStaffingPlan {
     financialConfigurationPending: true,
     stages: [
       { productModelStageId: 'stage-one', subStageId: defaultStageId, mainStageName: 'تجميع', stageCode: 'S1', stageName: 'تجميع', stageOrder: 1, piecePrice: .38, compensationMode: 'SharedPercentage', compensationConfigurationStatus: 'FinancialReviewPending', isFinancialReviewPending: true, defaultAssignedWorkersCount: 1, effectiveAssignedWorkersCount: 1, temporaryAssignedWorkersCount: 0, requiredWorkers: null, hasAuthoritativeRequiredWorkerCount: false, staffingStatus: 'Staffed', workerStatusText: 'يوجد عامل واحد', effectiveWorkerIds: ['worker-one'] },
-      { productModelStageId: 'stage-two', subStageId: temporaryStageId, mainStageName: 'تشطيب', stageCode: 'S2', stageName: 'تشطيب', stageOrder: 2, piecePrice: .38, compensationMode: 'SharedPercentage', compensationConfigurationStatus: 'FinancialReviewPending', isFinancialReviewPending: true, defaultAssignedWorkersCount: 0, effectiveAssignedWorkersCount: 0, temporaryAssignedWorkersCount: 0, requiredWorkers: null, hasAuthoritativeRequiredWorkerCount: false, staffingStatus: 'NeedsStaffing', workerStatusText: 'لا يوجد عمال معينون', effectiveWorkerIds: [] }
+      { productModelStageId: 'stage-two', subStageId: temporaryStageId, mainStageName: 'تشطيب', stageCode: 'S2', stageName: 'تشطيب', stageOrder: 2, piecePrice: .38, compensationMode: 'SharedPercentage', compensationConfigurationStatus: 'FinancialReviewPending', isFinancialReviewPending: true, defaultAssignedWorkersCount: 0, effectiveAssignedWorkersCount: 0, temporaryAssignedWorkersCount: 0, requiredWorkers: null, hasAuthoritativeRequiredWorkerCount: false, staffingStatus: 'NeedsStaffing', workerStatusText: 'لا يوجد عمال مسكنون', effectiveWorkerIds: [] }
     ],
     workers: [
       { workerId: 'worker-one', employeeCode: '100', fullName: 'عامل أول', departmentName: 'التجميع', isOnActiveService: true, hasPhoto: false, photoReference: null, photoVersion: null, defaultSubStageId: defaultStageId, defaultSubStageName: 'تجميع', effectiveAssignmentId: 'default-a', effectiveAssignmentType: 'Default', effectiveSubStageId: defaultStageId, effectiveSubStageName: 'تجميع', fromSubStageId: null, fromSubStageName: null, temporaryStartsAtUtc: null, temporaryEndsAtUtc: null, replacementForWorkerId: null, participations: [{ assignmentId: 'default-a', assignmentType: 'Default', subStageId: defaultStageId, subStageName: 'تجميع', fromSubStageId: null, fromSubStageName: null, startsAtUtc: null, endsAtUtc: null, replacementForWorkerId: null, temporaryParticipationMode: null }] },

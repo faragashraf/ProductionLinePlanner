@@ -1,22 +1,45 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { catchError, map, Observable, of, timeout } from 'rxjs';
+import { catchError, forkJoin, map, Observable, of } from 'rxjs';
 import { ApiResponse } from '../models/api-response.model';
 import { buildApiUrl } from '../config/api.config';
-import { deriveStatusFromReadiness } from '../../shared/models/factory-status.model';
+import { PERMISSIONS } from '../config/permission-identifiers';
+import { PermissionService } from './permission.service';
+import { FactoryStatus } from '../../shared/models/factory-status.model';
 import {
   FactoryLayout,
+  LayoutNode,
   LayoutPosition,
   MainStageLayout,
   ProductionLineLayout,
-  SubStageLayout,
-  WorkerLayout
+  SubStageLayout
 } from '../../shared/models/factory-visualization.model';
 
 type RawRecord = Record<string, unknown>;
 type FactoryMapFallbackReason = 'incomplete' | 'connection';
+type StaffingStatus = 'RequirementNotDefined' | 'Unstaffed' | 'Understaffed' | 'Staffed';
+type SubStageAttendanceStatus = 'FullyPresent' | 'PartiallyPresent' | 'AllAbsent' | 'NeedsSync' | 'NoAssignments' | 'NotAuthorized' | 'Unavailable';
+type AttendanceSummaryAvailability = 'available' | 'not-authorized' | 'unavailable';
+interface HierarchySummaryOverride {
+  workersCurrent?: number;
+  presentAssignedWorkers?: number;
+  absentAssignedWorkers?: number;
+}
 
-const FACTORY_MAP_REQUEST_TIMEOUT_MS = 1500;
+export function createEmptyFactoryLayout(): FactoryLayout {
+  return {
+    id: 'factory-empty',
+    type: 'factory',
+    name: 'خريطة المصنع',
+    status: 'info',
+    readinessPercent: 0,
+    workersCurrent: 0,
+    workersRequired: 0,
+    workerRequirementDefined: false,
+    description: 'لا توجد بيانات تسكين متاحة من الخادم.',
+    lines: []
+  };
+}
 
 export interface FactoryMapApiData {
   layout: FactoryLayout;
@@ -25,456 +48,451 @@ export interface FactoryMapApiData {
   fallbackReason?: FactoryMapFallbackReason;
 }
 
-interface FactoryReadinessSummary {
-  overallReadiness: number;
-  workersCurrent: number;
-  workersRequired: number;
-  totalLines: number;
-}
-
-@Injectable({
-  providedIn: 'root'
-})
+@Injectable({ providedIn: 'root' })
 export class FactoryMapApiService {
-  constructor(private readonly http: HttpClient) {}
+  constructor(
+    private readonly http: HttpClient,
+    private readonly permissionService: PermissionService
+  ) {}
 
   loadFactoryMapData(): Observable<FactoryMapApiData> {
-    return this.getFactories().pipe(
-      timeout(FACTORY_MAP_REQUEST_TIMEOUT_MS),
-      map((factories) => {
+    return forkJoin({
+      factories: this.getEntityList('/api/factories?pageSize=200'),
+      productionLines: this.getEntityList('/api/production-lines?pageSize=200'),
+      mainStages: this.getEntityList('/api/main-stages?isActive=true&pageSize=200'),
+      subStages: this.getEntityList('/api/sub-stages?isActive=true&pageSize=200'),
+      staffingCoverage: this.getEntityList('/api/factory-structure/sub-stages/staffing-coverage'),
+      attendanceSummary: this.loadAttendanceSummary()
+    }).pipe(
+      map(({ factories, productionLines, mainStages, subStages, staffingCoverage, attendanceSummary }) => {
         const selectedFactory = factories[0] ?? {};
+        const selectedFactoryId = this.resolveString(selectedFactory, ['id', 'factoryId', '_id']);
         const mapped = this.mapFactoryLayout(
-          factories,
-          this.getNestedProductionLines(selectedFactory),
-          [],
-          [],
-          this.getEmptyFactoryReadiness(),
-          []
+          selectedFactory,
+          productionLines.filter((line) => this.resolveString(line, ['factoryId', 'parentFactoryId']) === selectedFactoryId),
+          mainStages,
+          subStages,
+          this.indexByKey(staffingCoverage, ['subStageId', 'id']),
+          this.indexByKey(attendanceSummary.items, ['subStageId', 'id']),
+          attendanceSummary.availability
         );
-        const hasBackendData = this.hasBackendData(factories);
-        const hasUsableBackendData = this.hasUsableBackendData(mapped, hasBackendData);
+        const hasBackendData = factories.length > 0;
 
-        if (!hasBackendData || !hasUsableBackendData) {
+        if (!hasBackendData || !this.hasUsableBackendData(mapped, hasBackendData)) {
           return this.createFallbackData('incomplete', hasBackendData);
         }
 
-        return {
-          layout: mapped,
-          hasBackendData: true,
-          hasUsableBackendData: true
-        };
+        return { layout: mapped, hasBackendData: true, hasUsableBackendData: true };
       }),
       catchError(() => of(this.createFallbackData('connection')))
     );
   }
 
-  private getFactories(): Observable<RawRecord[]> {
-    return this.http
-      .get<ApiResponse<unknown>>(buildApiUrl('/api/factories'))
-      .pipe(
-        map((response) => this.parseEntityList(this.extractPayload(response))),
-        map((factories) => factories.map((item) => this.normalizeObject(item)))
-      );
-  }
-
-  private hasBackendData(factories: RawRecord[]): boolean {
-    return factories.length > 0;
-  }
-
-  private getNestedProductionLines(factory: RawRecord): RawRecord[] {
-    return this.toArray(this.pickFirst(factory, ['productionLines', 'lines', 'items']))
-      .map((line) => this.normalizeObject(line));
-  }
-
-  private createFallbackData(
-    fallbackReason: FactoryMapFallbackReason,
-    hasBackendData = false
-  ): FactoryMapApiData {
-    return {
-      layout: this.getEmptyFactoryLayout(),
-      hasBackendData,
-      hasUsableBackendData: false,
-      fallbackReason
-    };
-  }
-
-  private getEmptyFactoryReadiness(): FactoryReadinessSummary {
-    return {
-      overallReadiness: 0,
-      workersCurrent: 0,
-      workersRequired: 0,
-      totalLines: 0
-    };
-  }
-
-  private hasUsableBackendData(layout: FactoryLayout, hasBackendData: boolean): boolean {
-    if (!hasBackendData) {
-      return false;
+  private loadAttendanceSummary(): Observable<{ items: RawRecord[]; availability: AttendanceSummaryAvailability }> {
+    if (!this.permissionService.hasPermission(PERMISSIONS.attendance.view)) {
+      return of({ items: [], availability: 'not-authorized' as const });
     }
 
-    if (layout.lines.length === 0) {
-      return false;
-    }
-
-    const totalStages = layout.lines.reduce((sum, line) => sum + (line.stages?.length ?? 0), 0);
-    return totalStages > 0;
+    return this.getEntityList('/api/factory-structure/sub-stages/attendance-summary').pipe(
+      map((items) => ({ items, availability: 'available' as const })),
+      catchError(() => of({ items: [], availability: 'unavailable' as const }))
+    );
   }
 
   private mapFactoryLayout(
-    factories: RawRecord[],
+    selectedFactory: RawRecord,
     productionLines: RawRecord[],
     mainStages: RawRecord[],
     subStages: RawRecord[],
-    factoryReadiness: FactoryReadinessSummary,
-    lineReadiness: RawRecord[]
+    staffingCoverageBySubStageId: Map<string, RawRecord>,
+    attendanceSummaryBySubStageId: Map<string, RawRecord>,
+    attendanceSummaryAvailability: AttendanceSummaryAvailability
   ): FactoryLayout {
-    const selectedFactory = factories.length > 0 ? factories[0] : {};
-    const mainStageMap = this.groupByParentId(mainStages, ['lineId', 'productionLineId', 'parentLineId']);
+    const mainStageMap = this.groupByParentId(mainStages, ['departmentId', 'parentDepartmentId']);
     const subStageByMainMap = this.groupByParentId(subStages, ['mainStageId', 'parentMainStageId', 'parentId']);
-    const lineReadinessById = this.indexByKey(lineReadiness, ['lineId', 'productionLineId', 'id', '_id']);
-
-    const mappedLines = this.buildProductionLines(
-      productionLines,
+    const lines = productionLines.map((line, index) => this.mapLine(
+      line,
+      index,
       mainStageMap,
       subStageByMainMap,
-      lineReadinessById
-    );
-
-    const lines = mappedLines.length > 0 ? mappedLines : this.buildLinesFromReadiness(lineReadinessById, mainStageMap, subStageByMainMap);
-    const totalWorkersCurrent = lines.reduce((sum, line) => sum + (line.workersCurrent ?? 0), 0);
-    const totalWorkersRequired = lines.reduce((sum, line) => sum + (line.workersRequired ?? 0), 0);
-    const factoryReadinessPercent = this.toPercent(
-      this.pickFirst(selectedFactory, ['readinessPercent', 'readiness', 'overallReadiness', 'readinessPercentile']),
-      totalWorkersCurrent,
-      totalWorkersRequired,
-      this.toPercentFromReadinessObject(factoryReadiness)
-    );
+      staffingCoverageBySubStageId,
+      attendanceSummaryBySubStageId,
+      attendanceSummaryAvailability
+    ));
+    const subStageIds = lines.flatMap(line => line.stages.flatMap(stage => stage.subStages.map(subStage => subStage.id)));
+    const summary = this.summarizeNodes(lines, this.hierarchySummaryOverride(
+      subStageIds,
+      staffingCoverageBySubStageId,
+      attendanceSummaryBySubStageId,
+      'factory'
+    ));
 
     return {
       id: this.resolveString(selectedFactory, ['id', 'factoryId', '_id']) || 'factory-01',
       type: 'factory',
-      name: this.resolveString(selectedFactory, ['name', 'factoryName', 'title']) || 'مصنع الطموح',
-      status: deriveStatusFromReadiness(factoryReadinessPercent),
-      readinessPercent: factoryReadinessPercent,
-      workersCurrent: this.toNumber(
-        this.pickFirst(selectedFactory, ['workersCurrent', 'currentWorkers', 'activeWorkers', 'activeWorkersCount']),
-        totalWorkersCurrent
-      ),
-      workersRequired: this.toNumber(
-        this.pickFirst(selectedFactory, ['workersRequired', 'requiredWorkers', 'expectedWorkers']),
-        totalWorkersRequired
-      ),
-      description: this.resolveString(
-        selectedFactory,
-        ['description', 'summary', 'meta']
-      ) || 'خريطة مرئية تعتمد على ميتاداتا المصانع.',
+      name: this.resolveString(selectedFactory, ['name', 'factoryName', 'title']) || 'مصنع غير محدد',
+      status: this.statusFor(summary.staffingStatus, summary.readinessPercent),
+      readinessPercent: summary.readinessPercent,
+      workersCurrent: summary.workersCurrent,
+      workersRequired: summary.workersRequired,
+      workerRequirementDefined: summary.workerRequirementDefined,
+      staffingSummaryAvailable: summary.staffingSummaryAvailable,
+      attendanceSummaryAvailable: summary.attendanceSummaryAvailable,
+      presentAssignedWorkers: summary.presentAssignedWorkers,
+      absentAssignedWorkers: summary.absentAssignedWorkers,
+      attendanceStatus: summary.attendanceStatus,
+      attendanceSummaryText: this.attendanceSummaryText(summary),
+      assignmentParticipationsCount: summary.assignmentParticipationsCount,
+      description: 'خريطة مرئية لتغطية التسكين الفعّال.',
       lines
     };
   }
 
-  private buildLinesFromReadiness(
-    lineReadinessById: Map<string, RawRecord>,
-    mainStageMap: Map<string, RawRecord[]>,
-    subStageByMainMap: Map<string, RawRecord[]>
-  ): ProductionLineLayout[] {
-    return Array.from(lineReadinessById.entries()).map(([lineId], index) => {
-      const readinessRecord = lineReadinessById.get(lineId) ?? {};
-      const lineName = this.resolveString(readinessRecord, ['lineName', 'name', 'title'], `الخط ${index + 1}`);
-
-      const stages = this.buildMainStages(
-        lineId,
-        this.resolveString(readinessRecord, ['name', 'lineName', 'title']) || lineName,
-        mainStageMap.get(lineId) ?? [],
-        subStageByMainMap,
-        readinessRecord
-      );
-
-      const stageWorkersCurrent = stages.reduce((sum, stage) => sum + (stage.workersCurrent ?? 0), 0);
-      const stageWorkersRequired = stages.reduce((sum, stage) => sum + (stage.workersRequired ?? 0), 0);
-      const workersCurrent = this.toNumber(
-        this.pickFirst(readinessRecord, ['workersCurrent', 'currentWorkers', 'activeWorkers']),
-        stageWorkersCurrent
-      );
-      const workersRequired = this.toNumber(
-        this.pickFirst(readinessRecord, ['workersRequired', 'requiredWorkers', 'expectedWorkers']),
-        stageWorkersRequired
-      );
-      const readinessPercent = this.toPercent(
-        this.pickFirst(readinessRecord, ['readinessPercent', 'readiness', 'lineReadinessPercent', 'readinessRate']),
-        workersCurrent,
-        workersRequired
-      );
-      const activeStage = stages.length > 0 ? stages[0] : null;
-
-      return {
-        id: lineId,
-        type: 'line',
-        name: lineName,
-        status: deriveStatusFromReadiness(readinessPercent),
-        readinessPercent,
-        statusText: this.toStatusText(readinessPercent),
-        activeStageId: activeStage?.id ?? '',
-        activeStageName: activeStage?.name ?? 'بدون مرحلة نشطة',
-        workersCurrent,
-        workersRequired,
-        stages,
-        description: `خط ${lineName}`
-      };
-    });
-  }
-
-  private buildProductionLines(
-    productionLines: RawRecord[],
+  private mapLine(
+    lineRecord: RawRecord,
+    index: number,
     mainStageMap: Map<string, RawRecord[]>,
     subStageByMainMap: Map<string, RawRecord[]>,
-    lineReadinessById: Map<string, RawRecord>
-  ): ProductionLineLayout[] {
-    return productionLines.map((lineRecord, lineIndex) => {
-      const lineId = this.resolveString(lineRecord, ['id', 'lineId', 'productionLineId', '_id'], `line-${lineIndex + 1}`);
-      const lineName = this.resolveString(lineRecord, ['name', 'lineName', 'title'], `الخط ${lineIndex + 1}`);
-      const stagesFromLine = this.toArray(this.pickFirst(lineRecord, ['stages', 'mainStages', 'items']));
-      const mainStageRecords = this.mergeById(mainStageMap.get(lineId) ?? [], stagesFromLine, ['id', 'mainStageId', 'stageId', '_id']);
-      const readinessRecord = lineReadinessById.get(lineId) ?? {};
-      const stages = this.buildMainStages(lineId, lineName, mainStageRecords, subStageByMainMap, readinessRecord);
-
-      const activeStage = stages.length > 0 ? stages[0] : null;
-      const inlineActiveStageId = this.resolveString(lineRecord, ['activeStageId', 'currentStageId']);
-      const inlineActiveStageName = this.resolveString(lineRecord, ['activeStageName', 'currentStageName']);
-      const stageWorkersCurrent = stages.reduce((sum, stage) => sum + (stage.workersCurrent ?? 0), 0);
-      const stageWorkersRequired = stages.reduce((sum, stage) => sum + (stage.workersRequired ?? 0), 0);
-      const workersCurrent = this.toNumber(
-        this.pickFirst(lineRecord, ['workersCurrent', 'currentWorkers', 'activeWorkers']),
-        this.toNumber(this.pickFirst(readinessRecord, ['workersCurrent', 'currentWorkers', 'activeWorkers']), stageWorkersCurrent)
-      );
-      const workersRequired = this.toNumber(
-        this.pickFirst(lineRecord, ['workersRequired', 'requiredWorkers', 'expectedWorkers']),
-        this.toNumber(this.pickFirst(readinessRecord, ['workersRequired', 'requiredWorkers', 'expectedWorkers']), stageWorkersRequired)
-      );
-      const readinessPercent = this.toPercent(
-        this.pickFirst(lineRecord, ['readinessPercent', 'readiness', 'lineReadinessPercent']),
-        workersCurrent,
-        workersRequired
-      );
-      const statusText = this.resolveString(
-        lineRecord,
-        ['statusText', 'readinessLabel', 'status'],
-        this.toStatusText(readinessPercent)
-      );
-
-      return {
-        id: lineId,
-        type: 'line',
-        name: lineName,
-        status: deriveStatusFromReadiness(readinessPercent),
-        readinessPercent,
-        statusText,
-        activeStageId: inlineActiveStageId || activeStage?.id || '',
-        activeStageName: inlineActiveStageName || activeStage?.name || 'بدون مرحلة نشطة',
-        workersCurrent,
-        workersRequired,
-        position: this.parsePosition(lineRecord),
-        stages,
-        description: this.resolveString(lineRecord, ['description', 'summary'])
-      };
-    });
-  }
-
-  private buildMainStages(
-    lineId: string,
-    lineName: string,
-    stages: RawRecord[],
-    subStageByMainMap: Map<string, RawRecord[]>,
-    lineReadinessRecord: RawRecord
-  ): MainStageLayout[] {
-    return stages.map((stageRecord, stageIndex) => {
-      const stageId = this.resolveString(stageRecord, ['id', 'mainStageId', 'stageId', '_id'], `${lineId}-stage-${stageIndex + 1}`);
-      const stageName = this.resolveString(stageRecord, ['name', 'stageName', 'title'], `${lineName} - مرحلة`);
-
-      const inlineSubStages = this.toArray(this.pickFirst(stageRecord, ['subStages', 'stages', 'items']));
-      const subStagesRecords = this.mergeById(
-        subStageByMainMap.get(stageId) ?? [],
-        inlineSubStages,
-        ['id', 'subStageId', 'workerStageId', '_id']
-      );
-      const workersFromSubStages = subStagesRecords.reduce<{ current: number; required: number }>(
-        (acc, subStage) => {
-          const subWorkers = this.parseWorkers(subStage);
-          return {
-            current: acc.current + subWorkers.currentCount,
-            required: acc.required + subWorkers.requiredCount
-          };
-        },
-        { current: 0, required: 0 }
-      );
-      const workersCurrent = this.toNumber(
-        this.pickFirst(stageRecord, ['workersCurrent', 'currentWorkers', 'activeWorkers']),
-        workersFromSubStages.current
-      );
-      const workersRequired = this.toNumber(
-        this.pickFirst(stageRecord, ['workersRequired', 'requiredWorkers', 'expectedWorkers']),
-        workersFromSubStages.required
-      );
-      const lineFallbackCurrent = this.toNumber(this.pickFirst(lineReadinessRecord, ['workersCurrent', 'currentWorkers']));
-      const lineFallbackRequired = this.toNumber(this.pickFirst(lineReadinessRecord, ['workersRequired', 'requiredWorkers']));
-      const readinessPercent = this.toPercent(
-        this.pickFirst(stageRecord, ['readinessPercent', 'readiness']),
-        workersCurrent || lineFallbackCurrent,
-        workersRequired || lineFallbackRequired
-      );
-      const parsedSubStages = subStagesRecords.map((subStageRecord, subStageIndex) =>
-        this.mapSubStage(subStageRecord, `${stageId}-sub-${subStageIndex + 1}`)
-      );
-
-      return {
-        id: stageId,
-        type: 'main-stage',
-        name: stageName,
-        status: deriveStatusFromReadiness(readinessPercent),
-        readinessPercent,
-        workersCurrent,
-        workersRequired,
-        note: this.resolveString(stageRecord, ['note', 'description']),
-        position: this.parsePosition(stageRecord),
-        subStages: parsedSubStages
-      };
-    });
-  }
-
-  private mapSubStage(subStageRecord: RawRecord, fallbackId: string): SubStageLayout {
-    const subStageId = this.resolveString(subStageRecord, ['id', 'subStageId', '_id'], fallbackId);
-    const subStageName = this.resolveString(subStageRecord, ['name', 'stageName', 'title'], 'مرحلة فرعية');
-    const workers = this.parseWorkers(subStageRecord).workers;
-    const workersCurrent = this.toNumber(
-      this.pickFirst(subStageRecord, ['workersCurrent', 'currentWorkers']),
-      workers.length
-    );
-    const workersRequired = this.toNumber(
-      this.pickFirst(subStageRecord, ['workersRequired', 'requiredWorkers', 'expectedWorkers']),
-      workersCurrent
-    );
-    const readinessPercent = this.toPercent(
-      this.pickFirst(subStageRecord, ['readinessPercent', 'readiness']),
-      workersCurrent,
-      workersRequired
-    );
+    staffingCoverageBySubStageId: Map<string, RawRecord>,
+    attendanceSummaryBySubStageId: Map<string, RawRecord>,
+    attendanceSummaryAvailability: AttendanceSummaryAvailability
+  ): ProductionLineLayout {
+    const id = this.resolveString(lineRecord, ['id', 'lineId', 'productionLineId', '_id'], `line-${index + 1}`);
+    const name = this.resolveString(lineRecord, ['name', 'lineName', 'title'], `الخط ${index + 1}`);
+    const departmentId = this.resolveString(lineRecord, ['departmentId']);
+    const stages = (mainStageMap.get(departmentId) ?? []).map((stage, stageIndex) => this.mapMainStage(
+      stage,
+      stageIndex,
+      id,
+      name,
+      subStageByMainMap,
+      staffingCoverageBySubStageId,
+      attendanceSummaryBySubStageId,
+      attendanceSummaryAvailability,
+      id
+    ));
+    const subStageIds = stages.flatMap(stage => stage.subStages.map(subStage => subStage.id));
+    const summary = this.summarizeNodes(stages, this.hierarchySummaryOverride(
+      subStageIds,
+      staffingCoverageBySubStageId,
+      attendanceSummaryBySubStageId,
+      'productionLine',
+      id
+    ));
+    const activeStage = stages[0];
 
     return {
-      id: subStageId,
+      id,
+      type: 'line',
+      departmentId: departmentId || null,
+      departmentName: this.resolveString(lineRecord, ['departmentNameAr', 'departmentName', 'department']) || null,
+      name,
+      status: this.statusFor(summary.staffingStatus, summary.readinessPercent),
+      readinessPercent: summary.readinessPercent,
+      statusText: this.statusText(summary.staffingStatus),
+      activeStageId: activeStage?.id ?? '',
+      activeStageName: activeStage?.name ?? 'بدون مرحلة نشطة',
+      workersCurrent: summary.workersCurrent,
+      workersRequired: summary.workersRequired,
+      workerRequirementDefined: summary.workerRequirementDefined,
+      staffingSummaryAvailable: summary.staffingSummaryAvailable,
+      attendanceSummaryAvailable: summary.attendanceSummaryAvailable,
+      presentAssignedWorkers: summary.presentAssignedWorkers,
+      absentAssignedWorkers: summary.absentAssignedWorkers,
+      attendanceStatus: summary.attendanceStatus,
+      attendanceSummaryText: this.attendanceSummaryText(summary),
+      assignmentParticipationsCount: summary.assignmentParticipationsCount,
+      position: this.parsePosition(lineRecord),
+      stages,
+      description: this.resolveString(lineRecord, ['description', 'summary'])
+    };
+  }
+
+  private mapMainStage(
+    stageRecord: RawRecord,
+    index: number,
+    lineId: string,
+    lineName: string,
+    subStageByMainMap: Map<string, RawRecord[]>,
+    staffingCoverageBySubStageId: Map<string, RawRecord>,
+    attendanceSummaryBySubStageId: Map<string, RawRecord>,
+    attendanceSummaryAvailability: AttendanceSummaryAvailability,
+    productionLineId: string
+  ): MainStageLayout {
+    const id = this.resolveString(stageRecord, ['id', 'mainStageId', 'stageId', '_id'], `${lineId}-stage-${index + 1}`);
+    const subStages = (subStageByMainMap.get(id) ?? []).map((subStage, subStageIndex) =>
+      this.mapSubStage(
+        subStage,
+        `${id}-sub-${subStageIndex + 1}`,
+        staffingCoverageBySubStageId,
+        attendanceSummaryBySubStageId,
+        attendanceSummaryAvailability,
+        productionLineId
+      )
+    );
+    const summary = this.summarizeNodes(subStages, this.hierarchySummaryOverride(
+      subStages.map(subStage => subStage.id),
+      staffingCoverageBySubStageId,
+      attendanceSummaryBySubStageId,
+      'mainStage',
+      productionLineId
+    ));
+
+    return {
+      id,
+      type: 'main-stage',
+      name: this.resolveString(stageRecord, ['name', 'stageName', 'title'], `${lineName} - مرحلة`),
+      status: this.statusFor(summary.staffingStatus, summary.readinessPercent),
+      readinessPercent: summary.readinessPercent,
+      workersCurrent: summary.workersCurrent,
+      workersRequired: summary.workersRequired,
+      workerRequirementDefined: summary.workerRequirementDefined,
+      staffingSummaryAvailable: summary.staffingSummaryAvailable,
+      attendanceSummaryAvailable: summary.attendanceSummaryAvailable,
+      presentAssignedWorkers: summary.presentAssignedWorkers,
+      absentAssignedWorkers: summary.absentAssignedWorkers,
+      attendanceStatus: summary.attendanceStatus,
+      attendanceSummaryText: this.attendanceSummaryText(summary),
+      assignmentParticipationsCount: summary.assignmentParticipationsCount,
+      note: this.resolveString(stageRecord, ['note', 'description']),
+      position: this.parsePosition(stageRecord),
+      subStages
+    };
+  }
+
+  private mapSubStage(
+    subStageRecord: RawRecord,
+    fallbackId: string,
+    staffingCoverageBySubStageId: Map<string, RawRecord>,
+    attendanceSummaryBySubStageId: Map<string, RawRecord>,
+    attendanceSummaryAvailability: AttendanceSummaryAvailability,
+    productionLineId: string
+  ): SubStageLayout {
+    const id = this.resolveString(subStageRecord, ['id', 'subStageId', '_id'], fallbackId);
+    const coverageRoot = staffingCoverageBySubStageId.get(id);
+    const coverage = coverageRoot
+      ? this.productionLineBreakdown(coverageRoot, productionLineId) ?? coverageRoot
+      : undefined;
+    const staffingSummaryAvailable = !!coverageRoot && !!coverage;
+    const workerRequirementDefined = staffingSummaryAvailable && this.toBoolean(
+      this.pickFirst(coverageRoot!, ['hasAuthoritativeRequiredWorkerCount']),
+      false
+    );
+    const workersCurrent = staffingSummaryAvailable
+      ? this.toNumber(this.pickFirst(coverage!, ['assignedWorkersCount']), 0)
+      : 0;
+    const workersRequired = workerRequirementDefined
+      ? this.toNumber(this.pickFirst(coverageRoot!, ['requiredWorkersCount']), 0)
+      : 0;
+    const staffingStatus = staffingSummaryAvailable
+      ? this.toStaffingStatus(undefined, workersCurrent, workersRequired, workerRequirementDefined)
+      : 'RequirementNotDefined';
+    const readinessPercent = workerRequirementDefined
+      ? this.toPercent(undefined, workersCurrent, workersRequired)
+      : 0;
+    const attendanceRoot = attendanceSummaryBySubStageId.get(id);
+    const attendance = attendanceRoot
+      ? this.productionLineBreakdown(attendanceRoot, productionLineId) ?? attendanceRoot
+      : undefined;
+    const attendanceSummaryAvailable = attendanceSummaryAvailability === 'available' && !!attendance;
+    const attendanceStatus = attendanceSummaryAvailability === 'not-authorized'
+      ? 'NotAuthorized'
+      : attendanceSummaryAvailability === 'unavailable' || !attendance
+        ? 'Unavailable'
+        : this.toAttendanceStatus(this.pickFirst(attendance, ['attendanceStatus']));
+
+    return {
+      id,
       type: 'sub-stage',
-      name: subStageName,
-      status: deriveStatusFromReadiness(readinessPercent),
+      name: this.resolveString(subStageRecord, ['name', 'stageName', 'title'], 'مرحلة فرعية'),
+      status: this.statusFor(staffingStatus, readinessPercent),
       readinessPercent,
       workersCurrent,
       workersRequired,
-      workers,
+      workerRequirementDefined,
+      staffingSummaryAvailable,
+      attendanceSummaryAvailable,
+      presentAssignedWorkers: attendanceSummaryAvailable
+        ? this.toNumber(this.pickFirst(attendance!, ['presentAssignedWorkersCount']), 0)
+        : 0,
+      absentAssignedWorkers: attendanceSummaryAvailable
+        ? this.toNumber(this.pickFirst(attendance!, ['absentAssignedWorkersCount']), 0)
+        : 0,
+      attendanceStatus,
+      assignmentParticipationsCount: workersCurrent,
+      workers: [],
       position: this.parsePosition(subStageRecord)
     };
   }
 
-  private parseWorkers(record: RawRecord): { workers: WorkerLayout[]; currentCount: number; requiredCount: number } {
-    const workers = this.toArray(this.pickFirst(record, ['workers', 'assignedWorkers', 'crew', 'members'])).map((worker, workerIndex) => {
-      const workerRecord = this.normalizeObject(worker);
+  private summarizeNodes(nodes: LayoutNode[], authoritative: HierarchySummaryOverride = {}): {
+    workersCurrent: number;
+    assignmentParticipationsCount: number;
+    workersRequired: number;
+    workerRequirementDefined: boolean;
+    staffingSummaryAvailable: boolean;
+    readinessPercent: number;
+    staffingStatus: StaffingStatus;
+    attendanceSummaryAvailable: boolean;
+    presentAssignedWorkers: number;
+    absentAssignedWorkers: number;
+    attendanceStatus: SubStageAttendanceStatus;
+  } {
+    const assignmentParticipationsCount = nodes.reduce(
+      (sum, node) => sum + (node.assignmentParticipationsCount ?? node.workersCurrent ?? 0),
+      0
+    );
+    const workersCurrent = authoritative.workersCurrent ?? assignmentParticipationsCount;
+    const workersRequired = nodes.reduce((sum, node) => sum + (node.workersRequired ?? 0), 0);
+    const staffingSummaryAvailable = nodes.length > 0 && nodes.every((node) => node.staffingSummaryAvailable === true);
+    const workerRequirementDefined = staffingSummaryAvailable && nodes.every((node) => node.workerRequirementDefined === true);
+    const readinessPercent = workerRequirementDefined ? this.toPercent(undefined, assignmentParticipationsCount, workersRequired) : 0;
+    const staffingStatus: StaffingStatus = !workerRequirementDefined
+      ? 'RequirementNotDefined'
+      : workersCurrent === 0
+        ? 'Unstaffed'
+        : assignmentParticipationsCount < workersRequired
+          ? 'Understaffed'
+          : 'Staffed';
+
+    const presentAssignedWorkers = authoritative.presentAssignedWorkers
+      ?? nodes.reduce((sum, node) => sum + (node.presentAssignedWorkers ?? 0), 0);
+    const absentAssignedWorkers = authoritative.absentAssignedWorkers
+      ?? nodes.reduce((sum, node) => sum + (node.absentAssignedWorkers ?? 0), 0);
+    const attendanceSummaryAvailable = nodes.length > 0 && nodes.every(node => node.attendanceSummaryAvailable === true);
+    const statuses = nodes.map(node => node.attendanceStatus);
+    const attendanceStatus: SubStageAttendanceStatus = workersCurrent === 0
+      ? 'NoAssignments'
+      : statuses.some(status => status === 'NotAuthorized')
+        ? 'NotAuthorized'
+        : !attendanceSummaryAvailable || statuses.some(status => status === 'NeedsSync' || status === 'Unavailable')
+          ? 'NeedsSync'
+          : presentAssignedWorkers === workersCurrent
+            ? 'FullyPresent'
+            : presentAssignedWorkers === 0
+              ? 'AllAbsent'
+              : 'PartiallyPresent';
+    return { workersCurrent, assignmentParticipationsCount, workersRequired, workerRequirementDefined, staffingSummaryAvailable, readinessPercent, staffingStatus, attendanceSummaryAvailable, presentAssignedWorkers, absentAssignedWorkers, attendanceStatus };
+  }
+
+  private hierarchySummaryOverride(
+    subStageIds: string[],
+    staffingCoverageBySubStageId: Map<string, RawRecord>,
+    attendanceSummaryBySubStageId: Map<string, RawRecord>,
+    scope: 'mainStage' | 'productionLine' | 'factory',
+    productionLineId?: string
+  ): HierarchySummaryOverride {
+    if (productionLineId) {
+      const staffingKey = scope === 'mainStage'
+        ? 'mainStageDistinctWorkersCount'
+        : 'productionLineDistinctWorkersCount';
+      const attendancePrefix = scope === 'mainStage' ? 'mainStageDistinct' : 'productionLineDistinct';
       return {
-        id: this.resolveString(workerRecord, ['id', 'workerId', '_id'], `worker-${workerIndex + 1}`),
-        fullName: this.resolveString(workerRecord, ['fullName', 'name', 'employeeName'], `عامل ${workerIndex + 1}`),
-        code: this.resolveString(workerRecord, ['code', 'workerCode', 'badge', 'employeeCode'], `W-${workerIndex + 1}`),
-        status: this.resolveString(workerRecord, ['status', 'workerStatus', 'state'], 'info'),
-        assignmentType: this.resolveString(workerRecord, ['assignmentType', 'type', 'employmentType'], 'غير محدد'),
-        lastActivity: this.resolveString(
-          workerRecord,
-          ['lastActivity', 'lastActivityText', 'statusText', 'lastSeen'],
-          'غير متاح'
-        )
+        workersCurrent: this.firstProductionLineAggregateNumber(subStageIds, staffingCoverageBySubStageId, productionLineId, staffingKey),
+        presentAssignedWorkers: this.firstProductionLineAggregateNumber(subStageIds, attendanceSummaryBySubStageId, productionLineId, `${attendancePrefix}PresentWorkersCount`),
+        absentAssignedWorkers: this.firstProductionLineAggregateNumber(subStageIds, attendanceSummaryBySubStageId, productionLineId, `${attendancePrefix}AbsentWorkersCount`)
       };
-    });
-
-    const workersCurrent = this.toNumber(this.pickFirst(record, ['workersCurrent', 'currentWorkers']), workers.length);
-    const workersRequired = this.toNumber(this.pickFirst(record, ['workersRequired', 'requiredWorkers', 'expectedWorkers']), workers.length);
-
-    return {
-      workers,
-      currentCount: workersCurrent,
-      requiredCount: workersRequired
-    };
-  }
-
-  private parseFactoryReadiness(raw: unknown): FactoryReadinessSummary {
-    const source = this.normalizeObject(raw);
-    return {
-      overallReadiness: this.toNumber(this.pickFirst(source, ['overallReadiness', 'readiness', 'overallReadyPercent'])),
-      workersCurrent: this.toNumber(this.pickFirst(source, ['workersCurrent', 'currentWorkers', 'activeWorkers'])),
-      workersRequired: this.toNumber(this.pickFirst(source, ['workersRequired', 'requiredWorkers', 'expectedWorkers'])),
-      totalLines: this.toNumber(this.pickFirst(source, ['totalLines', 'linesCount', 'lineCount']))
-    };
-  }
-
-  private toPercentFromReadinessObject(readiness: FactoryReadinessSummary): number {
-    if (!readiness.overallReadiness) {
-      return 0;
     }
-    return this.clampPercent(Math.round(readiness.overallReadiness));
+    const staffingKey = `${scope}DistinctWorkersCount`;
+    const attendancePrefix = `${scope}Distinct`;
+    return {
+      workersCurrent: this.firstAggregateNumber(subStageIds, staffingCoverageBySubStageId, staffingKey),
+      presentAssignedWorkers: this.firstAggregateNumber(subStageIds, attendanceSummaryBySubStageId, `${attendancePrefix}PresentWorkersCount`),
+      absentAssignedWorkers: this.firstAggregateNumber(subStageIds, attendanceSummaryBySubStageId, `${attendancePrefix}AbsentWorkersCount`)
+    };
+  }
+
+  private firstProductionLineAggregateNumber(
+    ids: string[],
+    records: Map<string, RawRecord>,
+    productionLineId: string,
+    key: string
+  ): number | undefined {
+    for (const id of ids) {
+      const record = records.get(id);
+      if (!record) continue;
+      const breakdown = this.productionLineBreakdown(record, productionLineId) ?? record;
+      const value = this.pickFirst(breakdown, [key]);
+      if (typeof value === 'number' && Number.isFinite(value)) return value;
+    }
+    return undefined;
+  }
+
+  private productionLineBreakdown(record: RawRecord, productionLineId: string): RawRecord | undefined {
+    const items = this.pickFirst(record, ['productionLines']);
+    if (!Array.isArray(items)) return undefined;
+    return items
+      .map((item) => this.normalizeObject(item))
+      .find((item) => this.resolveString(item, ['productionLineId', 'lineId']) === productionLineId);
+  }
+
+  private firstAggregateNumber(ids: string[], records: Map<string, RawRecord>, key: string): number | undefined {
+    for (const id of ids) {
+      const record = records.get(id);
+      if (!record) continue;
+      const value = this.pickFirst(record, [key]);
+      if (typeof value === 'number' && Number.isFinite(value)) return value;
+    }
+    return undefined;
+  }
+
+  private attendanceSummaryText(summary: { workersCurrent: number; presentAssignedWorkers: number; attendanceStatus: SubStageAttendanceStatus }): string {
+    if (summary.attendanceStatus === 'NotAuthorized') return 'غير متاح بالصلاحية';
+    if (summary.attendanceStatus === 'NeedsSync' || summary.attendanceStatus === 'Unavailable') return 'تحتاج مزامنة حضور اليوم';
+    if (summary.attendanceStatus === 'NoAssignments') return 'لا يوجد عمال مسكنون';
+    return `${summary.presentAssignedWorkers} من ${summary.workersCurrent}`;
+  }
+
+  private hasUsableBackendData(layout: FactoryLayout, hasBackendData: boolean): boolean {
+    if (!hasBackendData || layout.lines.length === 0) {
+      return false;
+    }
+
+    const subStages = layout.lines.flatMap((line) => line.stages.flatMap((stage) => stage.subStages));
+    return subStages.length > 0 && subStages.every((stage) => stage.staffingSummaryAvailable === true);
+  }
+
+  private createFallbackData(fallbackReason: FactoryMapFallbackReason, hasBackendData = false): FactoryMapApiData {
+    return { layout: createEmptyFactoryLayout(), hasBackendData, hasUsableBackendData: false, fallbackReason };
+  }
+
+  private getEntityList(path: string): Observable<RawRecord[]> {
+    return this.http.get<ApiResponse<unknown>>(buildApiUrl(path)).pipe(
+      map((response) => this.parseEntityList(this.extractPayload(response))),
+      map((items) => items.map((item) => this.normalizeObject(item)))
+    );
   }
 
   private parseEntityList(raw: unknown): unknown[] {
-    const source = this.normalizeObject(raw);
-    const candidates = this.pickFirst(source, ['factories', 'productionLines', 'mainStages', 'subStages', 'lines', 'items', 'data', 'results']);
-    const candidateArray = this.toArray(candidates);
-    if (candidateArray.length > 0) {
-      return candidateArray;
+    if (Array.isArray(raw)) {
+      return raw;
     }
 
-    if (raw === null || raw === undefined) {
-      return [];
-    }
-    return Array.isArray(raw) ? raw : [];
+    const source = this.normalizeObject(raw);
+    const candidate = this.pickFirst(source, ['items', 'data', 'results']);
+    return Array.isArray(candidate) ? candidate : [];
   }
 
   private groupByParentId(records: RawRecord[], parentKeys: string[]): Map<string, RawRecord[]> {
     const grouped = new Map<string, RawRecord[]>();
-
     records.forEach((record) => {
       const parentId = this.resolveString(record, parentKeys);
-      const bucket = parentId || '__unknown__';
-      const collection = grouped.get(bucket) ?? [];
+      const collection = grouped.get(parentId) ?? [];
       collection.push(record);
-      grouped.set(bucket, collection);
+      grouped.set(parentId, collection);
     });
-
     return grouped;
   }
 
   private indexByKey(records: RawRecord[], keys: string[]): Map<string, RawRecord> {
-    const map = new Map<string, RawRecord>();
+    const index = new Map<string, RawRecord>();
     records.forEach((record) => {
       const key = this.resolveString(record, keys);
       if (key) {
-        map.set(key, record);
+        index.set(key, record);
       }
     });
-    return map;
-  }
-
-  private mergeById(
-    primary: RawRecord[],
-    secondary: unknown[],
-    keys: string[]
-  ): RawRecord[] {
-    const map = new Map<string, RawRecord>();
-
-    primary.forEach((item, index) => {
-      const key = this.resolveString(item, keys, `__item-${index}`);
-      map.set(key, item);
-    });
-
-    secondary.forEach((item, index) => {
-      const record = this.normalizeObject(item);
-      const key = this.resolveString(record, keys, `__item-${index}`);
-      if (!map.has(key)) {
-        map.set(key, record);
-      }
-    });
-
-    return Array.from(map.values());
+    return index;
   }
 
   private parsePosition(record: RawRecord): LayoutPosition {
@@ -488,77 +506,65 @@ export class FactoryMapApiService {
     };
   }
 
+  private statusFor(status: StaffingStatus, percent: number): FactoryStatus {
+    if (status === 'RequirementNotDefined') return 'info';
+    if (status === 'Unstaffed') return 'critical';
+    if (status === 'Understaffed') return 'warning';
+    return percent >= 100 ? 'ready' : 'warning';
+  }
+
+  private statusText(status: StaffingStatus): string {
+    if (status === 'RequirementNotDefined') return 'الاحتياج غير محدد';
+    if (status === 'Unstaffed') return 'غير مسكن';
+    if (status === 'Understaffed') return 'تغطية ناقصة';
+    return 'مغطى';
+  }
+
+  private toStaffingStatus(value: unknown, workersCurrent: number, workersRequired: number, requirementDefined: boolean): StaffingStatus {
+    if (value === 'RequirementNotDefined' || value === 'Unstaffed' || value === 'Understaffed' || value === 'Staffed') {
+      return value;
+    }
+    if (!requirementDefined) return 'RequirementNotDefined';
+    if (workersCurrent === 0) return 'Unstaffed';
+    return workersCurrent < workersRequired ? 'Understaffed' : 'Staffed';
+  }
+
+  private toAttendanceStatus(value: unknown): SubStageAttendanceStatus {
+    if (value === 'FullyPresent' || value === 'PartiallyPresent' || value === 'AllAbsent' || value === 'NeedsSync' || value === 'NoAssignments') {
+      return value;
+    }
+
+    return 'Unavailable';
+  }
+
+  private toPercent(rawPercent: unknown, workersCurrent: number, workersRequired: number): number {
+    const percent = this.toNumber(rawPercent, -1);
+    if (percent >= 0) return this.clampPercent(percent);
+    return workersRequired > 0 ? this.clampPercent(Math.round((workersCurrent / workersRequired) * 100)) : 0;
+  }
+
   private resolveString(record: RawRecord, keys: string[], fallback = ''): string {
     const value = this.pickFirst(record, keys);
     return typeof value === 'string' && value.trim().length > 0 ? value.trim() : fallback;
   }
 
-  private toPercent(
-    rawPercent: unknown,
-    currentWorkers: number,
-    requiredWorkers: number,
-    fallbackPercent?: number
-  ): number {
-    const percent = this.toNumber(rawPercent);
-    if (percent > 0) {
-      return this.clampPercent(percent);
-    }
-    if (requiredWorkers > 0) {
-      return this.toPercentFromWorkers(currentWorkers, requiredWorkers);
-    }
-    return this.clampPercent(this.toNumber(fallbackPercent));
-  }
-
-  private toPercentFromWorkers(currentWorkers: number, requiredWorkers: number): number {
-    return requiredWorkers > 0 ? this.clampPercent(Math.round((currentWorkers / requiredWorkers) * 100)) : 0;
-  }
-
-  private toStatusText(percent: number): string {
-    const status = deriveStatusFromReadiness(percent);
-    return status === 'ready' ? 'ممتاز' : status === 'warning' ? 'متوسط' : 'ضعيف';
-  }
-
-  private getEmptyFactoryLayout(): FactoryLayout {
-    return {
-      id: 'factory-empty',
-      type: 'factory',
-      name: 'مصنع الطموح',
-      status: 'critical',
-      readinessPercent: 0,
-      workersCurrent: 0,
-      workersRequired: 0,
-      description: 'لا توجد بيانات تشغيل متاحة من الخادم.',
-      lines: []
-    };
-  }
-
   private toNumber(value: unknown, fallback = 0): number {
-    if (typeof value === 'number' && Number.isFinite(value)) {
-      return value;
-    }
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
     if (typeof value === 'string' && value.trim().length > 0) {
       const parsed = Number(value);
-      if (Number.isFinite(parsed)) {
-        return parsed;
-      }
-    }
-    if (typeof value === 'boolean') {
-      return value ? 1 : 0;
+      if (Number.isFinite(parsed)) return parsed;
     }
     return fallback;
   }
 
-  private toArray(value: unknown): unknown[] {
-    return Array.isArray(value) ? value : [];
+  private toBoolean(value: unknown, fallback: boolean): boolean {
+    return typeof value === 'boolean' ? value : fallback;
   }
 
-  private pickFirst(record: Record<string, unknown>, keys: string[]): unknown {
+  private pickFirst(record: RawRecord, keys: string[]): unknown {
     for (const key of keys) {
-      if (Object.prototype.hasOwnProperty.call(record, key)) {
-        const value = record[key];
-        if (value !== undefined && value !== null) {
-          return value;
-        }
+      if (Object.prototype.hasOwnProperty.call(record, key) && record[key] !== undefined && record[key] !== null) {
+        return record[key];
       }
     }
     return undefined;
@@ -566,15 +572,11 @@ export class FactoryMapApiService {
 
   private extractPayload<T>(response: ApiResponse<T>): T {
     if (response && typeof response === 'object' && 'success' in response) {
-      if (response.success === false) {
-        throw new Error(response.error?.message || 'API returned an unsuccessful response.');
-      }
-      if (!response.data) {
-        throw new Error('API response data is missing.');
+      if (response.success === false || !response.data) {
+        throw new Error(response.error?.message || 'API response data is missing.');
       }
       return response.data;
     }
-
     return response as T;
   }
 
@@ -583,12 +585,6 @@ export class FactoryMapApiService {
   }
 
   private clampPercent(value: number): number {
-    if (value < 0) {
-      return 0;
-    }
-    if (value > 100) {
-      return 100;
-    }
-    return value;
+    return Math.max(0, Math.min(100, value));
   }
 }

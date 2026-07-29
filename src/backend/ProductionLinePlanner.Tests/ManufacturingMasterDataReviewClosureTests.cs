@@ -1,10 +1,10 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Migrations.Operations;
 using ProductionLinePlanner.Application.Abstractions;
 using ProductionLinePlanner.Application.Common;
+using ProductionLinePlanner.Application.DTOs;
 using ProductionLinePlanner.Application.Requests;
 using ProductionLinePlanner.Domain.Entities;
 using ProductionLinePlanner.Domain.Enums;
@@ -16,6 +16,144 @@ namespace ProductionLinePlanner.Tests;
 
 public sealed class ManufacturingMasterDataReviewClosureTests
 {
+    [Fact]
+    public async Task Model_list_searches_only_model_name_and_code()
+    {
+        await using var fixture = await ProductModelFixture.CreateAsync();
+        var codeOnlyModel = new ProductModel(Guid.NewGuid(), "CODE-ONLY", "اسم لا يطابق الكود");
+        fixture.DbContext.ProductModelStages.Add(
+            new ProductModelStage(Guid.NewGuid(), fixture.Model.Id, fixture.Line.Id, fixture.SubStages[0].Id, 1, 1m, null, CompensationMode.FixedAmount));
+        fixture.DbContext.ProductModels.Add(codeOnlyModel);
+        await fixture.DbContext.SaveChangesAsync();
+
+        var byName = await fixture.Service.GetModelsAsync("model", isActive: null);
+        var byCode = await fixture.Service.GetModelsAsync("code-only", isActive: null);
+        var byStageName = await fixture.Service.GetModelsAsync("cut", isActive: null);
+
+        Assert.Equal(fixture.Model.Id, Assert.Single(byName.Value!).Id);
+        Assert.Equal(codeOnlyModel.Id, Assert.Single(byCode.Value!).Id);
+        Assert.Empty(byStageName.Value!);
+        Assert.DoesNotContain(typeof(ProductModelDto).GetProperties(), property => property.Name == "Stages");
+    }
+
+    [Fact]
+    public async Task Model_search_filters_before_count_and_paging()
+    {
+        await using var fixture = await ProductModelFixture.CreateAsync();
+        var lateMatch = new ProductModel(Guid.NewGuid(), "MODEL-055", "Late matching model");
+        var inactiveMatch = new ProductModel(Guid.NewGuid(), "MODEL-056", "Inactive matching model", isActive: false);
+        fixture.DbContext.ProductModels.AddRange(Enumerable.Range(1, 54).Select(index => new ProductModel(Guid.NewGuid(), $"MODEL-{index:D3}", $"Model {index:D3}")));
+        fixture.DbContext.ProductModels.AddRange(lateMatch, inactiveMatch);
+        await fixture.DbContext.SaveChangesAsync();
+
+        var sixthPage = await fixture.Service.GetModelsAsync(null, isActive: null, page: 6, pageSize: 10);
+        var byModel = await fixture.Service.GetModelsAsync("  055  ", isActive: true, page: 1, pageSize: 10);
+        var includingInactive = await fixture.Service.GetModelsAsync("matching model", isActive: null, page: 1, pageSize: 10);
+
+        Assert.True(sixthPage.IsSuccess);
+        Assert.Contains(sixthPage.Value!, model => model.Id == lateMatch.Id);
+        Assert.True(byModel.IsSuccess);
+        Assert.Equal(1, byModel.TotalCount);
+        Assert.Equal(lateMatch.Id, Assert.Single(byModel.Value!).Id);
+        Assert.True(includingInactive.IsSuccess);
+        Assert.Equal(2, includingInactive.TotalCount);
+    }
+
+    [Fact]
+    public async Task Updating_a_model_returns_the_general_model_dto()
+    {
+        await using var fixture = await ProductModelFixture.CreateAsync();
+        var updated = await fixture.Service.UpdateModelAsync(
+            fixture.Model.Id,
+            new UpdateProductModelRequest { Name = "Updated model" },
+            fixture.ActorUserId);
+
+        Assert.True(updated.IsSuccess);
+        Assert.Equal(fixture.Model.Id, updated.Value!.Id);
+        Assert.Equal("Updated model", updated.Value.Name);
+        Assert.DoesNotContain(typeof(ProductModelDto).GetProperties(), property => property.Name == "Stages");
+    }
+
+    [Fact]
+    public async Task Product_model_registration_and_updates_have_no_production_line_contract()
+    {
+        await using var fixture = await ProductModelFixture.CreateAsync();
+
+        var created = await fixture.Service.CreateModelAsync(
+            new CreateProductModelRequest
+            {
+                Code = "MODEL-WITHOUT-LINE",
+                Name = "Line-independent model",
+                Description = "Created without selecting a production line."
+            },
+            fixture.ActorUserId);
+        var updated = await fixture.Service.UpdateModelAsync(
+            created.Value!.Id,
+            new UpdateProductModelRequest { Name = "Updated line-independent model" },
+            fixture.ActorUserId);
+
+        Assert.True(created.IsSuccess);
+        Assert.True(updated.IsSuccess);
+        Assert.Equal("Updated line-independent model", updated.Value!.Name);
+        Assert.DoesNotContain(typeof(ProductModel).GetProperties(), property => property.Name == "ProductionLineId");
+        Assert.DoesNotContain(typeof(CreateProductModelRequest).GetProperties(), property => property.Name == "ProductionLineId");
+        Assert.DoesNotContain(typeof(UpdateProductModelRequest).GetProperties(), property => property.Name == "ProductionLineId");
+        Assert.DoesNotContain(typeof(ProductModelDto).GetProperties(), property => property.Name == "ProductionLineId");
+    }
+
+    [Fact]
+    public async Task Deleting_an_unlinked_model_soft_deactivates_it_without_removing_the_row()
+    {
+        await using var fixture = await ProductModelFixture.CreateAsync();
+
+        var result = await fixture.Service.DeleteModelAsync(fixture.Model.Id, fixture.ActorUserId);
+
+        Assert.True(result.IsSuccess);
+        var persisted = await fixture.DbContext.ProductModels.AsNoTracking().SingleAsync(x => x.Id == fixture.Model.Id);
+        Assert.False(persisted.IsActive);
+    }
+
+    [Fact]
+    public async Task Deleting_a_model_with_stages_or_production_history_is_blocked_by_the_service()
+    {
+        await using var fixture = await ProductModelFixture.CreateAsync();
+        fixture.AddStage(1, 1m, null, null);
+        fixture.DbContext.ProductionOrders.Add(new ProductionOrder(
+            Guid.NewGuid(), "MODEL-DELETE-BLOCKER", fixture.Model.Id, null,
+            DateOnly.FromDateTime(DateTime.UtcNow), 1m, null, fixture.ActorUserId, DateTime.UtcNow));
+        await fixture.DbContext.SaveChangesAsync();
+
+        var eligibility = await fixture.Service.GetModelDeleteEligibilityAsync(fixture.Model.Id);
+        var result = await fixture.Service.DeleteModelAsync(fixture.Model.Id, fixture.ActorUserId);
+
+        Assert.True(eligibility.IsSuccess);
+        Assert.False(eligibility.Value!.CanDelete);
+        Assert.Contains("تشغيل إنتاج", eligibility.Value.MessageAr, StringComparison.Ordinal);
+        Assert.True(result.IsFailure);
+        Assert.Equal("Conflict", result.Error!.Code);
+        Assert.Contains("مرحلة موديل", result.Error.Message, StringComparison.Ordinal);
+        Assert.Contains("تشغيل إنتاج", result.Error.Message, StringComparison.Ordinal);
+        Assert.True((await fixture.DbContext.ProductModels.AsNoTracking().SingleAsync(x => x.Id == fixture.Model.Id)).IsActive);
+    }
+
+    [Fact]
+    public async Task Updating_a_model_rejects_code_mutation_without_persisting_any_other_change()
+    {
+        await using var fixture = await ProductModelFixture.CreateAsync();
+        var originalName = fixture.Model.Name;
+
+        var result = await fixture.Service.UpdateModelAsync(
+            fixture.Model.Id,
+            new UpdateProductModelRequest { Code = "MUTATED", Name = "Must not persist" },
+            fixture.ActorUserId);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("ValidationError", result.Error!.Code);
+        var persisted = await fixture.DbContext.ProductModels.AsNoTracking().SingleAsync(x => x.Id == fixture.Model.Id);
+        Assert.Equal("MODEL", persisted.Code);
+        Assert.Equal(originalName, persisted.Name);
+    }
+
     [Fact]
     public void Manufacturing_migration_remediates_existing_sub_stages_before_constraints_and_indexes()
     {
@@ -78,6 +216,7 @@ public sealed class ManufacturingMasterDataReviewClosureTests
 
         var updated = await fixture.Service.UpdateModelStageAsync(
             fixture.Model.Id,
+            fixture.Line.Id,
             stage.Id,
             new UpsertProductModelStageRequest { PiecePrice = 8m },
             fixture.ActorUserId);
@@ -88,6 +227,7 @@ public sealed class ManufacturingMasterDataReviewClosureTests
 
         var cleared = await fixture.Service.UpdateModelStageAsync(
             fixture.Model.Id,
+            fixture.Line.Id,
             stage.Id,
             new UpsertProductModelStageRequest { HasStandardSeconds = true, HasEffectiveFrom = true },
             fixture.ActorUserId);
@@ -105,12 +245,90 @@ public sealed class ManufacturingMasterDataReviewClosureTests
 
         var result = await fixture.Service.UpdateModelStageAsync(
             fixture.Model.Id,
+            fixture.Line.Id,
             stage.Id,
             new UpsertProductModelStageRequest { StandardSeconds = 0m, HasStandardSeconds = true },
             fixture.ActorUserId);
 
         Assert.True(result.IsFailure);
         Assert.Equal("ValidationError", result.Error!.Code);
+    }
+
+    [Fact]
+    public async Task Patch_stage_activation_updates_only_the_requested_model_relationship_and_supports_reactivation()
+    {
+        await using var fixture = await ProductModelFixture.CreateAsync();
+        var firstRelationship = fixture.AddStage(1, 5m, null, null);
+        var otherModel = new ProductModel(Guid.NewGuid(), "OTHER", "Other model");
+        var otherRelationship = new ProductModelStage(
+            Guid.NewGuid(),
+            otherModel.Id,
+            fixture.Line.Id,
+            fixture.SubStages[0].Id,
+            1,
+            5m,
+            null,
+            CompensationMode.FixedAmount);
+        fixture.DbContext.ProductModels.Add(otherModel);
+        fixture.DbContext.ProductModelStages.Add(otherRelationship);
+        await fixture.DbContext.SaveChangesAsync();
+
+        var deactivated = await fixture.Service.UpdateModelStageAsync(
+            fixture.Model.Id,
+            fixture.Line.Id,
+            firstRelationship.Id,
+            new UpsertProductModelStageRequest { IsActive = false },
+            fixture.ActorUserId);
+
+        Assert.True(deactivated.IsSuccess);
+        Assert.False(deactivated.Value!.IsActive);
+        fixture.DbContext.ChangeTracker.Clear();
+        Assert.False((await fixture.DbContext.ProductModelStages.SingleAsync(x => x.Id == firstRelationship.Id)).IsActive);
+        Assert.True((await fixture.DbContext.ProductModelStages.SingleAsync(x => x.Id == otherRelationship.Id)).IsActive);
+
+        var reactivated = await fixture.Service.UpdateModelStageAsync(
+            fixture.Model.Id,
+            fixture.Line.Id,
+            firstRelationship.Id,
+            new UpsertProductModelStageRequest { IsActive = true },
+            fixture.ActorUserId);
+
+        Assert.True(reactivated.IsSuccess);
+        Assert.True(reactivated.Value!.IsActive);
+        fixture.DbContext.ChangeTracker.Clear();
+        Assert.True((await fixture.DbContext.ProductModelStages.SingleAsync(x => x.Id == firstRelationship.Id)).IsActive);
+        Assert.True((await fixture.DbContext.ProductModelStages.SingleAsync(x => x.Id == otherRelationship.Id)).IsActive);
+    }
+
+    [Fact]
+    public async Task Patch_stage_activation_reports_not_found_for_a_relationship_outside_the_selected_model()
+    {
+        await using var fixture = await ProductModelFixture.CreateAsync();
+        var otherModel = new ProductModel(Guid.NewGuid(), "OTHER", "Other model");
+        var otherRelationship = new ProductModelStage(
+            Guid.NewGuid(),
+            otherModel.Id,
+            fixture.Line.Id,
+            fixture.SubStages[0].Id,
+            1,
+            5m,
+            null,
+            CompensationMode.FixedAmount);
+        fixture.DbContext.ProductModels.Add(otherModel);
+        fixture.DbContext.ProductModelStages.Add(otherRelationship);
+        await fixture.DbContext.SaveChangesAsync();
+
+        var result = await fixture.Service.UpdateModelStageAsync(
+            fixture.Model.Id,
+            fixture.Line.Id,
+            otherRelationship.Id,
+            new UpsertProductModelStageRequest { IsActive = false },
+            fixture.ActorUserId);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("NotFound", result.Error!.Code);
+        fixture.DbContext.ChangeTracker.Clear();
+        Assert.True((await fixture.DbContext.ProductModelStages.SingleAsync(x => x.Id == otherRelationship.Id)).IsActive);
     }
 
     [Fact]
@@ -121,6 +339,7 @@ public sealed class ManufacturingMasterDataReviewClosureTests
 
         var add = await fixture.Service.AddModelStageAsync(
             fixture.Model.Id,
+            fixture.Line.Id,
             new UpsertProductModelStageRequest
             {
                 SubStageId = fixture.SubStages[2].Id,
@@ -133,39 +352,6 @@ public sealed class ManufacturingMasterDataReviewClosureTests
         Assert.True(add.IsFailure);
         Assert.Equal("Conflict", add.Error!.Code);
 
-        var target = new ProductModel(Guid.NewGuid(), "TARGET", "Target");
-        fixture.DbContext.ProductModels.Add(target);
-        fixture.DbContext.ProductModelStages.Add(new ProductModelStage(Guid.NewGuid(), target.Id, fixture.SubStages[1].Id, 2, 1m, null, CompensationMode.FixedAmount));
-        await fixture.DbContext.SaveChangesAsync();
-
-        var copy = await fixture.Service.CopyModelStagesAsync(fixture.Model.Id, new CopyProductModelStagesRequest { TargetModelId = target.Id }, fixture.ActorUserId);
-        Assert.True(copy.IsFailure);
-        Assert.Equal("Conflict", copy.Error!.Code);
-        Assert.Single(fixture.DbContext.ProductModelStages.Where(x => x.ProductModelId == target.Id));
-    }
-
-    [Fact]
-    public async Task Copy_model_stages_rejects_sub_stage_conflicts_and_copies_all_when_target_is_clear()
-    {
-        await using var fixture = await ProductModelFixture.CreateAsync();
-        fixture.AddStage(1, 1m, null, null);
-        var conflictingTarget = new ProductModel(Guid.NewGuid(), "CONFLICT", "Conflict");
-        fixture.DbContext.ProductModels.Add(conflictingTarget);
-        fixture.DbContext.ProductModelStages.Add(new ProductModelStage(Guid.NewGuid(), conflictingTarget.Id, fixture.SubStages[0].Id, 4, 1m, null, CompensationMode.FixedAmount));
-        await fixture.DbContext.SaveChangesAsync();
-
-        var conflict = await fixture.Service.CopyModelStagesAsync(fixture.Model.Id, new CopyProductModelStagesRequest { TargetModelId = conflictingTarget.Id }, fixture.ActorUserId);
-        Assert.True(conflict.IsFailure);
-        Assert.Equal("Conflict", conflict.Error!.Code);
-        Assert.Single(fixture.DbContext.ProductModelStages.Where(x => x.ProductModelId == conflictingTarget.Id));
-
-        var clearTarget = new ProductModel(Guid.NewGuid(), "CLEAR", "Clear");
-        fixture.DbContext.ProductModels.Add(clearTarget);
-        await fixture.DbContext.SaveChangesAsync();
-        var copied = await fixture.Service.CopyModelStagesAsync(fixture.Model.Id, new CopyProductModelStagesRequest { TargetModelId = clearTarget.Id }, fixture.ActorUserId);
-
-        Assert.True(copied.IsSuccess);
-        Assert.Single(fixture.DbContext.ProductModelStages.Where(x => x.ProductModelId == clearTarget.Id));
     }
 
     [Fact]
@@ -201,116 +387,39 @@ public sealed class ManufacturingMasterDataReviewClosureTests
     }
 
     [Fact]
-    public async Task Employee_name_rollback_uses_the_original_external_name_and_reports_reconciliation_failure()
+    public async Task Employee_local_name_update_has_no_external_compensation_path()
     {
         var worker = new Worker(Guid.NewGuid(), "W-1", "Local Original", "111", attendanceDepartmentId: 1);
         await using var dbContext = ProductModelFixture.CreateContext();
         dbContext.Workers.Add(worker);
         await dbContext.SaveChangesAsync();
-        var employees = new Dictionary<string, AttendanceEmployeeRecord?>
-        {
-            ["111"] = new AttendanceEmployeeRecord("111", 1, "1001", "ZK Original", true)
-        };
-        var names = new List<string>();
-        var writer = new FakeAttendanceEmployeeWriter(
-            employees,
-            (_, name, _) => { names.Add(name); return Task.FromResult(Result.Success()); },
-            (_, _, _) => Task.FromResult(Result.Failure(new Error("ExternalFailure", "Department failed."))));
-        var service = new EmployeeMasterDataService(
-            dbContext, writer, new FakeAttendanceEmployeeReader(employees),
-            new FakeAttendanceDepartmentReader(new Dictionary<int, AttendanceDepartmentRecord> { [2] = new(2, "Quality") }),
-            new RecordingAuditEngine());
+        var service = new EmployeeMasterDataService(dbContext, new RecordingAuditEngine());
 
-        var result = await service.UpdateMasterIdentityAsync(worker.Id, new UpdateWorkerRequest { FullName = "New Name", AttendanceDepartmentId = 2 }, Guid.NewGuid());
+        var result = await service.UpdateMasterIdentityAsync(worker.Id, new UpdateWorkerRequest { FullName = "New Local Name" }, Guid.NewGuid());
 
-        Assert.True(result.IsFailure);
-        Assert.Equal(new[] { "New Name", "ZK Original" }, names);
-        Assert.Equal("Local Original", (await dbContext.Workers.AsNoTracking().SingleAsync()).FullName);
+        Assert.True(result.IsSuccess);
+        Assert.Equal("New Local Name", (await dbContext.Workers.AsNoTracking().SingleAsync()).FullName);
+        Assert.Equal(1, (await dbContext.Workers.AsNoTracking().SingleAsync()).AttendanceDepartmentId);
     }
 
     [Fact]
-    public async Task Employee_name_rollback_failure_requires_reconciliation_and_does_not_update_planner()
+    public async Task Source_observed_department_and_external_department_mutations_are_blocked()
     {
         var worker = new Worker(Guid.NewGuid(), "W-1", "Local Original", "111", attendanceDepartmentId: 1);
         await using var dbContext = ProductModelFixture.CreateContext();
         dbContext.Workers.Add(worker);
         await dbContext.SaveChangesAsync();
-        var employees = new Dictionary<string, AttendanceEmployeeRecord?> { ["111"] = new("111", 1, "1001", "ZK Original", true) };
-        var calls = 0;
-        var writer = new FakeAttendanceEmployeeWriter(
-            employees,
-            (_, _, _) => Task.FromResult(++calls == 1 ? Result.Success() : Result.Failure(new Error("ExternalFailure", "Rollback failed."))),
-            (_, _, _) => Task.FromResult(Result.Failure(new Error("ExternalFailure", "Department failed."))));
-        var audit = new RecordingAuditEngine();
-        var service = new EmployeeMasterDataService(
-            dbContext, writer, new FakeAttendanceEmployeeReader(employees),
-            new FakeAttendanceDepartmentReader(new Dictionary<int, AttendanceDepartmentRecord> { [2] = new(2, "Quality") }), audit);
+        var departments = new FakeAttendanceDepartmentReader(new Dictionary<int, AttendanceDepartmentRecord> { [2] = new(2, "Quality") });
+        var employeeService = new EmployeeMasterDataService(dbContext, new RecordingAuditEngine());
+        var departmentService = new DepartmentAdministrationService(dbContext, departments);
 
-        var result = await service.UpdateMasterIdentityAsync(worker.Id, new UpdateWorkerRequest { FullName = "New Name", AttendanceDepartmentId = 2 }, Guid.NewGuid());
+        var identityUpdate = await employeeService.UpdateMasterIdentityAsync(worker.Id, new UpdateWorkerRequest { AttendanceDepartmentId = 2 }, Guid.NewGuid());
+        var departmentMove = await departmentService.MoveWorkerToDepartmentAsync(worker.Id, 2, Guid.NewGuid());
 
-        Assert.True(result.IsFailure);
-        Assert.Equal("NeedsReconciliation", result.Error!.Code);
+        Assert.Equal("SourceObservedOnly", identityUpdate.Error!.Code);
+        Assert.Equal("ExternalSourceReadOnly", departmentMove.Error!.Code);
         Assert.Equal("Local Original", (await dbContext.Workers.AsNoTracking().SingleAsync()).FullName);
-        Assert.Empty(audit.Calls);
-    }
-
-    [Fact]
-    public async Task Department_persistence_failure_compensates_external_move_after_queuing_the_uncommitted_audit()
-    {
-        var interceptor = new ThrowingSaveChangesInterceptor();
-        await using var dbContext = ProductModelFixture.CreateContext(interceptor);
-        var worker = new Worker(Guid.NewGuid(), "W-1", "Worker", "111", attendanceDepartmentId: 1);
-        dbContext.Workers.Add(worker);
-        await dbContext.SaveChangesAsync();
-        interceptor.ThrowOnSave = true;
-        var employees = new Dictionary<string, AttendanceEmployeeRecord?> { ["111"] = new("111", 1, "1001", "Worker", true) };
-        var writer = new FakeAttendanceEmployeeWriter(employees);
-        var audit = new RecordingAuditEngine();
-        var service = new DepartmentAdministrationService(
-            dbContext,
-            new FakeAttendanceDepartmentReader(new Dictionary<int, AttendanceDepartmentRecord> { [2] = new(2, "Quality") }),
-            new FakeAttendanceDepartmentWriter(),
-            writer,
-            new FakeAttendanceEmployeeReader(employees),
-            audit);
-
-        var result = await service.MoveWorkerToDepartmentAsync(worker.Id, 2, Guid.NewGuid());
-
-        Assert.True(result.IsFailure);
-        Assert.Equal("PersistenceFailed", result.Error!.Code);
-        Assert.Equal(new[] { 2, 1 }, writer.DepartmentUpdates.Select(x => x.DepartmentId));
-        Assert.Single(audit.Calls);
-    }
-
-    [Fact]
-    public async Task Department_rollback_failure_requires_reconciliation_after_queuing_the_uncommitted_audit()
-    {
-        var interceptor = new ThrowingSaveChangesInterceptor();
-        await using var dbContext = ProductModelFixture.CreateContext(interceptor);
-        var worker = new Worker(Guid.NewGuid(), "W-1", "Worker", "111", attendanceDepartmentId: 1);
-        dbContext.Workers.Add(worker);
-        await dbContext.SaveChangesAsync();
-        interceptor.ThrowOnSave = true;
-        var employees = new Dictionary<string, AttendanceEmployeeRecord?> { ["111"] = new("111", 1, "1001", "Worker", true) };
-        var calls = 0;
-        var writer = new FakeAttendanceEmployeeWriter(
-            employees,
-            null,
-            (_, _, _) => Task.FromResult(++calls == 1 ? Result.Success() : Result.Failure(new Error("ExternalFailure", "Rollback failed."))));
-        var audit = new RecordingAuditEngine();
-        var service = new DepartmentAdministrationService(
-            dbContext,
-            new FakeAttendanceDepartmentReader(new Dictionary<int, AttendanceDepartmentRecord> { [2] = new(2, "Quality") }),
-            new FakeAttendanceDepartmentWriter(),
-            writer,
-            new FakeAttendanceEmployeeReader(employees),
-            audit);
-
-        var result = await service.MoveWorkerToDepartmentAsync(worker.Id, 2, Guid.NewGuid());
-
-        Assert.True(result.IsFailure);
-        Assert.Equal("NeedsReconciliation", result.Error!.Code);
-        Assert.Single(audit.Calls);
+        Assert.Equal(1, (await dbContext.Workers.AsNoTracking().SingleAsync()).AttendanceDepartmentId);
     }
 
     private sealed class TestableManufacturingMigration : AddManufacturingMasterDataFoundation
@@ -318,63 +427,52 @@ public sealed class ManufacturingMasterDataReviewClosureTests
         public void BuildUp(MigrationBuilder builder) => Up(builder);
     }
 
-    private sealed class ThrowingSaveChangesInterceptor : SaveChangesInterceptor
-    {
-        public bool ThrowOnSave { get; set; }
-
-        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
-            DbContextEventData eventData,
-            InterceptionResult<int> result,
-            CancellationToken cancellationToken = default)
-        {
-            if (ThrowOnSave) throw new InvalidOperationException("Persistence failed.");
-            return base.SavingChangesAsync(eventData, result, cancellationToken);
-        }
-    }
-
     private sealed class ProductModelFixture : IAsyncDisposable
     {
-        private ProductModelFixture(AppDbContext dbContext, ProductModel model, SubStage[] subStages)
+        private ProductModelFixture(AppDbContext dbContext, ProductModel model, ProductionLine line, SubStage[] subStages)
         {
             DbContext = dbContext;
             Model = model;
+            Line = line;
             SubStages = subStages;
             Service = new ProductModelService(dbContext, new RecordingAuditEngine());
         }
 
         public AppDbContext DbContext { get; }
         public ProductModel Model { get; }
+        public ProductionLine Line { get; }
         public SubStage[] SubStages { get; }
         public ProductModelService Service { get; }
         public Guid ActorUserId { get; } = Guid.NewGuid();
 
-        public static AppDbContext CreateContext(params IInterceptor[] interceptors)
-        {
-            var builder = new DbContextOptionsBuilder<AppDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString("N"));
-            if (interceptors.Length > 0) builder.AddInterceptors(interceptors);
-            return new AppDbContext(builder.Options);
-        }
+        public static AppDbContext CreateContext() =>
+            new(new DbContextOptionsBuilder<AppDbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
+                .Options);
 
         public static async Task<ProductModelFixture> CreateAsync()
         {
             var dbContext = CreateContext();
             var model = new ProductModel(Guid.NewGuid(), "MODEL", "Model");
-            var mainStageId = Guid.NewGuid();
+            var factory = new Factory(Guid.NewGuid(), "Factory", "FAC");
+            var department = new Department(Guid.NewGuid(), factory.Id, "OPS", "التشغيل", "Operations", 1);
+            var line = new ProductionLine(Guid.NewGuid(), factory.Id, "Line", 1, departmentId: department.Id);
+            var mainStage = new MainStage(Guid.NewGuid(), department.Id, "Main", 1);
             var subStages = new[]
             {
-                new SubStage(Guid.NewGuid(), mainStageId, "Cut", "CUT", 1, 1),
-                new SubStage(Guid.NewGuid(), mainStageId, "Sew", "SEW", 1, 2),
-                new SubStage(Guid.NewGuid(), mainStageId, "Pack", "PACK", 1, 3)
+                new SubStage(Guid.NewGuid(), mainStage.Id, "Cut", "CUT", 1, 1, departmentId: department.Id),
+                new SubStage(Guid.NewGuid(), mainStage.Id, "Sew", "SEW", 1, 2, departmentId: department.Id),
+                new SubStage(Guid.NewGuid(), mainStage.Id, "Pack", "PACK", 1, 3, departmentId: department.Id)
             };
-            dbContext.ProductModels.Add(model);
+            dbContext.AddRange(factory, department, line, mainStage, model);
             dbContext.SubStages.AddRange(subStages);
             await dbContext.SaveChangesAsync();
-            return new ProductModelFixture(dbContext, model, subStages);
+            return new ProductModelFixture(dbContext, model, line, subStages);
         }
 
         public ProductModelStage AddStage(int order, decimal piecePrice, decimal? standardSeconds, DateTime? effectiveFrom, bool isActive = true)
         {
-            var stage = new ProductModelStage(Guid.NewGuid(), Model.Id, SubStages[0].Id, order, piecePrice, standardSeconds, CompensationMode.FixedAmount, isActive: isActive, effectiveFrom: effectiveFrom);
+            var stage = new ProductModelStage(Guid.NewGuid(), Model.Id, Line.Id, SubStages[0].Id, order, piecePrice, standardSeconds, CompensationMode.FixedAmount, isActive: isActive, effectiveFrom: effectiveFrom);
             DbContext.ProductModelStages.Add(stage);
             DbContext.SaveChanges();
             return stage;

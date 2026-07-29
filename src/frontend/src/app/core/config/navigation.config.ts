@@ -23,13 +23,20 @@ export const APP_NAVIGATION_ITEMS: AppNavigationItem[] = [
     group: 'workspace',
     requireAny: [...MANUFACTURING_WORKSPACE_VIEW_PERMISSIONS]
   },
-  { id: 'factory-map', label: 'خريطة المصنع', route: '/factory-map', icon: 'pi-map', order: 20, group: 'workspace', permission: PERMISSIONS.factoryStructure.view },
-  { id: 'production-lines', label: 'خطوط الإنتاج', route: '/production-lines', icon: 'pi-sitemap', order: 30, group: 'workspace', permission: PERMISSIONS.factoryStructure.view },
-  { id: 'stages', label: 'المراحل', route: '/stages', icon: 'pi-list', order: 40, group: 'workspace', permission: PERMISSIONS.stages.view },
-  { id: 'workers', label: 'العاملون', route: '/workers', icon: 'pi-users', order: 50, group: 'workspace', permission: PERMISSIONS.workers.view },
-  { id: 'assignments', label: 'التعيينات', route: '/assignments', icon: 'pi-file-check', order: 60, group: 'workspace', permission: PERMISSIONS.assignments.view },
+  {
+    id: 'factory-map',
+    label: 'خريطة المصنع',
+    route: '/factory-map',
+    icon: 'pi-map',
+    order: 20,
+    group: 'workspace',
+    requireAll: [PERMISSIONS.factoryStructure.view, PERMISSIONS.stages.view]
+  },
+  { id: 'workers', label: 'إدارة العاملين', route: '/workers', icon: 'pi-users', order: 50, group: 'workspace', permission: PERMISSIONS.workers.view },
+  { id: 'attendance-workforce', label: 'الحضور والتسكين اليومي', route: '/attendance/workforce', icon: 'pi-clock', order: 55, group: 'workspace', requireAll: [PERMISSIONS.attendance.view, PERMISSIONS.assignments.view] },
   { id: 'notifications', label: 'الإشعارات', route: '/notifications', icon: 'pi-bell', order: 90, group: 'workspace' },
   { id: 'admin-users', label: 'إدارة المستخدمين', route: '/admin/users', icon: 'pi-id-card', order: 100, group: 'administration', permission: PERMISSIONS.users.view },
   { id: 'admin-roles', label: 'إدارة الأدوار', route: '/admin/roles', icon: 'pi-lock', order: 110, group: 'administration', permission: PERMISSIONS.roles.view },
-  { id: 'admin-permissions', label: 'كتالوج الصلاحيات', route: '/admin/permissions', icon: 'pi-key', order: 120, group: 'administration', permission: PERMISSIONS.permissions.assign }
+  { id: 'admin-permissions', label: 'كتالوج الصلاحيات', route: '/admin/permissions', icon: 'pi-key', order: 120, group: 'administration', permission: PERMISSIONS.permissions.assign },
+  { id: 'admin-notification-policies', label: 'سياسات الإشعارات', route: '/admin/notification-policies', icon: 'pi-bell', order: 130, group: 'administration', permission: PERMISSIONS.notifications.policiesManage }
 ];

@@ -38,6 +38,7 @@ public class Factory
     public DateTime UpdatedAtUtc { get; private set; }
 
     public List<ProductionLine> ProductionLines { get; } = [];
+    public List<Department> Departments { get; } = [];
 
     public void Activate(DateTime? atUtc = null)
     {
@@ -48,14 +49,6 @@ public class Factory
     public void Deactivate(DateTime? atUtc = null)
     {
         IsActive = false;
-        UpdatedAtUtc = atUtc ?? DateTime.UtcNow;
-    }
-
-    public void SetCode(string code, DateTime? atUtc = null)
-    {
-        if (string.IsNullOrWhiteSpace(code))
-            throw new ArgumentException("Factory code is required.", nameof(code));
-        Code = code.Trim();
         UpdatedAtUtc = atUtc ?? DateTime.UtcNow;
     }
 

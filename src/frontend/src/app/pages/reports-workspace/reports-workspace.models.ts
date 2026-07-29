@@ -1,4 +1,7 @@
-import { QuantitiesReportSortBy, QuantitiesReportSortDirection, QuantitiesReportStatus, QuantitiesReportView } from '../../core/services/production-quantities-report-api.service';
+import { FinancialReportResult, FinancialReportRow, FinancialReportSummary } from '../../core/services/production-financial-report-api.service';
+import { QuantitiesReportResult, QuantitiesReportRow, QuantitiesReportSortBy, QuantitiesReportSortDirection, QuantitiesReportStatus, QuantitiesReportSummary, QuantitiesReportView } from '../../core/services/production-quantities-report-api.service';
+
+export type ReportPresentationMode = 'QuantitiesOnly' | 'QuantitiesAndFinancials';
 
 export interface ReportsWorkspaceFilters {
   from: string;
@@ -23,3 +26,7 @@ export interface ReportsWorkspaceViewOption {
   description: string;
   icon: string;
 }
+
+export type ReportsWorkspaceSummary = QuantitiesReportSummary | FinancialReportSummary;
+export type ReportsWorkspaceRow = QuantitiesReportRow | FinancialReportRow;
+export type ReportsWorkspaceResult = QuantitiesReportResult | FinancialReportResult;

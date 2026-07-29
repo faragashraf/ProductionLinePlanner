@@ -12,6 +12,7 @@ import { PermissionHydrationState, PermissionService } from '../../core/services
 import { ProductExperienceModule } from '../../shared/product/product-experience.module';
 import { AppShellComponent, ShellNavigationMode } from './app-shell.component';
 import { PRODUCT_IDENTITY } from '../../core/config/product-identity.config';
+import { NotificationInboxService } from '../../core/services/notification-inbox.service';
 
 describe('AppShellComponent', () => {
   let fixture: ComponentFixture<AppShellComponent>;
@@ -20,6 +21,7 @@ describe('AppShellComponent', () => {
   let permissions: PermissionServiceStub;
   let authService: jasmine.SpyObj<AuthService>;
   let originalInnerWidth: number;
+  let originalInnerHeight: number;
 
   const navigation: AppNavigationItem[] = [
     { id: 'dashboard', label: 'لوحة التحكم', route: '/dashboard', icon: 'pi-home', order: 10, group: 'workspace' },
@@ -29,7 +31,8 @@ describe('AppShellComponent', () => {
 
   beforeEach(() => {
     originalInnerWidth = window.innerWidth;
-    setViewport(390);
+    originalInnerHeight = window.innerHeight;
+    setViewport(390, 844);
     router = new RouterStub('/dashboard');
     permissions = new PermissionServiceStub(navigation);
     authService = jasmine.createSpyObj<AuthService>('AuthService', ['logout']);
@@ -45,7 +48,8 @@ describe('AppShellComponent', () => {
           useValue: { root: { snapshot: { url: [], data: {}, children: [] } } }
         },
         { provide: AuthService, useValue: authService },
-        { provide: PermissionService, useValue: permissions }
+        { provide: PermissionService, useValue: permissions },
+        { provide: NotificationInboxService, useValue: { unreadCount$: of(3) } }
       ],
       schemas: [NO_ERRORS_SCHEMA]
     });
@@ -56,20 +60,25 @@ describe('AppShellComponent', () => {
   });
 
   afterEach(() => {
-    setViewport(originalInnerWidth);
+    setViewport(originalInnerWidth, originalInnerHeight);
   });
 
-  it('renders the existing permission-filtered navigation and preserves the business router outlet', () => {
-    const text = fixture.nativeElement.textContent as string;
+  it('renders the existing permission-filtered navigation and preserves the business router outlet', fakeAsync(() => {
+    openOverlayDrawer();
+    tick(200);
+    fixture.detectChanges();
+
+    const overlayContainer = getOverlaySidebar().container as HTMLElement;
+    const text = overlayContainer.textContent as string;
 
     expect(permissions.filterNavigation).toHaveBeenCalled();
     expect(text).toContain('لوحة التحكم');
     expect(text).toContain('العاملون');
     expect(text).toContain('إدارة المستخدمين');
     expect(fixture.nativeElement.querySelector('router-outlet')).not.toBeNull();
-  });
+  }));
 
-  it('uses the static shared Flowline mark with the large English name in roomy navigation', () => {
+  it('uses the static shared Flowline mark with the large English name in the persistent sidebar', () => {
     const topbar = fixture.nativeElement.querySelector('.plp-app-shell__topbar') as HTMLElement;
     const compactLogo = topbar.querySelector('plp-brand-logo [data-plp-brand-variant="header"]') as HTMLElement;
 
@@ -80,6 +89,7 @@ describe('AppShellComponent', () => {
     setViewport(1024);
     component.onResize();
     fixture.detectChanges();
+
     const desktopSidebar = fixture.nativeElement.querySelector('.plp-app-shell__desktop-nav') as HTMLElement;
     const sidebarHeader = desktopSidebar.querySelector('.plp-app-shell__sidebar-header') as HTMLElement;
     const sidebarIdentity = sidebarHeader.querySelector('.plp-app-shell__sidebar-identity') as HTMLElement;
@@ -115,11 +125,24 @@ describe('AppShellComponent', () => {
     expect(component.administrationNavigationItems).toBe(administrationItems);
   });
 
-  it('renders the active navigation state from the existing route contract', () => {
-    const activeLink = fixture.nativeElement.querySelector('.plp-app-shell__nav-link--active') as HTMLAnchorElement;
+  it('renders the active navigation state from the existing route contract', fakeAsync(() => {
+    openOverlayDrawer();
+    tick(200);
+    fixture.detectChanges();
+
+    const overlayContainer = getOverlaySidebar().container as HTMLElement;
+    const activeLink = overlayContainer.querySelector('.plp-app-shell__nav-link--active') as HTMLAnchorElement;
 
     expect(activeLink.textContent).toContain('لوحة التحكم');
     expect(activeLink.getAttribute('aria-current')).toBe('page');
+  }));
+
+  it('keeps a workspace navigation item active throughout its internal routes', () => {
+    router.url = '/manufacturing/daily-production-operations?date=2026-07-19';
+
+    expect(component.isActive('/manufacturing/dashboard')).toBeTrue();
+    expect(component.isActive('/dashboard')).toBeFalse();
+    expect(component.isActive('/workers')).toBeFalse();
   });
 
   it('renders the phone menu trigger, opens the mobile Sidebar, exposes expanded state, and closes from the close action', fakeAsync(() => {
@@ -144,7 +167,7 @@ describe('AppShellComponent', () => {
     expect(menuButton.getAttribute('aria-expanded')).toBe('false');
   }));
 
-  it('uses the body-overlay RTL/right Sidebar contract in phone and tablet portrait modes', fakeAsync(() => {
+  it('uses the overlay drawer on phone and tablet portrait while switching to a collapsible persistent sidebar on larger breakpoints', fakeAsync(() => {
     openOverlayDrawer();
     tick(200);
     fixture.detectChanges();
@@ -164,7 +187,7 @@ describe('AppShellComponent', () => {
     expect(sidebarIdentity.textContent).not.toContain(PRODUCT_IDENTITY.nameAr);
     expect(component.navigationMode).toBe('phone');
 
-    setViewport(600);
+    setViewport(600, 960);
     component.onResize();
     fixture.detectChanges();
     expect(component.navigationMode).toBe('tablet-portrait');
@@ -172,6 +195,24 @@ describe('AppShellComponent', () => {
     expect(fixture.nativeElement.querySelector('[aria-label="فتح القائمة"]')).not.toBeNull();
     sidebar = getOverlaySidebar();
     expect(sidebar).toBeTruthy();
+
+    setViewport(800, 600);
+    component.onResize();
+    fixture.detectChanges();
+    expect(component.navigationMode).toBe('tablet-landscape');
+    expect(component.isOverlayNavigation).toBeFalse();
+    expect(component.hasPersistentNavigation).toBeTrue();
+    expect(fixture.nativeElement.querySelector('.plp-app-shell__desktop-nav')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('.plp-app-shell__menu-trigger')).not.toBeNull();
+
+    setViewport(1280);
+    component.onResize();
+    fixture.detectChanges();
+    expect(component.navigationMode).toBe('desktop');
+    expect(component.isOverlayNavigation).toBeFalse();
+    expect(component.hasPersistentNavigation).toBeTrue();
+    expect(fixture.nativeElement.querySelector('.plp-app-shell__desktop-nav')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('.plp-app-shell__menu-trigger')).not.toBeNull();
 
     component.closeSidebar();
     fixture.detectChanges();
@@ -279,7 +320,7 @@ describe('AppShellComponent', () => {
     tick(200);
     expect(component.sidebarOpen).toBeFalse();
 
-    setViewport(700);
+    setViewport(700, 1000);
     component.onResize();
     openOverlayDrawer();
     router.eventsSubject.next(new NavigationEnd(2, '/workers', '/workers'));
@@ -288,93 +329,106 @@ describe('AppShellComponent', () => {
     expect(component.sidebarOpen).toBeFalse();
   }));
 
-  it('uses overlay navigation for tablet portrait and compact persistent navigation for tablet landscape', () => {
+  it('keeps overlay navigation for phone and tablet portrait while using a collapsible persistent sidebar on larger breakpoints', () => {
     expect(component.navigationMode).toBe('phone');
 
-    setViewport(700);
+    setViewport(700, 1000);
     component.onResize();
     expect(component.navigationMode).toBe('tablet-portrait');
     expect(component.isOverlayNavigation).toBeTrue();
+    expect(fixture.nativeElement.querySelector('[aria-label="فتح القائمة"]')).not.toBeNull();
 
-    setViewport(800);
+    setViewport(800, 600);
     component.onResize();
     fixture.detectChanges();
     expect(component.navigationMode).toBe('tablet-landscape');
+    expect(component.isOverlayNavigation).toBeFalse();
     expect(component.hasPersistentNavigation).toBeTrue();
     expect(fixture.nativeElement.querySelector('.plp-app-shell__desktop-nav')).not.toBeNull();
-    expect(fixture.nativeElement.querySelector('[aria-label="فتح القائمة"]')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.plp-app-shell__menu-trigger')).not.toBeNull();
 
     setViewport(1280);
     component.onResize();
     expect(component.navigationMode).toBe('desktop');
     expect(component.isOverlayNavigation).toBeFalse();
+    expect(component.hasPersistentNavigation).toBeTrue();
+    expect(fixture.nativeElement.querySelector('.plp-app-shell__desktop-nav')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('.plp-app-shell__menu-trigger')).not.toBeNull();
   });
 
-  it('keeps the desktop sidebar persistent without an overlay trigger', () => {
+  it('collapses the persistent sidebar on desktop and expands the content area', () => {
     setViewport(1280);
     component.onResize();
     fixture.detectChanges();
 
-    expect(fixture.nativeElement.querySelector('.plp-app-shell__desktop-nav')).not.toBeNull();
-    expect(fixture.nativeElement.querySelector('[aria-label="فتح القائمة"]')).toBeNull();
-    expect(component.isOverlayNavigation).toBeFalse();
+    const shell = fixture.nativeElement.querySelector('.plp-app-shell') as HTMLElement;
+    const sidebar = fixture.nativeElement.querySelector('.plp-app-shell__desktop-nav') as HTMLElement;
+    const menuButton = fixture.nativeElement.querySelector('[aria-label="إغلاق القائمة"]') as HTMLButtonElement;
+
+    expect(component.hasPersistentNavigation).toBeTrue();
+    expect(shell.getAttribute('data-sidebar-collapsed')).toBe('false');
+    expect(window.getComputedStyle(sidebar).display).toBe('block');
+
+    menuButton.click();
+    fixture.detectChanges();
+
+    expect(component.sidebarCollapsed).toBeTrue();
+    expect(shell.getAttribute('data-sidebar-collapsed')).toBe('true');
+    expect(window.getComputedStyle(sidebar).display).toBe('none');
   });
 
-  it('keeps scrolling inside page content and persistent navigation across tablet and desktop modes', () => {
-    const scenarios: Array<[number, ShellNavigationMode, boolean]> = [
-      [700, 'tablet-portrait', false],
-      [800, 'tablet-landscape', true],
-      [1280, 'desktop', true]
+  it('keeps scrolling inside page content while the shell switches between overlay and persistent navigation', () => {
+    const scenarios: Array<[number, number, ShellNavigationMode, boolean]> = [
+      [700, 1000, 'tablet-portrait', true],
+      [800, 1280, 'tablet-portrait', true],
+      [960, 600, 'tablet-landscape', false],
+      [1280, 800, 'desktop', false]
     ];
 
-    for (const [width, expectedMode, hasPersistentSidebar] of scenarios) {
-      setViewport(width);
+    for (const [width, height, expectedMode, isOverlay] of scenarios) {
+      setViewport(width, height);
       component.onResize();
       fixture.detectChanges();
 
       const shell = fixture.nativeElement.querySelector('.plp-app-shell') as HTMLElement;
       const main = fixture.nativeElement.querySelector('.plp-app-shell__main') as HTMLElement;
-      const sidebar = fixture.nativeElement.querySelector('.plp-app-shell__desktop-nav') as HTMLElement;
       const shellStyle = window.getComputedStyle(shell);
       const mainStyle = window.getComputedStyle(main);
-      const sidebarStyle = window.getComputedStyle(sidebar);
 
-      expect(component.navigationMode).withContext(`width ${width}`).toBe(expectedMode);
+      expect(component.navigationMode).withContext(`${width}x${height}`).toBe(expectedMode);
       expect(shellStyle.overflowY).withContext(`shell width ${width}`).toBe('hidden');
       expect(mainStyle.overflowY).withContext(`content width ${width}`).toBe('auto');
-      expect(sidebarStyle.position).withContext(`sidebar width ${width}`).not.toBe('fixed');
 
-      if (hasPersistentSidebar) {
-        expect(sidebarStyle.display).withContext(`sidebar width ${width}`).toBe('block');
-        expect(sidebarStyle.overflowY).withContext(`sidebar width ${width}`).toBe('auto');
-        expect(fixture.nativeElement.querySelector('[aria-label="فتح القائمة"]')).toBeNull();
-      } else {
-        expect(sidebarStyle.display).withContext(`sidebar width ${width}`).toBe('none');
+      if (isOverlay) {
         expect(fixture.debugElement.query(By.directive(Sidebar))).not.toBeNull();
-        expect(fixture.nativeElement.querySelector('[aria-label="فتح القائمة"]')).not.toBeNull();
+      } else {
+        expect(fixture.nativeElement.querySelector('.plp-app-shell__desktop-nav')).not.toBeNull();
       }
     }
   });
 
   it('keeps a navigation mode available at every required breakpoint boundary', () => {
-    const expectedModes: Array<[number, ShellNavigationMode]> = [
-      [320, 'phone'],
-      [360, 'phone'],
-      [390, 'phone'],
-      [599, 'phone'],
-      [600, 'tablet-portrait'],
-      [767, 'tablet-portrait'],
-      [768, 'tablet-landscape'],
-      [1023, 'tablet-landscape'],
-      [1024, 'desktop'],
-      [1280, 'desktop']
+    const expectedModes: Array<[number, number, ShellNavigationMode]> = [
+      [320, 800, 'phone'],
+      [360, 800, 'phone'],
+      [390, 844, 'phone'],
+      [599, 960, 'phone'],
+      [600, 960, 'tablet-portrait'],
+      [767, 1024, 'tablet-portrait'],
+      [768, 1024, 'tablet-portrait'],
+      [800, 1280, 'tablet-portrait'],
+      [962, 1280, 'tablet-portrait'],
+      [960, 600, 'tablet-landscape'],
+      [1023, 768, 'tablet-landscape'],
+      [1024, 1366, 'desktop'],
+      [1280, 800, 'desktop']
     ];
 
-    for (const [width, expectedMode] of expectedModes) {
-      setViewport(width);
+    for (const [width, height, expectedMode] of expectedModes) {
+      setViewport(width, height);
       component.onResize();
 
-      expect(component.navigationMode).withContext(`width ${width}`).toBe(expectedMode);
+      expect(component.navigationMode).withContext(`${width}x${height}`).toBe(expectedMode);
       expect(component.isOverlayNavigation || component.hasPersistentNavigation)
         .withContext(`width ${width}`)
         .toBeTrue();
@@ -389,16 +443,21 @@ describe('AppShellComponent', () => {
     expect(computedStyle.insetBlockStart).toBe('0px');
   });
 
-  it('continues to filter menu items through the existing permission service', () => {
+  it('continues to filter menu items through the existing permission service', fakeAsync(() => {
     permissions.filterNavigation.and.returnValue([navigation[0]]);
     permissions.permissions$.next(['dashboard.view']);
     fixture.detectChanges();
 
-    const text = fixture.nativeElement.textContent as string;
+    openOverlayDrawer();
+    tick(200);
+    fixture.detectChanges();
+
+    const overlayContainer = getOverlaySidebar().container as HTMLElement;
+    const text = overlayContainer.textContent as string;
     expect(text).toContain('لوحة التحكم');
     expect(text).not.toContain('العاملون');
     expect(text).not.toContain('إدارة المستخدمين');
-  });
+  }));
 
   it('uses the existing logout action and destination without changing permissions or routes', () => {
     component.logout();
@@ -407,8 +466,9 @@ describe('AppShellComponent', () => {
     expect(router.navigateByUrl).toHaveBeenCalledOnceWith('/login');
   });
 
-  function setViewport(width: number): void {
+  function setViewport(width: number, height = 900): void {
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: width });
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: height });
   }
 
   function openOverlayDrawer(): void {

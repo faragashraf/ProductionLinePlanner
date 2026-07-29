@@ -2,7 +2,7 @@
   display: grid;
   gap: var(--plp-spacing-2);
   min-width: 0;
-  width: min(100%, 1060px);
+  width: 100%;
 }
 
 .plp-stage-renderer__header {
@@ -46,10 +46,49 @@
   gap: 0.4rem;
 }
 
+.plp-stage-renderer__filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--plp-color-text-subtle);
+  font-size: var(--plp-font-size-xs);
+}
+
+.plp-stage-renderer__filter label {
+  font-weight: 700;
+  color: var(--plp-color-text);
+}
+
+.plp-stage-renderer__filter select {
+  min-height: 2.35rem;
+  min-width: min(100%, 13rem);
+  border: 1px solid var(--plp-color-border);
+  border-radius: var(--plp-radius-md);
+  background: var(--plp-color-surface);
+  color: var(--plp-color-text);
+  padding-inline: 0.65rem;
+}
+
+.plp-stage-renderer__filter-count {
+  white-space: nowrap;
+}
+
+.plp-stage-renderer__filter-empty {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--plp-spacing-1);
+  border: 1px dashed var(--plp-color-border);
+  border-radius: var(--plp-radius-md);
+  color: var(--plp-color-text-subtle);
+  padding: var(--plp-spacing-2);
+}
+
 .plp-stage-renderer__substages-grid {
   align-items: start;
   width: 100%;
-  --plp-grid-min-width: 240px;
+  --plp-grid-min-width: 280px;
 }
 
 .plp-stage-renderer__substage-button {
@@ -97,8 +136,18 @@
 }
 
 :host ::ng-deep .plp-stage-renderer .plp-completion-bar {
-  max-width: 8.5rem;
+  max-width: 100%;
   gap: 0.25rem;
+}
+
+@media (max-width: 767px) {
+  .plp-stage-renderer__filter {
+    align-items: stretch;
+  }
+
+  .plp-stage-renderer__filter select {
+    flex: 1 1 100%;
+  }
 }
 
 :host ::ng-deep .plp-stage-renderer .plp-completion-bar__track {

@@ -1,0 +1,25 @@
+<section class="factory-structure-tree-view" dir="rtl">
+  <p-tree
+    [value]="selectableNodes(nodes)"
+    selectionMode="single"
+    [(selection)]="selectedNode"
+    [loading]="loading"
+    [propagateSelectionUp]="false"
+    [propagateSelectionDown]="false"
+    (onNodeExpand)="onNodeExpand($event)"
+    (onNodeCollapse)="onNodeCollapse($event)"
+    (onNodeSelect)="onNodeSelect($event)"
+  >
+    <ng-template pTemplate="default" let-node>
+      <div class="factory-structure-node" [class.factory-structure-node--no-actions]="!showActions" [class.factory-structure-node--not-selectable]="!isSelectable(node)" [class.factory-structure-node--inactive]="!node.data.isActive" [class.factory-structure-node--department]="node.data.entityType === 'department'" [class.factory-structure-node--line]="node.data.entityType === 'line'" [attr.aria-disabled]="!isSelectable(node)" [attr.data-selectable]="isSelectable(node)">
+        <span class="factory-structure-node__type-icon" [class.factory-structure-node__type-icon--factory]="node.data.entityType === 'factory'"><i [class]="nodeIcon(node.data.entityType)" aria-hidden="true"></i></span>
+        <span class="factory-structure-node__content">
+          <strong>{{ node.data.name }}</strong>
+          <span class="plp-code" *ngIf="node.data.code">{{ node.data.code }}</span>
+        </span>
+        <plp-status-badge [status]="node.data.isActive ? 'ready' : 'warning'" [label]="node.data.isActive ? 'نشط' : 'غير نشط'" [compact]="true"></plp-status-badge>
+        <button *ngIf="showActions" pButton type="button" class="p-button-rounded p-button-text p-button-sm factory-structure-node__menu" icon="pi pi-ellipsis-v" aria-label="إجراءات العنصر" title="إجراءات" [disabled]="actionDisabled" (click)="openNodeAction($event, node)"></button>
+      </div>
+    </ng-template>
+  </p-tree>
+</section>

@@ -4,6 +4,9 @@ public sealed class ProductionLineDto
 {
     public Guid Id { get; init; }
     public Guid FactoryId { get; init; }
+    public Guid? DepartmentId { get; init; }
+    public string? DepartmentCode { get; init; }
+    public string? DepartmentNameAr { get; init; }
     public string Name { get; init; } = string.Empty;
     public string? LineCode { get; init; }
     public int SequenceOrder { get; init; }

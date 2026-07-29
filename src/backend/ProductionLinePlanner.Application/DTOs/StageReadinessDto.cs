@@ -7,6 +7,8 @@ public sealed class StageReadinessDto
     public Guid ScopeEntityId { get; init; }
     public string ScopeType { get; init; } = string.Empty;
     public decimal ReadinessPercent { get; init; }
+    public decimal AssignmentCoveragePercent { get; init; }
+    public string AttendanceDataStatus { get; init; } = "Unknown";
     public int RequiredWorkers { get; init; }
     public int AssignedWorkers { get; init; }
     public int PresentWorkers { get; init; }

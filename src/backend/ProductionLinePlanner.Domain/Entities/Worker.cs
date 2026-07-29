@@ -19,7 +19,9 @@ public class Worker
         int? attendanceDepartmentId = null,
         string? photoReference = null,
         DateTime? lastExternalSyncAt = null,
-        DateTime? createdAtUtc = null)
+        DateTime? createdAtUtc = null,
+        Guid? organizationalDepartmentId = null,
+        Guid? organizationalDepartmentConcurrencyToken = null)
     {
         if (string.IsNullOrWhiteSpace(employeeCode))
             throw new ArgumentException("EmployeeCode is required.", nameof(employeeCode));
@@ -38,6 +40,8 @@ public class Worker
         AttendanceDepartmentId = attendanceDepartmentId;
         PhotoReference = string.IsNullOrWhiteSpace(photoReference) ? null : photoReference.Trim();
         LastExternalSyncAt = lastExternalSyncAt;
+        OrganizationalDepartmentId = organizationalDepartmentId;
+        OrganizationalDepartmentConcurrencyToken = organizationalDepartmentConcurrencyToken ?? Guid.NewGuid();
         CreatedAtUtc = createdAtUtc ?? DateTime.UtcNow;
         UpdatedAtUtc = CreatedAtUtc;
     }
@@ -56,6 +60,13 @@ public class Worker
     public EmploymentStatus EmploymentStatus { get; private set; }
     public DateTime? EmploymentEndDate { get; private set; }
     public int? AttendanceDepartmentId { get; private set; }
+    /// <summary>
+    /// Planner-owned organizational department. This is independent from the ZKTime
+    /// attendance department and from permanent production-stage staffing.
+    /// </summary>
+    public Guid? OrganizationalDepartmentId { get; private set; }
+    public Department? OrganizationalDepartment { get; private set; }
+    public Guid OrganizationalDepartmentConcurrencyToken { get; private set; }
     public string? PhotoReference { get; private set; }
     public DateTime? LastExternalSyncAt { get; private set; }
     public DateTime CreatedAtUtc { get; private set; }
@@ -64,20 +75,6 @@ public class Worker
     public WorkerDefaultAssignment? DefaultAssignment { get; private set; }
     public List<WorkerDefaultAssignment> DefaultAssignmentHistory { get; } = [];
     public List<WorkerTemporaryAssignment> TemporaryAssignments { get; } = [];
-
-    public void UpdateContactInfo(string? zkEmployeeCode, string? phone, DateTime? atUtc = null)
-    {
-        AttendanceUserId = string.IsNullOrWhiteSpace(zkEmployeeCode) ? null : zkEmployeeCode.Trim();
-        Phone = string.IsNullOrWhiteSpace(phone) ? null : phone.Trim();
-        UpdatedAtUtc = atUtc ?? DateTime.UtcNow;
-    }
-
-    public void SetAttendanceDepartmentId(int? attendanceDepartmentId, DateTime? atUtc = null)
-    {
-        AttendanceDepartmentId = attendanceDepartmentId;
-        UpdatedAtUtc = atUtc ?? DateTime.UtcNow;
-        LastExternalSyncAt = UpdatedAtUtc;
-    }
 
     public void SetPhone(string? phone, DateTime? atUtc = null)
     {
@@ -89,6 +86,22 @@ public class Worker
     {
         LocalDepartmentName = string.IsNullOrWhiteSpace(departmentName) ? null : departmentName.Trim();
         UpdatedAtUtc = atUtc ?? DateTime.UtcNow;
+    }
+
+    public bool AssignOrganizationalDepartment(Guid departmentId, DateTime? atUtc = null)
+    {
+        if (departmentId == Guid.Empty)
+            throw new ArgumentException("Organizational department is required.", nameof(departmentId));
+
+        if (OrganizationalDepartmentId == departmentId)
+        {
+            return false;
+        }
+
+        OrganizationalDepartmentId = departmentId;
+        OrganizationalDepartmentConcurrencyToken = Guid.NewGuid();
+        UpdatedAtUtc = atUtc ?? DateTime.UtcNow;
+        return true;
     }
 
     public void SetPhotoReference(string? photoReference, DateTime? atUtc = null)
@@ -104,6 +117,72 @@ public class Worker
 
         FullName = fullName.Trim();
         UpdatedAtUtc = atUtc ?? DateTime.UtcNow;
+    }
+
+    /// <summary>
+    /// Updates only the stable identities observed in the external attendance directory.
+    /// Planner-owned profile, employment, assignment, and compensation fields deliberately
+    /// remain outside this synchronization boundary.
+    /// </summary>
+    public bool SynchronizeAttendanceIdentity(
+        string attendanceUserId,
+        string badgeNumber,
+        DateTime synchronizedAtUtc)
+    {
+        if (string.IsNullOrWhiteSpace(attendanceUserId))
+            throw new ArgumentException("AttendanceUserId is required.", nameof(attendanceUserId));
+        if (string.IsNullOrWhiteSpace(badgeNumber))
+            throw new ArgumentException("BadgeNumber is required.", nameof(badgeNumber));
+
+        var normalizedAttendanceUserId = attendanceUserId.Trim();
+        var normalizedBadgeNumber = badgeNumber.Trim();
+        var changed = !string.Equals(AttendanceUserId, normalizedAttendanceUserId, StringComparison.OrdinalIgnoreCase) ||
+                      !string.Equals(BadgeNumber, normalizedBadgeNumber, StringComparison.OrdinalIgnoreCase) ||
+                      LastExternalSyncAt is null;
+
+        if (!changed)
+        {
+            return false;
+        }
+
+        AttendanceUserId = normalizedAttendanceUserId;
+        BadgeNumber = normalizedBadgeNumber;
+        LastExternalSyncAt = synchronizedAtUtc;
+        UpdatedAtUtc = synchronizedAtUtc;
+        return true;
+    }
+
+    /// <summary>
+    /// Applies the authoritative current-worker signal supplied by the durable attendance staging
+    /// contract. A repeated former-worker observation preserves the original employment end date.
+    /// </summary>
+    public bool SynchronizeAttendanceEmployment(bool isCurrentWorker, DateTime synchronizedAtUtc)
+    {
+        if (isCurrentWorker)
+        {
+            if (IsActive && EmploymentStatus == EmploymentStatus.Active && EmploymentEndDate is null)
+            {
+                return false;
+            }
+
+            Activate(synchronizedAtUtc);
+        }
+        else
+        {
+            if (!IsActive && EmploymentStatus == EmploymentStatus.LeftEmployment)
+            {
+                return false;
+            }
+
+            SetEmploymentStatus(
+                EmploymentStatus.LeftEmployment,
+                synchronizedAtUtc,
+                EmploymentEndDate ?? synchronizedAtUtc);
+        }
+
+        LastExternalSyncAt = synchronizedAtUtc;
+        UpdatedAtUtc = synchronizedAtUtc;
+        return true;
     }
 
     public void SetEmploymentStatus(EmploymentStatus status, DateTime? atUtc = null, DateTime? employmentEndDate = null)
@@ -143,68 +222,4 @@ public class Worker
         UpdatedAtUtc = atUtc ?? DateTime.UtcNow;
     }
 
-    public void MarkExternalSync(DateTime syncedAt, int? attendanceDepartmentId = null)
-    {
-        LastExternalSyncAt = syncedAt;
-        if (attendanceDepartmentId.HasValue)
-        {
-            AttendanceDepartmentId = attendanceDepartmentId;
-        }
-        UpdatedAtUtc = syncedAt;
-    }
-
-    public bool ApplyAttendanceSync(
-        DateTime syncedAtUtc,
-        string? attendanceUserId = null,
-        string? fullName = null,
-        string? badgeNumber = null,
-        int? attendanceDepartmentId = null)
-    {
-        var isUpdated = false;
-
-        var normalizedAttendanceUserId = NormalizeOptionalString(attendanceUserId);
-        var normalizedFullName = NormalizeOptionalString(fullName);
-        var normalizedBadgeNumber = NormalizeOptionalString(badgeNumber);
-
-        if (!string.IsNullOrWhiteSpace(normalizedAttendanceUserId) &&
-            !string.Equals(AttendanceUserId, normalizedAttendanceUserId, StringComparison.Ordinal))
-        {
-            AttendanceUserId = normalizedAttendanceUserId;
-            isUpdated = true;
-        }
-
-        if (!string.IsNullOrWhiteSpace(normalizedFullName) &&
-            !string.Equals(FullName, normalizedFullName, StringComparison.Ordinal))
-        {
-            FullName = normalizedFullName;
-            isUpdated = true;
-        }
-
-        if (!string.IsNullOrWhiteSpace(normalizedBadgeNumber) &&
-            !string.Equals(BadgeNumber, normalizedBadgeNumber, StringComparison.Ordinal))
-        {
-            BadgeNumber = normalizedBadgeNumber;
-            isUpdated = true;
-        }
-
-        if (attendanceDepartmentId.HasValue && AttendanceDepartmentId != attendanceDepartmentId.Value)
-        {
-            AttendanceDepartmentId = attendanceDepartmentId;
-            isUpdated = true;
-        }
-
-        UpdatedAtUtc = syncedAtUtc;
-        LastExternalSyncAt = syncedAtUtc;
-        return isUpdated;
-    }
-
-    private static string? NormalizeOptionalString(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return null;
-        }
-
-        return value.Trim();
-    }
 }

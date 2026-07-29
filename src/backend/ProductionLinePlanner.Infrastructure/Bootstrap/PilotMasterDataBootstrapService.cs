@@ -70,7 +70,8 @@ public sealed class PilotMasterDataBootstrapService(
 
             var now = DateTime.UtcNow;
             var factory = await ApplyFactoryAsync(prepared, now, cancellationToken);
-            var line = await ApplyProductionLineAsync(prepared, factory, now, cancellationToken);
+            var department = await ApplyDepartmentAsync(prepared, factory, now, cancellationToken);
+            var line = await ApplyProductionLineAsync(prepared, factory, department, now, cancellationToken);
             var product = await ApplyProductAsync(prepared, now, cancellationToken);
             await ApplyStagesAndMappingsAsync(prepared, line, product, now, cancellationToken);
             await ApplyWorkerProjectionAsync(prepared, actorUserId, now, cancellationToken);
@@ -131,14 +132,14 @@ public sealed class PilotMasterDataBootstrapService(
         var productMatches = Match(products, ProductName, x => x.Name);
         var targetProduct = productMatches.Length == 1 ? productMatches[0] : null;
 
-        var stages = targetLine is null
+        var stages = targetLine?.DepartmentId is null
             ? []
             : await db.SubStages.AsNoTracking().Include(x => x.MainStage)
-                .Where(x => x.MainStage!.ProductionLineId == targetLine.Id)
+                .Where(x => x.DepartmentId == targetLine.DepartmentId.Value)
                 .ToArrayAsync(cancellationToken);
-        var mappings = targetProduct is null
+        var mappings = targetProduct is null || targetLine is null
             ? []
-            : await db.ProductModelStages.AsNoTracking().Where(x => x.ProductModelId == targetProduct.Id).ToArrayAsync(cancellationToken);
+            : await db.ProductModelStages.AsNoTracking().Where(x => x.ProductModelId == targetProduct.Id && x.ProductionLineId == targetLine.Id).ToArrayAsync(cancellationToken);
 
         var expectedCodes = Enumerable.Range(1, prepared.SourceStages.Count).Select(x => $"STG{x:000}").ToHashSet(StringComparer.OrdinalIgnoreCase);
         var actualCodes = stages.Select(x => x.Code).ToArray();
@@ -238,18 +239,17 @@ public sealed class PilotMasterDataBootstrapService(
         if (existingProduct is not null && !existingProduct.IsActive)
             issues.Add(Block("InactiveProduct", "The matching product is inactive and must be reviewed before bootstrap."));
 
-        var existingSubStages = existingLine is null
+        var existingSubStages = existingLine?.DepartmentId is null
             ? Array.Empty<SubStage>()
             : await db.SubStages.AsNoTracking()
                 .Include(x => x.MainStage)
-                .Where(x => x.MainStage!.ProductionLineId == existingLine.Id)
+                .Where(x => x.DepartmentId == existingLine.DepartmentId.Value)
                 .ToArrayAsync(ct);
-        var allSubStages = await db.SubStages.AsNoTracking().ToArrayAsync(ct);
-        var existingMappings = existingProduct is null
+        var existingMappings = existingProduct is null || existingLine is null
             ? Array.Empty<ProductModelStage>()
-            : await db.ProductModelStages.AsNoTracking().Where(x => x.ProductModelId == existingProduct.Id).ToArrayAsync(ct);
+            : await db.ProductModelStages.AsNoTracking().Where(x => x.ProductModelId == existingProduct.Id && x.ProductionLineId == existingLine.Id).ToArrayAsync(ct);
 
-        var stages = BuildStagePlans(sourceStages, existingSubStages, allSubStages, existingMappings, input.ExplicitCompensationMode, issues);
+        var stages = BuildStagePlans(sourceStages, existingSubStages, existingMappings, input.ExplicitCompensationMode, issues);
         var unexpectedProductStageMappings = ValidateExistingProductMappings(existingMappings, stages, issues);
 
         var workers = await db.Workers.AsNoTracking().ToArrayAsync(ct);
@@ -268,7 +268,6 @@ public sealed class PilotMasterDataBootstrapService(
     private IReadOnlyCollection<StagePlan> BuildStagePlans(
         IReadOnlyCollection<SourceStage> sourceStages,
         IReadOnlyCollection<SubStage> existingSubStages,
-        IReadOnlyCollection<SubStage> allSubStages,
         IReadOnlyCollection<ProductModelStage> existingMappings,
         CompensationMode? explicitCompensationMode,
         List<PilotBootstrapIssueDto> issues)
@@ -278,7 +277,7 @@ public sealed class PilotMasterDataBootstrapService(
             .GroupBy(x => StageIdentity(x.MainStage!.Name, x.Name))
             .ToDictionary(x => x.Key, x => x.ToArray());
         var mappingsByStage = existingMappings.GroupBy(x => x.SubStageId).ToDictionary(x => x.Key, x => x.ToArray());
-        var globalCodes = allSubStages.Select(x => x.Code).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var lineCodes = existingSubStages.Select(x => x.Code).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var plannedCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var generatedNumber = 4;
 
@@ -313,7 +312,7 @@ public sealed class PilotMasterDataBootstrapService(
                 generated = true;
             }
 
-            var codeOwners = allSubStages.Where(x => string.Equals(x.Code, code, StringComparison.OrdinalIgnoreCase)).ToArray();
+            var codeOwners = existingSubStages.Where(x => string.Equals(x.Code, code, StringComparison.OrdinalIgnoreCase)).ToArray();
             if (codeOwners.Length > 0 && (existing is null || codeOwners.Any(x => x.Id != existing.Id)))
             {
                 rowIssues.Add(Block("DuplicateStageCode", "The generated or preserved stage code belongs to a different stage."));
@@ -322,7 +321,7 @@ public sealed class PilotMasterDataBootstrapService(
             {
                 rowIssues.Add(Block("DuplicateStageCodeInWorkbook", "The workbook produces the same stage code more than once."));
             }
-            if (globalCodes.Contains(code) && existing is null && codeOwners.Length == 0)
+            if (lineCodes.Contains(code) && existing is null && codeOwners.Length == 0)
             {
                 rowIssues.Add(Block("DuplicateStageCode", "The generated or preserved stage code is already in use."));
             }
@@ -405,16 +404,37 @@ public sealed class PilotMasterDataBootstrapService(
         return factory;
     }
 
-    private async Task<ProductionLine> ApplyProductionLineAsync(PreparedBootstrap prepared, Factory factory, DateTime now, CancellationToken ct)
+    private async Task<Department> ApplyDepartmentAsync(PreparedBootstrap prepared, Factory factory, DateTime now, CancellationToken ct)
     {
         if (prepared.ProductionLine is not null)
         {
-            return await db.ProductionLines.SingleAsync(x => x.Id == prepared.ProductionLine.Id, ct);
+            var departmentId = prepared.ProductionLine.DepartmentId
+                ?? throw new InvalidOperationException("The pilot production line must belong to a department.");
+            return await db.Departments.SingleAsync(x => x.Id == departmentId && x.FactoryId == factory.Id, ct);
+        }
+
+        var existing = await db.Departments.SingleOrDefaultAsync(x => x.FactoryId == factory.Id && x.Code == "PILOT", ct);
+        if (existing is not null) return existing;
+
+        var nextOrder = await db.Departments.Where(x => x.FactoryId == factory.Id)
+            .Select(x => (int?)x.SequenceOrder).MaxAsync(ct) ?? -1;
+        var department = new Department(Guid.NewGuid(), factory.Id, "PILOT", "قسم التشغيل التجريبي", "Pilot operations", nextOrder + 1, true, now);
+        db.Departments.Add(department);
+        return department;
+    }
+
+    private async Task<ProductionLine> ApplyProductionLineAsync(PreparedBootstrap prepared, Factory factory, Department department, DateTime now, CancellationToken ct)
+    {
+        if (prepared.ProductionLine is not null)
+        {
+            var existing = await db.ProductionLines.SingleAsync(x => x.Id == prepared.ProductionLine.Id, ct);
+            if (existing.DepartmentId is null) throw new InvalidOperationException("The pilot production line must belong to a department.");
+            return existing;
         }
 
         var lastOrder = await db.ProductionLines.Where(x => x.FactoryId == factory.Id)
             .Select(x => (int?)x.SequenceOrder).MaxAsync(ct) ?? -1;
-        var line = new ProductionLine(Guid.NewGuid(), factory.Id, ProductionLineName, lastOrder + 1, "SEW", true, now);
+        var line = new ProductionLine(Guid.NewGuid(), factory.Id, ProductionLineName, lastOrder + 1, "SEW", true, now, department.Id);
         db.ProductionLines.Add(line);
         return line;
     }
@@ -433,9 +453,12 @@ public sealed class PilotMasterDataBootstrapService(
 
     private async Task ApplyStagesAndMappingsAsync(PreparedBootstrap prepared, ProductionLine line, ProductModel product, DateTime now, CancellationToken ct)
     {
-        var mains = await db.MainStages.Where(x => x.ProductionLineId == line.Id).ToListAsync(ct);
-        var subStages = await db.SubStages.Include(x => x.MainStage).Where(x => x.MainStage!.ProductionLineId == line.Id).ToListAsync(ct);
-        var mappings = await db.ProductModelStages.Where(x => x.ProductModelId == product.Id).ToListAsync(ct);
+        var departmentId = line.DepartmentId ?? throw new InvalidOperationException("The pilot production line must belong to a department.");
+        var mains = await db.MainStages.Where(x => x.DepartmentId == departmentId).ToListAsync(ct);
+        var subStages = await db.SubStages.Include(x => x.MainStage).Where(x => x.DepartmentId == departmentId).ToListAsync(ct);
+        var mappings = await db.ProductModelStages
+            .Where(x => x.ProductModelId == product.Id && x.ProductionLineId == line.Id)
+            .ToListAsync(ct);
 
         foreach (var plan in prepared.Stages.OrderBy(x => x.Source.SourceRow))
         {
@@ -448,7 +471,7 @@ public sealed class PilotMasterDataBootstrapService(
             if (main is null)
             {
                 var nextOrder = mains.Count == 0 ? 0 : mains.Max(x => x.SequenceOrder) + 1;
-                main = new MainStage(Guid.NewGuid(), line.Id, plan.Source.MainStageName, nextOrder, false, true, now);
+                main = new MainStage(Guid.NewGuid(), departmentId, plan.Source.MainStageName, nextOrder, false, true, now);
                 mains.Add(main);
                 db.MainStages.Add(main);
             }
@@ -463,7 +486,7 @@ public sealed class PilotMasterDataBootstrapService(
             if (subStage is null)
             {
                 var nextOrder = subStages.Where(x => x.MainStageId == main.Id).Select(x => x.DefaultOrder).DefaultIfEmpty(0).Max() + 1;
-                subStage = new SubStage(Guid.NewGuid(), main.Id, plan.Source.SubStageName, plan.Code, 0, nextOrder, true, now);
+                subStage = new SubStage(Guid.NewGuid(), main.Id, plan.Source.SubStageName, plan.Code, 0, nextOrder, true, now, departmentId);
                 subStages.Add(subStage);
                 db.SubStages.Add(subStage);
             }
@@ -478,7 +501,7 @@ public sealed class PilotMasterDataBootstrapService(
             {
                 var compensationMode = prepared.Input.ExplicitCompensationMode ?? ProvisionalPilotCompensationMode;
                 mapping = new ProductModelStage(
-                    Guid.NewGuid(), product.Id, subStage.Id, plan.Source.SourceRow,
+                    Guid.NewGuid(), product.Id, line.Id, subStage.Id, plan.Source.SourceRow,
                     plan.Source.PiecePrice, plan.Source.StandardSeconds, compensationMode,
                     isRequired: true, isActive: true, createdAtUtc: now);
                 mappings.Add(mapping);

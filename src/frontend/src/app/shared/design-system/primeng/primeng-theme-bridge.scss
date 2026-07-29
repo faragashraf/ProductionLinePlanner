@@ -170,6 +170,100 @@
   min-block-size: var(--plp-control-height-standard);
 }
 
+/* Opt-in sizing contract for form selects and searchable connected overlays. */
+p-dropdown:has(.app-full-width-select),
+p-select:has(.app-full-width-select),
+p-multiselect:has(.app-full-width-select),
+.p-dropdown.app-full-width-select,
+.p-select.app-full-width-select,
+.p-multiselect.app-full-width-select {
+  box-sizing: border-box;
+  display: flex;
+  inline-size: 100%;
+  max-inline-size: 100%;
+  min-inline-size: 0;
+}
+
+.app-full-width-select .p-dropdown-label,
+.app-full-width-select .p-select-label,
+.app-full-width-select .p-multiselect-label {
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* PrimeNG 17 positions clear icons absolutely with a physical `right` value.
+ * Give labels, clear actions, and dropdown triggers independent RTL-safe lanes
+ * so long selected values can truncate without covering either action. */
+.p-dropdown.p-dropdown-clearable,
+.p-select.p-select-clearable {
+  --plp-select-clear-size: 2.5rem;
+  --plp-select-trigger-size: 3rem;
+  align-items: stretch;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--plp-select-clear-size) var(--plp-select-trigger-size);
+}
+
+.p-dropdown.p-dropdown-clearable .p-dropdown-label,
+.p-select.p-select-clearable .p-select-label {
+  inline-size: auto;
+  min-inline-size: 0;
+}
+
+.p-dropdown.p-dropdown-clearable .p-dropdown-clear-icon,
+.p-select.p-select-clearable .p-select-clear-icon {
+  align-self: stretch;
+  block-size: 100%;
+  box-sizing: border-box;
+  cursor: pointer;
+  inline-size: var(--plp-select-clear-size);
+  inset: auto;
+  margin: 0;
+  padding: .75rem;
+  place-self: stretch center;
+  position: static;
+}
+
+.p-dropdown.p-dropdown-clearable .p-dropdown-trigger,
+.p-select.p-select-clearable .p-select-dropdown {
+  inline-size: var(--plp-select-trigger-size);
+  min-inline-size: var(--plp-select-trigger-size);
+}
+
+.p-multiselect.p-multiselect-clearable {
+  --plp-select-clear-size: 2.5rem;
+  --plp-select-trigger-size: 3rem;
+}
+
+.p-multiselect.p-multiselect-clearable .p-multiselect-label-container {
+  min-inline-size: 0;
+  padding-inline-end: var(--plp-select-clear-size);
+  padding-right: 0;
+  position: relative;
+}
+
+.p-multiselect.p-multiselect-clearable .p-multiselect-clear-icon {
+  block-size: 100%;
+  box-sizing: border-box;
+  cursor: pointer;
+  inline-size: var(--plp-select-clear-size);
+  inset-block-start: 0;
+  inset-inline-end: 0;
+  margin: 0;
+  padding: .75rem;
+}
+
+.p-multiselect.p-multiselect-clearable .p-multiselect-trigger {
+  inline-size: var(--plp-select-trigger-size);
+  min-inline-size: var(--plp-select-trigger-size);
+}
+
+.p-dropdown.p-disabled .p-dropdown-clear-icon,
+.p-select.p-disabled .p-select-clear-icon,
+.p-multiselect.p-disabled .p-multiselect-clear-icon {
+  pointer-events: none;
+}
+
 .p-inputtext:hover,
 .p-inputnumber-input:hover,
 .p-dropdown:not(.p-disabled):hover,
@@ -321,9 +415,42 @@ p-radiobutton,
   inline-size: 2.25rem;
 }
 
-.p-dialog.plp-form-sheet .p-dialog-header-icon:hover {
+.p-dialog.plp-form-sheet .p-dialog-header-icon:not(.p-dialog-header-close):hover {
   background: var(--plp-color-surface-soft);
   color: var(--plp-color-text);
+}
+
+/* Only the actual dialog-close action receives danger affordance. Clear icons,
+ * chips, and other uses of the times glyph remain untouched. */
+.p-dialog .p-dialog-header .p-dialog-header-close {
+  color: var(--plp-color-text-inverse);
+  transition:
+    background-color var(--plp-motion-fast) var(--plp-motion-ease-standard),
+    color var(--plp-motion-fast) var(--plp-motion-ease-standard),
+    box-shadow var(--plp-motion-fast) var(--plp-motion-ease-standard);
+}
+
+.p-dialog .p-dialog-header .p-dialog-header-close .p-dialog-header-close-icon {
+  color: inherit;
+}
+
+.p-dialog .p-dialog-header .p-dialog-header-close.p-button:not(:disabled):not(.p-disabled):hover {
+  background: var(--plp-color-danger);
+  border-color: transparent;
+  color: var(--plp-color-text-inverse);
+  transform: none;
+}
+
+.p-dialog .p-dialog-header .p-dialog-header-close.p-button:focus-visible {
+  box-shadow: var(--focus-ring);
+  outline: none;
+}
+
+.p-dialog .p-dialog-header .p-dialog-header-close.p-button:not(:disabled):not(.p-disabled):active {
+  background: var(--plp-color-danger-strong);
+  border-color: transparent;
+  color: var(--plp-color-text-inverse);
+  transform: none;
 }
 
 .p-dialog.plp-form-sheet .p-dialog-footer {
@@ -552,6 +679,130 @@ p-radiobutton,
   color: var(--plp-color-text);
 }
 
+.p-dropdown-panel,
+.p-select-overlay,
+.p-multiselect-panel {
+  box-sizing: border-box;
+  max-inline-size: calc(100vw - 1rem);
+  overflow: hidden;
+}
+
+.p-dropdown-panel .p-dropdown-header,
+.p-select-overlay .p-select-header,
+.p-multiselect-panel .p-multiselect-header {
+  box-sizing: border-box;
+  inline-size: 100%;
+  max-inline-size: 100%;
+  padding: var(--plp-space-8);
+}
+
+.p-dropdown-panel .p-dropdown-filter-container,
+.p-select-overlay .p-select-filter-container,
+.p-multiselect-panel .p-multiselect-filter-container {
+  box-sizing: border-box;
+  display: block;
+  inline-size: 100%;
+  min-inline-size: 0;
+  position: relative;
+}
+
+.p-dropdown-panel .p-dropdown-filter,
+.p-select-overlay .p-select-filter,
+.p-multiselect-panel .p-multiselect-filter {
+  box-sizing: border-box;
+  inline-size: 100%;
+  margin: 0;
+  min-block-size: var(--plp-touch-target-min);
+  min-inline-size: 0;
+}
+
+:root[dir='rtl'] .p-dropdown-panel .p-dropdown-filter,
+:root[dir='rtl'] .p-select-overlay .p-select-filter,
+:root[dir='rtl'] .p-multiselect-panel .p-multiselect-filter {
+  padding-inline: 2.5rem .75rem;
+}
+
+:root[dir='rtl'] .p-dropdown-panel .p-dropdown-filter-icon,
+:root[dir='rtl'] .p-select-overlay .p-select-filter-icon,
+:root[dir='rtl'] .p-multiselect-panel .p-multiselect-filter-icon {
+  inset-inline-end: auto;
+  inset-inline-start: .85rem;
+  margin-block-start: -.5rem;
+  margin-inline: 0;
+  position: absolute;
+  top: 50%;
+}
+
+.p-dropdown-panel .p-dropdown-items-wrapper,
+.p-select-overlay .p-select-list-container,
+.p-multiselect-panel .p-multiselect-items-wrapper {
+  max-inline-size: 100%;
+  scrollbar-gutter: stable;
+}
+
+.p-dropdown-panel .p-dropdown-item,
+.p-select-overlay .p-select-option,
+.p-multiselect-panel .p-multiselect-item,
+.p-dropdown-panel .p-dropdown-empty-message,
+.p-select-overlay .p-select-empty-message,
+.p-multiselect-panel .p-multiselect-empty-message {
+  box-sizing: border-box;
+  max-inline-size: 100%;
+  min-inline-size: 0;
+  overflow: hidden;
+  text-align: start;
+}
+
+.p-dropdown-panel.app-searchable-select-panel,
+.p-select-overlay.app-searchable-select-panel,
+.p-multiselect-panel.app-searchable-select-panel {
+  direction: rtl;
+  max-inline-size: calc(100vw - 1rem);
+}
+
+.app-select-value,
+.app-select-option {
+  box-sizing: border-box;
+  display: grid;
+  gap: .125rem;
+  inline-size: 100%;
+  min-inline-size: 0;
+  overflow: hidden;
+  text-align: start;
+}
+
+.app-select-value strong,
+.app-select-value small,
+.app-select-option strong,
+.app-select-option code,
+.app-select-option small {
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-select-value small,
+.app-select-option small {
+  color: var(--plp-color-text-muted);
+  font-size: var(--plp-type-caption);
+}
+
+.app-select-option > span {
+  align-items: center;
+  display: flex;
+  gap: var(--plp-space-8);
+  min-inline-size: 0;
+}
+
+.app-select-option > span strong {
+  flex: 1 1 auto;
+}
+
+.app-select-option > span code {
+  flex: 0 1 auto;
+}
+
 .p-card,
 .p-panel,
 .p-menu,
@@ -688,7 +939,7 @@ p-dropdown[data-report-filter='production-order'] .p-dropdown-label {
 }
 
 .p-skeleton {
-  background: var(--plp-color-surface-soft);
+  background: color-mix(in oklab, var(--plp-color-border) 72%, var(--plp-color-surface));
   border-radius: var(--plp-radius-sm);
 }
 

@@ -1,4 +1,4 @@
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { Injectable } from '@angular/core';
 import { map, Observable, of, timeout } from 'rxjs';
 import { buildApiUrl } from '../config/api.config';
@@ -15,6 +15,7 @@ export type ApiAssignmentType = 'Default' | 'Temporary' | 'Replacement';
 
 export interface DefaultAssignmentRequest {
   workerId: string;
+  productionLineId: string;
   subStageId: string;
   reason?: string;
 }
@@ -367,37 +368,38 @@ export class AssignmentsApiService {
       );
   }
 
-  getRecommendations(subStageId: string): Observable<AssignmentRecommendation[]> {
-    if (!isBackendGuid(subStageId)) {
+  getRecommendations(productionLineId: string, subStageId: string): Observable<AssignmentRecommendation[]> {
+    if (!isBackendGuid(productionLineId) || !isBackendGuid(subStageId)) {
       return of([]);
     }
 
     return this.http
-      .get<ApiResponse<unknown>>(buildApiUrl('/api/assignments/recommendations'), { params: { subStageId } })
+      .get<ApiResponse<unknown>>(buildApiUrl('/api/assignments/recommendations'), { params: { productionLineId, subStageId } })
       .pipe(
         timeout(ASSIGNMENTS_READ_TIMEOUT_MS),
         map((response) => this.parseRecommendations(this.extractPayload(response)))
       );
   }
 
-  createDefaultAssignment(request: DefaultAssignmentRequest): Observable<AssignmentActionResult> {
+  createDefaultAssignment(request: DefaultAssignmentRequest, correlationId?: string): Observable<AssignmentActionResult> {
     return this.http
-      .post<ApiResponse<unknown>>(buildApiUrl('/api/assignments/default'), request)
+      .post<ApiResponse<unknown>>(buildApiUrl('/api/assignments/default'), request, { headers: this.correlationHeaders(correlationId) })
       .pipe(timeout(ASSIGNMENTS_WRITE_TIMEOUT_MS), map((response) => this.mapActionResult(this.extractPayload(response))));
   }
 
-  updateStageDefaultAssignments(subStageId: string, workerIds: string[]): Observable<StageDefaultAssignmentsUpdateResult> {
+  updateStageDefaultAssignments(productionLineId: string, subStageId: string, workerIds: string[], correlationId?: string): Observable<StageDefaultAssignmentsUpdateResult> {
     return this.http
       .put<ApiResponse<StageDefaultAssignmentsUpdateResult>>(
         buildApiUrl(`/api/assignments/default/stages/${encodeURIComponent(subStageId)}`),
-        { workerIds }
+        { productionLineId, workerIds },
+        { headers: this.correlationHeaders(correlationId) }
       )
       .pipe(timeout(ASSIGNMENTS_WRITE_TIMEOUT_MS), map((response) => this.extractPayload(response)));
   }
 
-  removeDefaultAssignment(workerId: string, subStageId: string, reason: string): Observable<AssignmentActionResult> {
+  removeDefaultAssignment(workerId: string, productionLineId: string, subStageId: string, reason: string, correlationId?: string): Observable<AssignmentActionResult> {
     return this.http
-      .delete<ApiResponse<unknown>>(buildApiUrl(`/api/assignments/default/${encodeURIComponent(workerId)}`), { params: { subStageId, reason } })
+      .delete<ApiResponse<unknown>>(buildApiUrl(`/api/assignments/default/${encodeURIComponent(workerId)}`), { params: { productionLineId, subStageId, reason }, headers: this.correlationHeaders(correlationId) })
       .pipe(timeout(ASSIGNMENTS_WRITE_TIMEOUT_MS), map((response) => this.mapActionResult(this.extractPayload(response))));
   }
 
@@ -429,6 +431,12 @@ export class AssignmentsApiService {
     return this.http
       .delete<ApiResponse<unknown>>(buildApiUrl(`/api/assignments/temporary/${encodeURIComponent(assignmentId)}`), { params: { reason } })
       .pipe(timeout(ASSIGNMENTS_WRITE_TIMEOUT_MS), map((response) => this.mapActionResult(this.extractPayload(response))));
+  }
+
+  private correlationHeaders(correlationId?: string): HttpHeaders | undefined {
+    return correlationId
+      ? new HttpHeaders({ 'X-Manufacturing-Realtime-Correlation-Id': correlationId })
+      : undefined;
   }
 
   private mapSubStageWorkers(payload: unknown, requestedSubStageId: string): SubStageWorkersData {

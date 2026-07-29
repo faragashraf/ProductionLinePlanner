@@ -1,193 +1,153 @@
-import { Component, OnInit } from '@angular/core';
-import { catchError, finalize, of } from 'rxjs';
+import { Component, OnDestroy, OnInit } from '@angular/core';
+import { catchError, finalize, of, Subject, Subscription, takeUntil } from 'rxjs';
+import { ManufacturingDataChanged, RealtimeConnectionStatus, realtimeConnectionStatusLabel } from '../../core/models/realtime-notification.models';
+import { ManufacturingCommandCenterApiService } from '../../core/services/manufacturing-command-center-api.service';
+import { ManufacturingRealtimeService } from '../../core/services/manufacturing-realtime.service';
 import {
-  AttendanceIndicator,
-  MockDataService
-} from '../../core/services/mock-data.service';
-import { DashboardApiData, DashboardApiService, StageReadinessAlert } from '../../core/services/dashboard-api.service';
-import { DashboardCard, FactoryMapLine, FactoryReadinessSummary, KpiTrend } from '../../core/services/mock-data.service';
-import { FactoryStatus } from '../../shared/models/factory-status.model';
+  CommandCenterFilters,
+  CommandCenterLine,
+  CommandCenterLineStatusDimension,
+  CommandCenterOperation,
+  CommandCenterProblemLine,
+  CommandCenterQualityIssue,
+  CommandCenterWorkerDetail,
+  ManufacturingCommandCenter,
+  commandCenterLineStatusDimensions,
+  commandCenterOperationLabel,
+  commandCenterProblemLines,
+  commandCenterScopeMatches,
+  defaultCommandCenterFilters
+} from '../../shared/models/manufacturing-command-center.model';
+
+type DashboardDetail = 'present' | 'present-assigned' | 'present-unassigned' | 'not-present' | 'drafts' | 'approved' | 'quality' | 'stage-shortage' | null;
 
 @Component({
   selector: 'app-dashboard-page',
-  templateUrl: './dashboard-page.component.html',
-  styleUrls: ['./dashboard-page.component.scss']
+  templateUrl: './dashboard-page.component.html'
 })
-export class DashboardPageComponent implements OnInit {
+export class DashboardPageComponent implements OnInit, OnDestroy {
+  filters = defaultCommandCenterFilters();
+  data: ManufacturingCommandCenter | null = null;
   isLoading = true;
-  showFallbackWarning = false;
-  cards: DashboardCard[] = [];
-  lineReadinessSummary: FactoryReadinessSummary = {
-    overallReadiness: 0,
-    totalLines: 0,
-    healthyLines: 0,
-    warningLines: 0,
-    criticalLines: 0,
-    activeWorkers: 0,
-    totalWorkers: 0,
-    attendanceRate: 0
-  };
-  attendanceIndicators: AttendanceIndicator[] = [];
-  previewLines: FactoryMapLine[] = [];
-  criticalReadinessAlerts: StageReadinessAlert[] = [];
+  isRefreshing = false;
+  hasLoadError = false;
+  dataIsCurrent = false;
+  selectedDetail: DashboardDetail = null;
+  readonly skeletons = [1, 2, 3, 4, 5, 6];
+
+  private readonly destroy$ = new Subject<void>();
+  private stopRealtimeWatch?: () => void;
+  private activeLoad?: Subscription;
+  private loadVersion = 0;
 
   constructor(
-    private readonly dataService: MockDataService,
-    private readonly dashboardApiService: DashboardApiService
+    private readonly api: ManufacturingCommandCenterApiService,
+    private readonly manufacturingRealtime: ManufacturingRealtimeService
   ) {}
 
+  get realtimeStatus$() { return this.manufacturingRealtime.connectionStatus$; }
+
   ngOnInit(): void {
-    this.loadDashboardData();
+    this.load();
+    this.stopRealtimeWatch = this.manufacturingRealtime.watchScreen({
+      screen: 'manufacturing-command-center',
+      matches: change => this.matchesCurrentScope(change),
+      refresh: () => this.load(true)
+    });
   }
 
-  private loadDashboardData(): void {
-    this.dashboardApiService
-      .loadDashboardData()
-      .pipe(
-        catchError(() => {
-          this.showFallbackWarning = true;
-          return of(this.getMockDashboardData());
-        }),
-        finalize(() => {
-          this.isLoading = false;
-        })
-      )
-      .subscribe((data) => {
-        this.setDashboardData(data);
-      });
+  ngOnDestroy(): void {
+    this.stopRealtimeWatch?.();
+    this.activeLoad?.unsubscribe();
+    this.destroy$.next();
+    this.destroy$.complete();
   }
 
-  private setDashboardData(data: DashboardApiData): void {
-    this.cards = data.cards;
-    this.previewLines = data.previewLines;
-    this.lineReadinessSummary = data.lineReadinessSummary;
-    this.attendanceIndicators = data.attendanceIndicators;
-    this.criticalReadinessAlerts = data.criticalReadinessAlerts;
+  onFiltersChange(filters: CommandCenterFilters): void {
+    this.filters = filters;
+    this.selectedDetail = null;
+    this.dataIsCurrent = false;
+    this.load();
   }
 
-  private getMockDashboardData(): DashboardApiData {
-    const previewLines = this.dataService.getFactoryMapData();
-    return {
-      cards: this.dataService.getDashboardCards(),
-      lineReadinessSummary: this.dataService.getFactoryReadinessSummary(previewLines),
-      attendanceIndicators: this.dataService.getAttendanceIndicators(),
-      previewLines,
-      criticalReadinessAlerts: this.dashboardApiService.extractCriticalReadinessAlerts(previewLines)
-    };
+  retry(): void { this.load(); }
+  selectDetail(detail: DashboardDetail): void { this.selectedDetail = this.selectedDetail === detail ? null : detail; }
+  operationLabel(status: string): string { return commandCenterOperationLabel(status); }
+  realtimeLabel(status: RealtimeConnectionStatus): string { return realtimeConnectionStatusLabel(status); }
+  realtimeClass(status: RealtimeConnectionStatus): string { return `realtime-status--${status}`; }
+  lineDimensions(line: CommandCenterLine): CommandCenterLineStatusDimension[] { return commandCenterLineStatusDimensions(line); }
+  dimensionClass(dimension: CommandCenterLineStatusDimension): string { return `line-dimension--${dimension.tone}`; }
+  ratioText(percentage: number | null): string { return percentage === null ? 'لا توجد بيانات' : `${percentage}%`; }
+
+  get problemLines(): CommandCenterProblemLine[] {
+    return this.data && this.dataIsCurrent ? commandCenterProblemLines(this.data) : [];
   }
 
-  getTrendLabel(trend: KpiTrend): string {
-    if (trend === 'up') {
-      return 'ارتفع';
-    }
-    if (trend === 'down') {
-      return 'انخفض';
-    }
-    return 'مستقر';
+  get detailTitle(): string {
+    return ({
+      present: 'الحاضرون في النطاق',
+      'present-assigned': 'الحاضرون المسكنون دائمًا',
+      'present-unassigned': 'الحاضرون غير المسكنين',
+      'not-present': 'المسكنون الدائمون غير الحاضرين',
+      drafts: 'المسودات التي تحتاج إجراء',
+      approved: 'تشغيلات اليوم المعتمدة',
+      quality: 'مشكلات اكتمال البيانات',
+      'stage-shortage': 'المراحل المطلوبة بلا عامل حاضر'
+    } as Record<string, string>)[this.selectedDetail ?? ''] ?? '';
   }
 
-  getTrendClass(trend: KpiTrend): string {
-    if (trend === 'up') {
-      return 'trend-up';
+  get detailWorkers(): CommandCenterWorkerDetail[] {
+    if (!this.data) return [];
+    if (this.selectedDetail === 'present') {
+      return [...this.data.workforce.presentAssignedDetails, ...this.data.workforce.presentUnassignedDetails]
+        .filter((worker, index, workers) => workers.findIndex(candidate => candidate.workerId === worker.workerId) === index);
     }
-    if (trend === 'down') {
-      return 'trend-down';
-    }
-    return 'trend-stable';
+    if (this.selectedDetail === 'present-assigned') return this.data.workforce.presentAssignedDetails;
+    if (this.selectedDetail === 'present-unassigned') return this.data.workforce.presentUnassignedDetails;
+    if (this.selectedDetail === 'not-present') return this.data.workforce.assignedNotPresentDetails;
+    return [];
   }
 
-  getTrendIcon(trend: KpiTrend): string {
-    if (trend === 'up') {
-      return 'pi pi-arrow-up';
-    }
-    if (trend === 'down') {
-      return 'pi pi-arrow-down';
-    }
-    return 'pi pi-minus';
+  get detailOperations(): CommandCenterOperation[] {
+    if (!this.data) return [];
+    if (this.selectedDetail === 'drafts') return this.data.operations.items.filter(item => item.status === 'Draft' || item.status === 'ApprovalCancelled');
+    if (this.selectedDetail === 'approved') return this.data.operations.items.filter(item => item.status === 'Approved');
+    return [];
   }
 
-  getReadinessTone(): string {
-    if (this.lineReadinessSummary.overallReadiness >= 85) {
-      return 'green';
-    }
-    if (this.lineReadinessSummary.overallReadiness >= 60) {
-      return 'yellow';
-    }
-    return 'red';
+  get detailIssues(): CommandCenterQualityIssue[] {
+    if (!this.data) return [];
+    if (this.selectedDetail === 'stage-shortage') return this.data.dataQuality.issues.filter(issue => issue.type === 'StageWithoutPresentWorker');
+    if (this.selectedDetail === 'quality') return this.data.dataQuality.issues;
+    return [];
   }
 
-  getAttendanceTone(): string {
-    if (this.lineReadinessSummary.attendanceRate >= 90) {
-      return 'green';
-    }
-    if (this.lineReadinessSummary.attendanceRate >= 75) {
-      return 'yellow';
-    }
-    return 'red';
+  private load(background = false): void {
+    const loadVersion = ++this.loadVersion;
+    this.activeLoad?.unsubscribe();
+    if (background && this.data) this.isRefreshing = true;
+    else this.isLoading = true;
+    this.hasLoadError = false;
+    this.activeLoad = this.api.load(this.filters).pipe(
+      catchError(() => {
+        if (loadVersion === this.loadVersion) this.hasLoadError = true;
+        return of(null);
+      }),
+      finalize(() => {
+        if (loadVersion !== this.loadVersion) return;
+        this.isLoading = false;
+        this.isRefreshing = false;
+      }),
+      takeUntil(this.destroy$)
+    ).subscribe(data => {
+      if (loadVersion === this.loadVersion && data) {
+        this.data = data;
+        this.dataIsCurrent = true;
+      }
+    });
   }
 
-  get totalAttendanceDeficit(): number {
-    return this.lineReadinessSummary.totalWorkers - this.lineReadinessSummary.activeWorkers;
-  }
-
-  get readinessToneStatus(): FactoryStatus {
-    if (this.lineReadinessSummary.overallReadiness >= 85) {
-      return 'ready';
-    }
-    if (this.lineReadinessSummary.overallReadiness >= 60) {
-      return 'warning';
-    }
-    return 'critical';
-  }
-
-  get attendanceToneStatus(): FactoryStatus {
-    if (this.lineReadinessSummary.attendanceRate >= 90) {
-      return 'present';
-    }
-    if (this.lineReadinessSummary.attendanceRate >= 70) {
-      return 'warning';
-    }
-    return 'absent';
-  }
-
-  get shortageToneStatus(): FactoryStatus {
-    if (this.totalAttendanceDeficit <= 2) {
-      return 'ready';
-    }
-    if (this.totalAttendanceDeficit <= 6) {
-      return 'warning';
-    }
-    return 'critical';
-  }
-
-  get recommendationAvailabilityTone(): FactoryStatus {
-    if (this.criticalReadinessAlerts.length > 0) {
-      return 'warning';
-    }
-    return 'ready';
-  }
-
-  get criticalAlertsText(): string {
-    if (this.criticalReadinessAlerts.length === 0) {
-      return 'لا توجد حالات عجز واضحة الآن.';
-    }
-    if (this.criticalReadinessAlerts.length === 1) {
-      return 'يوجد مرحلة واحدة تحتاج تدخل سريع.';
-    }
-    return `يوجد ${this.criticalReadinessAlerts.length} مرحلة تحتاج تدخل سريع.`;
-  }
-
-  get readinessShortageToneStatus(): FactoryStatus {
-    if (this.lineReadinessSummary.overallReadiness >= 80) {
-      return 'ready';
-    }
-    if (this.lineReadinessSummary.overallReadiness >= 65) {
-      return 'warning';
-    }
-    return 'critical';
-  }
-
-  getIndicatorClass(tone: AttendanceIndicator['tone']): string {
-    return `attendance-pill ${tone}`;
+  private matchesCurrentScope(change: ManufacturingDataChanged): boolean {
+    return commandCenterScopeMatches(this.filters, change);
   }
 }

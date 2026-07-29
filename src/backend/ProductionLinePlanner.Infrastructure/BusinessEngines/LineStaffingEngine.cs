@@ -8,15 +8,11 @@ using ProductionLinePlanner.Infrastructure.Data;
 namespace ProductionLinePlanner.Infrastructure.BusinessEngines;
 
 /// <summary>
-/// Resolves the organizational staffing plan for a line and model. It uses the
-/// existing assignment engine, but intentionally never queries attendance.
+/// Resolves the organizational, permanent staffing plan for a line and model.
+/// It intentionally never queries attendance or temporary-assignment records.
 /// </summary>
-public sealed class LineStaffingEngine(
-    AppDbContext dbContext,
-    IAssignmentEngine assignmentEngine) : ILineStaffingEngine
+public sealed class LineStaffingEngine(AppDbContext dbContext) : ILineStaffingEngine
 {
-    private static readonly TimeZoneInfo EgyptTimeZone = TimeZoneInfo.FindSystemTimeZoneById("Africa/Cairo");
-
     public async Task<Result<LineStaffingPlanDto>> GetLineStaffingPlanAsync(
         Guid factoryId,
         Guid productionLineId,
@@ -42,11 +38,15 @@ public sealed class LineStaffingEngine(
         var line = await dbContext.ProductionLines
             .AsNoTracking()
             .Where(candidate => candidate.Id == productionLineId && candidate.FactoryId == factoryId && candidate.IsActive)
-            .Select(candidate => new { candidate.Id, candidate.Name })
+            .Select(candidate => new { candidate.Id, candidate.Name, candidate.DepartmentId })
             .SingleOrDefaultAsync(cancellationToken);
         if (line is null)
         {
             return Result<LineStaffingPlanDto>.Failure(new Error("NotFound", "Active production line was not found in the selected factory."));
+        }
+        if (line.DepartmentId is null)
+        {
+            return Result<LineStaffingPlanDto>.Failure(new Error("ValidationError", "يجب ربط خط الإنتاج بقسم قبل تحميل التسكين."));
         }
 
         var product = await dbContext.ProductModels
@@ -62,12 +62,13 @@ public sealed class LineStaffingEngine(
         var stages = await dbContext.ProductModelStages
             .AsNoTracking()
             .Where(stage => stage.ProductModelId == productModelId
+                            && stage.ProductionLineId == productionLineId
                             && stage.IsActive
                             && stage.SubStage != null
                             && stage.SubStage.IsActive
                             && stage.SubStage.MainStage != null
                             && stage.SubStage.MainStage.IsActive
-                            && stage.SubStage.MainStage.ProductionLineId == productionLineId)
+                            && stage.SubStage.DepartmentId == line.DepartmentId.Value)
             .OrderBy(stage => stage.StageOrder)
             .Select(stage => new StageRow(
                 stage.Id,
@@ -90,7 +91,7 @@ public sealed class LineStaffingEngine(
 
         var defaultCounts = await dbContext.WorkerDefaultAssignments
             .AsNoTracking()
-            .Where(assignment => assignment.IsActive && stages.Select(stage => stage.SubStageId).Contains(assignment.SubStageId))
+            .Where(assignment => assignment.IsActive && assignment.ProductionLineId == productionLineId && stages.Select(stage => stage.SubStageId).Contains(assignment.SubStageId))
             .GroupBy(assignment => assignment.SubStageId)
             .Select(group => new { SubStageId = group.Key, Count = group.Count() })
             .ToDictionaryAsync(item => item.SubStageId, item => item.Count, cancellationToken);
@@ -115,7 +116,7 @@ public sealed class LineStaffingEngine(
             stagesWithWorkers.Length,
             stagesWithWorkers.Count(stage => stage.EffectiveAssignedWorkersCount > 0),
             withoutWorkers,
-            stagesWithWorkers.Count(stage => stage.TemporaryAssignedWorkersCount > 0),
+            0,
             compensationReview,
             staffingReview,
             overallStatus,
@@ -195,16 +196,30 @@ public sealed class LineStaffingEngine(
         }
 
         var workerIds = workers.Select(worker => worker.Id).ToArray();
-        var assignmentsResult = await assignmentEngine.ResolveEffectiveAssignmentsAsync(
-            workerIds,
-            StaffingReferenceAtUtc(staffingReferenceDate),
-            cancellationToken);
-        if (assignmentsResult.IsFailure)
-        {
-            return Result<IReadOnlyCollection<LineStaffingWorkerDto>>.Failure(assignmentsResult.Error!);
-        }
-
-        var resolvedAssignments = assignmentsResult.Value!;
+        var resolvedAssignments = (await dbContext.WorkerDefaultAssignments
+                .AsNoTracking()
+                .Where(assignment => assignment.IsActive && workerIds.Contains(assignment.WorkerId))
+                .Select(assignment => new DefaultAssignmentRow(
+                    assignment.Id,
+                    assignment.WorkerId,
+                    assignment.SubStageId,
+                    assignment.AssignedAt))
+                .ToArrayAsync(cancellationToken))
+            .GroupBy(assignment => assignment.WorkerId)
+            .ToDictionary(
+                group => group.Key,
+                group => (IReadOnlyCollection<WorkerAssignmentState>)group
+                    .Select(assignment => new WorkerAssignmentState(
+                        assignment.Id,
+                        assignment.WorkerId,
+                        AssignmentType.Default,
+                        assignment.AssignedAt,
+                        null,
+                        assignment.SubStageId,
+                        null,
+                        assignment.SubStageId,
+                        null))
+                    .ToArray());
         var referencedSubStageIds = resolvedAssignments.Values.SelectMany(assignments => assignments)
             .SelectMany(assignment => new[] { assignment.EffectiveSubStageId, assignment.FromSubStageId })
             .Where(subStageId => subStageId.HasValue)
@@ -233,7 +248,6 @@ public sealed class LineStaffingEngine(
             .Where(worker => worker.Participations.Any(participation => participation.SubStageId == stage.SubStageId))
             .OrderBy(worker => worker.EmployeeCode)
             .ToArray();
-        var temporaryCount = effectiveWorkers.Count(worker => worker.Participations.Any(participation => participation.SubStageId == stage.SubStageId && participation.AssignmentType is "Temporary" or "Replacement"));
         var hasRequiredWorkers = stage.Capacity > 0;
         var compensationConfigured = stage.PiecePrice >= 0m && Enum.IsDefined(stage.CompensationMode);
         var financialReviewPending = stage.CompensationMode == CompensationMode.SharedPercentage;
@@ -243,10 +257,8 @@ public sealed class LineStaffingEngine(
                 ? "NeedsStaffingReview"
                 : "Staffed";
         var workerStatusText = effectiveWorkers.Length == 0
-            ? "لا يوجد عمال معينون"
-            : temporaryCount > 0
-                ? effectiveWorkers.Length == 1 ? "يوجد تعيين مؤقت" : $"يوجد {effectiveWorkers.Length} عمال، منهم تعيين مؤقت"
-                : effectiveWorkers.Length == 1 ? "يوجد عامل واحد" : $"يوجد {effectiveWorkers.Length} عمال";
+            ? "لا يوجد عمال مسكنون"
+            : effectiveWorkers.Length == 1 ? "يوجد عامل واحد" : $"يوجد {effectiveWorkers.Length} عمال";
 
         return new LineStaffingStageDto(
             stage.ProductModelStageId,
@@ -261,7 +273,7 @@ public sealed class LineStaffingEngine(
             financialReviewPending,
             defaultCount,
             effectiveWorkers.Length,
-            temporaryCount,
+            0,
             hasRequiredWorkers ? stage.Capacity : null,
             hasRequiredWorkers,
             staffingStatus,
@@ -295,11 +307,7 @@ public sealed class LineStaffingEngine(
             .OrderByDescending(assignment => assignment.StartsAtUtc)
             .ThenByDescending(assignment => assignment.AssignmentId)
             .FirstOrDefault();
-        var primaryAssignment = effectiveAssignments
-            .OrderByDescending(assignment => assignment.AssignmentType is AssignmentType.Temporary or AssignmentType.Replacement)
-            .ThenByDescending(assignment => assignment.StartsAtUtc)
-            .ThenByDescending(assignment => assignment.AssignmentId)
-            .FirstOrDefault();
+        var primaryAssignment = defaultAssignment;
         var photoVersion = GetPhotoVersion(worker.PhotoReference);
         var hasPhoto = photoVersion is not null && IsManagedPhotoReference(worker.PhotoReference, worker.Id);
         return new LineStaffingWorkerDto(
@@ -319,9 +327,9 @@ public sealed class LineStaffingEngine(
             NameFor(primaryAssignment?.EffectiveSubStageId, subStageNames),
             primaryAssignment?.FromSubStageId,
             NameFor(primaryAssignment?.FromSubStageId, subStageNames),
-            primaryAssignment?.AssignmentType is AssignmentType.Temporary or AssignmentType.Replacement ? primaryAssignment.StartsAtUtc : null,
-            primaryAssignment?.AssignmentType is AssignmentType.Temporary or AssignmentType.Replacement ? primaryAssignment.EndsAtUtc : null,
-            primaryAssignment?.ReplacementForWorkerId,
+            null,
+            null,
+            null,
             participations);
     }
 
@@ -341,12 +349,6 @@ public sealed class LineStaffingEngine(
     private static string? NameFor(Guid? subStageId, IReadOnlyDictionary<Guid, string> names) =>
         subStageId.HasValue && names.TryGetValue(subStageId.Value, out var name) ? name : null;
 
-    private static DateTime StaffingReferenceAtUtc(DateOnly referenceDate)
-    {
-        var localEnd = referenceDate.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified).AddDays(1);
-        return TimeZoneInfo.ConvertTimeToUtc(localEnd, EgyptTimeZone).AddTicks(-1);
-    }
-
     private sealed record StageRow(
         Guid ProductModelStageId,
         Guid SubStageId,
@@ -365,4 +367,10 @@ public sealed class LineStaffingEngine(
         string? DepartmentName,
         bool IsOnActiveService,
         string? PhotoReference);
+
+    private sealed record DefaultAssignmentRow(
+        Guid Id,
+        Guid WorkerId,
+        Guid SubStageId,
+        DateTime AssignedAt);
 }
