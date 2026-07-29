@@ -638,6 +638,15 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
             .ToDictionary(
                 g => g.Key,
                 g => g.OrderByDescending(x => x.AttendanceTimeUtc).First());
+        var existingRecordIds = existingRecords.Select(record => record.Id).ToArray();
+        var queuedNotificationKeys = existingRecordIds.Length == 0
+            ? new HashSet<string>(StringComparer.Ordinal)
+            : (await _appDbContext.AttendanceNotificationEvents
+                .AsNoTracking()
+                .Where(item => existingRecordIds.Contains(item.AttendanceRecordId))
+                .Select(item => item.IdempotencyKey)
+                .ToListAsync(cancellationToken))
+                .ToHashSet(StringComparer.Ordinal);
 
         var insertCount = 0;
         var updateCount = 0;
@@ -681,10 +690,10 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
                 _appDbContext.AttendanceRecords.Add(record);
                 if (matchedByWorker.TryGetValue(worker.Id, out var insertedMatch))
                 {
-                    QueueAttendanceNotification(record, worker, WorkerAttendanceNotificationType.CheckIn, insertedMatch.FirstInUtc);
+                    QueueAttendanceNotification(record, worker, WorkerAttendanceNotificationType.CheckIn, insertedMatch.FirstInUtc, queuedNotificationKeys);
                     if (insertedMatch.LastOutUtc.HasValue)
                     {
-                        QueueAttendanceNotification(record, worker, WorkerAttendanceNotificationType.CheckOut, insertedMatch.LastOutUtc.Value);
+                        QueueAttendanceNotification(record, worker, WorkerAttendanceNotificationType.CheckOut, insertedMatch.LastOutUtc.Value, queuedNotificationKeys);
                     }
                 }
                 insertCount++;
@@ -711,11 +720,11 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
             {
                 if (previousWindow.FirstInUtc is null)
                 {
-                    QueueAttendanceNotification(existing, worker, WorkerAttendanceNotificationType.CheckIn, updatedMatch.FirstInUtc);
+                    QueueAttendanceNotification(existing, worker, WorkerAttendanceNotificationType.CheckIn, updatedMatch.FirstInUtc, queuedNotificationKeys);
                 }
                 if (updatedMatch.LastOutUtc.HasValue && previousWindow.LastOutUtc is null)
                 {
-                    QueueAttendanceNotification(existing, worker, WorkerAttendanceNotificationType.CheckOut, updatedMatch.LastOutUtc.Value);
+                    QueueAttendanceNotification(existing, worker, WorkerAttendanceNotificationType.CheckOut, updatedMatch.LastOutUtc.Value, queuedNotificationKeys);
                 }
             }
             updateCount++;
@@ -822,7 +831,31 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
         }
         catch (Exception exception)
         {
-            await RetryAttendanceBatchAsync(sourceBatch, "AttendanceProcessingFailed");
+            var errorDetails = GetProcessingErrorDetails(exception);
+            foreach (var punch in sourceCheckIns.Where(item => item.SourceRecordId.HasValue))
+            {
+                var matchingWorkers = workers
+                    .Where(worker =>
+                        string.Equals(NormalizeIdentity(worker.AttendanceUserId), NormalizeSourceIdentity(punch.UserId), StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(NormalizeIdentity(worker.BadgeNumber), NormalizeIdentity(punch.BadgeNumber), StringComparison.OrdinalIgnoreCase))
+                    .Select(worker => worker.Id)
+                    .Distinct()
+                    .Take(2)
+                    .ToArray();
+                var workerId = matchingWorkers.Length == 1 ? matchingWorkers[0] : (Guid?)null;
+
+                _logger.LogError(
+                    exception,
+                    "Attendance staging row processing failed. inboxId={InboxId}, sourceUserId={SourceUserId}, badgeNumber={BadgeNumber}, sourceCheckTimeLocal={SourceCheckTimeLocal}, sourceCheckType={SourceCheckType}, workerId={WorkerId}",
+                    punch.SourceRecordId,
+                    punch.UserId,
+                    punch.BadgeNumber,
+                    punch.CheckTimeLocal,
+                    punch.CheckType,
+                    workerId);
+            }
+
+            await RetryAttendanceBatchAsync(sourceBatch, "AttendanceProcessingFailed", errorDetails);
             _logger.LogError(
                 exception,
                 "Attendance staging processing failed after rows were claimed. claimedCount={ClaimedCount}, leaseId={LeaseId}",
@@ -834,11 +867,11 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
         }
     }
 
-    private async Task RetryAttendanceBatchAsync(AttendanceSourceBatch batch, string errorCode)
+    private async Task RetryAttendanceBatchAsync(AttendanceSourceBatch batch, string errorCode, string? errorDetails = null)
     {
         var outcomes = batch.Punches
             .Where(punch => punch.SourceRecordId.HasValue)
-            .Select(punch => SourceProcessingOutcome.Retry(punch.SourceRecordId!.Value, errorCode))
+            .Select(punch => SourceProcessingOutcome.Retry(punch.SourceRecordId!.Value, errorCode, errorDetails))
             .ToArray();
         var result = await _attendanceSource.CompleteAsync(batch, outcomes, CancellationToken.None);
         if (result.IsFailure)
@@ -847,13 +880,23 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
         }
     }
 
+    private static string GetProcessingErrorDetails(Exception exception)
+    {
+        var message = exception.InnerException?.Message ?? exception.Message;
+        message = message.Trim();
+        return message.Length <= 1000 ? message : message[..1000];
+    }
+
     private void QueueAttendanceNotification(
         AttendanceRecord attendanceRecord,
         Worker worker,
         WorkerAttendanceNotificationType attendanceType,
-        DateTime attendanceTimeUtc)
+        DateTime attendanceTimeUtc,
+        ISet<string> queuedNotificationKeys)
     {
         var idempotencyKey = $"attendance:{attendanceRecord.Id:D}:{attendanceType}";
+        if (!queuedNotificationKeys.Add(idempotencyKey)) return;
+
         _appDbContext.AttendanceNotificationEvents.Add(new AttendanceNotificationEvent(
             Guid.NewGuid(),
             attendanceRecord.Id,

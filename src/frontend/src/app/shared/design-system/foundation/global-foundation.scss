@@ -878,6 +878,57 @@ plp-expandable-form {
   }
 }
 
+/* The workforce list needs its card layout earlier because the application
+   sidebar leaves less table space at 1024–1100px. Keep this opt-in so other
+   stack tables retain the product-wide 1023px breakpoint. */
+@media (min-width: 64rem) and (max-width: 68.75rem) {
+  .worker-management-page__table .plp-operational-table--stack .p-datatable-wrapper {
+    overflow: visible;
+  }
+
+  .worker-management-page__table .plp-operational-table--stack :is(.p-datatable-table, .p-datatable-tbody) {
+    display: grid;
+    inline-size: 100%;
+  }
+
+  .worker-management-page__table .plp-operational-table--stack .p-datatable-thead {
+    display: none;
+  }
+
+  .worker-management-page__table .plp-operational-table--stack .p-datatable-tbody {
+    gap: var(--plp-space-12);
+    padding: var(--plp-space-8);
+  }
+
+  .worker-management-page__table .plp-operational-table--stack .p-datatable-tbody > tr {
+    background: var(--plp-color-surface-raised);
+    border: var(--plp-border-default);
+    border-radius: var(--plp-radius-md);
+    display: grid;
+    overflow: hidden;
+  }
+
+  .worker-management-page__table .plp-operational-table--stack .p-datatable-tbody > tr > td {
+    align-items: baseline;
+    display: grid;
+    gap: var(--plp-space-12);
+    grid-template-columns: minmax(6.5rem, 40%) minmax(0, 1fr);
+    min-block-size: 0;
+    padding: var(--plp-space-8) var(--plp-space-12);
+  }
+
+  .worker-management-page__table .plp-operational-table--stack .p-datatable-tbody > tr > td::before {
+    color: var(--plp-color-text-subtle);
+    content: attr(data-plp-label);
+    font-size: var(--plp-type-caption);
+    font-weight: var(--plp-font-weight-semibold);
+  }
+
+  .worker-management-page__table .plp-operational-table--stack .p-datatable-tbody > tr > td:empty::before {
+    content: '';
+  }
+}
+
 @media (max-width: 1023px) {
   .plp-page-surface {
     border-inline: 0;

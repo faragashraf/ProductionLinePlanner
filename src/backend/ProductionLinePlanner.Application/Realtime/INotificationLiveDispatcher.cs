@@ -11,4 +11,9 @@ public interface INotificationLiveDispatcher
         string permission,
         NotificationSummaryDto notification,
         CancellationToken cancellationToken = default);
+
+    Task SendReadStateToUserAsync(
+        Guid recipientUserId,
+        NotificationReadStateChangedDto change,
+        CancellationToken cancellationToken = default) => Task.CompletedTask;
 }

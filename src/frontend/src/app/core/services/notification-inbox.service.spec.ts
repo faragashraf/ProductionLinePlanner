@@ -80,7 +80,7 @@ describe('NotificationInboxService', () => {
     const value = notification();
     realtime.notifications.next(value);
     http.expectOne('/api/notifications/unread-count').flush({ success: true, data: { unreadCount: 1 } });
-    service.markAsRead(value.id);
+    service.markAsRead(value.id).subscribe();
 
     http.expectOne(`/api/notifications/${value.id}/read`).flush({
       success: true,
@@ -93,6 +93,39 @@ describe('NotificationInboxService', () => {
     service.unreadCount$.subscribe(count => unread = count);
     expect(latest[0].isRead).toBeTrue();
     expect(unread).toBe(0);
+  });
+
+  it('marks all notifications read through the server-wide read-all endpoint and updates the counter', () => {
+    flushSessionBootstrap();
+    realtime.notifications.next(notification());
+    realtime.notifications.next(notification('77777777-7777-7777-7777-777777777777'));
+    const unreadRequests = http.match('/api/notifications/unread-count');
+    expect(unreadRequests.length).toBe(2);
+    unreadRequests.at(-1)!.flush({ success: true, data: { unreadCount: 2 } });
+
+    service.markAllAsRead().subscribe();
+    http.expectOne('/api/notifications/read-all').flush({ success: true, data: { updatedCount: 2 } });
+
+    let latest: NotificationSummary[] = [];
+    let unread = -1;
+    service.recent$.subscribe(items => latest = items);
+    service.unreadCount$.subscribe(count => unread = count);
+    expect(latest.every(item => item.isRead)).toBeTrue();
+    expect(unread).toBe(0);
+  });
+
+  it('applies a cross-tab read update and reloads the authoritative unread total', () => {
+    flushSessionBootstrap();
+    const value = notification();
+    realtime.notifications.next(value);
+    http.expectOne('/api/notifications/unread-count').flush({ success: true, data: { unreadCount: 1 } });
+
+    realtime.notificationReadStateChanged.next({ notificationId: value.id, isRead: true, updatedCount: 1, occurredAtUtc: '2026-07-29T09:00:00Z' });
+    http.expectOne('/api/notifications/unread-count').flush({ success: true, data: { unreadCount: 0 } });
+
+    let latest: NotificationSummary[] = [];
+    service.recent$.subscribe(items => latest = items);
+    expect(latest[0].isRead).toBeTrue();
   });
 
   it('does not emit historical inbox rows as live notifications or replay them after reconnect', () => {
@@ -216,8 +249,10 @@ describe('NotificationInboxService', () => {
 class RealtimeStub {
   readonly connectionStatus = new BehaviorSubject<RealtimeConnectionStatus>('disconnected');
   readonly notifications = new Subject<NotificationSummary>();
+  readonly notificationReadStateChanged = new Subject<any>();
   readonly connectionStatus$ = this.connectionStatus.asObservable();
   readonly notifications$ = this.notifications.asObservable();
+  readonly notificationReadStateChanged$ = this.notificationReadStateChanged.asObservable();
 }
 
 class AuthStub {

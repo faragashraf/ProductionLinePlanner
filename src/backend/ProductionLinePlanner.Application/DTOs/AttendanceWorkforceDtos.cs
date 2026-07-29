@@ -16,7 +16,8 @@ public sealed record AttendanceWorkforceQuery(
     string? AssignmentFilter = null,
     string? OperationalFilter = null,
     string? SortBy = null,
-    string? SortDirection = null);
+    string? SortDirection = null,
+    Guid? WorkerId = null);
 
 public sealed record AttendanceWorkforceAssignmentDto(
     Guid AssignmentId,
@@ -76,6 +77,43 @@ public sealed record AttendanceWorkforceDetailDto(
     DateOnly ProductionDate,
     IReadOnlyCollection<AttendanceWorkforcePunchDto> AttendanceRecords,
     IReadOnlyCollection<AttendanceWorkforceAssignmentDto> Assignments);
+
+public sealed record WorkerAttendanceProfileSummaryDto(
+    Guid WorkerId,
+    DateOnly ProductionDate,
+    string TodayStatus,
+    bool AttendanceDataAvailableForDate,
+    DateTime? FirstCheckInUtc,
+    DateTime? LastCheckOutUtc,
+    DateTime? LastKnownMovementUtc);
+
+public sealed record WorkerAttendanceHistoryQuery(
+    DateOnly FromDate,
+    DateOnly ToDate,
+    int Page = 1,
+    int PageSize = 20,
+    string SortDirection = "desc");
+
+public sealed record WorkerAttendanceHistoryMovementDto(
+    DateTime OccurredAtUtc,
+    string MovementType);
+
+public sealed record WorkerAttendanceHistoryRecordDto(
+    Guid RecordId,
+    DateOnly ProductionDate,
+    AttendanceStatus AttendanceStatus,
+    string? Source,
+    IReadOnlyCollection<WorkerAttendanceHistoryMovementDto> Movements);
+
+public sealed record WorkerAttendanceHistoryPageDto(
+    Guid WorkerId,
+    DateOnly FromDate,
+    DateOnly ToDate,
+    IReadOnlyCollection<WorkerAttendanceHistoryRecordDto> Items,
+    int Page,
+    int PageSize,
+    int TotalCount,
+    int TotalPages);
 
 /// <summary>
 /// A user-facing attendance evidence point. OccurredAtUtc is always an explicitly UTC value;

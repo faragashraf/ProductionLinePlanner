@@ -1,5 +1,5 @@
 import { Component, HostListener, OnInit } from '@angular/core';
-import { catchError, finalize, forkJoin, of } from 'rxjs';
+import { catchError, finalize, forkJoin, of, switchMap } from 'rxjs';
 import {
   NotificationPolicyAdminService,
   NotificationPolicyDetails,
@@ -57,6 +57,10 @@ export class NotificationPolicyStudioPageComponent implements OnInit {
       const matchesSeverity = this.severityFilter === 'all' || policy.severity === this.severityFilter;
       return matchesSearch && matchesEnabled && matchesSeverity;
     });
+  }
+
+  get canSave(): boolean {
+    return this.validateDraft() === null;
   }
 
   loadStudio(): void {
@@ -159,7 +163,8 @@ export class NotificationPolicyStudioPageComponent implements OnInit {
     this.hasError = false;
     this.isLoadError = false;
     this.errorMessage = null;
-    this.policyService.updatePolicy(this.draft.eventKey, {
+    const eventKey = this.draft.eventKey;
+    this.policyService.updatePolicy(eventKey, {
       isEnabled: this.draft.isEnabled,
       severity: this.draft.severity,
       isToastEnabled: this.draft.isToastEnabled,
@@ -170,9 +175,12 @@ export class NotificationPolicyStudioPageComponent implements OnInit {
       titleTemplateAr: this.draft.titleTemplateAr.trim(),
       messageTemplateAr: this.draft.messageTemplateAr.trim(),
       rowVersion: this.draft.rowVersion,
-      recipientRules: this.draft.recipientRules.map((rule, index) => ({ ...rule, sortOrder: index, id: undefined }))
+      recipientRules: this.draft.recipientRules.map((rule, index) => this.toUpdateRule(rule, index))
     })
-      .pipe(finalize(() => this.isSaving = false))
+      .pipe(
+        switchMap(() => this.policyService.getPolicy(eventKey)),
+        finalize(() => this.isSaving = false)
+      )
       .subscribe({
         next: details => {
           this.draft = this.cloneDetails(details);
@@ -199,7 +207,7 @@ export class NotificationPolicyStudioPageComponent implements OnInit {
   }
 
   trackPolicy(_: number, policy: NotificationPolicyListItem): string { return policy.eventKey; }
-  trackRule(_: number, rule: NotificationPolicyRecipientRule): string { return rule.id || `${rule.recipientKind}-${rule.sortOrder}`; }
+  trackRule(_: number, rule: NotificationPolicyRecipientRule): string { return rule.id || `new-rule-${rule.sortOrder}`; }
 
   @HostListener('window:beforeunload', ['$event'])
   beforeUnload(event: BeforeUnloadEvent): void {
@@ -212,7 +220,25 @@ export class NotificationPolicyStudioPageComponent implements OnInit {
     if (!this.draft) return 'اختر سياسة أولاً.';
     if (!this.draft.titleTemplateAr.trim() || !this.draft.messageTemplateAr.trim()) return 'العنوان والرسالة العربية مطلوبان.';
     if (this.draft.titleTemplateAr.trim().length > 200 || this.draft.messageTemplateAr.trim().length > 2000) return 'تجاوزت القوالب الحدود المسموح بها.';
+    if (this.draft.recipientRules.some(rule => rule.recipientKind === 'Role' && !this.isKnownRole(rule.roleId))) return 'اختر الدور المستلم';
     return null;
+  }
+
+  private isKnownRole(roleId: string | null | undefined): boolean {
+    return !!roleId && this.recipientOptions.roles.some(role => role.id === roleId);
+  }
+
+  private toUpdateRule(rule: NotificationPolicyRecipientRule, sortOrder: number): NotificationPolicyRecipientRule {
+    return {
+      recipientKind: rule.recipientKind,
+      userId: rule.recipientKind === 'User' ? rule.userId ?? null : null,
+      roleId: rule.recipientKind === 'Role' ? rule.roleId ?? null : null,
+      permissionKey: rule.recipientKind === 'Permission' ? rule.permissionKey ?? null : null,
+      capabilityKey: rule.recipientKind === 'CapabilityGroup' ? rule.capabilityKey ?? null : null,
+      isExcludeActor: rule.recipientKind === 'ExcludeActor',
+      sortOrder,
+      isActive: rule.isActive
+    };
   }
 
   private normalizeSortOrder(): void {

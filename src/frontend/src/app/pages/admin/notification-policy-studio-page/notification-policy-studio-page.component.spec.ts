@@ -7,6 +7,8 @@ describe('NotificationPolicyStudioPageComponent', () => {
     severity: 'Information', isToastEnabled: true, isInboxEnabled: true, isSoundEnabled: false, isBrowserEnabled: false,
     soundKey: null, titleTemplateAr: 'عامل {WorkerName}', messageTemplateAr: 'تم إنشاء {WorkerName}', rowVersion: 'AQI=', recipientRules: [], updatedAtUtc: '2026-07-20T00:00:00Z'
   };
+  const roleId = 'f0000000-0000-0000-0000-000000000002';
+  const recipientOptions = { users: [], roles: [{ id: roleId, name: 'مشرف' }], permissions: [], capabilityGroups: [] };
 
   function create(overrides: any = {}): { component: NotificationPolicyStudioPageComponent; api: any } {
     const api = {
@@ -49,6 +51,51 @@ describe('NotificationPolicyStudioPageComponent', () => {
     component.save();
     expect(api.updatePolicy).toHaveBeenCalled();
     expect(api.updatePolicy.calls.mostRecent().args[1].recipientRules[0].sortOrder).toBe(0);
+  });
+
+  it('sends and rehydrates the selected role identifier after save and reload', () => {
+    const roleRule = { recipientKind: 'Role' as const, roleId, isExcludeActor: false, sortOrder: 0, isActive: true };
+    const persisted = { ...policy, rowVersion: 'AwQ=', recipientRules: [{ ...roleRule, id: 'rule-1' }] };
+    const { component, api } = create({
+      getRecipientOptions: jasmine.createSpy().and.returnValue(of(recipientOptions)),
+      getPolicy: jasmine.createSpy().and.returnValue(of(persisted)),
+      updatePolicy: jasmine.createSpy().and.returnValue(of(persisted))
+    });
+    component.recipientOptions = recipientOptions;
+    component.draft = { ...policy, recipientRules: [roleRule] };
+
+    component.save();
+
+    expect(api.updatePolicy.calls.mostRecent().args[1].recipientRules[0].roleId).toBe(roleId);
+    expect(api.getPolicy).toHaveBeenCalledWith('WorkerCreated');
+    expect(component.draft?.recipientRules[0].roleId).toBe(roleId);
+  });
+
+  it('keeps a hydrated role value while role options arrive later', () => {
+    const { component } = create();
+    component.draft = { ...policy, recipientRules: [{ recipientKind: 'Role', roleId, isExcludeActor: false, sortOrder: 0, isActive: true }] };
+
+    expect(component.canSave).toBeFalse();
+    component.recipientOptions = recipientOptions;
+
+    expect(component.draft!.recipientRules[0].roleId).toBe(roleId);
+    expect(component.canSave).toBeTrue();
+  });
+
+  it('requires a role and clears it only after changing recipient kind', () => {
+    const { component, api } = create();
+    component.recipientOptions = recipientOptions;
+    const rule = { recipientKind: 'Role' as const, roleId, isExcludeActor: false, sortOrder: 0, isActive: true };
+    component.draft = { ...policy, recipientRules: [rule] };
+    rule.recipientKind = 'Creator' as any;
+
+    component.onRecipientKindChanged(rule);
+
+    expect(rule.roleId).toBeNull();
+    rule.recipientKind = 'Role';
+    component.save();
+    expect(api.updatePolicy).not.toHaveBeenCalled();
+    expect(component.errorMessage).toBe('اختر الدور المستلم');
   });
 
   it('surfaces API errors during save', () => {

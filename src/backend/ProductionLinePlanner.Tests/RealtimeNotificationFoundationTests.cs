@@ -203,6 +203,35 @@ public sealed class RealtimeNotificationFoundationTests
     }
 
     [Fact]
+    public async Task Notification_read_actions_are_idempotent_owner_scoped_and_publish_state_changes()
+    {
+        await using var db = CreateDbContext();
+        var owner = new AppUser(Guid.NewGuid(), "Owner", "read-actions-owner@example.test", "hash");
+        var other = new AppUser(Guid.NewGuid(), "Other", "read-actions-other@example.test", "hash");
+        var first = new Notification(Guid.NewGuid(), owner.Id, "First", "Unread");
+        var second = new Notification(Guid.NewGuid(), owner.Id, "Second", "Unread");
+        var otherNotification = new Notification(Guid.NewGuid(), other.Id, "Other", "Unread");
+        db.AddRange(owner, other, first, second, otherNotification);
+        await db.SaveChangesAsync();
+        var dispatcher = new RecordingDispatcher();
+        var engine = new NotificationEngine(db, new AuditEngineStub(), dispatcher);
+
+        var firstRead = await engine.MarkNotificationReadAsync(owner.Id, first.Id);
+        var repeatRead = await engine.MarkNotificationReadAsync(owner.Id, first.Id);
+        var allRead = await engine.MarkAllAsReadAsync(owner.Id);
+
+        Assert.True(firstRead.IsSuccess);
+        Assert.True(repeatRead.IsSuccess);
+        Assert.Equal(1, allRead.Value);
+        Assert.True((await db.Notifications.SingleAsync(item => item.Id == first.Id)).IsRead);
+        Assert.True((await db.Notifications.SingleAsync(item => item.Id == second.Id)).IsRead);
+        Assert.False((await db.Notifications.SingleAsync(item => item.Id == otherNotification.Id)).IsRead);
+        Assert.Collection(dispatcher.ReadStateChanges,
+            change => { Assert.Equal(first.Id, change.NotificationId); Assert.Equal(1, change.UpdatedCount); },
+            change => { Assert.Null(change.NotificationId); Assert.Equal(1, change.UpdatedCount); });
+    }
+
+    [Fact]
     public async Task Notification_list_and_unread_count_do_not_write_to_the_database()
     {
         var options = new DbContextOptionsBuilder<AppDbContext>()
@@ -256,6 +285,7 @@ public sealed class RealtimeNotificationFoundationTests
     private sealed class RecordingDispatcher(Func<bool>? persistenceProbe = null) : INotificationLiveDispatcher
     {
         public List<NotificationSummaryDto> UserDeliveries { get; } = [];
+        public List<NotificationReadStateChangedDto> ReadStateChanges { get; } = [];
         public bool NotificationWasPersistedWhenDispatched { get; private set; }
 
         public Task SendToUserAsync(Guid recipientUserId, NotificationSummaryDto notification, CancellationToken cancellationToken = default)
@@ -267,6 +297,12 @@ public sealed class RealtimeNotificationFoundationTests
 
         public Task SendToCapabilityAsync(string permission, NotificationSummaryDto notification, CancellationToken cancellationToken = default) =>
             Task.CompletedTask;
+
+        public Task SendReadStateToUserAsync(Guid recipientUserId, NotificationReadStateChangedDto change, CancellationToken cancellationToken = default)
+        {
+            ReadStateChanges.Add(change);
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class ThrowingDispatcher : INotificationLiveDispatcher

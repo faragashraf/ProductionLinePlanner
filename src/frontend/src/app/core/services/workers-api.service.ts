@@ -4,7 +4,7 @@ import { map, Observable, timeout } from 'rxjs';
 import { ApiResponse } from '../models/api-response.model';
 import { buildApiUrl } from '../config/api.config';
 import { STANDARD_API_TIMEOUT_MS } from '../config/api-timeout.config';
-import { WorkerPageItem } from '../../shared/models/worker.model';
+import { WorkerPageItem, WorkerPermanentAssignment } from '../../shared/models/worker.model';
 
 type RawRecord = Record<string, unknown>;
 
@@ -43,6 +43,28 @@ export interface WorkerDepartmentAssignmentResponse {
   factoryName: string;
   concurrencyToken: string;
   updatedAtUtc: string;
+}
+
+export interface WorkerSalaryRecord {
+  id: string;
+  workerId: string;
+  amount: number;
+  currencyCode: string;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+}
+
+export interface WorkerPhotoChangeResponse {
+  photo: {
+    workerId: string;
+    photoReference: string;
+    version: string;
+    contentType: string;
+    length: number;
+  };
+  created: boolean;
+  replaced: boolean;
+  unchanged: boolean;
 }
 
 @Injectable({
@@ -143,17 +165,20 @@ export class WorkersApiService {
       .pipe(timeout(STANDARD_API_TIMEOUT_MS), map(response => this.extractPayload(response)));
   }
 
-  uploadWorkerPhoto(workerId: string, photo: File, correlationId?: string): Observable<void> {
+  getCurrentSalary(workerId: string): Observable<WorkerSalaryRecord> {
+    return this.http
+      .get<ApiResponse<WorkerSalaryRecord>>(buildApiUrl(`/api/workers/${encodeURIComponent(workerId)}/compensation/current`))
+      .pipe(timeout(STANDARD_API_TIMEOUT_MS), map(response => this.extractPayload(response)));
+  }
+
+  uploadWorkerPhoto(workerId: string, photo: File, correlationId?: string): Observable<WorkerPhotoChangeResponse> {
     const form = new FormData();
     form.append('photo', photo, photo.name);
     return this.http
-      .put<ApiResponse<unknown>>(buildApiUrl(`/api/workers/${encodeURIComponent(workerId)}/photo`), form, { headers: this.correlationHeaders(correlationId) })
+      .put<ApiResponse<WorkerPhotoChangeResponse>>(buildApiUrl(`/api/workers/${encodeURIComponent(workerId)}/photo`), form, { headers: this.correlationHeaders(correlationId) })
       .pipe(
         timeout(STANDARD_API_TIMEOUT_MS),
-        map(response => {
-          this.extractPayload(response);
-          return undefined;
-        })
+        map(response => this.extractPayload(response))
       );
   }
 
@@ -186,7 +211,7 @@ export class WorkersApiService {
     return correlationId ? new HttpHeaders({ 'X-Manufacturing-Realtime-Correlation-Id': correlationId }) : undefined;
   }
 
-  private mapWorker(worker: RawRecord, index: number): WorkerPageItem {
+  private mapWorker(worker: RawRecord, _index: number): WorkerPageItem {
     const safeRecord = this.normalizeObject(worker);
     const code = this.pickString(safeRecord, ['code', 'workerCode', 'empCode', 'employeeCode', 'badge']);
     const fullName = this.pickString(safeRecord, ['fullName', 'name', 'workerName', 'displayName', 'employeeName']);
@@ -203,7 +228,15 @@ export class WorkersApiService {
     const photoVersion = this.pickString(safeRecord, ['photoVersion']);
     const attendanceUserId = this.pickString(safeRecord, ['attendanceUserId']);
     const badgeNumber = this.pickString(safeRecord, ['badgeNumber']);
+    const attendanceDepartmentId = this.toOptionalNumber(this.pickFirst(safeRecord, ['attendanceDepartmentId']));
     const defaultSubStageId = this.pickString(safeRecord, ['defaultSubStageId']);
+    const employmentEndDate = this.pickString(safeRecord, ['employmentEndDate']);
+    const lastExternalSyncAt = this.pickString(safeRecord, ['lastExternalSyncAt']);
+    const createdAtUtc = this.pickString(safeRecord, ['createdAtUtc']);
+    const updatedAtUtc = this.pickString(safeRecord, ['updatedAtUtc']);
+    const permanentAssignments = this.toArray(this.pickFirst(safeRecord, ['permanentAssignments']))
+      .map(assignment => this.mapPermanentAssignment(assignment))
+      .filter((assignment): assignment is WorkerPermanentAssignment => assignment !== null);
     const organizationalDepartmentId = this.pickString(safeRecord, ['organizationalDepartmentId']);
     const organizationalDepartmentName = this.pickString(safeRecord, ['organizationalDepartmentName']);
     const organizationalFactoryId = this.pickString(safeRecord, ['organizationalFactoryId']);
@@ -212,8 +245,8 @@ export class WorkersApiService {
 
     return {
       id: this.pickString(safeRecord, ['id', 'workerId', '_id']),
-      code: code || `W-${index + 1}`,
-      fullName: fullName || 'عامل غير محدد',
+      code,
+      fullName,
       state: status,
       ...(employmentStatus ? { employmentStatus } : {}),
       ...(isActive ? { isActive } : { isActive: false }),
@@ -225,7 +258,13 @@ export class WorkersApiService {
       ...(photoVersion ? { photoVersion } : {}),
       ...(attendanceUserId ? { attendanceUserId } : {}),
       ...(badgeNumber ? { badgeNumber } : {}),
+      ...(attendanceDepartmentId !== null ? { attendanceDepartmentId } : {}),
       ...(defaultSubStageId ? { defaultSubStageId } : {}),
+      permanentAssignments,
+      ...(employmentEndDate ? { employmentEndDate } : {}),
+      ...(lastExternalSyncAt ? { lastExternalSyncAt } : {}),
+      ...(createdAtUtc ? { createdAtUtc } : {}),
+      ...(updatedAtUtc ? { updatedAtUtc } : {}),
       ...(organizationalDepartmentId ? { organizationalDepartmentId } : {}),
       ...(organizationalDepartmentName ? { organizationalDepartmentName } : {}),
       ...(organizationalFactoryId ? { organizationalFactoryId } : {}),
@@ -238,6 +277,31 @@ export class WorkersApiService {
     const code = this.pickString(worker, ['code', 'workerCode', 'empCode', 'employeeCode', 'badge']);
     const fullName = this.pickString(worker, ['fullName', 'name', 'workerName', 'displayName', 'employeeName']);
     return this.hasText(code) && this.hasText(fullName);
+  }
+
+  private mapPermanentAssignment(value: RawRecord): WorkerPermanentAssignment | null {
+    const assignment = this.normalizeObject(value);
+    const id = this.pickString(assignment, ['id']);
+    const factoryId = this.pickString(assignment, ['factoryId']);
+    const productionLineId = this.pickString(assignment, ['productionLineId']);
+    const departmentId = this.pickString(assignment, ['departmentId']);
+    const mainStageId = this.pickString(assignment, ['mainStageId']);
+    const subStageId = this.pickString(assignment, ['subStageId']);
+    if (![id, factoryId, productionLineId, departmentId, mainStageId, subStageId].every(item => this.hasText(item))) return null;
+    return {
+      id,
+      factoryId,
+      factoryName: this.pickString(assignment, ['factoryName']),
+      productionLineId,
+      productionLineName: this.pickString(assignment, ['productionLineName']),
+      departmentId,
+      departmentName: this.pickString(assignment, ['departmentName']),
+      mainStageId,
+      mainStageName: this.pickString(assignment, ['mainStageName']),
+      subStageId,
+      subStageName: this.pickString(assignment, ['subStageName']),
+      assignedAtUtc: this.pickString(assignment, ['assignedAtUtc'])
+    };
   }
 
   private hasUsableWorkerData(mappedWorkers: WorkerPageItem[], hasBackendData: boolean): boolean {
@@ -364,6 +428,15 @@ export class WorkersApiService {
       return Number.isFinite(parsed) ? Math.trunc(parsed) : 0;
     }
     return 0;
+  }
+
+  private toOptionalNumber(value: unknown): number | null {
+    if (typeof value === 'number' && Number.isFinite(value)) return Math.trunc(value);
+    if (typeof value === 'string' && value.trim()) {
+      const parsed = Number(value.trim());
+      return Number.isFinite(parsed) ? Math.trunc(parsed) : null;
+    }
+    return null;
   }
 
   private toBoolean(value: unknown): boolean {

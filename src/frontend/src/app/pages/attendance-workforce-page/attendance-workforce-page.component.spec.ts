@@ -12,7 +12,7 @@ describe('AttendanceWorkforcePageComponent', () => {
     assignments: [], isAssigned: false, hasTemporaryAssignment: false, needsReview: true
   };
 
-  function createComponent(canSync = true): AttendanceWorkforcePageComponent {
+  function createComponent(canSync = true, query: Record<string, string> = {}): AttendanceWorkforcePageComponent {
     const api = jasmine.createSpyObj<AttendanceWorkforceApiService>('AttendanceWorkforceApiService', ['getPage', 'getDetail']);
     api.getPage.and.returnValue(of({ productionDate: '2026-07-19', items: [row], summary: { totalWorkers: 1, presentWorkers: 1, absentWorkers: 0, lateWorkers: 0, incompleteWorkers: 0, unassignedPresentWorkers: 1, assignedAbsentWorkers: 0, reviewRequiredWorkers: 1, attendanceDataAvailable: true, scope: 'filtered-results' }, page: 1, pageSize: 25, totalCount: 1, totalPages: 1 }));
     api.getDetail.and.returnValue(of({ workerId: row.workerId, productionDate: '2026-07-19', attendanceRecords: [], assignments: [] }));
@@ -22,7 +22,10 @@ describe('AttendanceWorkforcePageComponent', () => {
     master.factories.and.returnValue(of([])); master.allProductionLines.and.returnValue(of([])); master.mainStagesForDepartment.and.returnValue(of([])); master.subStagesForMainStage.and.returnValue(of([]));
     const permissions = jasmine.createSpyObj<PermissionService>('PermissionService', ['has']);
     permissions.has.and.returnValue(canSync);
-    return new AttendanceWorkforcePageComponent(api, attendance, master, permissions);
+    const route = { snapshot: { queryParamMap: { get: (name: string) => query[name] ?? null } } } as any;
+    const router = jasmine.createSpyObj('Router', ['navigate']);
+    router.navigate.and.resolveTo(true);
+    return new AttendanceWorkforcePageComponent(api, attendance, master, permissions, undefined, route, router);
   }
 
   afterEach(() => localStorage.clear());
@@ -37,6 +40,29 @@ describe('AttendanceWorkforcePageComponent', () => {
     const component = createComponent();
     component.search = 'فاطمة'; component.selectedFactoryId = 'factory-1'; component.attendanceFilter = 'Absent';
     expect(component.activeFilterCount).toBe(3);
+  });
+
+  it('applies notification worker and production-date query parameters to the server-side request', () => {
+    const workerId = '11111111-1111-4111-8111-111111111111';
+    const component = createComponent(true, { workerId, productionDate: '2026-07-29' });
+
+    component.ngOnInit();
+
+    const api = (component as any).api as jasmine.SpyObj<AttendanceWorkforceApiService>;
+    expect(component.selectedWorkerId).toBe(workerId);
+    expect(component.selectedDate).toBe('2026-07-29');
+    expect(api.getPage).toHaveBeenCalledWith(jasmine.objectContaining({ workerId, productionDate: '2026-07-29' }));
+  });
+
+  it('removes the notification worker filter and reloads the normal query', () => {
+    const component = createComponent(true, { workerId: '11111111-1111-4111-8111-111111111111', productionDate: '2026-07-29' });
+    component.ngOnInit();
+
+    component.clearWorkerFilter();
+
+    expect(component.selectedWorkerId).toBe('');
+    const api = (component as any).api as jasmine.SpyObj<AttendanceWorkforceApiService>;
+    expect(api.getPage).toHaveBeenCalledWith(jasmine.objectContaining({ workerId: undefined }));
   });
 
   it('labels a filtered summary distinctly from the current page', () => {

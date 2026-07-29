@@ -7,10 +7,11 @@ import {
 } from '@microsoft/signalr';
 import { BehaviorSubject, Observable, Subject, Subscription, distinctUntilChanged, map } from 'rxjs';
 import { buildHubUrl } from '../config/api.config';
-import { ManufacturingDataChanged, NotificationSummary, RealtimeConnectionStatus } from '../models/realtime-notification.models';
+import { ManufacturingDataChanged, NotificationReadStateChanged, NotificationSummary, RealtimeConnectionStatus } from '../models/realtime-notification.models';
 import { AuthService } from './auth.service';
 
 const NOTIFICATION_EVENT = 'NotificationReceived';
+const NOTIFICATION_READ_STATE_CHANGED_EVENT = 'NotificationReadStateChanged';
 const MANUFACTURING_DATA_CHANGED_EVENT = 'ManufacturingDataChanged';
 
 export interface RealtimeConnection {
@@ -40,6 +41,7 @@ export class SignalRConnectionFactory {
 export class RealtimeService implements OnDestroy {
   private readonly connectionStatusSubject = new BehaviorSubject<RealtimeConnectionStatus>('disconnected');
   private readonly notificationSubject = new Subject<NotificationSummary>();
+  private readonly notificationReadStateChangedSubject = new Subject<NotificationReadStateChanged>();
   private readonly manufacturingDataChangedSubject = new Subject<ManufacturingDataChanged>();
   private readonly reconnectedSubject = new Subject<void>();
   private authSubscription?: Subscription;
@@ -50,6 +52,7 @@ export class RealtimeService implements OnDestroy {
 
   readonly connectionStatus$ = this.connectionStatusSubject.asObservable();
   readonly notifications$: Observable<NotificationSummary> = this.notificationSubject.asObservable();
+  readonly notificationReadStateChanged$: Observable<NotificationReadStateChanged> = this.notificationReadStateChangedSubject.asObservable();
   readonly manufacturingDataChanged$: Observable<ManufacturingDataChanged> = this.manufacturingDataChangedSubject.asObservable();
   readonly reconnected$ = this.reconnectedSubject.asObservable();
 
@@ -85,6 +88,7 @@ export class RealtimeService implements OnDestroy {
     this.initialized = false;
     this.queueLifecycle(() => this.stopConnection());
     this.notificationSubject.complete();
+    this.notificationReadStateChangedSubject.complete();
     this.manufacturingDataChangedSubject.complete();
     this.reconnectedSubject.complete();
     this.connectionStatusSubject.complete();
@@ -103,6 +107,7 @@ export class RealtimeService implements OnDestroy {
     this.connection = connection;
     this.connectedUserId = userId;
     connection.on<NotificationSummary>(NOTIFICATION_EVENT, notification => this.notificationSubject.next(notification));
+    connection.on<NotificationReadStateChanged>(NOTIFICATION_READ_STATE_CHANGED_EVENT, change => this.notificationReadStateChangedSubject.next(change));
     connection.on<ManufacturingDataChanged>(MANUFACTURING_DATA_CHANGED_EVENT, change => this.manufacturingDataChangedSubject.next(change));
     connection.onreconnecting(() => this.connectionStatusSubject.next('reconnecting'));
     connection.onreconnected(() => {
@@ -134,6 +139,7 @@ export class RealtimeService implements OnDestroy {
     }
 
     connection.off(NOTIFICATION_EVENT);
+    connection.off(NOTIFICATION_READ_STATE_CHANGED_EVENT);
     connection.off(MANUFACTURING_DATA_CHANGED_EVENT);
     try {
       await connection.stop();

@@ -1,9 +1,9 @@
 import { Injectable, OnDestroy } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { BehaviorSubject, EMPTY, Observable, Subject, Subscription, catchError, distinctUntilChanged, filter, map, tap } from 'rxjs';
+import { BehaviorSubject, EMPTY, Observable, Subject, Subscription, catchError, distinctUntilChanged, filter, map, tap, throwError } from 'rxjs';
 import { buildApiUrl } from '../config/api.config';
 import { ApiResponse } from '../models/api-response.model';
-import { NotificationPage, NotificationSummary } from '../models/realtime-notification.models';
+import { NotificationPage, NotificationReadStateChanged, NotificationSummary } from '../models/realtime-notification.models';
 import { AuthService } from './auth.service';
 import { RealtimeService } from './realtime.service';
 
@@ -45,6 +45,9 @@ export class NotificationInboxService implements OnDestroy {
     this.subscriptions.add(this.realtime.notifications$
       .subscribe(notification => this.acceptLiveNotification(notification)));
 
+    this.subscriptions.add(this.realtime.notificationReadStateChanged$
+      .subscribe(change => this.applyRealtimeReadState(change)));
+
     this.subscriptions.add(this.realtime.connectionStatus$
       .pipe(
         distinctUntilChanged(),
@@ -65,10 +68,10 @@ export class NotificationInboxService implements OnDestroy {
     }).pipe(map(response => this.extractData(response)));
   }
 
-  markAsRead(notificationId: string): void {
-    if (!this.activeUserId) return;
+  markAsRead(notificationId: string): Observable<{ id: string; isRead: boolean; readAtUtc: string }> {
+    if (!this.activeUserId) return throwError(() => new Error('يلزم تسجيل الدخول لتحديث الإشعارات.'));
     const expectedSessionVersion = this.sessionVersion;
-    const request = this.http.patch<ApiResponse<{ id: string; isRead: boolean; readAtUtc: string }>>(
+    return this.http.patch<ApiResponse<{ id: string; isRead: boolean; readAtUtc: string }>>(
       buildApiUrl(`/api/notifications/${encodeURIComponent(notificationId)}/read`),
       {}
     ).pipe(
@@ -85,10 +88,26 @@ export class NotificationInboxService implements OnDestroy {
         if (wasUnread) {
           this.unreadCountSubject.next(Math.max(0, this.unreadCountSubject.value - 1));
         }
-      }),
-      catchError(() => EMPTY)
-    ).subscribe();
-    this.sessionRequests.add(request);
+      })
+    );
+  }
+
+  markAllAsRead(): Observable<{ updatedCount: number }> {
+    if (!this.activeUserId) return throwError(() => new Error('يلزم تسجيل الدخول لتحديث الإشعارات.'));
+    const expectedSessionVersion = this.sessionVersion;
+    return this.http.patch<ApiResponse<{ updatedCount: number }>>(
+      buildApiUrl('/api/notifications/read-all'),
+      {}
+    ).pipe(
+      map(response => this.extractData(response)),
+      tap(result => {
+        if (expectedSessionVersion !== this.sessionVersion) return;
+        this.recentSubject.next(this.recentSubject.value.map(notification => notification.isRead
+          ? notification
+          : { ...notification, isRead: true, status: 'Read' as const, readAtUtc: new Date().toISOString() }));
+        this.unreadCountSubject.next(Math.max(0, this.unreadCountSubject.value - result.updatedCount));
+      })
+    );
   }
 
   ngOnDestroy(): void {
@@ -163,6 +182,26 @@ export class NotificationInboxService implements OnDestroy {
       this.loadUnreadCount();
     }
     this.liveNotificationSubject.next(notification);
+  }
+
+  private applyRealtimeReadState(change: NotificationReadStateChanged): void {
+    if (!this.activeUserId || !change.isRead) return;
+    const recent = this.recentSubject.value;
+    if (change.notificationId) {
+      const wasUnread = recent.some(item => item.id === change.notificationId && !item.isRead);
+      this.recentSubject.next(recent.map(item => item.id === change.notificationId
+        ? { ...item, isRead: true, status: 'Read' as const, readAtUtc: change.occurredAtUtc }
+        : item));
+      if (wasUnread) this.unreadCountSubject.next(Math.max(0, this.unreadCountSubject.value - 1));
+    } else {
+      this.recentSubject.next(recent.map(item => item.isRead
+        ? item
+        : { ...item, isRead: true, status: 'Read' as const, readAtUtc: change.occurredAtUtc }));
+      this.unreadCountSubject.next(Math.max(0, this.unreadCountSubject.value - change.updatedCount));
+    }
+    // A read-all event can race a newly delivered notification; reload the
+    // authoritative total instead of assuming the local count is permanently zero.
+    this.loadUnreadCount();
   }
 
   private mergeRecent(

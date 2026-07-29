@@ -9,7 +9,7 @@
         <i class="pi pi-info-circle" aria-hidden="true"></i>
         <span>البيانات المعروضة محلية من قاعدة التطبيق؛ لا توجد قراءة مباشرة من نظام البصمة.</span>
       </div>
-      <button plp-primary-action pButton type="button" icon="pi pi-user-plus" label="إضافة عامل لاحقًا" disabled title="إنشاء العامل خارج نطاق هذه الجولة"></button>
+      <span plp-primary-action class="worker-management-page__creation-note"><i class="pi pi-sync" aria-hidden="true"></i> إنشاء العامل يتم عبر مزامنة المصدر المعتمدة</span>
     </plp-product-page-header>
 
     <section class="worker-management-page__ownership" aria-label="حدود البيانات في مساحة إدارة العاملين">
@@ -77,7 +77,36 @@
     ></plp-product-empty-state>
 
     <section class="worker-management-page__table" *ngIf="workers.length > 0 && !hasError" [attr.aria-busy]="isLoading || null">
-      <p-menu #workerActionsMenu [model]="workerActionItems" [popup]="true" appendTo="body"></p-menu>
+      <p-overlayPanel
+        #workerActionsOverlay
+        appendTo="body"
+        [@.disabled]="true"
+      >
+        <div role="menu" aria-label="إجراءات العامل" [style]="{ display: 'grid', gap: '0.25rem', minWidth: '12rem' }">
+          <button
+            pButton
+            pRipple
+            type="button"
+            role="menuitem"
+            class="p-button-text"
+            icon="pi pi-folder-open"
+            label="فتح الملف"
+            [style]="{ width: '100%', justifyContent: 'flex-start' }"
+            (click)="openProfileFromWorkerActions(workerActionsOverlay)"
+          ></button>
+          <button
+            pButton
+            pRipple
+            type="button"
+            role="menuitem"
+            class="p-button-text"
+            icon="pi pi-sitemap"
+            [label]="workerActionTarget?.organizationalDepartmentId ? 'تغيير القسم' : 'تعيين إلى قسم'"
+            [style]="{ width: '100%', justifyContent: 'flex-start' }"
+            (click)="openDepartmentFromWorkerActions(workerActionsOverlay)"
+          ></button>
+        </div>
+      </p-overlayPanel>
       <p-table
         plpResponsiveTable="stack"
         [value]="workers"
@@ -85,17 +114,15 @@
         [lazy]="true"
         [rows]="pageSize"
         [totalRecords]="totalRecords"
-        responsiveLayout="scroll"
+        responsiveLayout="stack"
+        breakpoint="1100px"
       >
         <ng-template pTemplate="header">
           <tr>
             <th>العامل</th>
-            <th>BadgeNumber</th>
-            <th>EmployeeCode</th>
-            <th>التسكين الحالي</th>
             <th>القسم التنظيمي</th>
-            <th>الربط بالمصدر</th>
-            <th>حالة الملف</th>
+            <th>التسكين الدائم</th>
+            <th>الحالة والربط</th>
             <th class="worker-management-page__actions">الإجراء</th>
           </tr>
         </ng-template>
@@ -112,39 +139,34 @@
                 ></plp-worker-avatar>
                 <div>
                   <strong>{{ worker.localName }}</strong>
-                  <span><i class="pi pi-home" aria-hidden="true"></i> الاسم المحلي الرئيسي</span>
-                  <small *ngIf="worker.badgeNumber">مرجع خارجي: {{ worker.badgeNumber }}</small>
-                  <small *ngIf="!worker.badgeNumber">لا يتوفر مرجع خارجي محفوظ</small>
+                  <span><i class="pi pi-id-card" aria-hidden="true"></i> كود العامل: <bdi>{{ worker.employeeCode }}</bdi></span>
+                  <small *ngIf="worker.badgeNumber">Badge: <bdi>{{ worker.badgeNumber }}</bdi></small>
+                  <small *ngIf="!worker.badgeNumber">لم يُسجل Badge Number</small>
                 </div>
-              </div>
-            </td>
-            <td data-plp-label="BadgeNumber"><bdi class="plp-code">{{ worker.badgeNumber || '—' }}</bdi></td>
-            <td data-plp-label="EmployeeCode"><bdi class="plp-code">{{ worker.employeeCode || '—' }}</bdi></td>
-            <td data-plp-label="التسكين الحالي">
-              <div class="worker-management-page__assignment">
-                <plp-status-badge
-                  [status]="assignmentStatusMeta(worker.assignmentStatus).tone"
-                  [label]="assignmentStatusMeta(worker.assignmentStatus).label"
-                ></plp-status-badge>
-                <span>{{ worker.assignmentLabel }}</span>
               </div>
             </td>
             <td data-plp-label="القسم التنظيمي">
               <div class="worker-management-page__department">
-                <strong>{{ worker.organizationalDepartmentName || 'غير معيّن' }}</strong>
+                <strong>{{ worker.organizationalDepartmentName || 'غير معيّن إلى قسم تنظيمي' }}</strong>
                 <small>{{ worker.organizationalFactoryName || 'لا يوجد مصنع تنظيمي' }}</small>
               </div>
             </td>
-            <td data-plp-label="الربط بالمصدر">
+            <td data-plp-label="التسكين الدائم">
+              <div class="worker-management-page__assignment">
+                <plp-status-badge *ngIf="canViewAssignments"
+                  [status]="assignmentStatusMeta(worker.assignmentStatus).tone"
+                  [label]="assignmentStatusMeta(worker.assignmentStatus).label"
+                ></plp-status-badge>
+                <plp-status-badge *ngIf="!canViewAssignments" status="neutral" label="غير متاح بالصلاحية"></plp-status-badge>
+                <span *ngIf="canViewAssignments">{{ worker.assignmentLabel }}</span>
+                <small *ngIf="canViewAssignments">{{ worker.factoryLineLabel }}</small>
+              </div>
+            </td>
+            <td data-plp-label="الحالة والربط" class="worker-management-page__status-stack">
+              <plp-status-badge [status]="localEmploymentStatusMeta(worker.localEmploymentStatus).tone" [label]="localEmploymentStatusMeta(worker.localEmploymentStatus).label"></plp-status-badge>
               <plp-status-badge
                 [status]="sourceLinkStatusMeta(worker.sourceLinkStatus).tone"
                 [label]="sourceLinkStatusMeta(worker.sourceLinkStatus).label"
-              ></plp-status-badge>
-            </td>
-            <td data-plp-label="حالة الملف">
-              <plp-status-badge
-                [status]="localProfileStatusMeta(worker.localProfileStatus).tone"
-                [label]="localProfileStatusMeta(worker.localProfileStatus).label"
               ></plp-status-badge>
             </td>
             <td data-plp-label="الإجراء" class="worker-management-page__actions">
@@ -153,9 +175,9 @@
                 pRipple
                 type="button"
                 class="p-button-sm p-button-outlined worker-management-page__action-menu-button"
-                label="إجراءات"
-                [attr.aria-label]="'إجراءات العامل ' + worker.localName"
-                (click)="openWorkerActions($event, worker, workerActionsMenu)"
+                [label]="canAssignDepartment ? 'إجراءات' : 'فتح الملف'"
+                [attr.aria-label]="(canAssignDepartment ? 'إجراءات العامل ' : 'فتح ملف العامل ') + worker.localName"
+                (click)="canAssignDepartment ? openWorkerActions($event, worker, workerActionsOverlay) : openProfile(worker)"
               ></button>
             </td>
           </tr>
@@ -182,14 +204,19 @@
     </div>
     <div class="worker-management-page__profile-state" *ngIf="profileError && !profileLoading">
       <button pButton pRipple type="button" class="p-button-text" icon="pi pi-arrow-right" label="العودة إلى قائمة العاملين" (click)="closeProfile()"></button>
-      <plp-product-error-state title="تعذر فتح ملف العامل" [description]="profileError" (retry)="closeProfile()"></plp-product-error-state>
+      <plp-product-error-state title="تعذر فتح ملف العامل" [description]="profileError" (retry)="retryProfile()"></plp-product-error-state>
     </div>
     <app-worker-profile-workspace
       *ngIf="selectedProfile && !profileLoading"
       [worker]="selectedProfile"
       [canManage]="canManage"
       [canViewAssignments]="canViewAssignments"
+      [canViewAttendance]="canViewAttendance"
+      [canViewCompensation]="canViewCompensation"
+      [canAssignDepartment]="canAssignDepartment"
       (changed)="onProfileChanged($event)"
+      (departmentAssignmentRequested)="openProfileDepartmentDialog()"
+      (reloadRequested)="retryProfile()"
       (closed)="closeProfile()"
     ></app-worker-profile-workspace>
   </ng-template>
@@ -233,7 +260,7 @@
         appendTo="body"
         styleClass="worker-management-page__department-select"
       ></p-dropdown>
-      <small *ngIf="selectedDepartmentId === worker.organizationalDepartmentId">اختر قسمًا مختلفًا لتفعيل الحفظ.</small>
+      <small *ngIf="selectedDepartmentId === worker.organizationalDepartmentId">العامل معيّن بالفعل على هذا القسم.</small>
       <p class="worker-management-page__conflict" *ngIf="departmentConflict"><i class="pi pi-exclamation-triangle" aria-hidden="true"></i> يجب إعادة فتح النافذة بعد تحديث بيانات العامل.</p>
     </div>
   </plp-dialog>

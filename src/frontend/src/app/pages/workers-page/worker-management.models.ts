@@ -1,27 +1,36 @@
 export type WorkerLocalProfileStatus = 'complete' | 'needs-review' | 'source-pending';
 export type WorkerSourceLinkStatus = 'linked' | 'unlinked' | 'conflict' | 'new-source' | 'missing-source';
-export type WorkerAssignmentStatus = 'assigned' | 'unassigned' | 'mixed';
+export type WorkerAssignmentStatus = 'assigned' | 'unassigned' | 'multiple';
 export type WorkerLocalEmploymentStatus = 'active' | 'inactive' | 'left-employment';
-export type WorkerAssignmentKind = 'permanent' | 'temporary';
-export type WorkerHistoryKind = 'name' | 'photo' | 'status' | 'assignment';
-export type WorkerSourcePreviewKind = 'new' | 'unchanged' | 'protected-local' | 'identity-conflict' | 'observed';
+export type WorkerAssignmentKind = 'permanent';
+export type WorkerProfileDataState = 'loaded' | 'empty' | 'forbidden' | 'error';
+
+export interface WorkerProfileAccess {
+  assignments: boolean;
+  attendance: boolean;
+  compensation: boolean;
+}
 
 export interface WorkerLocalSalary {
   amount: number;
-  currencyCode: 'EGP';
+  currencyCode: string;
   effectiveFrom: string;
 }
 
 export interface WorkerLocalProfile {
   displayName: string;
   photoUrl: string | null;
+  phone: string | null;
   salary: WorkerLocalSalary | null;
   profileStatus: WorkerLocalProfileStatus;
   employmentStatus: WorkerLocalEmploymentStatus;
+  employmentEndDate: string | null;
 }
 
 export interface WorkerSourceObservedProfile {
   sourceName: string | null;
+  attendanceUserId: string | null;
+  attendanceDepartmentId: number | null;
   badgeNumber: string | null;
   employeeCode: string | null;
   employmentStatus: string | null;
@@ -29,6 +38,48 @@ export interface WorkerSourceObservedProfile {
   shift: string | null;
   lastObservedAt: string | null;
   linkStatus: WorkerSourceLinkStatus;
+}
+
+export interface WorkerAttendanceSummary {
+  productionDate: string;
+  todayStatus: 'Present' | 'Late' | 'Absent' | 'Incomplete' | 'Unassigned' | 'NoMovement' | 'NeedsSync';
+  attendanceDataAvailableForDate: boolean;
+  firstCheckInUtc: string | null;
+  lastCheckOutUtc: string | null;
+  lastKnownMovementUtc: string | null;
+}
+
+export interface WorkerAttendanceHistoryMovement {
+  occurredAtUtc: string;
+  movementType: 'In' | 'Out';
+}
+
+export interface WorkerAttendanceHistoryRecord {
+  recordId: string;
+  productionDate: string;
+  attendanceStatus: 'Present' | 'Late';
+  source: string | null;
+  movements: WorkerAttendanceHistoryMovement[];
+}
+
+export interface WorkerAttendanceHistoryPage {
+  items: WorkerAttendanceHistoryRecord[];
+  page: number;
+  pageSize: number;
+  totalCount: number;
+  totalPages: number;
+}
+
+export interface WorkerAttendanceHistoryQuery {
+  fromDate: string;
+  toDate: string;
+  page: number;
+  pageSize: number;
+}
+
+export interface WorkerSystemSummary {
+  createdAtUtc: string | null;
+  updatedAtUtc: string | null;
 }
 
 export interface WorkerAssignmentSummary {
@@ -42,31 +93,24 @@ export interface WorkerAssignmentSummary {
   periodLabel: string;
 }
 
-export interface WorkerHistoryEntry {
-  id: string;
-  kind: WorkerHistoryKind;
-  title: string;
-  detail: string;
-  occurredAt: string;
-  actorLabel: string;
-}
-
-export interface WorkerSourcePreviewItem {
-  id: string;
-  kind: WorkerSourcePreviewKind;
-  title: string;
-  detail: string;
-}
-
 export interface WorkerManagementProfile {
   id: string;
   local: WorkerLocalProfile;
   source: WorkerSourceObservedProfile;
   assignments: WorkerAssignmentSummary[];
-  history: WorkerHistoryEntry[];
-  sourcePreview: WorkerSourcePreviewItem[];
   assignmentStatus: WorkerAssignmentStatus;
   defaultSubStageId: string | null;
+  attendance: WorkerAttendanceSummary | null;
+  organizationalDepartmentId?: string | null;
+  organizationalDepartmentName?: string | null;
+  organizationalFactoryName?: string | null;
+  organizationalDepartmentConcurrencyToken?: string;
+  system: WorkerSystemSummary;
+  dataStates: {
+    assignments: WorkerProfileDataState;
+    attendance: WorkerProfileDataState;
+    salary: WorkerProfileDataState;
+  };
 }
 
 export interface WorkerManagementListItem {

@@ -20,6 +20,7 @@ export class NotificationCardComponent {
   @Input() createdAtLabel = '';
   @Input() actionable = false;
   @Output() activate = new EventEmitter<void>();
+  @Output() markRead = new EventEmitter<void>();
 
   get readStateClass(): string {
     return this.isRead ? 'plp-notification-card--read' : 'plp-notification-card--unread';
@@ -29,5 +30,10 @@ export class NotificationCardComponent {
     if (!this.actionable || (event.key !== 'Enter' && event.key !== ' ')) return;
     event.preventDefault();
     this.activate.emit();
+  }
+
+  onMarkRead(event: MouseEvent): void {
+    event.stopPropagation();
+    this.markRead.emit();
   }
 }
