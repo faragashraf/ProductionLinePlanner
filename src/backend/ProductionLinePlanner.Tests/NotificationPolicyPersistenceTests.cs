@@ -76,6 +76,15 @@ public sealed class NotificationPolicyPersistenceTests
         Assert.True(result.Value!.IsEnabled);
         Assert.Equal(NotificationSeverity.Warning.ToString(), result.Value.Severity);
         Assert.Equal(6, result.Value.RecipientRules.Count);
+        Assert.Equal(
+            role.Id.ToString(),
+            Assert.Single(result.Value.RecipientRules, rule => rule.RecipientKind == "Role").RoleId);
+
+        fixture.Db.ChangeTracker.Clear();
+        var reloaded = await fixture.GetPolicyAsync(NotificationEventKeys.WorkerCreated);
+        Assert.Equal(
+            role.Id.ToString(),
+            Assert.Single(reloaded.RecipientRules, rule => rule.RecipientKind == "Role").RoleId);
         Assert.Single(fixture.Audit.Calls);
         Assert.Equal(nameof(NotificationPolicy), fixture.Audit.Calls[0].EntityType);
         Assert.DoesNotContain("عامل {WorkerName}", fixture.Audit.Calls[0].After?.ToString() ?? string.Empty);
@@ -139,6 +148,38 @@ public sealed class NotificationPolicyPersistenceTests
         var dto = Assert.Single(result.Value!.Items);
         Assert.Null(dto.EventKey);
         Assert.Equal(NotificationSeverity.Information, dto.Severity);
+    }
+
+    [Fact]
+    public async Task Notification_list_dto_preserves_action_navigation_metadata_for_new_attendance_notifications()
+    {
+        var options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
+            .Options;
+        await using var db = new AppDbContext(options);
+        var recipient = new AppUser(Guid.NewGuid(), "Inbox recipient", "inbox-navigation@test.local", "hash");
+        var workerId = Guid.NewGuid();
+        const string metadataJson = "{\"navigationAction\":\"OpenDailyAttendance\",\"navigationPayload\":{\"workerId\":\"11111111-1111-4111-8111-111111111111\",\"productionDate\":\"2026-07-29\"}}";
+        var notification = new Notification(
+            Guid.NewGuid(),
+            recipient.Id,
+            "حضور عامل",
+            "سجل العامل حضورًا.",
+            relatedWorkerId: workerId,
+            eventKey: NotificationEventKeys.WorkerCheckedIn,
+            navigationUrl: "/attendance/workforce",
+            metadataJson: metadataJson);
+        db.AddRange(recipient, notification);
+        await db.SaveChangesAsync();
+        var engine = new NotificationEngine(db, new RecordingAuditEngine());
+
+        var result = await engine.GetNotificationsAsync(recipient.Id, null);
+
+        Assert.True(result.IsSuccess);
+        var dto = Assert.Single(result.Value!.Items);
+        Assert.Equal("/attendance/workforce", dto.NavigationUrl);
+        Assert.Equal(metadataJson, dto.MetadataJson);
+        Assert.Equal(workerId, dto.RelatedWorkerId);
     }
 
     [Fact]

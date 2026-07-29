@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using ProductionLinePlanner.Application.Common;
 using ProductionLinePlanner.Application.DTOs;
 using ProductionLinePlanner.Application.Engines;
+using ProductionLinePlanner.Application.Realtime;
 using ProductionLinePlanner.Domain.Entities;
 using ProductionLinePlanner.Domain.Enums;
 using ProductionLinePlanner.Domain.Notifications;
@@ -13,11 +14,21 @@ public sealed class NotificationEngine : INotificationEngine
 {
     private readonly AppDbContext _dbContext;
     private readonly IAuditEngine _auditEngine;
+    private readonly INotificationLiveDispatcher? _liveDispatcher;
 
     public NotificationEngine(AppDbContext dbContext, IAuditEngine auditEngine)
+        : this(dbContext, auditEngine, null)
+    {
+    }
+
+    public NotificationEngine(
+        AppDbContext dbContext,
+        IAuditEngine auditEngine,
+        INotificationLiveDispatcher? liveDispatcher)
     {
         _dbContext = dbContext;
         _auditEngine = auditEngine;
+        _liveDispatcher = liveDispatcher;
     }
 
     public async Task<Result<PagedResult<NotificationDto>>> GetNotificationsAsync(
@@ -137,6 +148,10 @@ public sealed class NotificationEngine : INotificationEngine
                 },
                 cancellationToken: cancellationToken);
             await _dbContext.SaveChangesAsync(cancellationToken);
+            await DispatchReadChangeAsync(
+                recipientUserId,
+                new NotificationReadStateChangedDto(notification.Id, true, 1, notification.ReadAtUtc!.Value),
+                cancellationToken);
         }
 
         return Result<NotificationDto>.Success(new NotificationDto
@@ -187,10 +202,24 @@ public sealed class NotificationEngine : INotificationEngine
             : null;
         try
         {
-            var updatedCount = await query.ExecuteUpdateAsync(setters => setters
-                .SetProperty(x => x.IsRead, true)
-                .SetProperty(x => x.Status, NotificationStatus.Read)
-                .SetProperty(x => x.ReadAtUtc, now), cancellationToken);
+            int updatedCount;
+            if (_dbContext.Database.IsRelational())
+            {
+                updatedCount = await query.ExecuteUpdateAsync(setters => setters
+                    .SetProperty(x => x.IsRead, true)
+                    .SetProperty(x => x.Status, NotificationStatus.Read)
+                    .SetProperty(x => x.ReadAtUtc, now), cancellationToken);
+            }
+            else
+            {
+                var notifications = await query.ToArrayAsync(cancellationToken);
+                foreach (var notification in notifications)
+                {
+                    notification.MarkAsRead(now);
+                }
+
+                updatedCount = notifications.Length;
+            }
 
             await _auditEngine.RecordAsync(
                 recipientUserId,
@@ -206,6 +235,14 @@ public sealed class NotificationEngine : INotificationEngine
                 await transaction.CommitAsync(cancellationToken);
             }
 
+            if (updatedCount > 0)
+            {
+                await DispatchReadChangeAsync(
+                    recipientUserId,
+                    new NotificationReadStateChangedDto(null, true, updatedCount, now),
+                    cancellationToken);
+            }
+
             return Result<int>.Success(updatedCount);
         }
         catch
@@ -216,6 +253,28 @@ public sealed class NotificationEngine : INotificationEngine
             }
 
             throw;
+        }
+    }
+
+    private async Task DispatchReadChangeAsync(
+        Guid recipientUserId,
+        NotificationReadStateChangedDto change,
+        CancellationToken cancellationToken)
+    {
+        if (_liveDispatcher is null) return;
+
+        try
+        {
+            await _liveDispatcher.SendReadStateToUserAsync(recipientUserId, change, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            // Read state is durable before this best-effort fan-out. Clients
+            // rehydrate the authoritative unread count on reconnect/refresh.
         }
     }
 }

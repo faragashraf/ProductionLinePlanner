@@ -5,7 +5,9 @@
     <div><strong>إشعارات الجهاز</strong><span>{{ browserStateLabel() }}</span></div>
     <button *ngIf="browserState === 'default'" pButton type="button" label="تفعيل إشعارات الجهاز" icon="pi pi-bell" class="p-button-outlined" (click)="enableDeviceNotifications()"></button>
     <button pButton type="button" [label]="presentation.isSoundEnabled ? 'كتم صوت الإشعارات' : 'تشغيل صوت الإشعارات'" [icon]="presentation.isSoundEnabled ? 'pi pi-volume-off' : 'pi pi-volume-up'" class="p-button-text" [attr.aria-pressed]="!presentation.isSoundEnabled" (click)="toggleSound()"></button>
+    <button *ngIf="unreadCount > 0" pButton type="button" label="تحديد الكل كمقروء" icon="pi pi-check-double" class="p-button-outlined" [loading]="isMarkingAllRead" [disabled]="isMarkingAllRead" (click)="markAllAsRead()"></button>
   </section>
+  <p *ngIf="actionMessage" class="notifications-page__feedback" role="status">{{ actionMessage }}</p>
 
   <plp-product-loading-state *ngIf="isLoading" [lines]="6" label="جارٍ تحميل الإشعارات"></plp-product-loading-state>
   <plp-product-error-state *ngIf="hasError && !isLoading" title="تعذر تحميل الإشعارات" description="تحقق من الاتصال ثم أعد المحاولة." (retry)="loadPage(page)"></plp-product-error-state>
@@ -24,8 +26,9 @@
       [attendanceTime]="attendanceTime(item)"
       [assignmentLabel]="assignmentLabel(item)"
       [createdAtLabel]="createdAtLabel(item)"
-      [actionable]="!!item.navigationUrl"
+      [actionable]="canNavigate(item)"
       (activate)="open(item)"
+      (markRead)="markAsRead(item)"
     ></plp-notification-card>
   </div>
 

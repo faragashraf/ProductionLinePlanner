@@ -16,7 +16,8 @@ public sealed record AttendanceWorkforceQuery(
     string? AssignmentFilter = null,
     string? OperationalFilter = null,
     string? SortBy = null,
-    string? SortDirection = null);
+    string? SortDirection = null,
+    Guid? WorkerId = null);
 
 public sealed record AttendanceWorkforceAssignmentDto(
     Guid AssignmentId,

@@ -11,7 +11,7 @@ export interface WorkforceRow { workerId: string; employeeCode: string; fullName
 export interface WorkforceSummary { totalWorkers: number; presentWorkers: number; absentWorkers: number; lateWorkers: number; incompleteWorkers: number; unassignedPresentWorkers: number; assignedAbsentWorkers: number; reviewRequiredWorkers: number; attendanceDataAvailable: boolean; scope: string; }
 export interface WorkforcePage { productionDate: string; items: WorkforceRow[]; summary: WorkforceSummary; page: number; pageSize: number; totalCount: number; totalPages: number; }
 export interface WorkforceDetail { workerId: string; productionDate: string; attendanceRecords: { occurredAtUtc: string; label: 'Punch' }[]; assignments: WorkforceAssignment[]; }
-export interface WorkforceQuery { productionDate: string; page?: number; pageSize?: number; search?: string; factoryId?: string; productionLineId?: string; mainStageId?: string; subStageId?: string; department?: string; attendanceFilter?: string; assignmentFilter?: string; operationalFilter?: string; sortBy?: string; sortDirection?: string; }
+export interface WorkforceQuery { productionDate: string; page?: number; pageSize?: number; search?: string; factoryId?: string; productionLineId?: string; mainStageId?: string; subStageId?: string; department?: string; attendanceFilter?: string; assignmentFilter?: string; operationalFilter?: string; sortBy?: string; sortDirection?: string; workerId?: string; }
 
 @Injectable({ providedIn: 'root' })
 export class AttendanceWorkforceApiService {

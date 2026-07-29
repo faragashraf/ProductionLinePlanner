@@ -63,6 +63,25 @@ export interface NotificationSummary {
   readAtUtc: string | null;
 }
 
+export type NotificationNavigationAction = 'OpenDailyAttendance';
+
+export interface NotificationNavigationPayload {
+  workerId?: string;
+  productionDate?: string;
+}
+
+export interface NotificationMetadataEnvelope {
+  navigationAction?: NotificationNavigationAction | string | null;
+  navigationPayload?: NotificationNavigationPayload | null;
+}
+
+export interface NotificationReadStateChanged {
+  notificationId: string | null;
+  isRead: boolean;
+  updatedCount: number;
+  occurredAtUtc: string;
+}
+
 export interface NotificationPage {
   items: NotificationSummary[];
   totalCount: number;
@@ -89,4 +108,6 @@ export interface AttendanceNotificationMetadata {
   stageName?: string | null;
   productionLineId?: string | null;
   productionLineName?: string | null;
+  navigationAction?: NotificationNavigationAction | string | null;
+  navigationPayload?: NotificationNavigationPayload | null;
 }

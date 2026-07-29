@@ -85,6 +85,10 @@ public sealed class AttendanceNotificationOutboxTests
         Assert.True(notification.IsBrowserEnabled);
         using var metadata = JsonDocument.Parse(notification.MetadataJson!);
         Assert.Equal("Assigned", metadata.RootElement.GetProperty("assignmentStatus").GetString());
+        Assert.Equal("OpenDailyAttendance", metadata.RootElement.GetProperty("navigationAction").GetString());
+        var navigationPayload = metadata.RootElement.GetProperty("navigationPayload");
+        Assert.Equal(notification.RelatedWorkerId!.Value, navigationPayload.GetProperty("workerId").GetGuid());
+        Assert.Equal("2026-07-28", navigationPayload.GetProperty("productionDate").GetString());
     }
 
     [Fact]

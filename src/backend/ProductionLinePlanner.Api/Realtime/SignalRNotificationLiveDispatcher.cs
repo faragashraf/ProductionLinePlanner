@@ -22,4 +22,12 @@ public sealed class SignalRNotificationLiveDispatcher(
         hubContext.Clients
             .Group(capabilityGroupResolver.GetGroupName(permission))
             .NotificationReceived(notification);
+
+    public Task SendReadStateToUserAsync(
+        Guid recipientUserId,
+        NotificationReadStateChangedDto change,
+        CancellationToken cancellationToken = default) =>
+        hubContext.Clients
+            .User(recipientUserId.ToString("D"))
+            .NotificationReadStateChanged(change);
 }

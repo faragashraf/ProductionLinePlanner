@@ -57,10 +57,26 @@ public static class AttendanceWorkforceEndpoints
         string? operationalFilter = null,
         string? sortBy = null,
         string? sortDirection = null,
+        Guid? workerId = null,
         CancellationToken cancellationToken = default)
     {
         var cairoDate = DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, cairoTimeZoneProvider.TimeZone));
-        var result = await workforceEngine.GetPageAsync(new AttendanceWorkforceQuery(productionDate ?? cairoDate, page, pageSize, search, factoryId, productionLineId, mainStageId, subStageId, department, attendanceFilter, assignmentFilter, operationalFilter, sortBy, sortDirection), cancellationToken);
+        var result = await workforceEngine.GetPageAsync(new AttendanceWorkforceQuery(
+            productionDate ?? cairoDate,
+            page,
+            pageSize,
+            search,
+            factoryId,
+            productionLineId,
+            mainStageId,
+            subStageId,
+            department,
+            attendanceFilter,
+            assignmentFilter,
+            operationalFilter,
+            sortBy,
+            sortDirection,
+            workerId), cancellationToken);
         return result.IsFailure
             ? ApiResponse.Failure(result.Error?.Code ?? "AttendanceWorkforceReadFailed", result.Error?.Message ?? "Unable to load workforce attendance.", MapFailureStatusCode(result.Error?.Code))
             : Results.Ok(ApiResponse.Success(result.Value!));

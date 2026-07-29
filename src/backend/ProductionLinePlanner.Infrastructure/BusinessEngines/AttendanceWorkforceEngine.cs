@@ -24,8 +24,12 @@ public sealed class AttendanceWorkforceEngine(
         var page = Math.Max(query.Page, 1);
         var pageSize = Math.Clamp(query.PageSize, 10, 100);
         var (startUtc, endUtc) = GetDayBounds(query.ProductionDate);
-        var workerQuery = dbContext.Workers.AsNoTracking()
-            .Where(worker => worker.IsActive && worker.EmploymentStatus == EmploymentStatus.Active);
+        var workerQuery = dbContext.Workers.AsNoTracking();
+        // A notification deep link is historical evidence. It must still resolve
+        // its worker even if the worker became inactive after that production date.
+        workerQuery = query.WorkerId.HasValue
+            ? workerQuery.Where(worker => worker.Id == query.WorkerId.Value)
+            : workerQuery.Where(worker => worker.IsActive && worker.EmploymentStatus == EmploymentStatus.Active);
         if (!string.IsNullOrWhiteSpace(query.Search))
         {
             var term = query.Search.Trim();
@@ -170,7 +174,9 @@ public sealed class AttendanceWorkforceEngine(
 
     public async Task<Result<AttendanceWorkforceDetailDto>> GetWorkerDetailAsync(Guid workerId, DateOnly productionDate, CancellationToken cancellationToken = default)
     {
-        var exists = await dbContext.Workers.AsNoTracking().AnyAsync(worker => worker.Id == workerId && worker.IsActive, cancellationToken);
+        // Daily attendance is historical evidence; a worker who later leaves
+        // employment must remain readable from a notification deep link.
+        var exists = await dbContext.Workers.AsNoTracking().AnyAsync(worker => worker.Id == workerId, cancellationToken);
         if (!exists) return Result<AttendanceWorkforceDetailDto>.Failure(new Error("NotFound", "Worker not found."));
         var (startUtc, endUtc) = GetDayBounds(productionDate);
         var assignmentResult = await assignmentEngine.ResolveEffectiveAssignmentsAsync([workerId], startUtc, cancellationToken);
