@@ -91,6 +91,46 @@ public sealed class NotificationPolicyPersistenceTests
     }
 
     [Fact]
+    public async Task Role_recipient_survives_a_second_update_and_inactive_or_missing_roles_are_rejected()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var activeRole = new AppRole(Guid.NewGuid(), "Active policy role");
+        var inactiveRole = new AppRole(Guid.NewGuid(), "Inactive policy role", isActive: false);
+        fixture.Db.AddRange(activeRole, inactiveRole);
+        await fixture.Db.SaveChangesAsync();
+
+        var current = await fixture.GetPolicyAsync(NotificationEventKeys.WorkerCreated);
+        var first = await fixture.Service.UpdatePolicyAsync(
+            NotificationEventKeys.WorkerCreated,
+            CreateUpdate(current, rules: [Rule("Role", 0, roleId: activeRole.Id)]),
+            fixture.ActorId);
+        Assert.True(first.IsSuccess);
+
+        fixture.Db.ChangeTracker.Clear();
+        var reloaded = await fixture.GetPolicyAsync(NotificationEventKeys.WorkerCreated);
+        var second = await fixture.Service.UpdatePolicyAsync(
+            NotificationEventKeys.WorkerCreated,
+            CreateUpdate(reloaded, rules: [Rule("Role", 0, roleId: activeRole.Id)]),
+            fixture.ActorId);
+        Assert.True(second.IsSuccess);
+        fixture.Db.ChangeTracker.Clear();
+        Assert.Equal(activeRole.Id.ToString(), Assert.Single((await fixture.GetPolicyAsync(NotificationEventKeys.WorkerCreated)).RecipientRules).RoleId);
+
+        var latest = await fixture.GetPolicyAsync(NotificationEventKeys.WorkerCreated);
+        var missing = await fixture.Service.UpdatePolicyAsync(
+            NotificationEventKeys.WorkerCreated,
+            CreateUpdate(latest, rules: [Rule("Role", 0)]),
+            fixture.ActorId);
+        var inactive = await fixture.Service.UpdatePolicyAsync(
+            NotificationEventKeys.WorkerCreated,
+            CreateUpdate(latest, rules: [Rule("Role", 0, roleId: inactiveRole.Id)]),
+            fixture.ActorId);
+
+        Assert.Equal("InvalidRecipientRule", missing.Error?.Code);
+        Assert.Equal("InvalidRecipientRule", inactive.Error?.Code);
+    }
+
+    [Fact]
     public async Task Policy_update_rejects_unknown_event_unknown_token_and_invalid_recipient_target()
     {
         await using var fixture = await Fixture.CreateAsync();
