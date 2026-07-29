@@ -249,11 +249,14 @@ public sealed class ZkTimeStagingPipelineTests
 
         var claimedBatches = fixture.Source.AttendanceClaims.Count;
         var publishedChanges = publisher.Changes.Count;
+        var publishedSyncChanges = publisher.Changes.Count(change => change.EntityType == ManufacturingEntityType.AttendanceSyncState);
         var replay = await fixture.RunAsync();
 
         Assert.True(replay.IsSuccess, replay.Error?.Message);
         Assert.Equal(claimedBatches, fixture.Source.AttendanceClaims.Count);
-        Assert.Equal(publishedChanges, publisher.Changes.Count);
+        Assert.Equal(publishedChanges + 1, publisher.Changes.Count);
+        Assert.Equal(publishedSyncChanges + 1, publisher.Changes.Count(change => change.EntityType == ManufacturingEntityType.AttendanceSyncState));
+        Assert.Single(publisher.Changes, change => change.EntityType == ManufacturingEntityType.Worker);
         Assert.Contains(101, fixture.Source.SkippedPunchIds);
     }
 
@@ -339,7 +342,7 @@ public sealed class ZkTimeStagingPipelineTests
     }
 
     [Fact]
-    public async Task Successful_staging_batch_publishes_one_event_per_changed_domain_type_and_replay_publishes_none()
+    public async Task Successful_staging_batch_publishes_domain_changes_and_replay_only_refreshes_sync_freshness()
     {
         var publisher = new RecordingPublisher();
         await using var fixture = await Fixture.CreateAsync(publisher: publisher);
@@ -354,20 +357,23 @@ public sealed class ZkTimeStagingPipelineTests
         var first = await fixture.RunAsync();
 
         Assert.True(first.IsSuccess, first.Error?.Message);
-        Assert.Equal(2, publisher.Changes.Count);
+        Assert.Equal(3, publisher.Changes.Count);
         var workerChange = Assert.Single(publisher.Changes, change => change.EntityType == ManufacturingEntityType.Worker);
         var attendanceChange = Assert.Single(publisher.Changes, change => change.EntityType == ManufacturingEntityType.AttendanceRecord);
+        var syncChange = Assert.Single(publisher.Changes, change => change.EntityType == ManufacturingEntityType.AttendanceSyncState);
         Assert.Equal("ZkTimeSync", workerChange.Source);
         Assert.Equal("ZkTimeSync", attendanceChange.Source);
         Assert.Equal(ProductionDate, attendanceChange.ProductionDate);
         Assert.Equal(2, attendanceChange.AddedAttendanceCount);
         Assert.Equal(0, attendanceChange.UpdatedAttendanceCount);
+        Assert.Equal("ZkTimeSync", syncChange.Source);
+        Assert.Equal(ProductionDate, syncChange.ProductionDate);
         publisher.Changes.Clear();
 
         var replay = await fixture.RunAsync();
 
         Assert.True(replay.IsSuccess, replay.Error?.Message);
-        Assert.Empty(publisher.Changes);
+        Assert.Collection(publisher.Changes, change => Assert.Equal(ManufacturingEntityType.AttendanceSyncState, change.EntityType));
     }
 
     [Fact]

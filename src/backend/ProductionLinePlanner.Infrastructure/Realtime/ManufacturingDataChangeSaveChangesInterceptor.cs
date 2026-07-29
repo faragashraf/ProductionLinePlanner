@@ -217,6 +217,13 @@ public sealed class ManufacturingDataChangeSaveChangesInterceptor(
                 addedAttendanceCount: entry.State == EntityState.Added ? 1 : 0,
                 updatedAttendanceCount: entry.State == EntityState.Modified ? 1 : 0,
                 attendanceChangeKinds: [entry.State == EntityState.Added ? "created" : "updated"]),
+            AttendanceSyncState entity => Create(
+                entry,
+                ManufacturingEntityType.AttendanceSyncState,
+                entity.Id,
+                actorUserId,
+                productionDate: entity.OperationalDate,
+                affectedAttendanceDates: [entity.OperationalDate]),
             Worker entity => CreateWorkerChange(entry, entity, actorUserId),
             WorkerDefaultAssignment entity => CreateDefaultAssignmentChange(entry, entity, actorUserId),
             _ => null

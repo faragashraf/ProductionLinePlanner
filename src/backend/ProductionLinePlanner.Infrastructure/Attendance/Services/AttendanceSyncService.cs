@@ -343,7 +343,7 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
                 result.IsSuccess,
                 result.Value?.SourceUsersCount ?? 0,
                 result.Value?.SourceCheckInsCount ?? 0);
-            return result;
+            return await CompleteRunAsync(context, result);
         }
         catch (OperationCanceledException exception) when (AttendanceSyncFailureClassifier.Classify(exception, cancellationToken.IsCancellationRequested, internalTimeout.IsCancellationRequested) == AttendanceSyncFailureClassifier.ClientCancelled)
         {
@@ -354,7 +354,7 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
                 context.TriggerType,
                 stopwatch.ElapsedMilliseconds,
                 "request-token");
-            return Result<AttendanceSyncResultDto>.Failure(new Error(AttendanceSyncFailureClassifier.ClientCancelled, "Attendance synchronization request was cancelled by the client."));
+            return await CompleteRunAsync(context, Result<AttendanceSyncResultDto>.Failure(new Error(AttendanceSyncFailureClassifier.ClientCancelled, "Attendance synchronization request was cancelled by the client.")));
         }
         catch (OperationCanceledException exception) when (AttendanceSyncFailureClassifier.Classify(exception, cancellationToken.IsCancellationRequested, internalTimeout.IsCancellationRequested) == AttendanceSyncFailureClassifier.InternalTimeout)
         {
@@ -365,7 +365,7 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
                 context.TriggerType,
                 stopwatch.ElapsedMilliseconds,
                 "internal-timeout");
-            return Result<AttendanceSyncResultDto>.Failure(new Error(AttendanceSyncFailureClassifier.InternalTimeout, "Attendance synchronization exceeded its bounded source-read timeout."));
+            return await CompleteRunAsync(context, Result<AttendanceSyncResultDto>.Failure(new Error(AttendanceSyncFailureClassifier.InternalTimeout, "Attendance synchronization exceeded its bounded source-read timeout.")));
         }
         catch (OperationCanceledException exception)
         {
@@ -377,7 +377,7 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
                 context.TriggerType,
                 stopwatch.ElapsedMilliseconds,
                 "undetermined");
-            return Result<AttendanceSyncResultDto>.Failure(new Error(AttendanceSyncFailureClassifier.Cancelled, "Attendance synchronization was cancelled before completion."));
+            return await CompleteRunAsync(context, Result<AttendanceSyncResultDto>.Failure(new Error(AttendanceSyncFailureClassifier.Cancelled, "Attendance synchronization was cancelled before completion.")));
         }
         catch (Exception exception) when (AttendanceSyncFailureClassifier.Classify(exception, cancellationToken.IsCancellationRequested, internalTimeout.IsCancellationRequested) == AttendanceSyncFailureClassifier.SourceTimeout)
         {
@@ -389,8 +389,42 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
                 context.TriggerType,
                 stopwatch.ElapsedMilliseconds,
                 "sql-command-timeout");
-            return Result<AttendanceSyncResultDto>.Failure(new Error(AttendanceSyncFailureClassifier.SourceTimeout, "Attendance source query timed out."));
+            return await CompleteRunAsync(context, Result<AttendanceSyncResultDto>.Failure(new Error(AttendanceSyncFailureClassifier.SourceTimeout, "Attendance source query timed out.")));
         }
+    }
+
+    private async Task<Result<AttendanceSyncResultDto>> CompleteRunAsync(
+        AttendanceSyncExecutionContext context,
+        Result<AttendanceSyncResultDto> result)
+    {
+        try
+        {
+            var state = await _appDbContext.AttendanceSyncStates
+                .SingleOrDefaultAsync(item => item.SourceName == _sourceOptions.SourceName
+                    && item.OperationalDate == context.ProductionDate, CancellationToken.None);
+            state ??= new AttendanceSyncState(Guid.NewGuid(), _sourceOptions.SourceName, context.ProductionDate);
+            if (_appDbContext.Entry(state).State == EntityState.Detached)
+            {
+                _appDbContext.AttendanceSyncStates.Add(state);
+            }
+
+            if (result.IsSuccess) state.RecordSuccess(DateTime.UtcNow);
+            else state.RecordFailure(DateTime.UtcNow, result.Error?.Code);
+            await _appDbContext.SaveChangesAsync(CancellationToken.None);
+        }
+        catch (Exception exception)
+        {
+            // Attendance rows may already be committed. Freshness remains
+            // untrusted rather than turning a completed source synchronization
+            // into a false application failure.
+            _logger.LogError(
+                exception,
+                "Attendance sync freshness state could not be persisted. correlationId={CorrelationId}, date={SyncDate}",
+                context.CorrelationId,
+                context.ProductionDate);
+        }
+
+        return result;
     }
 
     private async Task<Result<AttendanceSyncResultDto>> SyncCoreAsync(

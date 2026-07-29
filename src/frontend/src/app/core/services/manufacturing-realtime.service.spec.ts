@@ -132,6 +132,20 @@ describe('ManufacturingRealtimeService', () => {
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
+  it('delivers every factory-readiness delta without refetch-screen coalescing and ignores duplicate event ids', async () => {
+    const refresh = jasmine.createSpy('refresh');
+    service.watchScreen({ screen: 'factory-readiness', coalesceMs: 0, refresh });
+    realtime.status.next('connected');
+    await settle();
+
+    realtime.changes.next(change('punch-1', 'line-1', null, 'AttendanceRecord'));
+    realtime.changes.next(change('punch-1', 'line-1', null, 'AttendanceRecord'));
+    realtime.changes.next(change('punch-2', 'line-2', null, 'AttendanceRecord'));
+
+    expect(refresh).toHaveBeenCalledTimes(2);
+    expect(realtime.invocations).toContain(['JoinManufacturingScreen', 'factory-readiness']);
+  });
+
   it('routes typed attendance and department changes without refreshing screens that do not consume the local department', async () => {
     const attendance = jasmine.createSpy('attendance');
     const employees = jasmine.createSpy('employees');

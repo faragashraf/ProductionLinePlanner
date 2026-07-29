@@ -13,6 +13,7 @@ public static class ManufacturingRealtimeGroups
     public const string LineStaffing = "line-staffing";
     public const string DailyProductionOperations = "daily-production-operations";
     public const string ManufacturingCommandCenter = "manufacturing-command-center";
+    public const string FactoryReadiness = "factory-readiness";
     public const string AttendanceWorkforce = "attendance-workforce";
     public const string Reports = "reports";
 
@@ -20,7 +21,13 @@ public static class ManufacturingRealtimeGroups
 
     public static bool TryGetRequiredPermission(string? screen, out string permission)
     {
-        permission = screen?.Trim().ToLowerInvariant() switch
+        permission = RequiredPermissions(screen).FirstOrDefault() ?? string.Empty;
+        return !string.IsNullOrEmpty(permission);
+    }
+
+    public static IReadOnlyList<string> RequiredPermissions(string? screen)
+    {
+        var permission = screen?.Trim().ToLowerInvariant() switch
         {
             FactoryStructure => FactoryStructurePermissions.View,
             Departments => "departments.view",
@@ -30,23 +37,27 @@ public static class ManufacturingRealtimeGroups
             LineStaffing => "assignments.view",
             DailyProductionOperations => "production.record",
             ManufacturingCommandCenter => "production.view",
+            FactoryReadiness => FactoryStructurePermissions.View,
             AttendanceWorkforce => "attendance.view",
             Reports => "reports.production.view",
             _ => string.Empty
         };
-        return !string.IsNullOrEmpty(permission);
+        return screen?.Trim().ToLowerInvariant() == FactoryReadiness
+            ? [FactoryStructurePermissions.View, "stages.view", "assignments.view", "attendance.view"]
+            : string.IsNullOrEmpty(permission) ? [] : [permission];
     }
 
     public static IReadOnlyCollection<string> ForChange(ManufacturingDataChanged change) => change.EntityType switch
     {
-        ManufacturingEntityType.Factory or ManufacturingEntityType.ProductionLine => [ForScreen(FactoryStructure), ForScreen(Stages), ForScreen(ManufacturingCommandCenter)],
-        ManufacturingEntityType.Department => [ForScreen(FactoryStructure), ForScreen(Departments), ForScreen(Stages), ForScreen(ManufacturingCommandCenter)],
-        ManufacturingEntityType.MainStage or ManufacturingEntityType.SubStage => [ForScreen(Stages), ForScreen(Models), ForScreen(ManufacturingCommandCenter)],
-        ManufacturingEntityType.ProductModel or ManufacturingEntityType.ProductModelStage => [ForScreen(Models), ForScreen(ManufacturingCommandCenter)],
+        ManufacturingEntityType.Factory or ManufacturingEntityType.ProductionLine => [ForScreen(FactoryStructure), ForScreen(Stages), ForScreen(ManufacturingCommandCenter), ForScreen(FactoryReadiness)],
+        ManufacturingEntityType.Department => [ForScreen(FactoryStructure), ForScreen(Departments), ForScreen(Stages), ForScreen(ManufacturingCommandCenter), ForScreen(FactoryReadiness)],
+        ManufacturingEntityType.MainStage or ManufacturingEntityType.SubStage => [ForScreen(Stages), ForScreen(Models), ForScreen(ManufacturingCommandCenter), ForScreen(FactoryReadiness)],
+        ManufacturingEntityType.ProductModel or ManufacturingEntityType.ProductModelStage => [ForScreen(Models), ForScreen(ManufacturingCommandCenter), ForScreen(FactoryReadiness)],
         ManufacturingEntityType.ProductionOrder or ManufacturingEntityType.StageProductionRecord => [ForScreen(DailyProductionOperations), ForScreen(ManufacturingCommandCenter), ForScreen(Reports)],
-        ManufacturingEntityType.AttendanceRecord => [ForScreen(AttendanceWorkforce), ForScreen(DailyProductionOperations), ForScreen(ManufacturingCommandCenter)],
+        ManufacturingEntityType.AttendanceRecord => [ForScreen(AttendanceWorkforce), ForScreen(DailyProductionOperations), ForScreen(ManufacturingCommandCenter), ForScreen(FactoryReadiness)],
+        ManufacturingEntityType.AttendanceSyncState => [ForScreen(AttendanceWorkforce), ForScreen(FactoryReadiness)],
         ManufacturingEntityType.Worker => WorkerGroups(change),
-        ManufacturingEntityType.WorkerDefaultAssignment => [ForScreen(LineStaffing), ForScreen(DailyProductionOperations), ForScreen(ManufacturingCommandCenter)],
+        ManufacturingEntityType.WorkerDefaultAssignment => [ForScreen(LineStaffing), ForScreen(DailyProductionOperations), ForScreen(ManufacturingCommandCenter), ForScreen(FactoryReadiness)],
         _ => []
     };
 
@@ -70,6 +81,7 @@ public static class ManufacturingRealtimeGroups
             groups.Add(ForScreen(LineStaffing));
             groups.Add(ForScreen(DailyProductionOperations));
             groups.Add(ForScreen(ManufacturingCommandCenter));
+            groups.Add(ForScreen(FactoryReadiness));
         }
 
         return groups;

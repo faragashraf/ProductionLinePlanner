@@ -1,3 +1,5 @@
+import { OperationalReadinessDelta } from '../../shared/models/operational-readiness.model';
+
 export type RealtimeConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'reconnecting';
 
 export function realtimeConnectionStatusLabel(status: RealtimeConnectionStatus): string {
@@ -9,7 +11,7 @@ export function realtimeConnectionStatusLabel(status: RealtimeConnectionStatus):
   } as const)[status];
 }
 
-export type ManufacturingEntityType = 'Factory' | 'Department' | 'ProductionLine' | 'MainStage' | 'SubStage' | 'ProductModel' | 'ProductModelStage' | 'ProductionOrder' | 'StageProductionRecord' | 'AttendanceRecord' | 'Worker' | 'WorkerDefaultAssignment';
+export type ManufacturingEntityType = 'Factory' | 'Department' | 'ProductionLine' | 'MainStage' | 'SubStage' | 'ProductModel' | 'ProductModelStage' | 'ProductionOrder' | 'StageProductionRecord' | 'AttendanceRecord' | 'AttendanceSyncState' | 'Worker' | 'WorkerDefaultAssignment';
 export type ManufacturingChangeType = 'Created' | 'Updated' | 'Deleted' | 'Activated' | 'Deactivated' | 'Reordered' | 'RelationshipChanged' | 'permanent-assignment-created' | 'permanent-assignment-updated' | 'permanent-assignment-cancelled';
 export type WorkerChangeKind = 'created' | 'deleted' | 'employment-status' | 'department-assignment' | 'attendance-identity' | 'profile';
 export type AttendanceChangeKind = 'created' | 'updated';
@@ -42,6 +44,8 @@ export interface ManufacturingDataChanged {
   updatedAttendanceCount?: number;
   workerChangeKinds?: WorkerChangeKind[];
   attendanceChangeKinds?: AttendanceChangeKind[];
+  /** Absolute readiness patches for the affected operational path; absent on older API instances. */
+  operationalReadiness?: OperationalReadinessDelta | null;
 }
 
 export interface NotificationSummary {

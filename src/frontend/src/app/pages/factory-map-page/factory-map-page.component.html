@@ -1,93 +1,25 @@
-<main class="factory-command" dir="rtl">
-  <header class="factory-command__header">
-    <div><span>Factory / Department / Line</span><h1>خريطة المصنع التشغيلية</h1><p>كل حالة أدناه ناتجة عن تشغيل مسجل، رحلة موديل، تسكين دائم، وحضور اليوم.</p></div>
-    <small *ngIf="data && dataIsCurrent">
-      <ng-container *ngIf="realtimeStatus$ | async as realtimeStatus">
-        <i class="realtime-status__dot" [ngClass]="realtimeClass(realtimeStatus)" aria-hidden="true"></i>
-        <strong>{{ realtimeLabel(realtimeStatus) }}</strong>
-      </ng-container>
-      <span>{{ isRefreshing ? 'جارٍ جلب التحديث · ' : '' }}آخر تحديث ناجح {{ data.calculatedAtUtc | date:'yyyy/MM/dd، HH:mm' }}</span>
+<main class="factory-readiness" dir="rtl">
+  <header class="factory-readiness__header">
+    <div><span>Factory → Departments → Lines → Stages → Workers</span><h1>جاهزية تشغيل المصنع الآن</h1><p>قراءة لحظية من التسكينات الدائمة والحضور الحالي؛ لا تعتمد على تسجيل الإنتاج اليومي.</p></div>
+    <small *ngIf="realtimeStatus$ | async as realtimeStatus">
+      <i class="factory-readiness__realtime-dot" [ngClass]="realtimeClass(realtimeStatus)" aria-hidden="true"></i>
+      <strong>{{ realtimeLabel(realtimeStatus) }}</strong>
+      <span *ngIf="store.snapshot() as snapshot">آخر حساب {{ snapshot.calculatedAtUtc | date:'yyyy/MM/dd، HH:mm:ss' }}</span>
     </small>
   </header>
 
-  <app-manufacturing-command-center-filters [catalog]="data?.filterCatalog ?? null" [filters]="filters" [loading]="isLoading" (filtersChange)="onFiltersChange($event)"></app-manufacturing-command-center-filters>
+  <app-attendance-sync-status *ngIf="store.snapshot() as snapshot" [sync]="snapshot.attendanceSync" [realtimeDisconnected]="store.realtimeDegraded()"></app-attendance-sync-status>
 
-  <section class="factory-command__loading-notice" *ngIf="isLoading && data && !dataIsCurrent" role="status"><i class="pi pi-spin pi-spinner" aria-hidden="true"></i><div><strong>جارٍ تحديث بيانات النطاق المختار…</strong><span>تم إخفاء الخريطة السابقة حتى يكتمل الطلب.</span></div></section>
-  <section class="factory-command__error" *ngIf="hasLoadError && !dataIsCurrent" role="alert"><strong>تعذر تحميل خريطة النطاق المحدد.</strong><span>لا نعرض خريطة النطاق السابق بدلًا منها.</span><button type="button" (click)="retry()">إعادة المحاولة</button></section>
-  <section class="factory-command__notice" *ngIf="hasLoadError && dataIsCurrent">تعذر التحديث اللحظي؛ بقيت آخر خريطة موثوقة لنفس النطاق وحالة التوسيع كما هما. <button type="button" (click)="retry()">إعادة المحاولة</button></section>
-  <section class="factory-command__loading" *ngIf="isLoading && !dataIsCurrent"><div></div><div></div><div></div></section>
+  <section class="factory-readiness__notice" *ngIf="store.realtimeDegraded() && store.snapshot()" role="status">
+    <i class="pi pi-wifi" aria-hidden="true"></i><span><strong>التحديث اللحظي متوقف مؤقتًا</strong> ستُعاد مزامنة Snapshot موثوقة عند عودة الاتصال.</span>
+  </section>
+  <section class="factory-readiness__error" *ngIf="store.loadError() && !store.snapshot()" role="alert">
+    <i class="pi pi-exclamation-triangle" aria-hidden="true"></i><span><strong>تعذر تحميل خريطة الجاهزية.</strong>{{ store.loadError() }}</span><button type="button" (click)="store.loadSnapshot()">إعادة المحاولة</button>
+  </section>
+  <section class="factory-readiness__notice factory-readiness__notice--warning" *ngIf="store.loadError() && store.snapshot()" role="status">
+    <i class="pi pi-exclamation-circle" aria-hidden="true"></i><span>تعذر تحديث الـSnapshot؛ تُعرض آخر نتيجة ناجحة.</span><button type="button" (click)="store.loadSnapshot(true)">إعادة المحاولة</button>
+  </section>
 
-  <ng-container *ngIf="dataIsCurrent">
-  <ng-container *ngIf="data as current">
-    <section class="factory-command__scope"><strong>{{ current.scope.productionDate }}</strong><span>{{ current.lineSummary.activeLines }} خط نشط</span><span>{{ current.lineSummary.problemLines }} خط بمشكلة</span><span>{{ current.operations.linesWithOperation }} خط لديه تشغيل</span></section>
-    <section class="factory-command__empty" *ngIf="!isLoading && !current.factories.length"><i class="pi pi-sitemap"></i><h2>لا توجد عقد ضمن النطاق الحالي</h2><p>غيّر الفلاتر لعرض بنية تشغيلية أخرى.</p></section>
-
-    <section class="factory-tree" *ngIf="current.factories.length" aria-label="الهيكل التشغيلي للمصنع">
-      <details class="factory-node" *ngFor="let factory of current.factories; trackBy: trackById" [open]="isExpanded('factory', factory.id)" (toggle)="setExpanded('factory', factory.id, $event)">
-        <summary>
-          <span class="node-icon"><i class="pi pi-building"></i></span>
-          <span class="node-title"><strong>{{ factory.name }}</strong><small>{{ factory.code }} · مصنع</small></span>
-          <span class="node-stat"><strong>{{ factory.activeDepartments }}</strong><small>قسم نشط</small></span>
-          <span class="node-stat"><strong>{{ factory.activeLines }}</strong><small>خط نشط</small></span>
-          <span class="node-stat state-ready"><strong>{{ factory.presentPermanentlyAssignedWorkers }}</strong><small>حاضر مسكن</small></span>
-          <span class="node-stat state-data-incomplete"><strong>{{ factory.problemLines }}</strong><small>خط بمشكلة</small></span>
-          <span class="node-operations"><em class="state-draft">{{ factory.draftOperations }} مسودة</em><em class="state-approved">{{ factory.approvedOperations }} معتمد</em></span>
-        </summary>
-
-        <div class="department-list">
-          <details class="department-node" *ngFor="let department of factory.departments" [open]="department.id && isExpanded('department', department.id)" (toggle)="setExpanded('department', department.id ?? 'unassigned-' + factory.id, $event)">
-            <summary>
-              <span class="node-icon"><i class="pi pi-sitemap"></i></span>
-              <span class="node-title"><strong>{{ department.name }}</strong><small>{{ department.code || 'بحاجة ربط تنظيمي' }}</small></span>
-              <span class="node-stat"><strong>{{ department.activeLines }}</strong><small>خط</small></span>
-              <span class="node-stat state-ready"><strong>{{ department.readyLines }}</strong><small>دون مشكلة جاهزية</small></span>
-              <span class="node-stat state-staffing-shortage"><strong>{{ department.notReadyLines }}</strong><small>تحتاج مراجعة جاهزية</small></span>
-              <span class="node-stat"><strong>{{ department.presentPermanentlyAssignedWorkers }}/{{ department.permanentlyAssignedWorkers }}</strong><small>حاضر/مسكن</small></span>
-            </summary>
-
-            <p class="department-node__note">{{ department.workforceAttributionNote }}</p>
-            <div class="line-list">
-              <details class="line-node" *ngFor="let line of sortedLines(department.lines); trackBy: trackById" [ngClass]="lineContainerClass(line)" [open]="isExpanded('line', line.id)" (toggle)="setExpanded('line', line.id, $event)">
-                <summary>
-                  <span class="line-node__identity"><strong>{{ line.name }}</strong><small>{{ line.code || 'بلا كود' }}</small></span>
-                  <div class="line-dimensions" aria-label="أبعاد حالة الخط">
-                    <span *ngFor="let dimension of lineDimensions(line)" [ngClass]="dimensionClass(dimension)"><small>{{ dimension.label }}</small><strong>{{ dimension.value }}</strong></span>
-                  </div>
-                  <span><strong>{{ line.presentPermanentlyAssignedWorkers }}/{{ line.requiredWorkers }}</strong><small>حاضر مسكن / احتياج الرحلة</small></span>
-                  <span><strong>{{ line.stagesCoveredByPresentWorker }}/{{ line.journeyStages }}</strong><small>مراحل بها حاضر / الرحلة</small></span>
-                  <time>{{ line.lastReliableUpdateUtc | date:'HH:mm' }}</time>
-                </summary>
-
-                <div class="line-node__body">
-                  <ul class="line-alerts" *ngIf="line.alerts.length"><li *ngFor="let alert of line.alerts"><i class="pi pi-exclamation-circle"></i>{{ alert }}</li></ul>
-                  <section class="no-operation" *ngIf="!line.operations.length"><strong>لا يوجد تشغيل اليوم</strong><span>لا توجد كمية أو موديل أو مراحل مسجلة لعرضها.</span></section>
-
-                  <article class="operation" *ngFor="let operation of line.operations; trackBy: trackById">
-                    <header>
-                      <div><strong>{{ operation.productModelCode }} - {{ operation.productModelName }}</strong><small>تشغيل {{ current.scope.productionDate }}</small></div>
-                      <em [class]="statusClass(operation.status)">{{ operationLabel(operation.status) }}</em>
-                    </header>
-                    <div class="operation__facts">
-                      <div><span>الكمية المخططة</span><strong>{{ operation.finalLineQuantity | number:'1.0-3' }}</strong><small>قيمة ProductionOrder.PlannedQuantity المحفوظة، وليست إنتاجًا فعليًا مقاسًا</small></div>
-                      <div><span>أجور العمال المسجلة</span><strong>{{ operation.recordedStageValue | number:'1.2-2' }}</strong><small>مجموع TotalWorkerEarnings، وليس قيمة أوكمية إنتاج</small></div>
-                      <div><span>اكتمال تسجيل المراحل</span><strong>{{ ratioText(operation.stageRegistrationCoverage.percentage) }}</strong><small>{{ operation.registeredStages }} ÷ {{ operation.journeyStages }}</small></div>
-                      <div><span>آخر تحديث موثوق</span><strong>{{ operation.lastReliableUpdateUtc | date:'HH:mm' }}</strong><small>{{ operation.lastReliableUpdateUtc | date:'yyyy/MM/dd' }}</small></div>
-                    </div>
-                    <div class="stage-grid">
-                      <article class="stage" *ngFor="let stage of operation.stages" [class.stage--alert]="stage.alerts.length">
-                        <header><span>{{ stage.stageOrder }}</span><div><strong>{{ stage.stageName }}</strong><small>{{ stage.mainStageName }} · {{ stage.stageCode }}</small></div></header>
-                        <dl><div><dt>الحاضرون المسكنون</dt><dd>{{ stage.presentPermanentlyAssignedWorkers }}/{{ stage.requiredWorkers }}</dd></div><div><dt>تسجيل المرحلة</dt><dd>{{ stage.isRegistered ? 'مسجلة' : 'غير مسجلة' }}</dd></div><div><dt>السعر/الزمن</dt><dd>{{ stage.hasPrice && stage.hasStandardTime ? 'مكتمل' : 'ناقص' }}</dd></div></dl>
-                        <ul *ngIf="stage.alerts.length"><li *ngFor="let alert of stage.alerts">{{ alert }}</li></ul>
-                      </article>
-                    </div>
-                  </article>
-                </div>
-              </details>
-            </div>
-          </details>
-        </div>
-      </details>
-    </section>
-  </ng-container>
-  </ng-container>
+  <section class="factory-readiness__loading" *ngIf="store.loading() && !store.snapshot()" role="status" aria-label="جار تحميل خريطة الجاهزية"><div></div><div></div><div></div></section>
+  <app-factory-readiness-map *ngIf="store.snapshot()"></app-factory-readiness-map>
 </main>

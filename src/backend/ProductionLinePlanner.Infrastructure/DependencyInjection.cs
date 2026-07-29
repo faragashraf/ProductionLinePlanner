@@ -36,6 +36,7 @@ public static class DependencyInjection
         var sourceMode = attendanceSourceSection["Mode"]?.Trim();
         var dayStartTime = attendanceSourceSection["DayStartTime"];
         var lateThresholdMinutes = attendanceSourceSection["LateThresholdMinutes"];
+        var freshnessThresholdMinutes = attendanceSourceSection["FreshnessThresholdMinutes"];
         var userInfoTable = attendanceSourceSection["UserInfoTable"]?.Trim();
         var checkInOutTable = attendanceSourceSection["CheckInOutTable"]?.Trim();
         var departmentsTable = attendanceSourceSection["DepartmentsTable"]?.Trim();
@@ -55,6 +56,7 @@ public static class DependencyInjection
             SourceName = string.IsNullOrWhiteSpace(sourceName) ? "AttendanceSync" : sourceName,
             DayStartTime = TimeSpan.TryParse(dayStartTime, out var parsedDayStart) ? parsedDayStart : new TimeSpan(8, 0, 0),
             LateThresholdMinutes = int.TryParse(lateThresholdMinutes, out var parsedLateThreshold) ? parsedLateThreshold : 15,
+            FreshnessThresholdMinutes = int.TryParse(freshnessThresholdMinutes, out var parsedFreshnessThreshold) ? Math.Clamp(parsedFreshnessThreshold, 1, 1440) : 5,
             UserInfoTable = string.IsNullOrWhiteSpace(userInfoTable) ? "USERINFO" : userInfoTable,
             CheckInOutTable = string.IsNullOrWhiteSpace(checkInOutTable) ? "CHECKINOUT" : checkInOutTable,
             DepartmentsTable = string.IsNullOrWhiteSpace(departmentsTable) ? "DEPARTMENTS" : departmentsTable,
@@ -113,6 +115,7 @@ public static class DependencyInjection
         services.AddScoped<IAttendanceWorkforceEngine, AttendanceWorkforceEngine>();
         services.AddScoped<IAssignmentRecommendationEngine, AssignmentRecommendationEngine>();
         services.AddScoped<IReadinessEngine, ReadinessEngine>();
+        services.AddScoped<IOperationalReadinessEngine, OperationalReadinessEngine>();
         services.AddScoped<IManufacturingCommandCenterEngine, ManufacturingCommandCenterEngine>();
         services.AddScoped<INotificationEngine, NotificationEngine>();
         services.AddSingleton<INotificationEventCatalog, CodeNotificationEventCatalog>();

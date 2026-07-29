@@ -296,6 +296,40 @@ namespace ProductionLinePlanner.Infrastructure.Data.Migrations
                     b.ToTable("AttendanceRecords", (string)null);
                 });
 
+            modelBuilder.Entity("ProductionLinePlanner.Domain.Entities.AttendanceSyncState", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("LastAttemptAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<bool>("LastAttemptSucceeded")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("LastErrorCode")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<DateTime?>("LastSuccessfulAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateOnly>("OperationalDate")
+                        .HasColumnType("date");
+
+                    b.Property<string>("SourceName")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SourceName", "OperationalDate")
+                        .IsUnique();
+
+                    b.ToTable("AttendanceSyncStates", (string)null);
+                });
+
             modelBuilder.Entity("ProductionLinePlanner.Domain.Entities.AuditLog", b =>
                 {
                     b.Property<Guid>("Id")

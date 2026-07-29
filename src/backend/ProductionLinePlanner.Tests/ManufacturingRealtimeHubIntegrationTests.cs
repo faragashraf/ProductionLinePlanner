@@ -131,6 +131,25 @@ public sealed class ManufacturingRealtimeHubIntegrationTests
     }
 
     [Fact]
+    public async Task Factory_readiness_group_requires_all_four_source_data_permissions()
+    {
+        await using var fixture = await HubFixture.CreateAsync();
+        var incompleteUserId = Guid.NewGuid();
+        fixture.Permissions.Set(incompleteUserId, ["factory-structure.view", "stages.view", "assignments.view"]);
+        await using var incomplete = fixture.CreateConnection(incompleteUserId);
+        await incomplete.StartAsync();
+
+        await Assert.ThrowsAnyAsync<Exception>(() => incomplete.InvokeAsync("JoinManufacturingScreen", "factory-readiness"));
+
+        var authorizedUserId = Guid.NewGuid();
+        fixture.Permissions.Set(authorizedUserId, ["factory-structure.view", "stages.view", "assignments.view", "attendance.view"]);
+        await using var authorized = fixture.CreateConnection(authorizedUserId);
+        await authorized.StartAsync();
+
+        await authorized.InvokeAsync("JoinManufacturingScreen", "factory-readiness");
+    }
+
+    [Fact]
     public async Task Browser_wire_contract_uses_stable_string_entity_and_change_values_for_factory_and_worker()
     {
         await using var fixture = await HubFixture.CreateAsync();

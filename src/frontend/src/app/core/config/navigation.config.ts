@@ -30,7 +30,7 @@ export const APP_NAVIGATION_ITEMS: AppNavigationItem[] = [
     icon: 'pi-map',
     order: 20,
     group: 'workspace',
-    requireAll: [PERMISSIONS.factoryStructure.view, PERMISSIONS.stages.view]
+    requireAll: [PERMISSIONS.factoryStructure.view, PERMISSIONS.stages.view, PERMISSIONS.assignments.view, PERMISSIONS.attendance.view]
   },
   { id: 'workers', label: 'إدارة العاملين', route: '/workers', icon: 'pi-users', order: 50, group: 'workspace', permission: PERMISSIONS.workers.view },
   { id: 'attendance-workforce', label: 'الحضور والتسكين اليومي', route: '/attendance/workforce', icon: 'pi-clock', order: 55, group: 'workspace', requireAll: [PERMISSIONS.attendance.view, PERMISSIONS.assignments.view] },

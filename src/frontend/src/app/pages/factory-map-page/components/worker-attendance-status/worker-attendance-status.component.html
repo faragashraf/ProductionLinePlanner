@@ -1,0 +1,5 @@
+<article class="worker" [attr.data-state]="worker.attendanceState">
+  <span class="worker__icon"><i class="pi" [ngClass]="icon" aria-hidden="true"></i></span>
+  <span class="worker__identity"><strong>{{ worker.fullName }}</strong><small>{{ worker.employeeCode }}</small></span>
+  <span class="worker__state"><strong>{{ worker.attendanceLabel }}</strong><small *ngIf="worker.checkInAtUtc">حضور {{ worker.checkInAtUtc | date:'HH:mm' }}<ng-container *ngIf="worker.lateByMinutes"> · تأخير {{ worker.lateByMinutes }} د</ng-container></small><small *ngIf="worker.checkOutAtUtc">انصراف {{ worker.checkOutAtUtc | date:'HH:mm' }}</small></span>
+</article>

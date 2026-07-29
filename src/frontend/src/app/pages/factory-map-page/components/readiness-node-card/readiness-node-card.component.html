@@ -1,0 +1,16 @@
+<article class="node" [class.node--featured]="featured" [attr.data-status]="node.metrics.status">
+  <button type="button" class="node__surface" [disabled]="!interactive" (click)="activate.emit()">
+    <header class="node__header">
+      <span class="node__icon" aria-hidden="true"><i class="pi" [ngClass]="icon"></i></span>
+      <span class="node__identity"><strong>{{ node.name }}</strong><small>{{ node.code || nodeType }}</small></span>
+      <span class="node__severity"><i class="pi pi-circle-fill" aria-hidden="true"></i>{{ node.metrics.status === 'Ready' ? 'جاهز' : node.metrics.status === 'Warning' ? 'تنبيه' : node.metrics.status === 'Critical' ? 'عجز' : node.metrics.status === 'NoAssignments' ? 'بلا تسكين' : 'غير مؤكد' }}</span>
+    </header>
+    <p class="node__models" *ngIf="node.modelNames?.length"><i class="pi pi-tags"></i>{{ node.modelNames!.join('، ') }}</p>
+    <app-readiness-metrics [metrics]="node.metrics"></app-readiness-metrics>
+    <footer class="node__footer">
+      <span>{{ node.metrics.childCount }} {{ childLabel }}</span>
+      <span *ngIf="node.metrics.contributionToParentShortage !== null">مساهمة العجز: {{ node.metrics.contributionToParentShortage }}</span>
+      <strong *ngIf="interactive">عرض التفاصيل <i class="pi pi-arrow-left"></i></strong>
+    </footer>
+  </button>
+</article>

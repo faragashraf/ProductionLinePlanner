@@ -12,6 +12,7 @@ public enum ManufacturingEntityType
     ProductionOrder,
     StageProductionRecord,
     AttendanceRecord,
+    AttendanceSyncState,
     Worker,
     WorkerDefaultAssignment
 }

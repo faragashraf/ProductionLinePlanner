@@ -3,7 +3,7 @@ import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 
 const visualOutput = path.join(process.cwd(), 'test-results', 'manufacturing-command-center');
-const permissions = ['dashboard.view', 'factory-structure.view', 'stages.view', 'production.view'];
+const permissions = ['dashboard.view', 'factory-structure.view', 'stages.view', 'assignments.view', 'attendance.view', 'production.view'];
 const viewports = [
   ['desktop-1440x900', 1440, 900],
   ['tablet-landscape-1280x800', 1280, 800],
@@ -72,9 +72,51 @@ const commandCenter = {
   calculatedAtUtc: '2026-07-24T07:00:00Z'
 };
 
+const freshness = {
+  status: 'Fresh', isTrusted: true, lastAttemptAtUtc: '2026-07-29T07:00:00Z',
+  lastSuccessfulAtUtc: '2026-07-29T07:00:00Z', lastErrorCode: null, ageMinutes: 0
+};
+const readinessMetrics = (present: number, assigned: number, late: number, absent: number, checkedOut: number, childCount: number) => ({
+  assignedWorkerCount: assigned, currentlyPresentCount: present, lateCount: late, absentCount: absent,
+  checkedOutCount: checkedOut, unknownCount: 0, operationalReadinessPercentage: assigned ? Math.round(present * 1000 / assigned) / 10 : null,
+  contributionToParentShortage: assigned ? assigned - present : null, childCount,
+  status: assigned === 0 ? 'NoAssignments' : present / assigned >= .9 ? 'Ready' : present / assigned >= .7 ? 'Warning' : 'Critical'
+});
+const readinessSnapshot = {
+  operationalDate: '2026-07-29', calculatedAtUtc: '2026-07-29T07:00:00Z', attendanceSync: freshness,
+  workdayPolicy: { dayStartTime: '08:00', gracePeriodMinutes: 15, freshnessThresholdMinutes: 5 },
+  factories: [{
+    id: 'factory-1', name: 'مصنع الأحذية الرئيسي', code: 'F-01', metrics: readinessMetrics(6, 10, 2, 3, 1, 1),
+    departments: [{
+      id: 'department-1', factoryId: 'factory-1', name: 'قسم الإنتاج', code: 'PROD', metrics: readinessMetrics(6, 10, 2, 3, 1, 2),
+      productionLines: [
+        { id: 'line-critical', factoryId: 'factory-1', departmentId: 'department-1', name: 'خط القص الحرج', code: 'L-01', metrics: readinessMetrics(3, 6, 1, 2, 1, 2), modelNames: ['موديل الحذاء اليومي', 'موديل السلامة'] },
+        { id: 'line-ready', factoryId: 'factory-1', departmentId: 'department-1', name: 'خط التشطيب', code: 'L-02', metrics: readinessMetrics(3, 4, 1, 1, 0, 1), modelNames: ['موديل الحذاء اليومي'] }
+      ]
+    }]
+  }]
+};
+const readinessStages = {
+  operationalDate: '2026-07-29', calculatedAtUtc: '2026-07-29T07:00:00Z', attendanceSync: freshness,
+  factoryId: 'factory-1', factoryName: 'مصنع الأحذية الرئيسي', departmentId: 'department-1', departmentName: 'قسم الإنتاج',
+  productionLineId: 'line-critical', productionLineName: 'خط القص الحرج', stages: [
+    { id: 'stage-cut', factoryId: 'factory-1', departmentId: 'department-1', productionLineId: 'line-critical', mainStageId: 'main-1', name: 'القص', code: 'ST-01', mainStageName: 'التجهيز', metrics: readinessMetrics(1, 3, 0, 1, 1, 3), modelNames: ['موديل الحذاء اليومي'] },
+    { id: 'stage-sew', factoryId: 'factory-1', departmentId: 'department-1', productionLineId: 'line-critical', mainStageId: 'main-2', name: 'الحياكة', code: 'ST-02', mainStageName: 'الخياطة', metrics: readinessMetrics(2, 3, 1, 1, 0, 3), modelNames: ['موديل الحذاء اليومي', 'موديل السلامة'] }
+  ]
+};
+const readinessWorkers = {
+  operationalDate: '2026-07-29', calculatedAtUtc: '2026-07-29T07:00:00Z', attendanceSync: freshness,
+  factoryId: 'factory-1', factoryName: 'مصنع الأحذية الرئيسي', departmentId: 'department-1', departmentName: 'قسم الإنتاج',
+  productionLineId: 'line-critical', productionLineName: 'خط القص الحرج', stageId: 'stage-cut', stageName: 'القص', workers: [
+    { workerId: 'worker-absent', productionLineId: 'line-critical', stageId: 'stage-cut', employeeCode: 'W-103', fullName: 'محمود سمير', attendanceState: 'NotCheckedIn', attendanceLabel: 'لم يسجل حضورًا', isOperationallyPresent: false, checkInAtUtc: null, checkOutAtUtc: null, lateByMinutes: null },
+    { workerId: 'worker-out', productionLineId: 'line-critical', stageId: 'stage-cut', employeeCode: 'W-102', fullName: 'أحمد صالح', attendanceState: 'CheckedOut', attendanceLabel: 'سجل انصرافًا', isOperationallyPresent: false, checkInAtUtc: '2026-07-29T05:00:00Z', checkOutAtUtc: '2026-07-29T09:00:00Z', lateByMinutes: null },
+    { workerId: 'worker-late', productionLineId: 'line-critical', stageId: 'stage-cut', employeeCode: 'W-101', fullName: 'علي حسن', attendanceState: 'Late', attendanceLabel: 'متأخر', isOperationallyPresent: true, checkInAtUtc: '2026-07-29T05:20:00Z', checkOutAtUtc: null, lateByMinutes: 20 }
+  ]
+};
+
 test.beforeAll(async () => { await mkdir(visualOutput, { recursive: true }); });
 
-async function preparePage(page: Page): Promise<void> {
+async function preparePage(page: Page, readiness: 'success' | 'empty' | 'error' | 'delayed' = 'success'): Promise<void> {
   await page.addInitScript(({ userPermissions }) => {
     localStorage.setItem('plp.accessToken', 'command-center-visual-token');
     localStorage.setItem('plp.currentUser', JSON.stringify({ id: 'visual-user', fullName: 'مدير المصنع', email: 'visual@local.test', roles: ['Administrator'], permissions: userPermissions }));
@@ -98,9 +140,18 @@ async function preparePage(page: Page): Promise<void> {
     if (pathname.endsWith('/api/manufacturing-command-center') && url.searchParams.has('factoryId')) {
       await new Promise(resolve => setTimeout(resolve, 500));
     }
+    if (pathname.endsWith('/api/operational-readiness') && readiness === 'error') {
+      await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ success: false, data: null, error: { message: 'غير متاح' } }) });
+      return;
+    }
+    if (pathname.endsWith('/api/operational-readiness') && readiness === 'delayed') await new Promise(resolve => setTimeout(resolve, 450));
     const data = pathname.endsWith('/api/auth/me')
       ? { id: 'visual-user', fullName: 'مدير المصنع', email: 'visual@local.test', roles: ['Administrator'], permissions }
-      : pathname.endsWith('/api/manufacturing-command-center') ? commandCenter : { items: [] };
+      : pathname.endsWith('/api/operational-readiness')
+        ? readiness === 'empty' ? { ...readinessSnapshot, factories: [] } : readinessSnapshot
+        : pathname.endsWith('/workers') && pathname.includes('/api/operational-readiness/lines/') ? readinessWorkers
+        : pathname.endsWith('/stages') && pathname.includes('/api/operational-readiness/lines/') ? readinessStages
+        : pathname.endsWith('/api/manufacturing-command-center') ? commandCenter : { items: [] };
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data, error: null }) });
   });
 }
@@ -131,12 +182,16 @@ test('reviews dashboard and factory map across the required RTL viewports', asyn
     await page.screenshot({ path: path.join(visualOutput, `${name}-dashboard.png`), fullPage: true });
 
     await page.goto('/factory-map');
-    await expect(page.getByRole('heading', { name: 'خريطة المصنع التشغيلية' })).toBeVisible();
-    await page.locator('.department-node > summary').click();
-    await expect(page.locator('.line-node')).toHaveCount(3);
-    await expect(page.locator('.line-node').first()).toContainText(criticalLine.name);
-    await expect(page.locator('.line-node').first()).toHaveClass(/line-state-critical/);
-    await expect(page.locator('.line-node').first().locator('.line-dimensions > span')).toHaveCount(4);
+    await expect(page.getByRole('heading', { name: 'جاهزية تشغيل المصنع الآن' })).toBeVisible();
+    await page.getByRole('button', { name: /مصنع الأحذية الرئيسي/ }).click();
+    await page.getByRole('button', { name: /قسم الإنتاج/ }).click();
+    await page.getByRole('button', { name: /خط القص الحرج/ }).click();
+    await page.getByRole('button', { name: /^القص ST-01/ }).click();
+    await expect(page.locator('app-worker-attendance-status')).toHaveCount(3);
+    await page.getByRole('button', { name: 'متأخر', exact: true }).click();
+    await expect(page.locator('app-worker-attendance-status')).toHaveCount(1);
+    await expect(page.locator('app-worker-attendance-status')).toContainText('علي حسن');
+    await expect(page.locator('app-worker-attendance-status')).toContainText('تأخير 20 د');
     await expectViewportSafe(page);
     await page.screenshot({ path: path.join(visualOutput, `${name}-factory-map.png`), fullPage: true });
   }
@@ -146,7 +201,7 @@ test('reviews dashboard and factory map across the required RTL viewports', asyn
   await expect(page.getByText('ستظهر بيانات كل مجال')).toHaveCount(0);
 });
 
-test('hides previous-scope dashboard figures and map nodes while a filter response is pending', async ({ page }) => {
+test('hides previous-scope dashboard figures while a filter response is pending', async ({ page }) => {
   await preparePage(page);
   await page.setViewportSize({ width: 1280, height: 800 });
 
@@ -156,11 +211,25 @@ test('hides previous-scope dashboard figures and map nodes while a filter respon
   await expect(page.locator('.command-page__loading-notice')).toBeVisible();
   await expect(page.locator('.metric-grid')).toHaveCount(0);
   await expect(page.locator('.metric-grid').first()).toBeVisible();
+});
 
+test('shows an honest readiness loading state before rendering the hierarchy', async ({ page }) => {
+  await preparePage(page, 'delayed');
   await page.goto('/factory-map');
-  await expect(page.locator('.factory-tree')).toBeVisible();
-  await page.locator('.command-filters__field select').nth(0).selectOption({ label: 'مصنع الأحذية الرئيسي · F-01' });
-  await expect(page.locator('.factory-command__loading-notice')).toBeVisible();
-  await expect(page.locator('.factory-tree')).toHaveCount(0);
-  await expect(page.locator('.factory-tree')).toBeVisible();
+  await expect(page.locator('.factory-readiness__loading')).toBeVisible();
+  await expect(page.getByRole('button', { name: /مصنع الأحذية الرئيسي/ })).toBeVisible();
+});
+
+test('shows readiness empty state without a fabricated 100% value', async ({ page }) => {
+  await preparePage(page, 'empty');
+  await page.goto('/factory-map');
+  await expect(page.getByText('لا توجد مصانع نشطة')).toBeVisible();
+  await expect(page.getByText('100%')).toHaveCount(0);
+});
+
+test('shows an actionable readiness error state', async ({ page }) => {
+  await preparePage(page, 'error');
+  await page.goto('/factory-map');
+  await expect(page.getByRole('alert')).toContainText('تعذر تحميل خريطة الجاهزية');
+  await expect(page.getByRole('button', { name: 'إعادة المحاولة' })).toBeVisible();
 });
