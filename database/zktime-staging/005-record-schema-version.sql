@@ -1,8 +1,8 @@
 SET NOCOUNT ON;
 SET XACT_ABORT ON;
 
-DECLARE @Version int = 2;
-DECLARE @Description nvarchar(500) = N'Add explicit skipped resolutions and controlled inbox completion dispositions';
+DECLARE @Version int = 3;
+DECLARE @Description nvarchar(500) = N'Align pending attendance dates with the configured operational-day boundary';
 
 BEGIN TRANSACTION;
 IF NOT EXISTS (SELECT 1 FROM dbo.ZkSyncSchemaVersions WITH (UPDLOCK, HOLDLOCK) WHERE Version = @Version)

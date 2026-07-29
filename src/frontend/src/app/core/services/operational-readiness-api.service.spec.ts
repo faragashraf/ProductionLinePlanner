@@ -23,8 +23,9 @@ describe('OperationalReadinessApiService', () => {
     const snapshot = http.expectOne(request => request.url === buildApiUrl('/operational-readiness') && request.params.get('factoryId') === 'factory 1');
     snapshot.flush({ success: true, data: { factories: [] } });
 
-    service.loadStages('line/1').subscribe(value => loadedStages = value);
-    http.expectOne(buildApiUrl('/operational-readiness/lines/line%2F1/stages')).flush({ success: true, data: { stages: [] } });
+    service.loadStages('line/1', 'model/1').subscribe(value => loadedStages = value);
+    http.expectOne(request => request.url === buildApiUrl('/operational-readiness/lines/line%2F1/stages') && request.params.get('productModelId') === 'model/1')
+      .flush({ success: true, data: { stages: [] } });
 
     service.loadWorkers('line/1', 'stage/1').subscribe(value => loadedWorkers = value);
     http.expectOne(buildApiUrl('/operational-readiness/lines/line%2F1/stages/stage%2F1/workers')).flush({ success: true, data: { workers: [] } });

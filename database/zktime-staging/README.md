@@ -34,7 +34,9 @@ The scripts use the SQL Server 2016-compatible create-stub/`ALTER PROCEDURE` pat
 assuming `CREATE OR ALTER` is available on every SQL Server 2016 patch level. No installer statement
 resets a watermark, processing status, `Pending` row, or `Failed` row.
 
-The schema remains at version 2 for the additive worker-employment payload. Install/upgrade adds
+Schema version 3 aligns attendance backlog grouping with the API's configurable operational-day
+boundary (05:00 by default), so pre-boundary punches and claimed source windows resolve to the same
+production date. The prior additive worker-employment upgrade adds
 `SourceDefaultDepartmentId` and non-null `IsCurrentWorker` in place, preserves existing inbox rows and
 statuses, atomically backfills the new classification, and recreates the worker ingestion/snapshot
 procedures. The worker row hash includes a stable rule revision, so the next worker collection requeues

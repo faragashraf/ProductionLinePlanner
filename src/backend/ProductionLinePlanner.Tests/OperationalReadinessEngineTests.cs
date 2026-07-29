@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using ProductionLinePlanner.Application.DTOs;
 using ProductionLinePlanner.Application.Engines;
+using ProductionLinePlanner.Application.Realtime;
 using ProductionLinePlanner.Domain.Entities;
 using ProductionLinePlanner.Domain.Enums;
 using ProductionLinePlanner.Infrastructure.Attendance;
@@ -66,7 +67,7 @@ public sealed class OperationalReadinessEngineTests
     }
 
     [Fact]
-    public async Task Checked_out_worker_is_not_currently_present()
+    public async Task Checked_out_worker_remains_counted_in_attendance_completion()
     {
         await using var fixture = await Fixture.CreateAsync(workerCount: 1, presentCount: 0);
         fixture.SetAttendance(
@@ -79,11 +80,59 @@ public sealed class OperationalReadinessEngineTests
         var workers = await fixture.Engine.GetStageWorkersAsync(fixture.Line.Id, fixture.StageA.Id, fixture.AsOfUtc);
         var snapshot = await fixture.Engine.GetSnapshotAsync(fixture.Factory.Id, fixture.AsOfUtc);
 
-        Assert.Equal(OperationalAttendanceStates.CheckedOut, Assert.Single(workers.Value!.Workers).AttendanceState);
+        var worker = Assert.Single(workers.Value!.Workers);
+        Assert.Equal(OperationalAttendanceStates.Present, worker.AttendanceState);
+        Assert.True(worker.IsOperationallyPresent);
+        Assert.NotNull(worker.CheckOutAtUtc);
         var metrics = Assert.Single(snapshot.Value!.Factories).Metrics;
-        Assert.Equal(0, metrics.CurrentlyPresentCount);
+        Assert.Equal(1, metrics.CurrentlyPresentCount);
         Assert.Equal(1, metrics.CheckedOutCount);
-        Assert.Equal(0m, metrics.OperationalReadinessPercentage);
+        Assert.Equal(100m, metrics.OperationalReadinessPercentage);
+    }
+
+    [Fact]
+    public async Task Existing_attendance_records_without_sync_state_remain_trusted_after_restore()
+    {
+        await using var fixture = await Fixture.CreateAsync(workerCount: 1, presentCount: 1, includeSyncState: false);
+
+        var snapshot = await fixture.Engine.GetSnapshotAsync(fixture.Factory.Id, fixture.AsOfUtc);
+        var workers = await fixture.Engine.GetStageWorkersAsync(fixture.Line.Id, fixture.StageA.Id, fixture.AsOfUtc);
+
+        Assert.True(snapshot.Value!.AttendanceSync.IsTrusted);
+        Assert.Equal("RecordsAvailable", snapshot.Value.AttendanceSync.Status);
+        Assert.Null(snapshot.Value.AttendanceSync.LastSuccessfulAtUtc);
+        Assert.Equal(1, Assert.Single(snapshot.Value.Factories).Metrics.CurrentlyPresentCount);
+        Assert.Equal(OperationalAttendanceStates.Present, Assert.Single(workers.Value!.Workers).AttendanceState);
+    }
+
+    [Fact]
+    public async Task Assigned_worker_without_a_day_record_is_absent_when_source_is_trusted()
+    {
+        await using var fixture = await Fixture.CreateAsync(workerCount: 1, presentCount: 0);
+        fixture.Db.AttendanceRecords.RemoveRange(fixture.Db.AttendanceRecords);
+        await fixture.Db.SaveChangesAsync();
+
+        var snapshot = await fixture.Engine.GetSnapshotAsync(fixture.Factory.Id, fixture.AsOfUtc);
+        var workers = await fixture.Engine.GetStageWorkersAsync(fixture.Line.Id, fixture.StageA.Id, fixture.AsOfUtc);
+
+        Assert.Equal(OperationalAttendanceStates.Absent, Assert.Single(workers.Value!.Workers).AttendanceState);
+        var metrics = Assert.Single(snapshot.Value!.Factories).Metrics;
+        Assert.Equal(1, metrics.AbsentCount);
+        Assert.Equal(0, metrics.UnknownCount);
+    }
+
+    [Fact]
+    public async Task Readiness_and_shared_attendance_classifier_return_the_same_basic_state()
+    {
+        await using var fixture = await Fixture.CreateAsync(workerCount: 1, presentCount: 1);
+        var presence = await fixture.AttendanceEngine.GetPresenceWindowsByWorkerAsync(
+            [fixture.Workers[0].Id], new DateOnly(2026, 7, 29));
+        var sharedState = AttendanceCompletionClassifier.Resolve(presence.Value![fixture.Workers[0].Id], true);
+
+        var workers = await fixture.Engine.GetStageWorkersAsync(fixture.Line.Id, fixture.StageA.Id, fixture.AsOfUtc);
+
+        Assert.Equal(sharedState.State, Assert.Single(workers.Value!.Workers).AttendanceState);
+        Assert.True(sharedState.CountsAsAttended);
     }
 
     [Fact]
@@ -112,6 +161,31 @@ public sealed class OperationalReadinessEngineTests
         var factory = Assert.Single(snapshot.Value!.Factories);
         Assert.Equal(1, factory.Metrics.AssignedWorkerCount);
         Assert.Equal(1, Assert.Single(Assert.Single(factory.Departments).ProductionLines).Metrics.AssignedWorkerCount);
+    }
+
+    [Fact]
+    public async Task Multiple_line_models_require_an_explicit_scope_and_do_not_union_all_stages()
+    {
+        await using var fixture = await Fixture.CreateAsync(workerCount: 1, presentCount: 1);
+        var existingModel = await fixture.Db.ProductModels.SingleAsync();
+        var secondModel = new ProductModel(Guid.NewGuid(), "M2", "موديل ثانٍ");
+        fixture.Db.ProductModels.Add(secondModel);
+        fixture.Db.ProductModelStages.Add(new ProductModelStage(
+            Guid.NewGuid(), secondModel.Id, fixture.Line.Id, fixture.StageA.Id, 1, 0m, 60m, CompensationMode.SharedPercentage));
+        await fixture.Db.SaveChangesAsync();
+
+        var unscoped = await fixture.Engine.GetLineStagesAsync(fixture.Line.Id, fixture.AsOfUtc);
+        var scoped = await fixture.Engine.GetLineStagesAsync(
+            fixture.Line.Id, fixture.AsOfUtc, productModelId: secondModel.Id);
+        var snapshot = await fixture.Engine.GetSnapshotAsync(fixture.Factory.Id, fixture.AsOfUtc);
+
+        Assert.True(unscoped.Value!.RequiresModelSelection);
+        Assert.Empty(unscoped.Value.Stages);
+        Assert.Equal(2, unscoped.Value.AvailableModels.Count);
+        Assert.Equal(secondModel.Id, scoped.Value!.SelectedProductModelId);
+        Assert.Single(scoped.Value.Stages);
+        Assert.Equal(existingModel.Id, unscoped.Value.AvailableModels.Single(model => model.Code == "M1").Id);
+        Assert.Equal(2, Assert.Single(Assert.Single(Assert.Single(snapshot.Value!.Factories).Departments).ProductionLines).Metrics.ChildCount);
     }
 
     [Fact]
@@ -147,6 +221,27 @@ public sealed class OperationalReadinessEngineTests
         Assert.Equal(100m, metrics.OperationalReadinessPercentage);
     }
 
+    [Fact]
+    public async Task Attendance_realtime_delta_updates_worker_stage_line_department_and_factory_path()
+    {
+        await using var fixture = await Fixture.CreateAsync(workerCount: 1, presentCount: 0);
+        fixture.SetAttendance(0, AttendanceStatus.Present);
+        (await fixture.Db.AttendanceSyncStates.SingleAsync()).RecordSuccess(DateTime.UtcNow);
+        await fixture.Db.SaveChangesAsync();
+        var change = new ManufacturingDataChanged(
+            Guid.NewGuid(), ManufacturingEntityType.AttendanceRecord, ManufacturingChangeType.Updated,
+            Guid.NewGuid(), fixture.AsOfUtc, null, "test", WorkerId: fixture.Workers[0].Id);
+
+        var delta = await fixture.Engine.GetDeltaAsync(change);
+
+        Assert.False(delta.Value!.RequiresSnapshotReload);
+        Assert.Contains(delta.Value.Nodes, node => node.NodeType == OperationalReadinessNodeTypes.Factory && node.Metrics.CurrentlyPresentCount == 1);
+        Assert.Contains(delta.Value.Nodes, node => node.NodeType == OperationalReadinessNodeTypes.Department && node.Metrics.CurrentlyPresentCount == 1);
+        Assert.Contains(delta.Value.Nodes, node => node.NodeType == OperationalReadinessNodeTypes.ProductionLine && node.Metrics.CurrentlyPresentCount == 1);
+        Assert.Contains(delta.Value.Nodes, node => node.NodeType == OperationalReadinessNodeTypes.Stage && node.Metrics.CurrentlyPresentCount == 1);
+        Assert.Contains(delta.Value.Workers, patch => patch.WorkerId == fixture.Workers[0].Id && patch.Worker?.IsOperationallyPresent == true);
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private Fixture(
@@ -156,7 +251,8 @@ public sealed class OperationalReadinessEngineTests
             ProductionLine line,
             SubStage stageA,
             Worker[] workers,
-            DateTime asOfUtc)
+            DateTime asOfUtc,
+            AttendanceEngine attendanceEngine)
         {
             Db = db;
             Engine = engine;
@@ -165,6 +261,7 @@ public sealed class OperationalReadinessEngineTests
             StageA = stageA;
             Workers = workers;
             AsOfUtc = asOfUtc;
+            AttendanceEngine = attendanceEngine;
         }
 
         public AppDbContext Db { get; }
@@ -174,12 +271,14 @@ public sealed class OperationalReadinessEngineTests
         public SubStage StageA { get; }
         public Worker[] Workers { get; }
         public DateTime AsOfUtc { get; }
+        public AttendanceEngine AttendanceEngine { get; }
 
         public static async Task<Fixture> CreateAsync(
             int workerCount,
             int presentCount,
             bool assignFirstWorkerToSecondStage = false,
-            int syncAgeMinutes = 1)
+            int syncAgeMinutes = 1,
+            bool includeSyncState = true)
         {
             var db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>()
                 .UseInMemoryDatabase(Guid.NewGuid().ToString("N")).Options);
@@ -205,9 +304,12 @@ public sealed class OperationalReadinessEngineTests
             if (assignFirstWorkerToSecondStage && workers.Length > 0)
                 db.WorkerDefaultAssignments.Add(new WorkerDefaultAssignment(Guid.NewGuid(), workers[0].Id, stageB.Id, actorId, asOfUtc.AddDays(-1), productionLineId: line.Id));
 
-            var sync = new AttendanceSyncState(Guid.NewGuid(), "AttendanceSync", new DateOnly(2026, 7, 29));
-            sync.RecordSuccess(asOfUtc.AddMinutes(-syncAgeMinutes));
-            db.AttendanceSyncStates.Add(sync);
+            if (includeSyncState)
+            {
+                var sync = new AttendanceSyncState(Guid.NewGuid(), "AttendanceSync", new DateOnly(2026, 7, 29));
+                sync.RecordSuccess(asOfUtc.AddMinutes(-syncAgeMinutes));
+                db.AttendanceSyncStates.Add(sync);
+            }
             for (var index = 0; index < workers.Length; index++)
             {
                 var status = index < presentCount ? AttendanceStatus.Present : AttendanceStatus.Absent;
@@ -222,14 +324,17 @@ public sealed class OperationalReadinessEngineTests
                 LateThresholdMinutes = 15,
                 FreshnessThresholdMinutes = 5
             });
+            var workdayPolicy = new AttendanceWorkdayPolicy(options, TestCairoTimeZoneProvider.Instance);
+            var attendanceEngine = new AttendanceEngine(null!, null!, db, TestCairoTimeZoneProvider.Instance, workdayPolicy);
             return new Fixture(
                 db,
-                new OperationalReadinessEngine(db, options, TestCairoTimeZoneProvider.Instance),
+                new OperationalReadinessEngine(db, options, TestCairoTimeZoneProvider.Instance, attendanceEngine, workdayPolicy),
                 factory,
                 line,
                 stageA,
                 workers,
-                asOfUtc);
+                asOfUtc,
+                attendanceEngine);
         }
 
         public void SetAttendance(int workerIndex, AttendanceStatus status, DateTime? firstInUtc = null, DateTime? lastOutUtc = null)

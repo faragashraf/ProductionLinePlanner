@@ -14,7 +14,8 @@ public interface IOperationalReadinessEngine
     Task<Result<OperationalReadinessStagesDto>> GetLineStagesAsync(
         Guid productionLineId,
         DateTime? asOfUtc = null,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        Guid? productModelId = null);
 
     Task<Result<OperationalReadinessWorkersDto>> GetStageWorkersAsync(
         Guid productionLineId,

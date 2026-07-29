@@ -13,6 +13,6 @@ export class AttendanceSyncStatusComponent {
 
   get label(): string {
     if (this.realtimeDisconnected) return 'الاتصال اللحظي منقطع';
-    return ({ Fresh: 'مزامنة الحضور حديثة', Stale: 'مزامنة الحضور قديمة', Failed: 'فشلت آخر مزامنة', NeverSynced: 'لم تتم مزامنة الحضور' } as const)[this.sync.status];
+    return ({ Fresh: 'مزامنة الحضور حديثة', RecordsAvailable: 'سجلات حضور اليوم متاحة', Stale: 'مزامنة الحضور قديمة', Failed: 'فشلت آخر مزامنة', NeverSynced: 'لم تتم مزامنة الحضور' } as const)[this.sync.status];
   }
 }

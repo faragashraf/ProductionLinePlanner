@@ -26,6 +26,7 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
     private readonly AttendanceSourceOptions _sourceOptions;
     private readonly ILogger<AttendanceSyncService> _logger;
     private readonly ICairoTimeZoneProvider _cairoTimeZoneProvider;
+    private readonly IAttendanceWorkdayPolicy _attendanceWorkdayPolicy;
     private readonly IWorkerInitialSyncService _workerSyncService;
     private readonly IManufacturingRealtimeChangeContext? _realtimeChangeContext;
 
@@ -36,7 +37,8 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
         ILogger<AttendanceSyncService> logger,
         ICairoTimeZoneProvider cairoTimeZoneProvider,
         IWorkerInitialSyncService workerSyncService,
-        IManufacturingRealtimeChangeContext? realtimeChangeContext = null)
+        IManufacturingRealtimeChangeContext? realtimeChangeContext = null,
+        IAttendanceWorkdayPolicy? attendanceWorkdayPolicy = null)
     {
         _appDbContext = appDbContext;
         _attendanceSource = attendanceSource;
@@ -45,6 +47,7 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
         _cairoTimeZoneProvider = cairoTimeZoneProvider;
         _workerSyncService = workerSyncService;
         _realtimeChangeContext = realtimeChangeContext;
+        _attendanceWorkdayPolicy = attendanceWorkdayPolicy ?? new AttendanceWorkdayPolicy(sourceOptions, cairoTimeZoneProvider);
     }
 
     public async Task<Result<AttendanceWorkerStateDto[]>> GetTodayAttendanceAsync(
@@ -306,8 +309,7 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
 
     public Task<Result<AttendanceSyncResultDto>> SyncTodayAsync(CancellationToken cancellationToken = default)
     {
-        var cairoNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, _cairoTimeZoneProvider.TimeZone);
-        return SyncForProductionDateAsync(DateOnly.FromDateTime(cairoNow), cancellationToken);
+        return SyncForProductionDateAsync(_attendanceWorkdayPolicy.GetOperationalDate(DateTime.UtcNow), cancellationToken);
     }
 
     public Task<Result<AttendanceSyncResultDto>> SyncForProductionDateAsync(DateOnly productionDate, CancellationToken cancellationToken = default)
@@ -697,7 +699,7 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
             if (matchedByWorker.TryGetValue(worker.Id, out var match))
             {
                 statusTime = match.FirstInUtc;
-                status = CalculateStatus(match.FirstInUtc, startLocal);
+                status = CalculateStatus(match.FirstInUtc, productionDate);
                 sourceRawId = match.SourceRawId;
                 sourcePayload = JsonSerializer.Serialize(new
                 {
@@ -981,8 +983,9 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
     private DateTime GetDateOnly(DateTime? dateUtc)
     {
         var utc = dateUtc ?? DateTime.UtcNow;
-        var cairo = TimeZoneInfo.ConvertTimeFromUtc(utc.Kind == DateTimeKind.Utc ? utc : utc.ToUniversalTime(), _cairoTimeZoneProvider.TimeZone);
-        return GetEgyptDayBounds(DateOnly.FromDateTime(cairo)).StartUtc;
+        var operationalDate = _attendanceWorkdayPolicy.GetOperationalDate(
+            utc.Kind == DateTimeKind.Utc ? utc : utc.ToUniversalTime());
+        return _attendanceWorkdayPolicy.GetWindow(operationalDate).StartUtc;
     }
 
     private static Dictionary<string, List<Guid>> BuildIdentityLookup(IEnumerable<Worker> workers, Func<Worker, string?> selector)
@@ -1091,9 +1094,9 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
 
     private sealed record AttendanceWindow(DateTime FirstInUtc, DateTime? LastOutUtc, string SourceRawId);
 
-    private AttendanceStatus CalculateStatus(DateTime checkTimeUtc, DateTime productionStartLocal)
+    private AttendanceStatus CalculateStatus(DateTime checkTimeUtc, DateOnly productionDate)
     {
-        var shiftStart = productionStartLocal.Add(_sourceOptions.DayStartTime);
+        var shiftStart = _attendanceWorkdayPolicy.GetShiftStartLocal(productionDate);
         var lateThreshold = shiftStart.AddMinutes(_sourceOptions.LateThresholdMinutes);
         var localCheckTime = TimeZoneInfo.ConvertTimeFromUtc(checkTimeUtc, _cairoTimeZoneProvider.TimeZone);
         return localCheckTime <= lateThreshold ? AttendanceStatus.Present : AttendanceStatus.Late;
@@ -1126,13 +1129,8 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
 
     private (DateTime StartUtc, DateTime EndUtc, DateTime StartLocal, DateTime EndLocal) GetEgyptDayBounds(DateOnly date)
     {
-        var startLocal = date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified);
-        var endLocal = startLocal.AddDays(1);
-        return (
-            TimeZoneInfo.ConvertTimeToUtc(startLocal, _cairoTimeZoneProvider.TimeZone),
-            TimeZoneInfo.ConvertTimeToUtc(endLocal, _cairoTimeZoneProvider.TimeZone),
-            startLocal,
-            endLocal);
+        var window = _attendanceWorkdayPolicy.GetWindow(date);
+        return (window.StartUtc, window.EndUtc, window.StartLocal, window.EndLocal);
     }
 
     private static PunchType? GetPunchType(string? checkType) => checkType?.Trim() switch

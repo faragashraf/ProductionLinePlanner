@@ -159,7 +159,7 @@ public sealed class AttendanceWorkforceEngineTests
         var noMovement = await engine.GetWorkerProfileSummaryAsync(worker.Id, ProductionDate);
         var needsSync = await engine.GetWorkerProfileSummaryAsync(worker.Id, ProductionDate.AddDays(1));
 
-        Assert.Equal("NoMovement", noMovement.Value!.TodayStatus);
+        Assert.Equal("Absent", noMovement.Value!.TodayStatus);
         Assert.True(noMovement.Value.AttendanceDataAvailableForDate);
         Assert.Equal("NeedsSync", needsSync.Value!.TodayStatus);
         Assert.False(needsSync.Value.AttendanceDataAvailableForDate);
@@ -204,9 +204,9 @@ public sealed class AttendanceWorkforceEngineTests
         db.AddRange(
             worker,
             emptyWorker,
-            AttendanceWindow(worker.Id, new DateTime(2026, 7, 18, 22, 0, 0, DateTimeKind.Utc), null),
+            AttendanceWindow(worker.Id, new DateTime(2026, 7, 19, 2, 0, 0, DateTimeKind.Utc), null),
             AttendanceWindow(worker.Id, new DateTime(2026, 7, 20, 20, 0, 0, DateTimeKind.Utc), null),
-            AttendanceWindow(worker.Id, new DateTime(2026, 7, 20, 22, 0, 0, DateTimeKind.Utc), null));
+            AttendanceWindow(worker.Id, new DateTime(2026, 7, 21, 2, 0, 0, DateTimeKind.Utc), null));
         await db.SaveChangesAsync();
         var engine = CreateEngine(db, new Dictionary<Guid, AttendancePresenceWindowDto>());
 

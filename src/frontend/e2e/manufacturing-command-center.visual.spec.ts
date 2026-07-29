@@ -84,14 +84,14 @@ const readinessMetrics = (present: number, assigned: number, late: number, absen
 });
 const readinessSnapshot = {
   operationalDate: '2026-07-29', calculatedAtUtc: '2026-07-29T07:00:00Z', attendanceSync: freshness,
-  workdayPolicy: { dayStartTime: '08:00', gracePeriodMinutes: 15, freshnessThresholdMinutes: 5 },
+  workdayPolicy: { workdayBoundaryTime: '05:00', dayStartTime: '08:00', gracePeriodMinutes: 15, freshnessThresholdMinutes: 5 },
   factories: [{
     id: 'factory-1', name: 'مصنع الأحذية الرئيسي', code: 'F-01', metrics: readinessMetrics(6, 10, 2, 3, 1, 1),
     departments: [{
       id: 'department-1', factoryId: 'factory-1', name: 'قسم الإنتاج', code: 'PROD', metrics: readinessMetrics(6, 10, 2, 3, 1, 2),
       productionLines: [
-        { id: 'line-critical', factoryId: 'factory-1', departmentId: 'department-1', name: 'خط القص الحرج', code: 'L-01', metrics: readinessMetrics(3, 6, 1, 2, 1, 2), modelNames: ['موديل الحذاء اليومي', 'موديل السلامة'] },
-        { id: 'line-ready', factoryId: 'factory-1', departmentId: 'department-1', name: 'خط التشطيب', code: 'L-02', metrics: readinessMetrics(3, 4, 1, 1, 0, 1), modelNames: ['موديل الحذاء اليومي'] }
+        { id: 'line-critical', factoryId: 'factory-1', departmentId: 'department-1', name: 'خط القص الحرج', code: 'L-01', metrics: readinessMetrics(3, 6, 1, 2, 1, 2), modelNames: ['موديل الحذاء اليومي', 'موديل السلامة'], models: [{ id: 'model-1', name: 'موديل الحذاء اليومي', code: 'SH-01', stageCount: 2 }, { id: 'model-2', name: 'موديل السلامة', code: 'SH-02', stageCount: 1 }] },
+        { id: 'line-ready', factoryId: 'factory-1', departmentId: 'department-1', name: 'خط التشطيب', code: 'L-02', metrics: readinessMetrics(3, 4, 1, 1, 0, 1), modelNames: ['موديل الحذاء اليومي'], models: [{ id: 'model-1', name: 'موديل الحذاء اليومي', code: 'SH-01', stageCount: 1 }] }
       ]
     }]
   }]
@@ -99,8 +99,8 @@ const readinessSnapshot = {
 const readinessStages = {
   operationalDate: '2026-07-29', calculatedAtUtc: '2026-07-29T07:00:00Z', attendanceSync: freshness,
   factoryId: 'factory-1', factoryName: 'مصنع الأحذية الرئيسي', departmentId: 'department-1', departmentName: 'قسم الإنتاج',
-  productionLineId: 'line-critical', productionLineName: 'خط القص الحرج', stages: [
-    { id: 'stage-cut', factoryId: 'factory-1', departmentId: 'department-1', productionLineId: 'line-critical', mainStageId: 'main-1', name: 'القص', code: 'ST-01', mainStageName: 'التجهيز', metrics: readinessMetrics(1, 3, 0, 1, 1, 3), modelNames: ['موديل الحذاء اليومي'] },
+  productionLineId: 'line-critical', productionLineName: 'خط القص الحرج', selectedProductModelId: 'model-1', selectedProductModelName: 'موديل الحذاء اليومي', requiresModelSelection: false, availableModels: [{ id: 'model-1', name: 'موديل الحذاء اليومي', code: 'SH-01', stageCount: 2 }, { id: 'model-2', name: 'موديل السلامة', code: 'SH-02', stageCount: 1 }], stages: [
+    { id: 'stage-cut', factoryId: 'factory-1', departmentId: 'department-1', productionLineId: 'line-critical', mainStageId: 'main-1', name: 'القص', code: 'ST-01', mainStageName: 'التجهيز', metrics: readinessMetrics(2, 3, 1, 1, 1, 3), modelNames: ['موديل الحذاء اليومي'] },
     { id: 'stage-sew', factoryId: 'factory-1', departmentId: 'department-1', productionLineId: 'line-critical', mainStageId: 'main-2', name: 'الحياكة', code: 'ST-02', mainStageName: 'الخياطة', metrics: readinessMetrics(2, 3, 1, 1, 0, 3), modelNames: ['موديل الحذاء اليومي', 'موديل السلامة'] }
   ]
 };
@@ -109,7 +109,7 @@ const readinessWorkers = {
   factoryId: 'factory-1', factoryName: 'مصنع الأحذية الرئيسي', departmentId: 'department-1', departmentName: 'قسم الإنتاج',
   productionLineId: 'line-critical', productionLineName: 'خط القص الحرج', stageId: 'stage-cut', stageName: 'القص', workers: [
     { workerId: 'worker-absent', productionLineId: 'line-critical', stageId: 'stage-cut', employeeCode: 'W-103', fullName: 'محمود سمير', attendanceState: 'NotCheckedIn', attendanceLabel: 'لم يسجل حضورًا', isOperationallyPresent: false, checkInAtUtc: null, checkOutAtUtc: null, lateByMinutes: null },
-    { workerId: 'worker-out', productionLineId: 'line-critical', stageId: 'stage-cut', employeeCode: 'W-102', fullName: 'أحمد صالح', attendanceState: 'CheckedOut', attendanceLabel: 'سجل انصرافًا', isOperationallyPresent: false, checkInAtUtc: '2026-07-29T05:00:00Z', checkOutAtUtc: '2026-07-29T09:00:00Z', lateByMinutes: null },
+    { workerId: 'worker-out', productionLineId: 'line-critical', stageId: 'stage-cut', employeeCode: 'W-102', fullName: 'أحمد صالح', attendanceState: 'Present', attendanceLabel: 'حاضر', isOperationallyPresent: true, checkInAtUtc: '2026-07-29T05:00:00Z', checkOutAtUtc: '2026-07-29T09:00:00Z', lateByMinutes: null },
     { workerId: 'worker-late', productionLineId: 'line-critical', stageId: 'stage-cut', employeeCode: 'W-101', fullName: 'علي حسن', attendanceState: 'Late', attendanceLabel: 'متأخر', isOperationallyPresent: true, checkInAtUtc: '2026-07-29T05:20:00Z', checkOutAtUtc: null, lateByMinutes: 20 }
   ]
 };
@@ -186,6 +186,8 @@ test('reviews dashboard and factory map across the required RTL viewports', asyn
     await page.getByRole('button', { name: /مصنع الأحذية الرئيسي/ }).click();
     await page.getByRole('button', { name: /قسم الإنتاج/ }).click();
     await page.getByRole('button', { name: /خط القص الحرج/ }).click();
+    await expect(page.getByText('اختر موديلًا لعرض مراحله')).toBeVisible();
+    await page.locator('app-readiness-model-selector').getByRole('button', { name: /موديل الحذاء اليومي/ }).click();
     await page.getByRole('button', { name: /^القص ST-01/ }).click();
     await expect(page.locator('app-worker-attendance-status')).toHaveCount(3);
     await page.getByRole('button', { name: 'متأخر', exact: true }).click();

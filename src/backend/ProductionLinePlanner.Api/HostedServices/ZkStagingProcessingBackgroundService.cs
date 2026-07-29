@@ -94,7 +94,7 @@ public sealed class ZkStagingProcessingBackgroundService(
         await using var scope = scopeFactory.CreateAsyncScope();
         var backlog = scope.ServiceProvider.GetRequiredService<IZkStagingBacklogReader>();
         var pendingDates = await backlog.GetPendingProductionDatesAsync(
-            sourceOptions.Value.DayStartTime,
+            sourceOptions.Value.WorkdayBoundaryTime,
             sourceOptions.Value.MaxPendingProductionDates,
             cancellationToken);
         if (pendingDates.IsFailure)

@@ -1,10 +1,10 @@
-using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using ProductionLinePlanner.Application.Common;
 using ProductionLinePlanner.Application.DTOs;
 using ProductionLinePlanner.Application.Engines;
 using ProductionLinePlanner.Application.Realtime;
+using ProductionLinePlanner.Application.Services;
 using ProductionLinePlanner.Domain.Enums;
 using ProductionLinePlanner.Infrastructure.Attendance;
 using ProductionLinePlanner.Infrastructure.Data;
@@ -14,9 +14,20 @@ namespace ProductionLinePlanner.Infrastructure.BusinessEngines;
 public sealed class OperationalReadinessEngine(
     AppDbContext dbContext,
     IOptions<AttendanceSourceOptions> sourceOptions,
-    Application.Services.ICairoTimeZoneProvider cairoTimeZoneProvider) : IOperationalReadinessEngine
+    ICairoTimeZoneProvider cairoTimeZoneProvider,
+    IAttendanceEngine? attendanceEngine = null,
+    IAttendanceWorkdayPolicy? attendanceWorkdayPolicy = null) : IOperationalReadinessEngine
 {
     private readonly AttendanceSourceOptions options = sourceOptions.Value;
+    private readonly IAttendanceWorkdayPolicy workdayPolicy = attendanceWorkdayPolicy ??
+        new AttendanceWorkdayPolicy(sourceOptions, cairoTimeZoneProvider);
+    private readonly IAttendanceEngine attendanceEngine = attendanceEngine ??
+        new AttendanceEngine(
+            null!,
+            null!,
+            dbContext,
+            cairoTimeZoneProvider,
+            attendanceWorkdayPolicy ?? new AttendanceWorkdayPolicy(sourceOptions, cairoTimeZoneProvider));
 
     public async Task<Result<OperationalReadinessSnapshotDto>> GetSnapshotAsync(
         Guid? factoryId = null,
@@ -24,21 +35,33 @@ public sealed class OperationalReadinessEngine(
         CancellationToken cancellationToken = default)
     {
         var asOf = NormalizeUtc(asOfUtc);
-        var operationalDate = CairoDate(asOf);
+        var operationalDate = workdayPolicy.GetOperationalDate(asOf);
         var structure = await LoadStructureAsync(factoryId, asOf, cancellationToken);
         if (factoryId.HasValue && structure.Factories.All(factory => factory.Id != factoryId.Value))
             return Result<OperationalReadinessSnapshotDto>.Failure(new Error("NotFound", "Factory not found."));
 
         var freshness = await GetFreshnessAsync(operationalDate, asOf, cancellationToken);
         var evidence = await LoadAttendanceEvidenceAsync(
-            structure.Assignments.Select(item => item.WorkerId), operationalDate, asOf, freshness.IsTrusted, cancellationToken);
+            structure.Assignments.Select(item => item.WorkerId), operationalDate, freshness.IsTrusted, cancellationToken);
         var states = evidence.ToDictionary(
             pair => pair.Key,
-            pair => new OperationalWorkerState(pair.Key, pair.Value.State, pair.Value.IsLate));
-        var stageKeysByLine = StageKeysByLine(structure);
+            pair => new OperationalWorkerState(pair.Key, pair.Value.State, pair.Value.IsLate, pair.Value.HasCheckedOut));
         var modelNamesByLine = structure.StageCatalog
             .GroupBy(item => item.ProductionLineId)
             .ToDictionary(group => group.Key, group => (IReadOnlyList<string>)group.Select(item => item.ModelName).Distinct().Order().ToArray());
+        var modelsByLine = structure.StageCatalog
+            .GroupBy(item => item.ProductionLineId)
+            .ToDictionary(
+                group => group.Key,
+                group => (IReadOnlyList<OperationalReadinessModelOptionDto>)group
+                    .GroupBy(item => new { item.ModelId, item.ModelName, item.ModelCode })
+                    .Select(model => new OperationalReadinessModelOptionDto(
+                        model.Key.ModelId,
+                        model.Key.ModelName,
+                        model.Key.ModelCode,
+                        model.Select(item => item.SubStageId).Distinct().Count()))
+                    .OrderBy(model => model.Name)
+                    .ToArray());
 
         var factories = structure.Factories.Select(factory =>
         {
@@ -47,7 +70,10 @@ public sealed class OperationalReadinessEngine(
                 var lines = structure.Lines.Where(line => line.DepartmentId == department.Id).Select(line =>
                 {
                     var workerIds = structure.Assignments.Where(item => item.ProductionLineId == line.Id).Select(item => item.WorkerId);
-                    var childCount = stageKeysByLine.GetValueOrDefault(line.Id)?.Count ?? 0;
+                    var models = modelsByLine.GetValueOrDefault(line.Id) ?? [];
+                    var childCount = models.Count > 0
+                        ? models.Count
+                        : structure.Assignments.Where(item => item.ProductionLineId == line.Id).Select(item => item.SubStageId).Distinct().Count();
                     return new OperationalReadinessLineDto(
                         line.Id,
                         factory.Id,
@@ -55,7 +81,8 @@ public sealed class OperationalReadinessEngine(
                         line.Name,
                         line.Code,
                         OperationalReadinessCalculator.Calculate(workerIds, states, freshness.IsTrusted, childCount),
-                        modelNamesByLine.GetValueOrDefault(line.Id) ?? []);
+                        modelNamesByLine.GetValueOrDefault(line.Id) ?? [],
+                        models);
                 }).OrderByReadiness(item => item.Metrics, item => item.Name).ToArray();
 
                 var departmentWorkerIds = structure.Assignments
@@ -83,6 +110,7 @@ public sealed class OperationalReadinessEngine(
             operationalDate,
             asOf,
             new OperationalReadinessWorkdayPolicyDto(
+                options.WorkdayBoundaryTime.ToString(@"hh\:mm"),
                 options.DayStartTime.ToString(@"hh\:mm"),
                 options.LateThresholdMinutes,
                 options.FreshnessThresholdMinutes),
@@ -93,7 +121,8 @@ public sealed class OperationalReadinessEngine(
     public async Task<Result<OperationalReadinessStagesDto>> GetLineStagesAsync(
         Guid productionLineId,
         DateTime? asOfUtc = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        Guid? productModelId = null)
     {
         if (productionLineId == Guid.Empty)
             return Result<OperationalReadinessStagesDto>.Failure(new Error("ValidationError", "ProductionLineId is required."));
@@ -110,18 +139,43 @@ public sealed class OperationalReadinessEngine(
             return Result<OperationalReadinessStagesDto>.Failure(new Error("NotFound", "Production line not found."));
 
         var structure = await LoadStructureAsync(line.FactoryId, asOf, cancellationToken);
-        var operationalDate = CairoDate(asOf);
+        var operationalDate = workdayPolicy.GetOperationalDate(asOf);
         var freshness = await GetFreshnessAsync(operationalDate, asOf, cancellationToken);
         var assignments = structure.Assignments.Where(item => item.ProductionLineId == productionLineId).ToArray();
         var evidence = await LoadAttendanceEvidenceAsync(
-            assignments.Select(item => item.WorkerId), operationalDate, asOf, freshness.IsTrusted, cancellationToken);
+            assignments.Select(item => item.WorkerId), operationalDate, freshness.IsTrusted, cancellationToken);
         var states = evidence.ToDictionary(
             pair => pair.Key,
-            pair => new OperationalWorkerState(pair.Key, pair.Value.State, pair.Value.IsLate));
-        var catalogByStage = structure.StageCatalog.Where(item => item.ProductionLineId == productionLineId)
+            pair => new OperationalWorkerState(pair.Key, pair.Value.State, pair.Value.IsLate, pair.Value.HasCheckedOut));
+        var lineCatalog = structure.StageCatalog.Where(item => item.ProductionLineId == productionLineId).ToArray();
+        var availableModels = lineCatalog
+            .GroupBy(item => new { item.ModelId, item.ModelName, item.ModelCode })
+            .Select(model => new OperationalReadinessModelOptionDto(
+                model.Key.ModelId,
+                model.Key.ModelName,
+                model.Key.ModelCode,
+                model.Select(item => item.SubStageId).Distinct().Count()))
+            .OrderBy(model => model.Name)
+            .ToArray();
+        if (productModelId.HasValue && availableModels.All(model => model.Id != productModelId.Value))
+        {
+            return Result<OperationalReadinessStagesDto>.Failure(
+                new Error("ValidationError", "The selected model is not assigned to this production line."));
+        }
+
+        var effectiveModelId = productModelId ?? (availableModels.Length == 1 ? availableModels[0].Id : null);
+        var requiresModelSelection = availableModels.Length > 1 && !effectiveModelId.HasValue;
+        var selectedCatalog = effectiveModelId.HasValue
+            ? lineCatalog.Where(item => item.ModelId == effectiveModelId.Value).ToArray()
+            : availableModels.Length == 0 ? [] : lineCatalog;
+        var catalogByStage = selectedCatalog
             .GroupBy(item => item.SubStageId)
             .ToDictionary(group => group.Key, group => group.ToArray());
-        var stageIds = assignments.Select(item => item.SubStageId).Concat(catalogByStage.Keys).Distinct().ToArray();
+        var stageIds = requiresModelSelection
+            ? []
+            : effectiveModelId.HasValue
+                ? catalogByStage.Keys.ToArray()
+                : assignments.Select(item => item.SubStageId).Distinct().ToArray();
         var stageDetails = await (from stage in dbContext.SubStages.AsNoTracking()
                                   join mainStage in dbContext.MainStages.AsNoTracking() on stage.MainStageId equals mainStage.Id
                                   where stageIds.Contains(stage.Id) && stage.IsActive && mainStage.IsActive
@@ -153,6 +207,10 @@ public sealed class OperationalReadinessEngine(
             line.FactoryId, line.FactoryName,
             line.DepartmentId, line.DepartmentName,
             line.ProductionLineId, line.ProductionLineName,
+            effectiveModelId,
+            availableModels.FirstOrDefault(model => model.Id == effectiveModelId)?.Name,
+            requiresModelSelection,
+            availableModels,
             stages));
     }
 
@@ -185,10 +243,10 @@ public sealed class OperationalReadinessEngine(
                                            && worker.IsActive && worker.EmploymentStatus == EmploymentStatus.Active
                                      select new WorkerContext(worker.Id, worker.EmployeeCode, worker.FullName))
             .Distinct().ToArrayAsync(cancellationToken);
-        var operationalDate = CairoDate(asOf);
+        var operationalDate = workdayPolicy.GetOperationalDate(asOf);
         var freshness = await GetFreshnessAsync(operationalDate, asOf, cancellationToken);
         var evidence = await LoadAttendanceEvidenceAsync(
-            assignedWorkers.Select(worker => worker.Id), operationalDate, asOf, freshness.IsTrusted, cancellationToken);
+            assignedWorkers.Select(worker => worker.Id), operationalDate, freshness.IsTrusted, cancellationToken);
 
         var workers = assignedWorkers.Select(worker =>
         {
@@ -223,7 +281,7 @@ public sealed class OperationalReadinessEngine(
         CancellationToken cancellationToken = default)
     {
         var asOf = DateTime.UtcNow;
-        var operationalDate = CairoDate(asOf);
+        var operationalDate = workdayPolicy.GetOperationalDate(asOf);
         var freshness = await GetFreshnessAsync(operationalDate, asOf, cancellationToken);
         if (change.EntityType == ManufacturingEntityType.AttendanceSyncState)
         {
@@ -285,7 +343,13 @@ public sealed class OperationalReadinessEngine(
         var workerPatches = new List<OperationalReadinessWorkerPatchDto>();
         foreach (var lineId in lineIds)
         {
-            var stagesResult = await GetLineStagesAsync(lineId, asOf, cancellationToken);
+            var affectedModelId = await dbContext.ProductModelStages.AsNoTracking()
+                .Where(item => item.ProductionLineId == lineId && item.IsActive && item.IsRequired
+                               && stageIds.Contains(item.SubStageId))
+                .OrderBy(item => item.ProductModelId)
+                .Select(item => (Guid?)item.ProductModelId)
+                .FirstOrDefaultAsync(cancellationToken);
+            var stagesResult = await GetLineStagesAsync(lineId, asOf, cancellationToken, affectedModelId);
             if (stagesResult.IsFailure) continue;
             foreach (var stage in stagesResult.Value!.Stages.Where(item => stageIds.Contains(item.Id)))
             {
@@ -366,10 +430,22 @@ public sealed class OperationalReadinessEngine(
         DateTime asOfUtc,
         CancellationToken cancellationToken)
     {
+        var window = workdayPolicy.GetWindow(operationalDate);
         var state = await dbContext.AttendanceSyncStates.AsNoTracking()
             .SingleOrDefaultAsync(item => item.SourceName == options.SourceName && item.OperationalDate == operationalDate, cancellationToken);
         if (state is null)
-            return new AttendanceSyncFreshnessDto("NeverSynced", false, null, null, null, null);
+        {
+            var latestImportedRecordAtUtc = await dbContext.AttendanceRecords.AsNoTracking()
+                .Where(record => record.AttendanceTimeUtc >= window.StartUtc && record.AttendanceTimeUtc < window.EndUtc)
+                .MaxAsync(record => (DateTime?)record.CreatedAtUtc, cancellationToken);
+            if (!latestImportedRecordAtUtc.HasValue)
+                return new AttendanceSyncFreshnessDto("NeverSynced", false, null, null, null, null);
+
+            var recordAge = Math.Max(
+                0,
+                (int)Math.Floor((asOfUtc - DateTime.SpecifyKind(latestImportedRecordAtUtc.Value, DateTimeKind.Utc)).TotalMinutes));
+            return new AttendanceSyncFreshnessDto("RecordsAvailable", true, null, null, null, recordAge);
+        }
 
         var age = state.LastSuccessfulAtUtc.HasValue
             ? Math.Max(0, (int)Math.Floor((asOfUtc - DateTime.SpecifyKind(state.LastSuccessfulAtUtc.Value, DateTimeKind.Utc)).TotalMinutes))
@@ -388,7 +464,6 @@ public sealed class OperationalReadinessEngine(
     private async Task<Dictionary<Guid, AttendanceEvidence>> LoadAttendanceEvidenceAsync(
         IEnumerable<Guid> workerIds,
         DateOnly operationalDate,
-        DateTime asOfUtc,
         bool isTrusted,
         CancellationToken cancellationToken)
     {
@@ -396,39 +471,24 @@ public sealed class OperationalReadinessEngine(
         if (ids.Length == 0) return [];
         if (!isTrusted) return ids.ToDictionary(id => id, _ => AttendanceEvidence.Unknown);
 
-        var localStart = operationalDate.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified);
-        var startUtc = TimeZoneInfo.ConvertTimeToUtc(localStart, cairoTimeZoneProvider.TimeZone);
-        var endUtc = TimeZoneInfo.ConvertTimeToUtc(localStart.AddDays(1), cairoTimeZoneProvider.TimeZone);
-        var records = await dbContext.AttendanceRecords.AsNoTracking()
-            .Where(record => ids.Contains(record.WorkerId)
-                && record.AttendanceTimeUtc >= startUtc && record.AttendanceTimeUtc < endUtc)
-            .ToArrayAsync(cancellationToken);
-        var latest = records.GroupBy(record => record.WorkerId)
-            .ToDictionary(group => group.Key, group => group.OrderByDescending(record => record.CreatedAtUtc).First());
-        var shiftStartLocal = operationalDate.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified).Add(options.DayStartTime);
+        var presenceResult = await attendanceEngine.GetPresenceWindowsByWorkerAsync(ids, operationalDate, cancellationToken);
+        if (presenceResult.IsFailure)
+            return ids.ToDictionary(id => id, _ => AttendanceEvidence.Unknown);
+        var presence = presenceResult.Value!;
+        var shiftStartLocal = workdayPolicy.GetShiftStartLocal(operationalDate);
 
         return ids.ToDictionary(workerId => workerId, workerId =>
         {
-            if (!latest.TryGetValue(workerId, out var record))
-                return AttendanceEvidence.NotCheckedIn;
-            if (record.AttendanceStatus == AttendanceStatus.Absent)
-                return AttendanceEvidence.Absent;
-            if (record.AttendanceStatus is not (AttendanceStatus.Present or AttendanceStatus.Late))
-                return AttendanceEvidence.Unknown;
-
-            var (firstIn, lastOut) = ReadWindow(record.SourcePayload, record.AttendanceTimeUtc);
-            var isLate = record.AttendanceStatus == AttendanceStatus.Late;
-            var lateMinutes = isLate
-                ? Math.Max(0, (int)Math.Floor((TimeZoneInfo.ConvertTimeFromUtc(firstIn, cairoTimeZoneProvider.TimeZone) - shiftStartLocal).TotalMinutes))
+            var state = AttendanceCompletionClassifier.Resolve(presence.GetValueOrDefault(workerId), true);
+            var lateMinutes = state.IsLate && state.FirstInUtc.HasValue
+                ? Math.Max(0, (int)Math.Floor((TimeZoneInfo.ConvertTimeFromUtc(state.FirstInUtc.Value, cairoTimeZoneProvider.TimeZone) - shiftStartLocal).TotalMinutes))
                 : (int?)null;
-            var checkedOut = lastOut.HasValue && lastOut.Value <= asOfUtc;
             return new AttendanceEvidence(
-                checkedOut ? OperationalAttendanceStates.CheckedOut
-                    : isLate ? OperationalAttendanceStates.Late
-                    : OperationalAttendanceStates.Present,
-                isLate,
-                firstIn,
-                lastOut,
+                state.State,
+                state.IsLate,
+                state.HasCheckedOut,
+                state.FirstInUtc,
+                state.LastOutUtc,
                 lateMinutes);
         });
     }
@@ -467,14 +527,6 @@ public sealed class OperationalReadinessEngine(
         return [];
     }
 
-    private static Dictionary<Guid, HashSet<Guid>> StageKeysByLine(StructureContext structure)
-    {
-        var result = structure.Lines.ToDictionary(line => line.Id, _ => new HashSet<Guid>());
-        foreach (var item in structure.StageCatalog) result.GetValueOrDefault(item.ProductionLineId)?.Add(item.SubStageId);
-        foreach (var item in structure.Assignments) result.GetValueOrDefault(item.ProductionLineId)?.Add(item.SubStageId);
-        return result;
-    }
-
     private static OperationalReadinessNodePatchDto NodePatch(
         Guid id,
         Guid? parentId,
@@ -485,35 +537,10 @@ public sealed class OperationalReadinessEngine(
         IReadOnlyList<string>? modelNames = null) =>
         new(id, parentId, type, name, code, metrics, modelNames ?? []);
 
-    private DateOnly CairoDate(DateTime asOfUtc) => DateOnly.FromDateTime(
-        TimeZoneInfo.ConvertTimeFromUtc(asOfUtc, cairoTimeZoneProvider.TimeZone));
-
     private static DateTime NormalizeUtc(DateTime? value)
     {
         var result = value ?? DateTime.UtcNow;
         return result.Kind == DateTimeKind.Utc ? result : result.ToUniversalTime();
-    }
-
-    private static (DateTime FirstInUtc, DateTime? LastOutUtc) ReadWindow(string? payload, DateTime fallbackFirstInUtc)
-    {
-        if (string.IsNullOrWhiteSpace(payload)) return (DateTime.SpecifyKind(fallbackFirstInUtc, DateTimeKind.Utc), null);
-        try
-        {
-            using var document = JsonDocument.Parse(payload);
-            var first = document.RootElement.TryGetProperty("FirstInUtc", out var firstValue) && firstValue.TryGetDateTime(out var parsedFirst)
-                ? DateTime.SpecifyKind(parsedFirst, DateTimeKind.Utc)
-                : DateTime.SpecifyKind(fallbackFirstInUtc, DateTimeKind.Utc);
-            var last = document.RootElement.TryGetProperty("LastOutUtc", out var lastValue)
-                       && lastValue.ValueKind != JsonValueKind.Null
-                       && lastValue.TryGetDateTime(out var parsedLast)
-                ? DateTime.SpecifyKind(parsedLast, DateTimeKind.Utc)
-                : (DateTime?)null;
-            return (first, last);
-        }
-        catch (JsonException)
-        {
-            return (DateTime.SpecifyKind(fallbackFirstInUtc, DateTimeKind.Utc), null);
-        }
     }
 
     private static string AttendanceLabel(string state) => state switch
@@ -587,13 +614,12 @@ public sealed class OperationalReadinessEngine(
     private sealed record AttendanceEvidence(
         string State,
         bool IsLate,
+        bool HasCheckedOut,
         DateTime? CheckInAtUtc,
         DateTime? CheckOutAtUtc,
         int? LateByMinutes)
     {
-        public static readonly AttendanceEvidence Unknown = new(OperationalAttendanceStates.Unknown, false, null, null, null);
-        public static readonly AttendanceEvidence NotCheckedIn = new(OperationalAttendanceStates.NotCheckedIn, false, null, null, null);
-        public static readonly AttendanceEvidence Absent = new(OperationalAttendanceStates.Absent, false, null, null, null);
+        public static readonly AttendanceEvidence Unknown = new(OperationalAttendanceStates.Unknown, false, false, null, null, null);
     }
 }
 

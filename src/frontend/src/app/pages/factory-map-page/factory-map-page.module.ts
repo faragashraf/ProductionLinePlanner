@@ -5,6 +5,7 @@ import { RouterModule, Routes } from '@angular/router';
 import { AttendanceSyncStatusComponent } from './components/attendance-sync-status/attendance-sync-status.component';
 import { FactoryReadinessMapComponent } from './components/factory-readiness-map/factory-readiness-map.component';
 import { ReadinessMetricsComponent } from './components/readiness-metrics/readiness-metrics.component';
+import { ReadinessModelSelectorComponent } from './components/readiness-model-selector/readiness-model-selector.component';
 import { ReadinessNodeCardComponent } from './components/readiness-node-card/readiness-node-card.component';
 import { ReadinessWorkerPanelComponent } from './components/readiness-worker-panel/readiness-worker-panel.component';
 import { WorkerAttendanceStatusComponent } from './components/worker-attendance-status/worker-attendance-status.component';
@@ -18,6 +19,7 @@ export const FACTORY_MAP_ROUTES: Routes = [{ path: '', component: FactoryMapPage
     FactoryReadinessMapComponent,
     ReadinessNodeCardComponent,
     ReadinessMetricsComponent,
+    ReadinessModelSelectorComponent,
     ReadinessWorkerPanelComponent,
     WorkerAttendanceStatusComponent,
     AttendanceSyncStatusComponent

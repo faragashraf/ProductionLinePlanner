@@ -7,6 +7,8 @@ using ProductionLinePlanner.Application.Services;
 using ProductionLinePlanner.Domain.Entities;
 using ProductionLinePlanner.Domain.Enums;
 using ProductionLinePlanner.Infrastructure.Data;
+using ProductionLinePlanner.Infrastructure.Attendance;
+using Microsoft.Extensions.Options;
 
 namespace ProductionLinePlanner.Infrastructure.BusinessEngines;
 
@@ -15,11 +17,15 @@ public sealed class AttendanceWorkforceEngine(
     AppDbContext dbContext,
     IAttendanceEngine attendanceEngine,
     IAssignmentEngine assignmentEngine,
-    ICairoTimeZoneProvider cairoTimeZoneProvider) : IAttendanceWorkforceEngine
+    ICairoTimeZoneProvider cairoTimeZoneProvider,
+    IAttendanceWorkdayPolicy? attendanceWorkdayPolicy = null) : IAttendanceWorkforceEngine
 {
     private const int ResolveBatchSize = 100;
     private const int MaximumHistoryPageSize = 100;
     private const int MaximumHistoryRangeDays = 366;
+    private readonly IAttendanceWorkdayPolicy workdayPolicy = attendanceWorkdayPolicy ?? new AttendanceWorkdayPolicy(
+        Options.Create(new AttendanceSourceOptions()),
+        cairoTimeZoneProvider);
 
     public async Task<Result<AttendanceWorkforcePageDto>> GetPageAsync(AttendanceWorkforceQuery query, CancellationToken cancellationToken = default)
     {
@@ -220,25 +226,22 @@ public sealed class AttendanceWorkforceEngine(
             .ThenByDescending(record => record.CreatedAtUtc)
             .Select(record => new AttendanceEvidence(record.AttendanceTimeUtc, record.SourcePayload))
             .FirstOrDefaultAsync(cancellationToken);
-        var todayStatus = !dataAvailableForDate
-            ? "NeedsSync"
-            : today is null
-                ? "NoMovement"
-                : today.Status switch
-                {
-                    AttendanceStatus.Present => today.LastOutUtc.HasValue ? "Present" : "Incomplete",
-                    AttendanceStatus.Late => today.LastOutUtc.HasValue ? "Late" : "Incomplete",
-                    AttendanceStatus.Absent => "Absent",
-                    _ => "NoMovement"
-                };
+        var completion = AttendanceCompletionClassifier.Resolve(today, dataAvailableForDate);
+        var todayStatus = completion.State switch
+        {
+            AttendanceDayStates.Present => "Present",
+            AttendanceDayStates.Late => "Late",
+            AttendanceDayStates.Absent => "Absent",
+            _ => "NeedsSync"
+        };
 
         return Result<WorkerAttendanceProfileSummaryDto>.Success(new WorkerAttendanceProfileSummaryDto(
             workerId,
             productionDate,
             todayStatus,
             dataAvailableForDate,
-            EnsureUtc(today?.FirstInUtc),
-            EnsureUtc(today?.LastOutUtc),
+            completion.FirstInUtc,
+            completion.LastOutUtc,
             latest is null ? null : LatestMovementUtc(latest)));
     }
 
@@ -299,19 +302,20 @@ public sealed class AttendanceWorkforceEngine(
 
     private AttendanceWorkforceRowDto MapRow(WorkerHeader worker, IReadOnlyCollection<WorkerAssignmentState> states, IReadOnlyDictionary<(Guid SubStageId, Guid ProductionLineId), StageHeader> stages, AttendancePresenceWindowDto? attendance, bool dataAvailable)
     {
-        var status = !dataAvailable ? "NeedsSync" : attendance is null ? "Unassigned" : attendance.Status switch
+        var completion = AttendanceCompletionClassifier.Resolve(attendance, dataAvailable);
+        var status = completion.State switch
         {
-            AttendanceStatus.Present => attendance.LastOutUtc.HasValue ? "Present" : "Incomplete",
-            AttendanceStatus.Late => attendance.LastOutUtc.HasValue ? "Late" : "Incomplete",
-            AttendanceStatus.Absent => "Absent",
-            _ => "Unassigned"
+            AttendanceDayStates.Present => "Present",
+            AttendanceDayStates.Late => "Late",
+            AttendanceDayStates.Absent => "Absent",
+            _ => "NeedsSync"
         };
         var items = MapAssignments(states, stages);
         var isAssigned = items.Count > 0;
-        var present = status is "Present" or "Late" or "Incomplete";
+        var present = completion.CountsAsAttended;
         return new AttendanceWorkforceRowDto(worker.Id, worker.EmployeeCode, worker.FullName, worker.DepartmentName, worker.PhotoReference, !string.IsNullOrWhiteSpace(worker.PhotoReference), status,
-            attendance?.FirstInUtc, attendance?.LastOutUtc, dataAvailable && attendance is not null, status == "Incomplete", items, isAssigned,
-            items.Any(item => item.AssignmentType is AssignmentType.Temporary or AssignmentType.Replacement), present && !isAssigned || status == "Absent" && isAssigned || status == "Incomplete");
+            completion.FirstInUtc, completion.LastOutUtc, dataAvailable && attendance is not null, present && !completion.HasCheckedOut, items, isAssigned,
+            items.Any(item => item.AssignmentType is AssignmentType.Temporary or AssignmentType.Replacement), present && !isAssigned || status == "Absent" && isAssigned || present && !completion.HasCheckedOut);
     }
 
     private static IReadOnlyCollection<AttendanceWorkforceAssignmentDto> MapAssignments(IEnumerable<WorkerAssignmentState> states, IReadOnlyDictionary<(Guid SubStageId, Guid ProductionLineId), StageHeader> stages) => states
@@ -407,8 +411,8 @@ public sealed class AttendanceWorkforceEngine(
 
     private (DateTime StartUtc, DateTime EndUtc) GetDayBounds(DateOnly date)
     {
-        var start = date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified);
-        return (TimeZoneInfo.ConvertTimeToUtc(start, cairoTimeZoneProvider.TimeZone), TimeZoneInfo.ConvertTimeToUtc(start.AddDays(1), cairoTimeZoneProvider.TimeZone));
+        var window = workdayPolicy.GetWindow(date);
+        return (window.StartUtc, window.EndUtc);
     }
 
     private static IReadOnlyCollection<AttendanceWorkforcePunchDto> MapAttendanceEvidence(IEnumerable<AttendanceEvidence> records)
@@ -473,8 +477,8 @@ public sealed class AttendanceWorkforceEngine(
         };
         if (lastOutUtc.HasValue && lastOutUtc.Value != firstInUtc)
             movements.Add(new(lastOutUtc.Value, "Out"));
-        var localDate = DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(firstInUtc, cairoTimeZoneProvider.TimeZone));
-        return new(record.RecordId, localDate, record.AttendanceStatus, record.Source, movements);
+        var operationalDate = workdayPolicy.GetOperationalDate(firstInUtc);
+        return new(record.RecordId, operationalDate, record.AttendanceStatus, record.Source, movements);
     }
 
     private static DateTime EnsureUtc(DateTime value) => value.Kind == DateTimeKind.Utc

@@ -2,7 +2,11 @@ using ProductionLinePlanner.Application.DTOs;
 
 namespace ProductionLinePlanner.Application.Engines;
 
-public sealed record OperationalWorkerState(Guid WorkerId, string AttendanceState, bool IsLate = false);
+public sealed record OperationalWorkerState(
+    Guid WorkerId,
+    string AttendanceState,
+    bool IsLate = false,
+    bool HasCheckedOut = false);
 
 /// <summary>
 /// Pure readiness math. Persistence, assignment resolution, attendance windows,
@@ -34,8 +38,8 @@ public static class OperationalReadinessCalculator
             : new OperationalWorkerState(workerId, OperationalAttendanceStates.NotCheckedIn)).ToArray();
         var states = assignedStates.Select(state => state.AttendanceState).ToArray();
         var late = assignedStates.Count(state => state.IsLate || state.AttendanceState == OperationalAttendanceStates.Late);
-        var present = states.Count(state => state is OperationalAttendanceStates.Present or OperationalAttendanceStates.Late);
-        var checkedOut = states.Count(state => state == OperationalAttendanceStates.CheckedOut);
+        var present = assignedStates.Count(state => state.AttendanceState is OperationalAttendanceStates.Present or OperationalAttendanceStates.Late or OperationalAttendanceStates.CheckedOut);
+        var checkedOut = assignedStates.Count(state => state.HasCheckedOut || state.AttendanceState == OperationalAttendanceStates.CheckedOut);
         var unknown = states.Count(state => state == OperationalAttendanceStates.Unknown);
         var absent = states.Count(state => state is OperationalAttendanceStates.Absent or OperationalAttendanceStates.NotCheckedIn);
         var percentage = decimal.Round(present * 100m / assigned.Length, 1, MidpointRounding.AwayFromZero);

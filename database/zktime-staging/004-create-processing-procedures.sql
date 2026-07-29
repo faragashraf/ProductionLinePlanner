@@ -288,25 +288,21 @@ IF OBJECT_ID(N'dbo.usp_ZkAttendanceInboxPendingDates', N'P') IS NULL
     EXEC(N'CREATE PROCEDURE dbo.usp_ZkAttendanceInboxPendingDates AS BEGIN SET NOCOUNT ON; END;');
 GO
 ALTER PROCEDURE dbo.usp_ZkAttendanceInboxPendingDates
-    @DayStartTime time(7),
+    @WorkdayBoundaryTime time(7),
     @MaximumDates int = 3,
     @MaxAttempts int = 5,
     @LeaseMinutes int = 15
 AS
 BEGIN
     SET NOCOUNT ON;
-    -- Retained for compatibility with existing callers. Backlog dates deliberately follow
-    -- the same calendar-day contract used by usp_ZkAttendanceInboxClaim.
     IF @MaximumDates < 1 OR @MaximumDates > 31 THROW 51221, 'MaximumDates must be between 1 and 31.', 1;
     IF @MaxAttempts < 1 OR @MaxAttempts > 100 THROW 51222, 'MaxAttempts must be between 1 and 100.', 1;
     IF @LeaseMinutes < 1 OR @LeaseMinutes > 120 THROW 51223, 'LeaseMinutes must be between 1 and 120.', 1;
 
-    -- AttendanceSyncService claims raw inbox records with calendar-day local bounds.
-    -- Do not derive an operational day here: a 02:00 punch could otherwise be returned
-    -- as the prior production date while the claim for that prior calendar day cannot see it.
-    -- @DayStartTime remains in the signature for backwards-compatible callers.
+    -- Shift source-local punches by the configured boundary before deriving the
+    -- operational date. AttendanceSyncService uses the same boundary for its claim window.
     SELECT TOP (@MaximumDates)
-        CONVERT(date, SourceCheckTimeLocal) AS ProductionDate
+        CONVERT(date, DATEADD(SECOND, -DATEDIFF(SECOND, CONVERT(time(7), '00:00:00'), @WorkdayBoundaryTime), SourceCheckTimeLocal)) AS ProductionDate
     FROM dbo.ZkAttendanceSyncInbox
     WHERE
         (
@@ -314,7 +310,7 @@ BEGIN
             OR (ProcessingStatus = 'Processing' AND ProcessingStartedAtUtc < DATEADD(MINUTE, -@LeaseMinutes, SYSUTCDATETIME()))
         )
       AND AttemptCount < @MaxAttempts
-    GROUP BY CONVERT(date, SourceCheckTimeLocal)
+    GROUP BY CONVERT(date, DATEADD(SECOND, -DATEDIFF(SECOND, CONVERT(time(7), '00:00:00'), @WorkdayBoundaryTime), SourceCheckTimeLocal))
     ORDER BY ProductionDate;
 END;
 GO

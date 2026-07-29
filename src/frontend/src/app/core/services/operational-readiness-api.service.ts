@@ -23,9 +23,11 @@ export class OperationalReadinessApiService {
       .pipe(map(response => this.unwrap(response)));
   }
 
-  loadStages(productionLineId: string): Observable<OperationalReadinessStages> {
+  loadStages(productionLineId: string, productModelId?: string | null): Observable<OperationalReadinessStages> {
+    const params = productModelId ? new HttpParams().set('productModelId', productModelId) : undefined;
     return this.http.get<ApiResponse<OperationalReadinessStages>>(
-      buildApiUrl(`/operational-readiness/lines/${encodeURIComponent(productionLineId)}/stages`)
+      buildApiUrl(`/operational-readiness/lines/${encodeURIComponent(productionLineId)}/stages`),
+      { params }
     ).pipe(map(response => this.unwrap(response)));
   }
 

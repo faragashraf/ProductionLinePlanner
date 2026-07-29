@@ -7,6 +7,8 @@ using ProductionLinePlanner.Application.Services;
 using ProductionLinePlanner.Domain.Entities;
 using ProductionLinePlanner.Domain.Enums;
 using ProductionLinePlanner.Infrastructure.Data;
+using ProductionLinePlanner.Infrastructure.Attendance;
+using Microsoft.Extensions.Options;
 
 namespace ProductionLinePlanner.Infrastructure.BusinessEngines;
 
@@ -15,18 +17,21 @@ public sealed class AttendanceEngine : IAttendanceEngine
     private readonly IAttendanceReadService _attendanceReadService;
     private readonly IAttendanceSyncService _attendanceSyncService;
     private readonly AppDbContext _dbContext;
-    private readonly ICairoTimeZoneProvider _cairoTimeZoneProvider;
+    private readonly IAttendanceWorkdayPolicy _attendanceWorkdayPolicy;
 
     public AttendanceEngine(
         IAttendanceReadService attendanceReadService,
         IAttendanceSyncService attendanceSyncService,
         AppDbContext dbContext,
-        ICairoTimeZoneProvider cairoTimeZoneProvider)
+        ICairoTimeZoneProvider cairoTimeZoneProvider,
+        IAttendanceWorkdayPolicy? attendanceWorkdayPolicy = null)
     {
         _attendanceReadService = attendanceReadService;
         _attendanceSyncService = attendanceSyncService;
         _dbContext = dbContext;
-        _cairoTimeZoneProvider = cairoTimeZoneProvider;
+        _attendanceWorkdayPolicy = attendanceWorkdayPolicy ?? new AttendanceWorkdayPolicy(
+            Options.Create(new AttendanceSourceOptions()),
+            cairoTimeZoneProvider);
     }
 
     public Task<Result<AttendanceWorkerStateDto[]>> GetTodayAttendanceAsync(
@@ -67,16 +72,14 @@ public sealed class AttendanceEngine : IAttendanceEngine
         }
 
         var asOf = asOfUtc ?? DateTime.UtcNow;
-        var cairo = TimeZoneInfo.ConvertTimeFromUtc(asOf.Kind == DateTimeKind.Utc ? asOf : asOf.ToUniversalTime(), _cairoTimeZoneProvider.TimeZone);
-        var localStart = DateOnly.FromDateTime(cairo).ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified);
-        var dateStartUtc = TimeZoneInfo.ConvertTimeToUtc(localStart, _cairoTimeZoneProvider.TimeZone);
-        var dateEndUtc = TimeZoneInfo.ConvertTimeToUtc(localStart.AddDays(1), _cairoTimeZoneProvider.TimeZone);
+        var operationalDate = _attendanceWorkdayPolicy.GetOperationalDate(asOf);
+        var window = _attendanceWorkdayPolicy.GetWindow(operationalDate);
 
         var query = await _dbContext.AttendanceRecords
             .AsNoTracking()
             .Where(x => workerIdArray.Contains(x.WorkerId)
-                        && x.AttendanceTimeUtc >= dateStartUtc
-                        && x.AttendanceTimeUtc < dateEndUtc)
+                        && x.AttendanceTimeUtc >= window.StartUtc
+                        && x.AttendanceTimeUtc < window.EndUtc)
             .GroupBy(x => x.WorkerId)
             .Select(g => new
             {
@@ -101,11 +104,9 @@ public sealed class AttendanceEngine : IAttendanceEngine
         if (ids.Length == 0)
             return Result<Dictionary<Guid, AttendancePresenceWindowDto>>.Success([]);
 
-        var localStart = productionDate.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified);
-        var startUtc = TimeZoneInfo.ConvertTimeToUtc(localStart, _cairoTimeZoneProvider.TimeZone);
-        var endUtc = TimeZoneInfo.ConvertTimeToUtc(localStart.AddDays(1), _cairoTimeZoneProvider.TimeZone);
+        var window = _attendanceWorkdayPolicy.GetWindow(productionDate);
         var records = await _dbContext.AttendanceRecords.AsNoTracking()
-            .Where(record => ids.Contains(record.WorkerId) && record.AttendanceTimeUtc >= startUtc && record.AttendanceTimeUtc < endUtc)
+            .Where(record => ids.Contains(record.WorkerId) && record.AttendanceTimeUtc >= window.StartUtc && record.AttendanceTimeUtc < window.EndUtc)
             .OrderBy(record => record.WorkerId)
             .ThenByDescending(record => record.CreatedAtUtc)
             .ToArrayAsync(cancellationToken);

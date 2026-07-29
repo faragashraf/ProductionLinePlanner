@@ -28,9 +28,10 @@ public static class OperationalReadinessEndpoints
 
         group.MapGet("/lines/{productionLineId:guid}/stages", async (
             Guid productionLineId,
+            Guid? productModelId,
             [FromServices] IOperationalReadinessEngine engine,
             CancellationToken cancellationToken) =>
-            ToResponse(await engine.GetLineStagesAsync(productionLineId, null, cancellationToken)))
+            ToResponse(await engine.GetLineStagesAsync(productionLineId, null, cancellationToken, productModelId)))
             .WithName("GetOperationalReadinessLineStages");
 
         group.MapGet("/lines/{productionLineId:guid}/stages/{stageId:guid}/workers", async (

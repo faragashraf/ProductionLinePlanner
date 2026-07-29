@@ -19,6 +19,7 @@ public static class OperationalAttendanceStates
 }
 
 public sealed record OperationalReadinessWorkdayPolicyDto(
+    string WorkdayBoundaryTime,
     string DayStartTime,
     int GracePeriodMinutes,
     int FreshnessThresholdMinutes);
@@ -58,6 +59,12 @@ public sealed record OperationalReadinessDepartmentDto(
     OperationalReadinessMetricsDto Metrics,
     IReadOnlyList<OperationalReadinessLineDto> ProductionLines);
 
+public sealed record OperationalReadinessModelOptionDto(
+    Guid Id,
+    string Name,
+    string Code,
+    int StageCount);
+
 public sealed record OperationalReadinessLineDto(
     Guid Id,
     Guid FactoryId,
@@ -65,7 +72,8 @@ public sealed record OperationalReadinessLineDto(
     string Name,
     string? Code,
     OperationalReadinessMetricsDto Metrics,
-    IReadOnlyList<string> ModelNames);
+    IReadOnlyList<string> ModelNames,
+    IReadOnlyList<OperationalReadinessModelOptionDto> Models);
 
 public sealed record OperationalReadinessStageDto(
     Guid Id,
@@ -109,6 +117,10 @@ public sealed record OperationalReadinessStagesDto(
     string DepartmentName,
     Guid ProductionLineId,
     string ProductionLineName,
+    Guid? SelectedProductModelId,
+    string? SelectedProductModelName,
+    bool RequiresModelSelection,
+    IReadOnlyList<OperationalReadinessModelOptionDto> AvailableModels,
     IReadOnlyList<OperationalReadinessStageDto> Stages);
 
 public sealed record OperationalReadinessWorkersDto(

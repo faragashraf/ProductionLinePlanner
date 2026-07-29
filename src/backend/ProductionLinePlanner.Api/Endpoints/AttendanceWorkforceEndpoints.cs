@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Mvc;
 using ProductionLinePlanner.Api.Authorization;
 using ProductionLinePlanner.Application.DTOs;
 using ProductionLinePlanner.Application.Engines;
@@ -57,7 +58,7 @@ public static class AttendanceWorkforceEndpoints
 
     private static async Task<IResult> GetPageAsync(
         IAttendanceWorkforceEngine workforceEngine,
-        ICairoTimeZoneProvider cairoTimeZoneProvider,
+        [FromServices] IAttendanceWorkdayPolicy workdayPolicy,
         DateOnly? productionDate = null,
         int page = 1,
         int pageSize = 25,
@@ -75,7 +76,7 @@ public static class AttendanceWorkforceEndpoints
         Guid? workerId = null,
         CancellationToken cancellationToken = default)
     {
-        var cairoDate = DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, cairoTimeZoneProvider.TimeZone));
+        var cairoDate = workdayPolicy.GetOperationalDate(DateTime.UtcNow);
         var result = await workforceEngine.GetPageAsync(new AttendanceWorkforceQuery(
             productionDate ?? cairoDate,
             page,
@@ -100,11 +101,11 @@ public static class AttendanceWorkforceEndpoints
     private static async Task<IResult> GetDetailAsync(
         Guid workerId,
         IAttendanceWorkforceEngine workforceEngine,
-        ICairoTimeZoneProvider cairoTimeZoneProvider,
+        [FromServices] IAttendanceWorkdayPolicy workdayPolicy,
         DateOnly? productionDate = null,
         CancellationToken cancellationToken = default)
     {
-        var cairoDate = DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, cairoTimeZoneProvider.TimeZone));
+        var cairoDate = workdayPolicy.GetOperationalDate(DateTime.UtcNow);
         var result = await workforceEngine.GetWorkerDetailAsync(workerId, productionDate ?? cairoDate, cancellationToken);
         return result.IsFailure
             ? ApiResponse.Failure(result.Error?.Code ?? "AttendanceWorkforceReadFailed", result.Error?.Message ?? "Unable to load worker attendance.", MapFailureStatusCode(result.Error?.Code))
@@ -114,11 +115,11 @@ public static class AttendanceWorkforceEndpoints
     private static async Task<IResult> GetProfileSummaryAsync(
         Guid workerId,
         IAttendanceWorkforceEngine workforceEngine,
-        ICairoTimeZoneProvider cairoTimeZoneProvider,
+        [FromServices] IAttendanceWorkdayPolicy workdayPolicy,
         DateOnly? productionDate = null,
         CancellationToken cancellationToken = default)
     {
-        var cairoDate = DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, cairoTimeZoneProvider.TimeZone));
+        var cairoDate = workdayPolicy.GetOperationalDate(DateTime.UtcNow);
         var result = await workforceEngine.GetWorkerProfileSummaryAsync(workerId, productionDate ?? cairoDate, cancellationToken);
         return result.IsFailure
             ? ApiResponse.Failure(result.Error?.Code ?? "AttendanceWorkforceReadFailed", result.Error?.Message ?? "Unable to load worker attendance summary.", MapFailureStatusCode(result.Error?.Code))
@@ -128,7 +129,7 @@ public static class AttendanceWorkforceEndpoints
     private static async Task<IResult> GetHistoryAsync(
         Guid workerId,
         IAttendanceWorkforceEngine workforceEngine,
-        ICairoTimeZoneProvider cairoTimeZoneProvider,
+        [FromServices] IAttendanceWorkdayPolicy workdayPolicy,
         DateOnly? fromDate = null,
         DateOnly? toDate = null,
         int page = 1,
@@ -136,7 +137,7 @@ public static class AttendanceWorkforceEndpoints
         string sortDirection = "desc",
         CancellationToken cancellationToken = default)
     {
-        var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, cairoTimeZoneProvider.TimeZone));
+        var today = workdayPolicy.GetOperationalDate(DateTime.UtcNow);
         var effectiveTo = toDate ?? today;
         var effectiveFrom = fromDate ?? effectiveTo.AddDays(-29);
         var result = await workforceEngine.GetWorkerAttendanceHistoryAsync(

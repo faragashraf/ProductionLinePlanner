@@ -26,6 +26,7 @@ export class ReadinessNodeCardComponent {
   }
 
   get childLabel(): string {
+    if (this.nodeType === 'ProductionLine' && this.node.modelNames?.length) return 'موديل';
     return ({ Factory: 'قسم', Department: 'خط', ProductionLine: 'مرحلة', Stage: 'عامل' } as const)[this.nodeType];
   }
 }

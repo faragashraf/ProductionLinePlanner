@@ -25,6 +25,7 @@ export class FactoryReadinessStore {
   readonly selectedFactoryId = signal<string | null>(null);
   readonly selectedDepartmentId = signal<string | null>(null);
   readonly selectedLineId = signal<string | null>(null);
+  readonly selectedModelId = signal<string | null>(null);
   readonly selectedStageId = signal<string | null>(null);
   readonly workerFilter = signal<ReadinessWorkerFilter>('all');
   readonly loading = signal(false);
@@ -36,6 +37,7 @@ export class FactoryReadinessStore {
   readonly selectedFactory = computed(() => this.snapshot()?.factories.find(item => item.id === this.selectedFactoryId()) ?? null);
   readonly selectedDepartment = computed(() => this.selectedFactory()?.departments.find(item => item.id === this.selectedDepartmentId()) ?? null);
   readonly selectedLine = computed(() => this.selectedDepartment()?.productionLines.find(item => item.id === this.selectedLineId()) ?? null);
+  readonly selectedModel = computed(() => this.selectedLine()?.models.find(item => item.id === this.selectedModelId()) ?? null);
   readonly selectedStage = computed(() => this.stages()?.stages.find(item => item.id === this.selectedStageId()) ?? null);
   readonly level = computed<ReadinessLevel>(() => this.selectedStageId() ? 'stage' : this.selectedLineId() ? 'line' : this.selectedDepartmentId() ? 'department' : 'factory');
   readonly visibleWorkers = computed(() => this.filterWorkers(this.workerResult()?.workers ?? [], this.workerFilter()));
@@ -59,12 +61,14 @@ export class FactoryReadinessStore {
       this.realtimeDegraded.set(false);
       this.reconcileSelection();
       if (background) {
+        const line = this.selectedLine();
         const lineId = this.selectedLineId();
         const stageId = this.selectedStageId();
-        if (lineId) {
+        const canLoadStages = lineId && ((line?.models.length ?? 0) <= 1 || !!this.selectedModelId());
+        if (canLoadStages) {
           this.stages.set(null);
           this.workerResult.set(null);
-          this.loadStages(lineId, stageId);
+          this.loadStages(lineId!, stageId, this.selectedModelId());
         }
       }
     });
@@ -74,6 +78,7 @@ export class FactoryReadinessStore {
     this.selectedFactoryId.set(factory.id);
     this.selectedDepartmentId.set(null);
     this.selectedLineId.set(null);
+    this.selectedModelId.set(null);
     this.selectedStageId.set(null);
     this.stages.set(null);
     this.workerResult.set(null);
@@ -83,6 +88,7 @@ export class FactoryReadinessStore {
     this.selectedFactoryId.set(null);
     this.selectedDepartmentId.set(null);
     this.selectedLineId.set(null);
+    this.selectedModelId.set(null);
     this.selectedStageId.set(null);
     this.stages.set(null);
     this.workerResult.set(null);
@@ -92,6 +98,7 @@ export class FactoryReadinessStore {
   showFactory(): void {
     this.selectedDepartmentId.set(null);
     this.selectedLineId.set(null);
+    this.selectedModelId.set(null);
     this.selectedStageId.set(null);
     this.stages.set(null);
     this.workerResult.set(null);
@@ -101,6 +108,7 @@ export class FactoryReadinessStore {
   openDepartment(department: OperationalReadinessDepartment): void {
     this.selectedDepartmentId.set(department.id);
     this.selectedLineId.set(null);
+    this.selectedModelId.set(null);
     this.selectedStageId.set(null);
     this.stages.set(null);
     this.workerResult.set(null);
@@ -108,9 +116,21 @@ export class FactoryReadinessStore {
 
   openLine(line: OperationalReadinessLine): void {
     this.selectedLineId.set(line.id);
+    this.selectedModelId.set(line.models.length === 1 ? line.models[0].id : null);
     this.selectedStageId.set(null);
+    this.stages.set(null);
     this.workerResult.set(null);
-    this.loadStages(line.id);
+    if (line.models.length <= 1) this.loadStages(line.id, null, this.selectedModelId());
+  }
+
+  selectModel(modelId: string): void {
+    const line = this.selectedLine();
+    if (!line || !line.models.some(model => model.id === modelId)) return;
+    this.selectedModelId.set(modelId);
+    this.selectedStageId.set(null);
+    this.stages.set(null);
+    this.workerResult.set(null);
+    this.loadStages(line.id, null, modelId);
   }
 
   openStage(stage: OperationalReadinessStage): void {
@@ -126,6 +146,7 @@ export class FactoryReadinessStore {
       this.showFactory();
     } else if (level === 'department') {
       this.selectedLineId.set(null);
+      this.selectedModelId.set(null);
       this.selectedStageId.set(null);
     } else if (level === 'line') {
       this.selectedStageId.set(null);
@@ -140,7 +161,8 @@ export class FactoryReadinessStore {
     const lineId = this.selectedLineId();
     const stageId = this.selectedStageId();
     if (lineId && stageId) this.loadWorkers(lineId, stageId);
-    else if (lineId) this.loadStages(lineId);
+    else if (lineId && (this.selectedLine()?.models.length ?? 0) <= 1) this.loadStages(lineId, null, this.selectedModelId());
+    else if (lineId && this.selectedModelId()) this.loadStages(lineId, null, this.selectedModelId());
   }
 
   applyDelta(delta: OperationalReadinessDelta): void {
@@ -188,10 +210,10 @@ export class FactoryReadinessStore {
     }
   }
 
-  private loadStages(lineId: string, stageToReload: string | null = null): void {
+  private loadStages(lineId: string, stageToReload: string | null = null, productModelId: string | null = null): void {
     this.beginChildLoad();
     this.childrenError.set(null);
-    this.api.loadStages(lineId).pipe(
+    this.api.loadStages(lineId, productModelId).pipe(
       catchError(() => {
         this.childrenError.set('تعذر تحميل مراحل الخط.');
         return EMPTY;
@@ -253,13 +275,19 @@ export class FactoryReadinessStore {
     if (this.selectedFactoryId() && !this.selectedFactory()) this.reset();
     else if (this.selectedDepartmentId() && !this.selectedDepartment()) this.goTo('department');
     else if (this.selectedLineId() && !this.selectedLine()) this.goTo('department');
+    else if (this.selectedModelId() && !this.selectedModel()) {
+      this.selectedModelId.set(null);
+      this.selectedStageId.set(null);
+      this.stages.set(null);
+      this.workerResult.set(null);
+    }
   }
 
   private filterWorkers(workers: OperationalReadinessWorker[], filter: ReadinessWorkerFilter): OperationalReadinessWorker[] {
     if (filter === 'all') return workers;
     if (filter === 'present') return workers.filter(worker => worker.attendanceState === 'Present');
     if (filter === 'late') return workers.filter(worker => worker.attendanceState === 'Late');
-    if (filter === 'checkedOut') return workers.filter(worker => worker.attendanceState === 'CheckedOut');
+    if (filter === 'checkedOut') return workers.filter(worker => !!worker.checkOutAtUtc);
     return workers.filter(worker => worker.attendanceState === 'Absent' || worker.attendanceState === 'NotCheckedIn');
   }
 

@@ -1,5 +1,5 @@
 export type ReadinessStatus = 'Ready' | 'Warning' | 'Critical' | 'Unknown' | 'NoAssignments';
-export type AttendanceSyncStatus = 'Fresh' | 'Stale' | 'Failed' | 'NeverSynced';
+export type AttendanceSyncStatus = 'Fresh' | 'Stale' | 'Failed' | 'NeverSynced' | 'RecordsAvailable';
 export type OperationalAttendanceState = 'Present' | 'Late' | 'Absent' | 'NotCheckedIn' | 'CheckedOut' | 'Unknown';
 export type ReadinessNodeType = 'Factory' | 'Department' | 'ProductionLine' | 'Stage';
 
@@ -26,9 +26,17 @@ export interface AttendanceSyncFreshness {
 }
 
 export interface OperationalReadinessWorkdayPolicy {
+  workdayBoundaryTime: string;
   dayStartTime: string;
   gracePeriodMinutes: number;
   freshnessThresholdMinutes: number;
+}
+
+export interface OperationalReadinessModelOption {
+  id: string;
+  name: string;
+  code: string;
+  stageCount: number;
 }
 
 export interface OperationalReadinessLine {
@@ -39,6 +47,7 @@ export interface OperationalReadinessLine {
   code: string | null;
   metrics: OperationalReadinessMetrics;
   modelNames: string[];
+  models: OperationalReadinessModelOption[];
 }
 
 export interface OperationalReadinessDepartment {
@@ -103,10 +112,15 @@ export interface OperationalReadinessStages {
   departmentName: string;
   productionLineId: string;
   productionLineName: string;
+  selectedProductModelId: string | null;
+  selectedProductModelName: string | null;
+  requiresModelSelection: boolean;
+  availableModels: OperationalReadinessModelOption[];
   stages: OperationalReadinessStage[];
 }
 
-export interface OperationalReadinessWorkers extends Omit<OperationalReadinessStages, 'stages'> {
+export interface OperationalReadinessWorkers extends Omit<OperationalReadinessStages,
+  'stages' | 'selectedProductModelId' | 'selectedProductModelName' | 'requiresModelSelection' | 'availableModels'> {
   stageId: string;
   stageName: string;
   workers: OperationalReadinessWorker[];

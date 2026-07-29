@@ -14,6 +14,9 @@
         <i class="pi pi-angle-left" aria-hidden="true"></i>
         <button type="button" (click)="store.goTo('line')">{{ line.name }}</button>
       </li>
+      <li *ngIf="store.selectedModel() as model">
+        <i class="pi pi-angle-left" aria-hidden="true"></i><span>{{ model.name }}</span>
+      </li>
       <li *ngIf="store.selectedStage() as stage" aria-current="page">
         <i class="pi pi-angle-left" aria-hidden="true"></i><span>{{ stage.name }}</span>
       </li>
@@ -62,8 +65,14 @@
       <app-readiness-node-card class="readiness-map__parent" [node]="line" nodeType="ProductionLine" [featured]="true" [interactive]="false"></app-readiness-node-card>
 
       <section class="readiness-map__level" *ngIf="!store.selectedStage()">
-        <header><div><span>داخل {{ line.name }}</span><h2>المراحل</h2></div><small>الموديلات أسماء سياقية وليست تشغيلًا يوميًا</small></header>
+        <header><div><span>داخل {{ line.name }}</span><h2>المراحل</h2></div><small>نطاق موديل مستقل عن بيانات الإنتاج اليومي</small></header>
         <div class="readiness-map__connector" aria-hidden="true"></div>
+        <app-readiness-model-selector *ngIf="line.models.length > 1"
+          [models]="line.models" [selectedModelId]="store.selectedModelId()"
+          (modelSelected)="store.selectModel($event)"></app-readiness-model-selector>
+        <div class="readiness-map__empty" *ngIf="line.models.length > 1 && !store.selectedModelId()">
+          <i class="pi pi-tags"></i><strong>اختر موديلًا لعرض مراحله</strong><span>لن تُجمع مراحل {{ line.models.length }} موديلات في نطاق تشغيلي واحد.</span>
+        </div>
         <div class="readiness-map__skeleton" *ngIf="store.loadingChildren() && !store.stages()" role="status" aria-label="جار تحميل المراحل"><span></span><span></span><span></span></div>
         <div class="readiness-map__error" *ngIf="store.childrenError() && !store.stages()" role="alert"><i class="pi pi-exclamation-triangle"></i><span>{{ store.childrenError() }}</span><button type="button" (click)="store.retryChildren()">إعادة المحاولة</button></div>
         <ng-container *ngIf="store.stages() as result">

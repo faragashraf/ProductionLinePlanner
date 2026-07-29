@@ -32,7 +32,7 @@ describe('FactoryReadinessStore', () => {
     store.openDepartment(department);
     store.openLine(line);
 
-    expect(api.loadStages).toHaveBeenCalledOnceWith('line-1');
+    expect(api.loadStages).toHaveBeenCalledOnceWith('line-1', 'model-1');
     expect(api.loadWorkers).not.toHaveBeenCalled();
     store.openStage(store.stages()!.stages[0]);
     expect(api.loadWorkers).toHaveBeenCalledOnceWith('line-1', 'stage-1');
@@ -46,6 +46,8 @@ describe('FactoryReadinessStore', () => {
     expect(store.visibleWorkers().map(worker => worker.workerId)).toEqual(['worker-2']);
     store.setWorkerFilter('absent');
     expect(store.visibleWorkers().map(worker => worker.workerId)).toEqual(['worker-3']);
+    store.setWorkerFilter('checkedOut');
+    expect(store.visibleWorkers().map(worker => worker.workerId)).toEqual(['worker-1']);
   });
 
   it('replaces absolute path metrics once when the same realtime event is delivered twice', () => {
@@ -88,7 +90,7 @@ describe('FactoryReadinessStore', () => {
 
     store.loadSnapshot(true);
 
-    expect(api.loadStages).toHaveBeenCalledOnceWith('line-1');
+    expect(api.loadStages).toHaveBeenCalledOnceWith('line-1', 'model-1');
     expect(api.loadWorkers).toHaveBeenCalledOnceWith('line-1', 'stage-1');
     expect(store.selectedStage()?.id).toBe('stage-1');
   });
@@ -102,6 +104,41 @@ describe('FactoryReadinessStore', () => {
 
     expect(store.snapshot()!.factories[0].metrics.operationalReadinessPercentage).toBeNull();
     expect(store.snapshot()!.factories[0].metrics.status).toBe('NoAssignments');
+  });
+
+  it('requires a model selection before loading stages for a multi-model line', () => {
+    const factory = store.snapshot()!.factories[0];
+    const department = factory.departments[0];
+    const line = department.productionLines[0];
+    line.models.push({ id: 'model-2', name: 'موديل ب', code: 'M2', stageCount: 8 });
+    api.loadStages.calls.reset();
+
+    store.openFactory(factory);
+    store.openDepartment(department);
+    store.openLine(line);
+    expect(api.loadStages).not.toHaveBeenCalled();
+
+    store.selectModel('model-2');
+    expect(api.loadStages).toHaveBeenCalledOnceWith('line-1', 'model-2');
+    expect(store.selectedModel()?.id).toBe('model-2');
+  });
+
+  it('keeps a multi-model line lazy after reconnect until a model is selected', () => {
+    const updated = snapshot();
+    const line = updated.factories[0].departments[0].productionLines[0];
+    line.models.push({ id: 'model-2', name: 'موديل ب', code: 'M2', stageCount: 8 });
+    api.loadSnapshot.and.returnValue(of(updated));
+
+    store.loadSnapshot();
+    store.openFactory(updated.factories[0]);
+    store.openDepartment(updated.factories[0].departments[0]);
+    store.openLine(line);
+    api.loadStages.calls.reset();
+
+    store.loadSnapshot(true);
+
+    expect(api.loadStages).not.toHaveBeenCalled();
+    expect(store.stages()).toBeNull();
   });
 });
 
@@ -125,10 +162,11 @@ function metrics(present = 6, assigned = 10, late = 1, absent = 3, checkedOut = 
 function snapshot(): OperationalReadinessSnapshot {
   return {
     operationalDate: '2026-07-29', calculatedAtUtc: '2026-07-29T07:00:00Z', attendanceSync: freshSync(),
-    workdayPolicy: { dayStartTime: '08:00:00', gracePeriodMinutes: 15, freshnessThresholdMinutes: 5 },
+    workdayPolicy: { workdayBoundaryTime: '05:00:00', dayStartTime: '08:00:00', gracePeriodMinutes: 15, freshnessThresholdMinutes: 5 },
     factories: [{ id: 'factory-1', name: 'المصنع', code: 'F', metrics: metrics(), departments: [{
       id: 'department-1', factoryId: 'factory-1', name: 'الخياطة', code: 'D', metrics: metrics(), productionLines: [{
-        id: 'line-1', factoryId: 'factory-1', departmentId: 'department-1', name: 'خط 1', code: 'L', metrics: metrics(), modelNames: ['موديل أ']
+        id: 'line-1', factoryId: 'factory-1', departmentId: 'department-1', name: 'خط 1', code: 'L', metrics: metrics(), modelNames: ['موديل أ'],
+        models: [{ id: 'model-1', name: 'موديل أ', code: 'M1', stageCount: 1 }]
       }]
     }] }]
   };
@@ -137,7 +175,7 @@ function snapshot(): OperationalReadinessSnapshot {
 function stages(): OperationalReadinessStages {
   return {
     operationalDate: '2026-07-29', calculatedAtUtc: '2026-07-29T07:00:00Z', attendanceSync: freshSync(), factoryId: 'factory-1', factoryName: 'المصنع',
-    departmentId: 'department-1', departmentName: 'الخياطة', productionLineId: 'line-1', productionLineName: 'خط 1', stages: [{
+    departmentId: 'department-1', departmentName: 'الخياطة', productionLineId: 'line-1', productionLineName: 'خط 1', selectedProductModelId: 'model-1', selectedProductModelName: 'موديل أ', requiresModelSelection: false, availableModels: [{ id: 'model-1', name: 'موديل أ', code: 'M1', stageCount: 1 }], stages: [{
       id: 'stage-1', factoryId: 'factory-1', departmentId: 'department-1', productionLineId: 'line-1', mainStageId: 'main-1', name: 'حياكة', code: 'S1', mainStageName: 'خياطة', metrics: metrics(), modelNames: ['موديل أ']
     }]
   };
@@ -147,7 +185,7 @@ function workers(): OperationalReadinessWorkers {
   return {
     operationalDate: '2026-07-29', calculatedAtUtc: '2026-07-29T07:00:00Z', attendanceSync: freshSync(), factoryId: 'factory-1', factoryName: 'المصنع', departmentId: 'department-1', departmentName: 'الخياطة', productionLineId: 'line-1', productionLineName: 'خط 1', stageId: 'stage-1', stageName: 'حياكة',
     workers: [
-      { workerId: 'worker-1', productionLineId: 'line-1', stageId: 'stage-1', employeeCode: 'W1', fullName: 'عامل حاضر', attendanceState: 'Present', attendanceLabel: 'حاضر', isOperationallyPresent: true, checkInAtUtc: '2026-07-29T05:00:00Z', checkOutAtUtc: null, lateByMinutes: null },
+      { workerId: 'worker-1', productionLineId: 'line-1', stageId: 'stage-1', employeeCode: 'W1', fullName: 'عامل حاضر', attendanceState: 'Present', attendanceLabel: 'حاضر', isOperationallyPresent: true, checkInAtUtc: '2026-07-29T05:00:00Z', checkOutAtUtc: '2026-07-29T09:00:00Z', lateByMinutes: null },
       { workerId: 'worker-2', productionLineId: 'line-1', stageId: 'stage-1', employeeCode: 'W2', fullName: 'عامل متأخر', attendanceState: 'Late', attendanceLabel: 'متأخر', isOperationallyPresent: true, checkInAtUtc: '2026-07-29T05:20:00Z', checkOutAtUtc: null, lateByMinutes: 5 },
       { workerId: 'worker-3', productionLineId: 'line-1', stageId: 'stage-1', employeeCode: 'W3', fullName: 'عامل غائب', attendanceState: 'Absent', attendanceLabel: 'غائب', isOperationallyPresent: false, checkInAtUtc: null, checkOutAtUtc: null, lateByMinutes: null }
     ]

@@ -1,4 +1,4 @@
 <aside class="sync" [class.sync--trusted]="sync.isTrusted && !realtimeDisconnected" role="status">
   <i class="pi" [ngClass]="sync.isTrusted && !realtimeDisconnected ? 'pi-cloud-upload' : 'pi-exclamation-triangle'" aria-hidden="true"></i>
-  <span><strong>{{ label }}</strong><small *ngIf="sync.lastSuccessfulAtUtc">آخر نجاح {{ sync.lastSuccessfulAtUtc | date:'yyyy/MM/dd، HH:mm' }}</small><small *ngIf="!sync.isTrusted">لا تُعرض حالات الغياب كحقيقة مؤكدة.</small></span>
+  <span><strong>{{ label }}</strong><small *ngIf="sync.lastSuccessfulAtUtc">آخر نجاح {{ sync.lastSuccessfulAtUtc | date:'yyyy/MM/dd، HH:mm' }}</small><small *ngIf="sync.status === 'RecordsAvailable'">وقت آخر مزامنة غير متاح؛ تم الاعتماد على سجلات حضور اليوم الموجودة.</small><small *ngIf="!sync.isTrusted">لا تُعرض حالات الغياب كحقيقة مؤكدة.</small></span>
 </aside>

@@ -1,7 +1,7 @@
-<section class="metrics" [attr.data-status]="metrics.status" title="الحاضرون حاليًا من العمال ذوي التسكين الدائم النشط">
+<section class="metrics" [attr.data-status]="metrics.status" title="من سجلوا حضورًا في يوم العمل من العمال ذوي التسكين الدائم النشط؛ الانصراف اللاحق لا يمحو اكتمال الحضور">
   <div class="metrics__headline">
     <strong>{{ percentageLabel }}</strong>
-    <span>الجاهزية التشغيلية الآن</span>
+    <span>اكتمال حضور تشغيل اليوم</span>
   </div>
   <div class="metrics__progress" *ngIf="metrics.operationalReadinessPercentage !== null"
        role="progressbar" aria-label="نسبة الجاهزية التشغيلية"

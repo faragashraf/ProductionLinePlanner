@@ -1,6 +1,6 @@
 <main class="factory-readiness" dir="rtl">
   <header class="factory-readiness__header">
-    <div><span>Factory → Departments → Lines → Stages → Workers</span><h1>جاهزية تشغيل المصنع الآن</h1><p>قراءة لحظية من التسكينات الدائمة والحضور الحالي؛ لا تعتمد على تسجيل الإنتاج اليومي.</p></div>
+    <div><span>Factory → Departments → Lines → Stages → Workers</span><h1>جاهزية تشغيل المصنع الآن</h1><p>اكتمال حضور يوم العمل من التسكينات الدائمة وسجلات الحضور المتزامنة؛ الانصراف اللاحق لا يمحو الحضور، ولا تعتمد الخريطة على تسجيل الإنتاج اليومي.</p></div>
     <small *ngIf="realtimeStatus$ | async as realtimeStatus">
       <i class="factory-readiness__realtime-dot" [ngClass]="realtimeClass(realtimeStatus)" aria-hidden="true"></i>
       <strong>{{ realtimeLabel(realtimeStatus) }}</strong>

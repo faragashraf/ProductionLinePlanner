@@ -34,6 +34,7 @@ public static class DependencyInjection
 
         var sourceName = attendanceSourceSection["SourceName"]?.Trim();
         var sourceMode = attendanceSourceSection["Mode"]?.Trim();
+        var workdayBoundaryTime = attendanceSourceSection["WorkdayBoundaryTime"];
         var dayStartTime = attendanceSourceSection["DayStartTime"];
         var lateThresholdMinutes = attendanceSourceSection["LateThresholdMinutes"];
         var freshnessThresholdMinutes = attendanceSourceSection["FreshnessThresholdMinutes"];
@@ -54,6 +55,7 @@ public static class DependencyInjection
             ConnectionString = attendanceConnectionString,
             Mode = AttendanceSourceOptions.ResolveMode(sourceMode),
             SourceName = string.IsNullOrWhiteSpace(sourceName) ? "AttendanceSync" : sourceName,
+            WorkdayBoundaryTime = TimeSpan.TryParse(workdayBoundaryTime, out var parsedWorkdayBoundary) ? parsedWorkdayBoundary : new TimeSpan(5, 0, 0),
             DayStartTime = TimeSpan.TryParse(dayStartTime, out var parsedDayStart) ? parsedDayStart : new TimeSpan(8, 0, 0),
             LateThresholdMinutes = int.TryParse(lateThresholdMinutes, out var parsedLateThreshold) ? parsedLateThreshold : 15,
             FreshnessThresholdMinutes = int.TryParse(freshnessThresholdMinutes, out var parsedFreshnessThreshold) ? Math.Clamp(parsedFreshnessThreshold, 1, 1440) : 5,
@@ -72,6 +74,7 @@ public static class DependencyInjection
 
         services.AddSingleton(Options.Create(attendanceSourceOptions));
         services.AddSingleton<ICairoTimeZoneProvider, CairoTimeZoneProvider>();
+        services.AddSingleton<IAttendanceWorkdayPolicy, AttendanceWorkdayPolicy>();
 
         services.AddScoped<IManufacturingDataChangePublisher, NoopManufacturingDataChangePublisher>();
         services.AddScoped<IManufacturingRealtimeCorrelationContext, NoopManufacturingRealtimeCorrelationContext>();
