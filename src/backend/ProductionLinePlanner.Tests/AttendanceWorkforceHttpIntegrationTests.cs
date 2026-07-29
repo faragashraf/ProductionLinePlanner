@@ -47,6 +47,9 @@ public sealed class AttendanceWorkforceHttpIntegrationTests
         Assert.True(listJson.RootElement.GetProperty("success").GetBoolean());
         Assert.Equal(JsonValueKind.Array, listJson.RootElement.GetProperty("data").GetProperty("items").ValueKind);
         Assert.Equal(1, listJson.RootElement.GetProperty("data").GetProperty("totalCount").GetInt32());
+        var row = listJson.RootElement.GetProperty("data").GetProperty("items")[0];
+        Assert.Equal(JsonValueKind.Null, row.GetProperty("firstCheckInUtc").ValueKind);
+        Assert.Equal(JsonValueKind.Null, row.GetProperty("lastCheckOutUtc").ValueKind);
 
         var detail = await fixture.GetAsync($"/api/attendance/workforce/workers/{fixture.WorkerId}/details?productionDate=2026-07-19", permissions);
         Assert.Equal(HttpStatusCode.OK, detail.StatusCode);

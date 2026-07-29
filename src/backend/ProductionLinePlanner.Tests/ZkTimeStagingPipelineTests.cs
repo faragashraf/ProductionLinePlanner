@@ -100,6 +100,64 @@ public sealed class ZkTimeStagingPipelineTests
     }
 
     [Fact]
+    public async Task Punch_type_aggregation_uses_the_first_in_and_last_out_without_inventing_a_checkout()
+    {
+        await using var fixture = await Fixture.CreateAsync(includeExistingWorker: false);
+        fixture.Source.AddWorkers(
+            Worker(1, 19, "19"),
+            Worker(2, 17189, "17189"),
+            Worker(3, 100, "100"),
+            Worker(4, 101, "101"),
+            Worker(5, 102, "102"),
+            Worker(6, 103, "103"),
+            Worker(7, 104, "104"),
+            Worker(8, 105, "105"),
+            Worker(9, 106, "106"),
+            Worker(10, 107, "107"));
+        fixture.Source.AddPunches(
+            Punch(101, 19, "19", 7, 56, "I", 47),
+            Punch(102, 19, "19", 7, 56, "I", 51),
+            Punch(103, 17189, "17189", 8, 1, "I", 13),
+            Punch(104, 17189, "17189", 9, 3, "I", 18),
+            Punch(105, 17189, "17189", 9, 3, "O", 45),
+            Punch(106, 100, "100", 8, 0, "I"),
+            Punch(107, 100, "100", 17, 0, "o"),
+            Punch(108, 101, "101", 8, 0, "I"),
+            Punch(109, 101, "101", 16, 0, "O"),
+            Punch(110, 101, "101", 17, 0, "O"),
+            Punch(111, 102, "102", 17, 0, "O"),
+            Punch(112, 103, "103", 8, 0, "X"),
+            Punch(113, 104, "104", 8, 0, "I"),
+            Punch(114, 105, "105", 8, 0, " "),
+            Punch(115, 106, "106", 8, 0, "I"),
+            Punch(116, 106, "106", 17, 0, "O"),
+            Punch(117, 107, "107", 8, 0, "i"),
+            Punch(118, 107, "107", 17, 0, "o"));
+
+        var result = await fixture.RunAsync();
+
+        Assert.True(result.IsSuccess, result.Error?.Message);
+        await using var db = fixture.CreateDbContext();
+        var records = await db.AttendanceRecords.AsNoTracking().ToArrayAsync();
+
+        AssertWindow(records, 19, "2026-07-16T04:56:47Z", null);
+        AssertWindow(records, 17189, "2026-07-16T05:01:13Z", "2026-07-16T06:03:45Z");
+        AssertWindow(records, 100, "2026-07-16T05:00:00Z", "2026-07-16T14:00:00Z");
+        AssertWindow(records, 101, "2026-07-16T05:00:00Z", "2026-07-16T14:00:00Z");
+        AssertWindow(records, 104, "2026-07-16T05:00:00Z", null);
+        AssertWindow(records, 106, "2026-07-16T05:00:00Z", "2026-07-16T14:00:00Z");
+        AssertWindow(records, 107, "2026-07-16T05:00:00Z", "2026-07-16T14:00:00Z");
+
+        var outOnlyWorker = await db.Workers.SingleAsync(worker => worker.AttendanceUserId == "102");
+        var outOnlyRecord = Assert.Single(records, record => record.WorkerId == outOnlyWorker.Id);
+        Assert.Equal(AttendanceStatus.Absent, outOnlyRecord.AttendanceStatus);
+        Assert.Null(outOnlyRecord.SourcePayload);
+        Assert.Contains(111, fixture.Source.ProcessedPunchIds);
+        Assert.Contains(112, fixture.Source.FailedPunchIds);
+        Assert.Contains(114, fixture.Source.FailedPunchIds);
+    }
+
+    [Fact]
     public async Task Unresolved_punch_is_retried_without_blocking_batch_and_can_be_processed_after_worker_arrives()
     {
         await using var fixture = await Fixture.CreateAsync(includeExistingWorker: false);
@@ -344,8 +402,24 @@ public sealed class ZkTimeStagingPipelineTests
             userId.ToString(), isCurrentWorker ? 1 : 2, badge, name ?? $"Worker {badge}", isCurrentWorker, badge,
             SourceDefaultDepartmentId: isCurrentWorker ? 1 : 2, IsCurrentWorker: isCurrentWorker), true);
 
-    private static AttendanceSourcePunch Punch(long id, int userId, string badge, int hour, int minute, string checkType) =>
-        new(id, userId, badge, new DateTime(2026, 7, 16, hour, minute, 0, DateTimeKind.Unspecified), checkType, $"source-{id}");
+    private static void AssertWindow(IReadOnlyCollection<AttendanceRecord> records, int attendanceUserId, string firstInUtc, string? lastOutUtc)
+    {
+        var record = records.Single(item => item.AttendanceUserId == attendanceUserId.ToString());
+        using var payload = JsonDocument.Parse(record.SourcePayload!);
+        Assert.Equal(firstInUtc, payload.RootElement.GetProperty("FirstInUtc").GetDateTime().ToString("yyyy-MM-ddTHH:mm:ss'Z'"));
+        var lastOut = payload.RootElement.GetProperty("LastOutUtc");
+        if (lastOutUtc is null)
+        {
+            Assert.Equal(JsonValueKind.Null, lastOut.ValueKind);
+        }
+        else
+        {
+            Assert.Equal(lastOutUtc, lastOut.GetDateTime().ToString("yyyy-MM-ddTHH:mm:ss'Z'"));
+        }
+    }
+
+    private static AttendanceSourcePunch Punch(long id, int userId, string badge, int hour, int minute, string checkType, int second = 0) =>
+        new(id, userId, badge, new DateTime(2026, 7, 16, hour, minute, second, DateTimeKind.Unspecified), checkType, $"source-{id}");
 
     private sealed class Fixture : IAsyncDisposable
     {

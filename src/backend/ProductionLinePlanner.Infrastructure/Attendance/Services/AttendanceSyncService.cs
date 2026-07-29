@@ -533,13 +533,14 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
                 WorkerUserId = NormalizeSourceIdentity(x.UserId)!,
                 x.CheckTimeLocal,
                 CheckTimeUtc = ToUtcFromEgyptSourceTime(x.CheckTimeLocal),
+                CheckType = GetPunchType(x.CheckType)!.Value,
                 RawSourceIdentifier = x.SourceRawId,
                 x.SourceRecordId
             })
             .Where(x => !string.IsNullOrWhiteSpace(x.WorkerUserId))
             .ToList();
 
-        var matchedByWorker = new Dictionary<Guid, (DateTime FirstIn, DateTime LastOut, string SourceRawId)>();
+        var matchedByWorker = new Dictionary<Guid, AttendanceWindow>();
         var unmatchedSourceUsers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var processingOutcomes = sourceCheckIns
             .Where(punch => punch.SourceRecordId.HasValue)
@@ -599,10 +600,29 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
                 processingOutcomes[item.SourceRecordId.Value] = SourceProcessingOutcome.Processed(item.SourceRecordId.Value);
             }
 
-            if (!matchedByWorker.TryGetValue(workerId, out var window))
-                matchedByWorker[workerId] = (item.CheckTimeUtc, item.CheckTimeUtc, item.RawSourceIdentifier);
-            else if (item.CheckTimeUtc > window.LastOut)
-                matchedByWorker[workerId] = (window.FirstIn, item.CheckTimeUtc, window.SourceRawId);
+            if (item.CheckType == PunchType.In)
+            {
+                if (!matchedByWorker.TryGetValue(workerId, out var window))
+                {
+                    matchedByWorker[workerId] = new AttendanceWindow(item.CheckTimeUtc, null, item.RawSourceIdentifier);
+                }
+                else if (item.CheckTimeUtc < window.FirstInUtc)
+                {
+                    matchedByWorker[workerId] = window with
+                    {
+                        FirstInUtc = item.CheckTimeUtc,
+                        SourceRawId = item.RawSourceIdentifier,
+                        LastOutUtc = window.LastOutUtc is { } lastOut && lastOut > item.CheckTimeUtc ? lastOut : null
+                    };
+                }
+            }
+            else if (matchedByWorker.TryGetValue(workerId, out var window) && item.CheckTimeUtc > window.FirstInUtc)
+            {
+                if (!window.LastOutUtc.HasValue || item.CheckTimeUtc > window.LastOutUtc.Value)
+                {
+                    matchedByWorker[workerId] = window with { LastOutUtc = item.CheckTimeUtc };
+                }
+            }
         }
 
         var matchedWorkersCount = matchedByWorker.Count;
@@ -633,13 +653,13 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
 
             if (matchedByWorker.TryGetValue(worker.Id, out var match))
             {
-                statusTime = match.FirstIn;
-                status = CalculateStatus(match.FirstIn, startLocal);
+                statusTime = match.FirstInUtc;
+                status = CalculateStatus(match.FirstInUtc, startLocal);
                 sourceRawId = match.SourceRawId;
                 sourcePayload = JsonSerializer.Serialize(new
                 {
-                    FirstInUtc = match.FirstIn,
-                    LastOutUtc = match.LastOut > match.FirstIn ? match.LastOut : (DateTime?)null
+                    FirstInUtc = match.FirstInUtc,
+                    LastOutUtc = match.LastOutUtc
                 });
             }
 
@@ -661,10 +681,10 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
                 _appDbContext.AttendanceRecords.Add(record);
                 if (matchedByWorker.TryGetValue(worker.Id, out var insertedMatch))
                 {
-                    QueueAttendanceNotification(record, worker, WorkerAttendanceNotificationType.CheckIn, insertedMatch.FirstIn);
-                    if (insertedMatch.LastOut > insertedMatch.FirstIn)
+                    QueueAttendanceNotification(record, worker, WorkerAttendanceNotificationType.CheckIn, insertedMatch.FirstInUtc);
+                    if (insertedMatch.LastOutUtc.HasValue)
                     {
-                        QueueAttendanceNotification(record, worker, WorkerAttendanceNotificationType.CheckOut, insertedMatch.LastOut);
+                        QueueAttendanceNotification(record, worker, WorkerAttendanceNotificationType.CheckOut, insertedMatch.LastOutUtc.Value);
                     }
                 }
                 insertCount++;
@@ -691,11 +711,11 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
             {
                 if (previousWindow.FirstInUtc is null)
                 {
-                    QueueAttendanceNotification(existing, worker, WorkerAttendanceNotificationType.CheckIn, updatedMatch.FirstIn);
+                    QueueAttendanceNotification(existing, worker, WorkerAttendanceNotificationType.CheckIn, updatedMatch.FirstInUtc);
                 }
-                if (updatedMatch.LastOut > updatedMatch.FirstIn && previousWindow.LastOutUtc is null)
+                if (updatedMatch.LastOutUtc.HasValue && previousWindow.LastOutUtc is null)
                 {
-                    QueueAttendanceNotification(existing, worker, WorkerAttendanceNotificationType.CheckOut, updatedMatch.LastOut);
+                    QueueAttendanceNotification(existing, worker, WorkerAttendanceNotificationType.CheckOut, updatedMatch.LastOutUtc.Value);
                 }
             }
             updateCount++;
@@ -971,6 +991,11 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
             return "InvalidCheckType";
         }
 
+        if (GetPunchType(punch.CheckType) is null)
+        {
+            return "UnsupportedCheckType";
+        }
+
         return string.IsNullOrWhiteSpace(punch.SourceRawId) ? "InvalidSourcePayload" : null;
     }
 
@@ -980,6 +1005,14 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
         Resolved,
         Ambiguous
     }
+
+    private enum PunchType
+    {
+        In,
+        Out
+    }
+
+    private sealed record AttendanceWindow(DateTime FirstInUtc, DateTime? LastOutUtc, string SourceRawId);
 
     private AttendanceStatus CalculateStatus(DateTime checkTimeUtc, DateTime productionStartLocal)
     {
@@ -1024,6 +1057,13 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
             startLocal,
             endLocal);
     }
+
+    private static PunchType? GetPunchType(string? checkType) => checkType?.Trim() switch
+    {
+        var value when string.Equals(value, "I", StringComparison.OrdinalIgnoreCase) => PunchType.In,
+        var value when string.Equals(value, "O", StringComparison.OrdinalIgnoreCase) => PunchType.Out,
+        _ => null
+    };
 
     private DateTime ToUtcFromEgyptSourceTime(DateTime sourceTime)
     {
