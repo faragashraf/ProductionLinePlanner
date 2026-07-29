@@ -110,6 +110,56 @@ public sealed class EmployeeMasterDataServiceTests
     }
 
     [Fact]
+    public async Task GetWorkerAsync_returns_only_active_permanent_assignments_with_full_structure()
+    {
+        await using var fixture = await EmployeeMasterDataFixture.CreateAsync();
+        var factory = new Factory(Guid.NewGuid(), "مصنع الاختبار", "F-1");
+        var department = new Department(Guid.NewGuid(), factory.Id, "D-1", "قسم التشغيل", null, 1);
+        var line = new ProductionLine(Guid.NewGuid(), factory.Id, "خط 1", 1, departmentId: department.Id);
+        var mainStage = new MainStage(Guid.NewGuid(), department.Id, "التجهيز", 1);
+        var activeStage = new SubStage(Guid.NewGuid(), mainStage.Id, "القص", "S-1", 5, 1, departmentId: department.Id);
+        var endedStage = new SubStage(Guid.NewGuid(), mainStage.Id, "مرحلة قديمة", "S-2", 5, 2, departmentId: department.Id);
+        var assignedAt = new DateTime(2026, 7, 20, 8, 0, 0, DateTimeKind.Utc);
+        fixture.DbContext.AddRange(factory, department, line, mainStage, activeStage, endedStage);
+        fixture.DbContext.WorkerDefaultAssignments.AddRange(
+            new WorkerDefaultAssignment(Guid.NewGuid(), fixture.Workers[0].Id, activeStage.Id, fixture.ActorUserId, assignedAt, productionLineId: line.Id),
+            new WorkerDefaultAssignment(Guid.NewGuid(), fixture.Workers[0].Id, endedStage.Id, fixture.ActorUserId, assignedAt.AddDays(-10), isActive: false, productionLineId: line.Id));
+        await fixture.DbContext.SaveChangesAsync();
+
+        var restricted = await fixture.Service.GetWorkerAsync(fixture.Workers[0].Id);
+        var result = await fixture.Service.GetWorkerAsync(fixture.Workers[0].Id, includePermanentAssignments: true);
+
+        Assert.True(result.IsSuccess);
+        Assert.Empty(restricted.Value!.PermanentAssignments);
+        Assert.Null(restricted.Value.DefaultSubStageId);
+        var assignment = Assert.Single(result.Value!.PermanentAssignments);
+        Assert.Equal(activeStage.Id, result.Value.DefaultSubStageId);
+        Assert.Equal("مصنع الاختبار", assignment.FactoryName);
+        Assert.Equal("خط 1", assignment.ProductionLineName);
+        Assert.Equal("قسم التشغيل", assignment.DepartmentName);
+        Assert.Equal("التجهيز", assignment.MainStageName);
+        Assert.Equal("القص", assignment.SubStageName);
+        Assert.Equal(assignedAt, assignment.AssignedAtUtc);
+    }
+
+    [Fact]
+    public async Task GetWorkerAsync_returns_explicit_empty_permanent_assignment_and_nullable_metadata()
+    {
+        await using var fixture = await EmployeeMasterDataFixture.CreateAsync();
+
+        var result = await fixture.Service.GetWorkerAsync(fixture.Workers[0].Id);
+
+        Assert.True(result.IsSuccess);
+        Assert.Empty(result.Value!.PermanentAssignments);
+        Assert.Null(result.Value.DefaultSubStageId);
+        Assert.Null(result.Value.BadgeNumber);
+        Assert.Null(result.Value.PhotoReference);
+        Assert.False(result.Value.HasPhoto);
+        Assert.NotEqual(default, result.Value.CreatedAtUtc);
+        Assert.NotEqual(default, result.Value.UpdatedAtUtc);
+    }
+
+    [Fact]
     public async Task GetWorkerAsync_returns_not_found()
     {
         await using var fixture = await EmployeeMasterDataFixture.CreateAsync();

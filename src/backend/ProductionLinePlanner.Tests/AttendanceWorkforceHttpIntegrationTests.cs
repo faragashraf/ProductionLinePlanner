@@ -59,6 +59,38 @@ public sealed class AttendanceWorkforceHttpIntegrationTests
     }
 
     [Fact]
+    public async Task Worker_profile_summary_requires_only_attendance_view_and_returns_lightweight_attendance_data()
+    {
+        await using var fixture = await AttendanceFixture.CreateAsync();
+        var path = $"/api/attendance/workforce/workers/{fixture.WorkerId}/summary?productionDate=2026-07-19";
+
+        Assert.Equal(HttpStatusCode.Forbidden, (await fixture.GetAsync(path, ["workers.view"])).StatusCode);
+        var response = await fixture.GetAsync(path, ["attendance.view"]);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var data = json.RootElement.GetProperty("data");
+        Assert.Equal("Present", data.GetProperty("todayStatus").GetString());
+        Assert.Equal(fixture.WorkerId, data.GetProperty("workerId").GetGuid());
+        Assert.False(data.TryGetProperty("assignments", out _));
+    }
+
+    [Fact]
+    public async Task Worker_attendance_history_requires_attendance_view_and_forwards_server_pagination()
+    {
+        await using var fixture = await AttendanceFixture.CreateAsync();
+        var path = $"/api/workers/{fixture.WorkerId}/attendance-records?fromDate=2026-07-01&toDate=2026-07-29&page=2&pageSize=10";
+
+        Assert.Equal(HttpStatusCode.Forbidden, (await fixture.GetAsync(path, ["workers.view"])).StatusCode);
+        var response = await fixture.GetAsync(path, ["attendance.view"]);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal(fixture.WorkerId, json.RootElement.GetProperty("data").GetProperty("workerId").GetGuid());
+        Assert.Equal(2, json.RootElement.GetProperty("data").GetProperty("page").GetInt32());
+    }
+
+    [Fact]
     public async Task Manual_sync_requires_attendance_sync_and_invokes_the_existing_engine_when_authorized()
     {
         await using var fixture = await AttendanceFixture.CreateAsync();
@@ -99,6 +131,7 @@ public sealed class AttendanceWorkforceHttpIntegrationTests
             app.UseAuthentication();
             app.UseAuthorization();
             app.MapGroup("/api/attendance").RequireAuthorization().MapAttendanceWorkforceEndpoints();
+            app.MapGroup("/api/workers").RequireAuthorization().MapWorkerAttendanceHistoryEndpoints();
             await app.StartAsync();
             return new AttendanceFixture(app, app.GetTestClient(), workerId, attendanceEngine);
         }
@@ -125,6 +158,10 @@ public sealed class AttendanceWorkforceHttpIntegrationTests
         }
         public Task<Result<AttendanceWorkforceDetailDto>> GetWorkerDetailAsync(Guid id, DateOnly productionDate, CancellationToken cancellationToken = default) =>
             Task.FromResult(Result<AttendanceWorkforceDetailDto>.Success(new AttendanceWorkforceDetailDto(id, productionDate, [], [])));
+        public Task<Result<WorkerAttendanceProfileSummaryDto>> GetWorkerProfileSummaryAsync(Guid id, DateOnly productionDate, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Result<WorkerAttendanceProfileSummaryDto>.Success(new WorkerAttendanceProfileSummaryDto(id, productionDate, "Present", true, DateTime.UtcNow, DateTime.UtcNow, DateTime.UtcNow)));
+        public Task<Result<WorkerAttendanceHistoryPageDto>> GetWorkerAttendanceHistoryAsync(Guid id, WorkerAttendanceHistoryQuery query, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Result<WorkerAttendanceHistoryPageDto>.Success(new WorkerAttendanceHistoryPageDto(id, query.FromDate, query.ToDate, [], query.Page, query.PageSize, 0, 1)));
     }
 
     public sealed class AttendanceEngineStub : IAttendanceEngine

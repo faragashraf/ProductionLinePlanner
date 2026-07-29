@@ -18,6 +18,8 @@ public sealed class AttendanceWorkforceEngine(
     ICairoTimeZoneProvider cairoTimeZoneProvider) : IAttendanceWorkforceEngine
 {
     private const int ResolveBatchSize = 100;
+    private const int MaximumHistoryPageSize = 100;
+    private const int MaximumHistoryRangeDays = 366;
 
     public async Task<Result<AttendanceWorkforcePageDto>> GetPageAsync(AttendanceWorkforceQuery query, CancellationToken cancellationToken = default)
     {
@@ -194,6 +196,107 @@ public sealed class AttendanceWorkforceEngine(
         return Result<AttendanceWorkforceDetailDto>.Success(new AttendanceWorkforceDetailDto(workerId, productionDate, MapAttendanceEvidence(attendanceRecords), MapAssignments(states, stages)));
     }
 
+    public async Task<Result<WorkerAttendanceProfileSummaryDto>> GetWorkerProfileSummaryAsync(
+        Guid workerId,
+        DateOnly productionDate,
+        CancellationToken cancellationToken = default)
+    {
+        var exists = await dbContext.Workers.AsNoTracking()
+            .AnyAsync(worker => worker.Id == workerId, cancellationToken);
+        if (!exists)
+            return Result<WorkerAttendanceProfileSummaryDto>.Failure(new Error("NotFound", "Worker not found."));
+
+        var (startUtc, endUtc) = GetDayBounds(productionDate);
+        var dataAvailableForDate = await dbContext.AttendanceRecords.AsNoTracking()
+            .AnyAsync(record => record.AttendanceTimeUtc >= startUtc && record.AttendanceTimeUtc < endUtc, cancellationToken);
+        var presence = await attendanceEngine.GetPresenceWindowsByWorkerAsync([workerId], productionDate, cancellationToken);
+        if (presence.IsFailure)
+            return Result<WorkerAttendanceProfileSummaryDto>.Failure(presence.Error!);
+
+        var today = presence.Value!.GetValueOrDefault(workerId);
+        var latest = await dbContext.AttendanceRecords.AsNoTracking()
+            .Where(record => record.WorkerId == workerId)
+            .OrderByDescending(record => record.AttendanceTimeUtc)
+            .ThenByDescending(record => record.CreatedAtUtc)
+            .Select(record => new AttendanceEvidence(record.AttendanceTimeUtc, record.SourcePayload))
+            .FirstOrDefaultAsync(cancellationToken);
+        var todayStatus = !dataAvailableForDate
+            ? "NeedsSync"
+            : today is null
+                ? "NoMovement"
+                : today.Status switch
+                {
+                    AttendanceStatus.Present => today.LastOutUtc.HasValue ? "Present" : "Incomplete",
+                    AttendanceStatus.Late => today.LastOutUtc.HasValue ? "Late" : "Incomplete",
+                    AttendanceStatus.Absent => "Absent",
+                    _ => "NoMovement"
+                };
+
+        return Result<WorkerAttendanceProfileSummaryDto>.Success(new WorkerAttendanceProfileSummaryDto(
+            workerId,
+            productionDate,
+            todayStatus,
+            dataAvailableForDate,
+            EnsureUtc(today?.FirstInUtc),
+            EnsureUtc(today?.LastOutUtc),
+            latest is null ? null : LatestMovementUtc(latest)));
+    }
+
+    public async Task<Result<WorkerAttendanceHistoryPageDto>> GetWorkerAttendanceHistoryAsync(
+        Guid workerId,
+        WorkerAttendanceHistoryQuery query,
+        CancellationToken cancellationToken = default)
+    {
+        if (workerId == Guid.Empty)
+            return Result<WorkerAttendanceHistoryPageDto>.Failure(new Error("ValidationError", "WorkerId is required."));
+        if (query.FromDate > query.ToDate)
+            return Result<WorkerAttendanceHistoryPageDto>.Failure(new Error("ValidationError", "FromDate cannot be after ToDate."));
+        if (query.ToDate.DayNumber - query.FromDate.DayNumber + 1 > MaximumHistoryRangeDays)
+            return Result<WorkerAttendanceHistoryPageDto>.Failure(new Error("ValidationError", $"Attendance history range cannot exceed {MaximumHistoryRangeDays} days."));
+        if (query.Page < 1 || query.PageSize < 1 || query.PageSize > MaximumHistoryPageSize)
+            return Result<WorkerAttendanceHistoryPageDto>.Failure(new Error("ValidationError", $"Page must be positive and PageSize must be between 1 and {MaximumHistoryPageSize}."));
+        if (!string.Equals(query.SortDirection, "asc", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(query.SortDirection, "desc", StringComparison.OrdinalIgnoreCase))
+            return Result<WorkerAttendanceHistoryPageDto>.Failure(new Error("ValidationError", "SortDirection must be asc or desc."));
+
+        var exists = await dbContext.Workers.AsNoTracking()
+            .AnyAsync(worker => worker.Id == workerId, cancellationToken);
+        if (!exists)
+            return Result<WorkerAttendanceHistoryPageDto>.Failure(new Error("NotFound", "Worker not found."));
+
+        var (startUtc, _) = GetDayBounds(query.FromDate);
+        var (endUtc, _) = GetDayBounds(query.ToDate.AddDays(1));
+        var recordsQuery = dbContext.AttendanceRecords.AsNoTracking()
+            .Where(record => record.WorkerId == workerId &&
+                record.AttendanceTimeUtc >= startUtc && record.AttendanceTimeUtc < endUtc &&
+                (record.AttendanceStatus == AttendanceStatus.Present || record.AttendanceStatus == AttendanceStatus.Late));
+        var totalCount = await recordsQuery.CountAsync(cancellationToken);
+        var descending = string.Equals(query.SortDirection, "desc", StringComparison.OrdinalIgnoreCase);
+        var ordered = descending
+            ? recordsQuery.OrderByDescending(record => record.AttendanceTimeUtc).ThenByDescending(record => record.Id)
+            : recordsQuery.OrderBy(record => record.AttendanceTimeUtc).ThenBy(record => record.Id);
+        var records = await ordered
+            .Skip((query.Page - 1) * query.PageSize)
+            .Take(query.PageSize)
+            .Select(record => new AttendanceHistoryEvidence(
+                record.Id,
+                record.AttendanceTimeUtc,
+                record.AttendanceStatus,
+                record.Source,
+                record.SourcePayload))
+            .ToArrayAsync(cancellationToken);
+        var items = records.Select(MapHistoryRecord).ToArray();
+        return Result<WorkerAttendanceHistoryPageDto>.Success(new(
+            workerId,
+            query.FromDate,
+            query.ToDate,
+            items,
+            query.Page,
+            query.PageSize,
+            totalCount,
+            Math.Max(1, (int)Math.Ceiling(totalCount / (double)query.PageSize))));
+    }
+
     private AttendanceWorkforceRowDto MapRow(WorkerHeader worker, IReadOnlyCollection<WorkerAssignmentState> states, IReadOnlyDictionary<(Guid SubStageId, Guid ProductionLineId), StageHeader> stages, AttendancePresenceWindowDto? attendance, bool dataAvailable)
     {
         var status = !dataAvailable ? "NeedsSync" : attendance is null ? "Unassigned" : attendance.Status switch
@@ -344,11 +447,69 @@ public sealed class AttendanceWorkforceEngine(
             .ToArray();
     }
 
+    private WorkerAttendanceHistoryRecordDto MapHistoryRecord(AttendanceHistoryEvidence record)
+    {
+        var firstInUtc = EnsureUtc(record.AttendanceTimeUtc);
+        DateTime? lastOutUtc = null;
+        if (!string.IsNullOrWhiteSpace(record.SourcePayload))
+        {
+            try
+            {
+                using var json = JsonDocument.Parse(record.SourcePayload);
+                if (json.RootElement.TryGetProperty("FirstInUtc", out var first) && first.TryGetDateTime(out var parsedFirst))
+                    firstInUtc = EnsureUtc(parsedFirst);
+                if (json.RootElement.TryGetProperty("LastOutUtc", out var last) && last.ValueKind != JsonValueKind.Null && last.TryGetDateTime(out var parsedLast))
+                    lastOutUtc = EnsureUtc(parsedLast);
+            }
+            catch (JsonException)
+            {
+                // Legacy records retain their explicit attendance timestamp as check-in evidence.
+            }
+        }
+
+        var movements = new List<WorkerAttendanceHistoryMovementDto>
+        {
+            new(firstInUtc, "In")
+        };
+        if (lastOutUtc.HasValue && lastOutUtc.Value != firstInUtc)
+            movements.Add(new(lastOutUtc.Value, "Out"));
+        var localDate = DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(firstInUtc, cairoTimeZoneProvider.TimeZone));
+        return new(record.RecordId, localDate, record.AttendanceStatus, record.Source, movements);
+    }
+
     private static DateTime EnsureUtc(DateTime value) => value.Kind == DateTimeKind.Utc
         ? value
         : DateTime.SpecifyKind(value, DateTimeKind.Utc);
 
+    private static DateTime? EnsureUtc(DateTime? value) => value.HasValue ? EnsureUtc(value.Value) : null;
+
+    private static DateTime LatestMovementUtc(AttendanceEvidence evidence)
+    {
+        var latest = EnsureUtc(evidence.AttendanceTimeUtc);
+        if (string.IsNullOrWhiteSpace(evidence.SourcePayload)) return latest;
+        try
+        {
+            using var json = JsonDocument.Parse(evidence.SourcePayload);
+            if (json.RootElement.TryGetProperty("FirstInUtc", out var first) && first.TryGetDateTime(out var firstValue))
+                latest = MaxUtc(latest, firstValue);
+            if (json.RootElement.TryGetProperty("LastOutUtc", out var last) && last.ValueKind != JsonValueKind.Null && last.TryGetDateTime(out var lastValue))
+                latest = MaxUtc(latest, lastValue);
+        }
+        catch (JsonException)
+        {
+            // The persisted UTC attendance timestamp remains valid legacy evidence.
+        }
+        return latest;
+    }
+
+    private static DateTime MaxUtc(DateTime first, DateTime second)
+    {
+        var normalizedSecond = EnsureUtc(second);
+        return normalizedSecond > first ? normalizedSecond : first;
+    }
+
     private sealed record WorkerHeader(Guid Id, string EmployeeCode, string FullName, string? DepartmentName, string? PhotoReference);
     private sealed record StageHeader(Guid Id, string Name, Guid MainStageId, string MainStageName, Guid LineId, string LineName, Guid FactoryId, string FactoryName);
     private sealed record AttendanceEvidence(DateTime AttendanceTimeUtc, string? SourcePayload);
+    private sealed record AttendanceHistoryEvidence(Guid RecordId, DateTime AttendanceTimeUtc, AttendanceStatus AttendanceStatus, string? Source, string? SourcePayload);
 }

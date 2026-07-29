@@ -116,6 +116,25 @@ public sealed class WorkerDepartmentAssignmentEngineTests
         Assert.Equal(fixture.Department.Id, (await fixture.Db.Workers.SingleAsync()).OrganizationalDepartmentId);
     }
 
+    [Fact]
+    public async Task Inactive_worker_is_rejected_without_touching_attendance_or_production_assignments()
+    {
+        await using var fixture = await Fixture.CreateAsync(workerActive: false);
+
+        var result = await fixture.Engine.AssignAsync(
+            fixture.Worker.Id,
+            fixture.Department.Id,
+            fixture.OriginalConcurrencyToken,
+            fixture.ActorUserId);
+
+        Assert.Equal("ValidationError", result.Error?.Code);
+        var worker = await fixture.Db.Workers.AsNoTracking().SingleAsync();
+        Assert.Null(worker.OrganizationalDepartmentId);
+        Assert.Equal(7, worker.AttendanceDepartmentId);
+        Assert.Single(await fixture.Db.WorkerDefaultAssignments.AsNoTracking().ToArrayAsync());
+        Assert.Empty(await fixture.Db.WorkerTemporaryAssignments.AsNoTracking().ToArrayAsync());
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private Fixture(AppDbContext db, Guid actorUserId, Factory factory, Department department, Worker worker, IReadOnlyCollection<string> permissions)
@@ -137,7 +156,7 @@ public sealed class WorkerDepartmentAssignmentEngineTests
         public Worker Worker { get; }
         public Guid OriginalConcurrencyToken { get; }
 
-        public static async Task<Fixture> CreateAsync(bool departmentActive = true, IReadOnlyCollection<string>? permissions = null)
+        public static async Task<Fixture> CreateAsync(bool departmentActive = true, IReadOnlyCollection<string>? permissions = null, bool workerActive = true)
         {
             var options = new DbContextOptionsBuilder<AppDbContext>()
                 .UseInMemoryDatabase(Guid.NewGuid().ToString())
@@ -146,7 +165,9 @@ public sealed class WorkerDepartmentAssignmentEngineTests
             var actor = Guid.NewGuid();
             var factory = new Factory(Guid.NewGuid(), "Factory", "F-001");
             var department = new Department(Guid.NewGuid(), factory.Id, "D-001", "قسم التشغيل", null, 1, departmentActive);
-            var worker = new Worker(Guid.NewGuid(), "W-001", "اسم محلي", "zk-1", "B-1", attendanceDepartmentId: 7);
+            var worker = new Worker(Guid.NewGuid(), "W-001", "اسم محلي", "zk-1", "B-1", isActive: workerActive,
+                employmentStatus: workerActive ? ProductionLinePlanner.Domain.Enums.EmploymentStatus.Active : ProductionLinePlanner.Domain.Enums.EmploymentStatus.LeftEmployment,
+                attendanceDepartmentId: 7);
             worker.SetLocalDepartmentName("Planner import label");
             var stage = new SubStage(Guid.NewGuid(), Guid.NewGuid(), "Stage", "S-001", 1, 1, departmentId: Guid.NewGuid());
             var assignment = new WorkerDefaultAssignment(Guid.NewGuid(), worker.Id, stage.Id, actor, DateTime.UtcNow, productionLineId: Guid.NewGuid());

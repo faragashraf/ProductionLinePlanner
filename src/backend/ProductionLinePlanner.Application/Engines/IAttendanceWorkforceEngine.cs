@@ -7,4 +7,6 @@ public interface IAttendanceWorkforceEngine
 {
     Task<Result<AttendanceWorkforcePageDto>> GetPageAsync(AttendanceWorkforceQuery query, CancellationToken cancellationToken = default);
     Task<Result<AttendanceWorkforceDetailDto>> GetWorkerDetailAsync(Guid workerId, DateOnly productionDate, CancellationToken cancellationToken = default);
+    Task<Result<WorkerAttendanceProfileSummaryDto>> GetWorkerProfileSummaryAsync(Guid workerId, DateOnly productionDate, CancellationToken cancellationToken = default);
+    Task<Result<WorkerAttendanceHistoryPageDto>> GetWorkerAttendanceHistoryAsync(Guid workerId, WorkerAttendanceHistoryQuery query, CancellationToken cancellationToken = default);
 }

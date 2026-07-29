@@ -1,6 +1,6 @@
 import { Component, OnDestroy, OnInit, Optional } from '@angular/core';
-import { MenuItem, MessageService } from 'primeng/api';
-import { Menu } from 'primeng/menu';
+import { MessageService } from 'primeng/api';
+import { OverlayPanel } from 'primeng/overlaypanel';
 import { Router } from '@angular/router';
 import { PermissionService } from '../../core/services/permission.service';
 import { PERMISSIONS } from '../../core/config/permission-identifiers';
@@ -21,6 +21,7 @@ import {
 import { ManufacturingDataChanged } from '../../core/models/realtime-notification.models';
 import {
   assignmentStatusPresentation,
+  localEmploymentStatusPresentation,
   localProfileStatusPresentation,
   sourceLinkStatusPresentation
 } from './worker-management.presentation';
@@ -41,9 +42,11 @@ export class WorkersPageComponent implements OnInit, OnDestroy {
   private readonly destroy$ = new Subject<void>();
   private readonly load$ = new Subject<WorkerManagementQuery>();
   private readonly search$ = new Subject<string>();
+  private readonly profileRequestCancel$ = new Subject<void>();
   private readonly storageKey = 'plp.worker-management.filters.v1';
   private loadSequence = 0;
   private stopRealtime?: () => void;
+  workerActionTarget: WorkerManagementListItem | null = null;
 
   readonly permissions = PERMISSIONS;
   readonly employmentStatuses = [
@@ -68,6 +71,7 @@ export class WorkersPageComponent implements OnInit, OnDestroy {
   profileLoading = false;
   profileError = '';
   selectedProfile: WorkerManagementProfile | null = null;
+  selectedProfileWorkerId = '';
   departmentDialogVisible = false;
   departmentOptionsLoading = false;
   departmentSaving = false;
@@ -76,7 +80,6 @@ export class WorkersPageComponent implements OnInit, OnDestroy {
   selectedDepartmentId = '';
   selectedDepartmentWorker: WorkerManagementListItem | null = null;
   departmentOptions: WorkerDepartmentOption[] = [];
-  workerActionItems: MenuItem[] = [];
 
   constructor(
     private readonly facade: WorkerManagementFacade,
@@ -132,6 +135,8 @@ export class WorkersPageComponent implements OnInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.stopRealtime?.();
+    this.profileRequestCancel$.next();
+    this.profileRequestCancel$.complete();
     this.destroy$.next();
     this.destroy$.complete();
   }
@@ -142,6 +147,14 @@ export class WorkersPageComponent implements OnInit, OnDestroy {
 
   get canViewAssignments(): boolean {
     return this.permissionService.hasPermission(PERMISSIONS.assignments.view);
+  }
+
+  get canViewAttendance(): boolean {
+    return this.permissionService.hasPermission(PERMISSIONS.attendance.view);
+  }
+
+  get canViewCompensation(): boolean {
+    return this.permissionService.hasPermission(PERMISSIONS.compensation.view);
   }
 
   get canAssignDepartment(): boolean {
@@ -205,37 +218,63 @@ export class WorkersPageComponent implements OnInit, OnDestroy {
 
   openProfile(worker: WorkerManagementListItem): void {
     this.profileViewOpen = true;
+    this.selectedProfileWorkerId = worker.id;
+    this.loadSelectedProfile();
+  }
+
+  retryProfile(): void {
+    if (!this.selectedProfileWorkerId) return;
+    this.loadSelectedProfile();
+  }
+
+  private loadSelectedProfile(): void {
+    const workerId = this.selectedProfileWorkerId;
+    this.profileRequestCancel$.next();
     this.profileLoading = true;
     this.profileError = '';
     this.selectedProfile = null;
-    this.facade.loadProfile(worker.id).pipe(
-      finalize(() => this.profileLoading = false),
+    this.facade.loadProfile(workerId, {
+      assignments: this.canViewAssignments,
+      attendance: this.canViewAttendance,
+      compensation: this.canViewCompensation
+    }).pipe(
+      finalize(() => {
+        if (this.selectedProfileWorkerId === workerId) this.profileLoading = false;
+      }),
+      takeUntil(this.profileRequestCancel$),
       takeUntil(this.destroy$)
     ).subscribe({
       next: profile => {
+        if (this.selectedProfileWorkerId !== workerId) return;
         this.selectedProfile = profile;
         if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' });
       },
       error: error => {
+        if (this.selectedProfileWorkerId !== workerId) return;
         this.profileError = error instanceof Error ? error.message : 'تعذر تحميل ملف العامل.';
       }
     });
   }
 
-  openWorkerActions(event: Event, worker: WorkerManagementListItem, menu: Menu): void {
-    this.workerActionItems = [
-      {
-        label: 'فتح الملف',
-        icon: 'pi pi-folder-open',
-        command: () => this.openProfile(worker)
-      },
-      ...(this.canAssignDepartment ? [{
-        label: worker.organizationalDepartmentId ? 'تغيير القسم' : 'تعيين إلى قسم',
-        icon: 'pi pi-sitemap',
-        command: () => this.openDepartmentDialog(worker)
-      }] : [])
-    ];
-    menu.toggle(event);
+  openWorkerActions(event: Event, worker: WorkerManagementListItem, overlay: OverlayPanel): void {
+    this.workerActionTarget = worker;
+    overlay.toggle(event);
+  }
+
+  openProfileFromWorkerActions(overlay: OverlayPanel): void {
+    const worker = this.workerActionTarget;
+    if (!worker) return;
+    this.workerActionTarget = null;
+    overlay.hide();
+    this.openProfile(worker);
+  }
+
+  openDepartmentFromWorkerActions(overlay: OverlayPanel): void {
+    const worker = this.workerActionTarget;
+    if (!worker) return;
+    this.workerActionTarget = null;
+    overlay.hide();
+    this.openDepartmentDialog(worker);
   }
 
   openDepartmentDialog(worker: WorkerManagementListItem): void {
@@ -253,8 +292,38 @@ export class WorkersPageComponent implements OnInit, OnDestroy {
       takeUntil(this.destroy$)
     ).subscribe({
       next: departments => this.departmentOptions = departments,
-      error: error => this.departmentDialogError = error instanceof Error ? error.message : 'تعذر تحميل الأقسام النشطة.'
+      error: () => this.departmentDialogError = 'تعذر تحميل الأقسام النشطة، أعد المحاولة.'
     });
+  }
+
+  openProfileDepartmentDialog(): void {
+    const profile = this.selectedProfile;
+    if (!profile || !this.canAssignDepartment) return;
+    const currentRow = this.workers.find(worker => worker.id === profile.id);
+    const worker: WorkerManagementListItem = {
+      ...(currentRow ?? {
+        id: profile.id,
+        localName: profile.local.displayName,
+        sourceName: null,
+        photoUrl: profile.local.photoUrl,
+        badgeNumber: profile.source.badgeNumber,
+        employeeCode: profile.source.employeeCode,
+        assignmentLabel: profile.assignments[0]?.stageNames.join(' / ') || 'غير مسكن حاليًا',
+        factoryLineLabel: profile.assignments[0] ? `${profile.assignments[0].factoryName} / ${profile.assignments[0].productionLineName}` : 'لا يوجد تسكين دائم نشط',
+        sourceLinkStatus: profile.source.linkStatus,
+        localProfileStatus: profile.local.profileStatus,
+        assignmentStatus: profile.assignmentStatus,
+        localEmploymentStatus: profile.local.employmentStatus,
+        factoryId: profile.assignments[0]?.factoryId ?? null,
+        productionLineId: profile.assignments[0]?.productionLineId ?? null,
+        hasIdentityConflict: false
+      }),
+      organizationalDepartmentId: profile.organizationalDepartmentId ?? null,
+      organizationalDepartmentName: profile.organizationalDepartmentName ?? null,
+      organizationalFactoryName: profile.organizationalFactoryName ?? null,
+      organizationalDepartmentConcurrencyToken: profile.organizationalDepartmentConcurrencyToken ?? ''
+    };
+    this.openDepartmentDialog(worker);
   }
 
   closeDepartmentDialog(): void {
@@ -269,6 +338,7 @@ export class WorkersPageComponent implements OnInit, OnDestroy {
   saveDepartmentAssignment(): void {
     const worker = this.selectedDepartmentWorker;
     if (!worker || this.departmentSaveDisabled) return;
+    const wasAssigned = !!worker.organizationalDepartmentId;
     this.departmentSaving = true;
     this.departmentDialogError = '';
     this.facade.assignDepartment(worker.id, this.selectedDepartmentId, worker.organizationalDepartmentConcurrencyToken ?? '').pipe(
@@ -283,25 +353,44 @@ export class WorkersPageComponent implements OnInit, OnDestroy {
           organizationalFactoryName: result.factoryName,
           organizationalDepartmentConcurrencyToken: result.concurrencyToken
         });
+        if (this.selectedProfile?.id === result.workerId) {
+          this.selectedProfile = {
+            ...this.selectedProfile,
+            organizationalDepartmentId: result.departmentId,
+            organizationalDepartmentName: result.departmentName,
+            organizationalFactoryName: result.factoryName,
+            organizationalDepartmentConcurrencyToken: result.concurrencyToken
+          };
+        }
         this.departmentSaving = false;
         this.closeDepartmentDialog();
-        this.messageService?.add({ severity: 'success', summary: 'تم تحديث القسم', detail: 'حُفظ التعيين التنظيمي داخل Dayoub فقط.' });
+        this.messageService?.add({
+          severity: 'success',
+          summary: wasAssigned ? 'تم تغيير القسم التنظيمي بنجاح' : 'تم تعيين العامل إلى القسم بنجاح',
+          detail: 'حُفظ التعيين التنظيمي داخل Dayoub فقط.'
+        });
       },
       error: error => {
         const status = (error as { status?: number })?.status;
         if (status === 409) this.departmentConflict = true;
         this.departmentDialogError = status === 409
           ? 'تغيرت بيانات العامل أثناء التحرير. أغلق النافذة وافتحها مجددًا قبل الحفظ.'
-          : error instanceof Error ? error.message : 'تعذر حفظ القسم التنظيمي.';
+          : status === 403
+            ? 'لا تملك صلاحية تعيين العامل إلى قسم.'
+            : status === 400
+              ? 'لا يمكن التعيين إلى قسم غير نشط أو لعامل غير نشط.'
+              : 'تعذر حفظ القسم، أعد المحاولة.';
       }
     });
   }
 
   closeProfile(): void {
+    this.profileRequestCancel$.next();
     this.profileViewOpen = false;
     this.profileLoading = false;
     this.profileError = '';
     this.selectedProfile = null;
+    this.selectedProfileWorkerId = '';
   }
 
   onProfileChanged(profile: WorkerManagementProfile): void {
@@ -314,11 +403,17 @@ export class WorkersPageComponent implements OnInit, OnDestroy {
         photoUrl: profile.local.photoUrl,
         localEmploymentStatus: profile.local.employmentStatus,
         assignmentStatus: profile.assignmentStatus,
-        assignmentLabel: profile.assignmentStatus === 'assigned' ? 'مرتبط بمرحلة محلية' : 'لا يوجد تسكين افتراضي نشط'
+        assignmentLabel: profile.assignments[0]
+          ? `${profile.assignments[0].stageNames.join(' / ')}${profile.assignments.length > 1 ? ` +${profile.assignments.length - 1}` : ''}`
+          : 'غير مسكن حاليًا',
+        factoryLineLabel: profile.assignments[0]
+          ? `${profile.assignments[0].factoryName} / ${profile.assignments[0].productionLineName}`
+          : 'لا يوجد تسكين دائم نشط'
       });
   }
 
   localProfileStatusMeta(status: WorkerLocalProfileStatus) { return localProfileStatusPresentation(status); }
+  localEmploymentStatusMeta(status: WorkerLocalEmploymentStatus) { return localEmploymentStatusPresentation(status); }
   sourceLinkStatusMeta(status: WorkerSourceLinkStatus) { return sourceLinkStatusPresentation(status); }
   assignmentStatusMeta(status: WorkerAssignmentStatus) { return assignmentStatusPresentation(status); }
 
