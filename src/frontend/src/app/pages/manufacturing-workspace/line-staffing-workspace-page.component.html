@@ -500,33 +500,39 @@
               placeholder="الكود أو الاسم"
             />
           </label>
-          <label
+          <label for="staffing-worker-department-filter"
             >القسم
-            <select
-              [(ngModel)]="departmentFilter"
+            <p-dropdown
+              data-testid="staffing-worker-department-filter"
+              inputId="staffing-worker-department-filter"
+              [options]="departmentFilterOptions"
+              [ngModel]="departmentFilter"
+              (ngModelChange)="changeDepartmentFilter($event)"
               [ngModelOptions]="{ standalone: true }"
-            >
-              <option value="">كل الأقسام</option>
-              <option
-                *ngFor="let department of workerDepartments"
-                [value]="department"
-              >
-                {{ department }}
-              </option>
-            </select>
+              optionLabel="label"
+              optionValue="value"
+              appendTo="body"
+              styleClass="app-full-width-select line-staffing-page__dialog-filter-control"
+              panelStyleClass="line-staffing-page__dialog-filter-panel"
+              ariaLabel="القسم"
+            ></p-dropdown>
           </label>
-          <label
+          <label for="staffing-worker-line-filter"
             >خط التسكين
-            <select
-              [(ngModel)]="assignmentLineFilter"
+            <p-dropdown
+              data-testid="staffing-worker-line-filter"
+              inputId="staffing-worker-line-filter"
+              [options]="assignmentLineFilterOptions"
+              [ngModel]="assignmentLineFilter"
+              (ngModelChange)="changeAssignmentLineFilter($event)"
               [ngModelOptions]="{ standalone: true }"
-            >
-              <option value="all">كل خطوط الإنتاج</option>
-              <option value="unassigned">غير مسكن</option>
-              <option *ngFor="let line of assignmentLineOptions" [value]="line.id">
-                {{ line.name }}
-              </option>
-            </select>
+              optionLabel="label"
+              optionValue="value"
+              appendTo="body"
+              styleClass="app-full-width-select line-staffing-page__dialog-filter-control"
+              panelStyleClass="line-staffing-page__dialog-filter-panel"
+              ariaLabel="خط التسكين"
+            ></p-dropdown>
           </label>
         </div>
         <p class="line-staffing-page__dialog-selection-summary line-staffing-page__wide">
@@ -565,6 +571,7 @@
             [employeeCode]="worker.employeeCode"
             [isOnActiveService]="worker.isOnActiveService"
             [assignmentDetails]="workerActualAssignmentDetails(worker)"
+            [expanded]="isWorkerAssignmentExpanded(worker)"
             [hasPhoto]="worker.hasPhoto"
             [photoReference]="worker.photoReference"
             [photoVersion]="worker.photoVersion"
@@ -572,6 +579,7 @@
               defaultWorkerSelectionUnavailableMessage(worker) || ''
             "
             (selectionChange)="toggleDefaultWorker(worker, $event)"
+            (expandedChange)="toggleWorkerAssignmentExpansion(worker, $event)"
           ></plp-worker-assignment-card>
           <p
             class="line-staffing-page__note"

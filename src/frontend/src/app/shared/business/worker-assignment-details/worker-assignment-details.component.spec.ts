@@ -104,17 +104,16 @@ describe('WorkerAssignmentDetailsComponent', () => {
     expect(text).not.toContain('مشارك حاليًا في مرحلتين:');
   });
 
-  it('shows only actual line-stage pairs and a compact multi-assignment summary', () => {
+  it('keeps only the actual assignment state in the main row', () => {
     const actual = fixture.nativeElement.querySelector('[data-dialog="actual"]') as HTMLElement;
     const unassigned = fixture.nativeElement.querySelector('[data-dialog="unassigned"]') as HTMLElement;
 
     expect(actual.textContent).toContain('مسكن');
-    expect(actual.textContent).toContain('الخط: خط الخياطة 1');
-    expect(actual.textContent).toContain('المرحلة: تركيب العلامة');
-    expect(actual.textContent).toContain('+2 تسكينات أخرى');
+    expect(actual.textContent).not.toContain('الخط: خط الخياطة 1');
+    expect(actual.textContent).not.toContain('المرحلة: تركيب العلامة');
+    expect(actual.textContent).not.toContain('+2 تسكينات أخرى');
     expect(actual.textContent).not.toContain('اسم سياق لا يجب عرضه');
-    expect(actual.querySelectorAll('.plp-worker-assignment-details__metadata--actual-line').length).toBe(1);
-    expect(actual.querySelectorAll('.plp-worker-assignment-details__metadata--actual-stage').length).toBe(1);
+    expect(actual.querySelector('.plp-responsive-entity-row__status')?.textContent).toContain('مسكن');
 
     expect(unassigned.textContent).toContain('غير مسكن');
     expect(unassigned.textContent).toContain('لا يوجد تسكين حالي');

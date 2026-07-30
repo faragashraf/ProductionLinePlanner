@@ -40,6 +40,7 @@ type AssignmentDialogMode = 'default' | 'remove-default';
 type WorkspaceScrollPosition = { stageList: number; selectedPanel: number };
 type StaffingSection = 'choices' | 'summary' | 'stages' | 'workers';
 type AssignmentLineOption = { id: string; name: string };
+type DialogFilterOption = { label: string; value: string };
 
 @Component({
   selector: 'app-line-staffing-workspace-page',
@@ -92,6 +93,14 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
   departmentFilter = '';
   assignmentLineFilter = 'all';
   dialogWorkers: LineStaffingWorker[] = [];
+  departmentFilterOptions: DialogFilterOption[] = [
+    { label: 'كل الأقسام', value: '' },
+  ];
+  assignmentLineFilterOptions: DialogFilterOption[] = [
+    { label: 'كل خطوط الإنتاج', value: 'all' },
+    { label: 'غير مسكن', value: 'unassigned' },
+  ];
+  expandedWorkerIds = new Set<string>();
 
   factoriesLoading = false;
   departmentsLoading = false;
@@ -281,7 +290,7 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
       .filter(
         (worker) =>
           !this.departmentFilter ||
-          worker.departmentName === this.departmentFilter,
+          worker.departmentName?.trim() === this.departmentFilter,
       )
       .filter(worker => this.matchesAssignmentLineFilter(worker))
       .filter(
@@ -297,28 +306,26 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
   }
 
   get assignmentLineOptions(): AssignmentLineOption[] {
-    const options = new Map<string, string>();
-    this.dialogWorkers.forEach(worker => {
-      this.permanentParticipations(worker).forEach(participation => {
-        const name = participation.productionLineName.trim();
-        if (participation.productionLineId && name && !options.has(participation.productionLineId)) {
-          options.set(participation.productionLineId, name);
-        }
-      });
-    });
-    return [...options.entries()]
-      .map(([id, name]) => ({ id, name }))
-      .sort((left, right) => left.name.localeCompare(right.name, 'ar'));
+    return this.assignmentLineFilterOptions.slice(2).map(option => ({
+      id: option.value,
+      name: option.label,
+    }));
   }
 
   get workerDepartments(): string[] {
-    return [
-      ...new Set(
-        this.dialogWorkers
-          .map((worker) => worker.departmentName)
-          .filter((name): name is string => Boolean(name)),
-      ),
-    ].sort();
+    return this.departmentFilterOptions.slice(1).map(option => option.label);
+  }
+
+  get selectedAssignmentLineFilterLabel(): string {
+    return this.assignmentLineFilterOptions.find(
+      option => option.value === this.assignmentLineFilter,
+    )?.label ?? 'كل خطوط الإنتاج';
+  }
+
+  get selectedDepartmentFilterLabel(): string {
+    return this.departmentFilterOptions.find(
+      option => option.value === this.departmentFilter,
+    )?.label ?? 'كل الأقسام';
   }
 
   get selectedDialogWorker(): LineStaffingWorker | null {
@@ -645,8 +652,7 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
     this.selectedDefaultWorkerIds = new Set<string>();
     this.dialogWorkers = [];
     this.workerSearch = '';
-    this.departmentFilter = '';
-    this.assignmentLineFilter = 'all';
+    this.resetDialogFilters();
     this.workerDirectoryError = '';
     this.workerDirectoryLoading = false;
   }
@@ -697,6 +703,33 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
     event.stopPropagation();
     const input = event.target as HTMLInputElement;
     this.toggleDefaultWorker(worker, input.checked);
+  }
+
+  changeDepartmentFilter(value: string | null | undefined): void {
+    this.departmentFilter = this.departmentFilterOptions.some(
+      option => option.value === value,
+    ) ? (value ?? '') : '';
+  }
+
+  changeAssignmentLineFilter(value: string | null | undefined): void {
+    this.assignmentLineFilter = this.assignmentLineFilterOptions.some(
+      option => option.value === value,
+    ) ? (value ?? 'all') : 'all';
+    this.expandedWorkerIds = new Set<string>();
+  }
+
+  isWorkerAssignmentExpanded(worker: LineStaffingWorker): boolean {
+    return this.expandedWorkerIds.has(worker.workerId);
+  }
+
+  toggleWorkerAssignmentExpansion(
+    worker: LineStaffingWorker,
+    expanded: boolean,
+  ): void {
+    const next = new Set(this.expandedWorkerIds);
+    if (expanded) next.add(worker.workerId);
+    else next.delete(worker.workerId);
+    this.expandedWorkerIds = next;
   }
 
   onAssignmentFormSubmitted(): void {
@@ -1182,8 +1215,7 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
     this.assignmentDialogError = '';
     this.assignmentValidationSummary = '';
     this.workerSearch = '';
-    this.departmentFilter = '';
-    this.assignmentLineFilter = 'all';
+    this.resetDialogFilters();
     this.dialogWorkers = [];
     this.workerDirectoryError = '';
     this.assignmentForm.reset({
@@ -1242,6 +1274,7 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
         next: (workers) => {
           if (requestVersion !== this.workerDirectoryRequestVersion) return;
           this.dialogWorkers = workers;
+          this.refreshDialogFilterOptions();
         },
         error: (error) => {
           if (requestVersion !== this.workerDirectoryRequestVersion) return;
@@ -1801,6 +1834,63 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
     return worker.participations.filter(
       participation => participation.assignmentType === 'Default',
     );
+  }
+
+  private refreshDialogFilterOptions(): void {
+    const lineNames = new Map<string, string>();
+    this.dialogWorkers.forEach(worker => {
+      this.permanentParticipations(worker).forEach(participation => {
+        const id = participation.productionLineId.trim();
+        const name = participation.productionLineName.trim();
+        if (id && name && !lineNames.has(id)) lineNames.set(id, name);
+      });
+    });
+    this.assignmentLineFilterOptions = [
+      { label: 'كل خطوط الإنتاج', value: 'all' },
+      { label: 'غير مسكن', value: 'unassigned' },
+      ...[...lineNames.entries()]
+        .map(([value, label]) => ({ label, value }))
+        .sort((left, right) => left.label.localeCompare(right.label, 'ar')),
+    ];
+
+    const departments = new Set(
+      this.dialogWorkers
+        .map(worker => worker.departmentName?.trim() ?? '')
+        .filter(Boolean),
+    );
+    this.departmentFilterOptions = [
+      { label: 'كل الأقسام', value: '' },
+      ...[...departments]
+        .sort((left, right) => left.localeCompare(right, 'ar'))
+        .map(name => ({ label: name, value: name })),
+    ];
+
+    if (!this.assignmentLineFilterOptions.some(
+      option => option.value === this.assignmentLineFilter,
+    )) {
+      this.assignmentLineFilter = 'all';
+      this.expandedWorkerIds = new Set<string>();
+    }
+    if (!this.departmentFilterOptions.some(
+      option => option.value === this.departmentFilter,
+    )) {
+      this.departmentFilter = '';
+    }
+    const workerIds = new Set(this.dialogWorkers.map(worker => worker.workerId));
+    this.expandedWorkerIds = new Set(
+      [...this.expandedWorkerIds].filter(workerId => workerIds.has(workerId)),
+    );
+  }
+
+  private resetDialogFilters(): void {
+    this.departmentFilter = '';
+    this.assignmentLineFilter = 'all';
+    this.departmentFilterOptions = [{ label: 'كل الأقسام', value: '' }];
+    this.assignmentLineFilterOptions = [
+      { label: 'كل خطوط الإنتاج', value: 'all' },
+      { label: 'غير مسكن', value: 'unassigned' },
+    ];
+    this.expandedWorkerIds = new Set<string>();
   }
 
   private participationsForSelectedLine(

@@ -28,13 +28,30 @@ import { SharedModule } from '../../shared.module';
         [stageNames]="stageNames"
         (selectionChange)="temporarySelected = $event"
       ></plp-worker-assignment-card>
+      <plp-worker-assignment-card
+        data-context="actual"
+        selectionMode="multiple"
+        [selected]="actualSelected"
+        [expanded]="actualExpanded"
+        fullName="عامل متعدد التسكينات"
+        employeeCode="W-1079"
+        [assignmentDetails]="actualAssignments"
+        (selectionChange)="actualSelected = $event"
+        (expandedChange)="actualExpanded = $event"
+      ></plp-worker-assignment-card>
     </section>
   `
 })
 class WorkerAssignmentCardTestHostComponent {
   permanentSelected = false;
   temporarySelected = false;
+  actualSelected = false;
+  actualExpanded = false;
   stageNames = ['مرحلة أولى', 'اسم مرحلة طويل يلتف داخل البطاقة على شاشة Android Tablet'];
+  actualAssignments = [
+    { productionLineId: 'line-1', productionLineName: 'خط الخياطة 1', subStageId: 'stage-1', subStageName: 'تركيب العلامة' },
+    { productionLineId: 'line-2', productionLineName: 'خط اللحام 2', subStageId: 'stage-2', subStageName: 'ازدواج كاموشا' },
+  ];
 }
 
 describe('WorkerAssignmentCardComponent', () => {
@@ -96,6 +113,34 @@ describe('WorkerAssignmentCardComponent', () => {
     fixture.detectChanges();
     expect(host.permanentSelected).toBeFalse();
     expect(checkbox.checked).toBeFalse();
+  });
+
+  it('keeps identity, code, and assignment state in the main row and expands every actual participation', () => {
+    const actual = fixture.nativeElement.querySelector('[data-context="actual"]') as HTMLElement;
+    const mainRow = actual.querySelector('.plp-responsive-entity-row') as HTMLElement;
+    const expandButton = actual.querySelector('.plp-worker-assignment-card__expand') as HTMLButtonElement;
+    const checkbox = actual.querySelector('input[type="checkbox"]') as HTMLInputElement;
+
+    expect(mainRow.textContent).toContain('عامل متعدد التسكينات');
+    expect(mainRow.textContent).toContain('W-1079');
+    expect(mainRow.textContent).toContain('مسكن');
+    expect(mainRow.textContent).not.toContain('خط الخياطة 1');
+    expect(mainRow.textContent).not.toContain('تركيب العلامة');
+    expect(expandButton.getAttribute('aria-expanded')).toBe('false');
+    expect(checkbox.checked).toBeFalse();
+
+    expandButton.click();
+    fixture.detectChanges();
+
+    const expansion = actual.querySelector('.plp-worker-assignment-card__assignment-expansion') as HTMLElement;
+    expect(expansion.textContent).toContain('التسكينات الحالية');
+    expect(expansion.textContent).toContain('الخط: خط الخياطة 1');
+    expect(expansion.textContent).toContain('المرحلة: تركيب العلامة');
+    expect(expansion.textContent).toContain('الخط: خط اللحام 2');
+    expect(expansion.textContent).toContain('المرحلة: ازدواج كاموشا');
+    expect(expansion.querySelectorAll('.plp-worker-assignment-card__assignment-item').length).toBe(2);
+    expect(checkbox.checked).toBeFalse();
+    expect(fixture.componentInstance.actualSelected).toBeFalse();
   });
 
   it('provides keyboard focus semantics and a stable touch target for both modes', () => {

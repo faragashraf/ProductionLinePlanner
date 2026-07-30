@@ -92,8 +92,12 @@
   gap: var(--plp-space-8) var(--plp-space-12);
   align-items: end;
 
-  label { min-width: 0; }
-  label, select, input { word-break: normal; overflow-wrap: normal; }
+  label, p-dropdown { min-width: 0; }
+  label, p-dropdown, select, input { word-break: normal; overflow-wrap: normal; }
+}
+
+.line-staffing-page__dialog-filter-control .p-dropdown-label {
+  text-align: start;
 }
 
 .line-staffing-page__dialog-selection-summary {
@@ -439,6 +443,107 @@ plp-product-metadata-item {
   display: none;
 }
 
+.plp-worker-assignment-card__shell {
+  align-items: center;
+  background: var(--plp-color-surface);
+  border: var(--plp-border-muted);
+  border-radius: var(--plp-radius-sm);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--plp-touch-target-min);
+  max-inline-size: 100%;
+  min-inline-size: 0;
+  overflow: hidden;
+  transition: background-color var(--plp-motion-fast) var(--plp-motion-ease-standard), border-color var(--plp-motion-fast) var(--plp-motion-ease-standard), box-shadow var(--plp-motion-fast) var(--plp-motion-ease-standard);
+}
+
+.plp-worker-assignment-card__shell:hover:not(.is-disabled),
+.plp-worker-assignment-card__shell.is-selected {
+  background: var(--plp-color-surface-selected);
+  border-color: var(--plp-color-selected-border);
+}
+
+.plp-worker-assignment-card__shell:focus-within {
+  outline: var(--plp-focus-outline);
+  outline-offset: var(--plp-focus-offset);
+}
+
+.plp-worker-assignment-card__shell.is-disabled { opacity: var(--plp-disabled-opacity); }
+
+.plp-worker-assignment-card__shell .plp-worker-assignment-card--actual {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  min-block-size: var(--plp-touch-target-min);
+}
+
+.plp-worker-assignment-card__shell .plp-worker-assignment-card--actual:hover,
+.plp-worker-assignment-card__shell .plp-worker-assignment-card--actual:focus-within {
+  background: transparent;
+  outline: 0;
+}
+
+.plp-worker-assignment-card__expand {
+  align-items: center;
+  align-self: stretch;
+  background: transparent;
+  border: 0;
+  border-inline-start: var(--plp-border-muted);
+  color: var(--plp-color-primary);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: var(--plp-icon-size-sm);
+  justify-content: center;
+  min-block-size: var(--plp-touch-target-min);
+  min-inline-size: var(--plp-touch-target-min);
+}
+
+.plp-worker-assignment-card__expand:hover,
+.plp-worker-assignment-card__expand:focus-visible { background: var(--plp-color-primary-soft); }
+
+.plp-worker-assignment-card__expand:focus-visible {
+  outline: var(--plp-focus-outline);
+  outline-offset: calc(-1 * var(--plp-focus-offset));
+}
+
+.plp-worker-assignment-card__assignment-expansion {
+  background: var(--plp-color-surface-soft);
+  border-block-start: var(--plp-border-muted);
+  display: grid;
+  gap: var(--plp-space-8);
+  grid-column: 1 / -1;
+  min-inline-size: 0;
+  padding: var(--plp-space-8) var(--plp-space-12) var(--plp-space-12);
+}
+
+.plp-worker-assignment-card__assignment-heading,
+.plp-worker-assignment-card__assignment-item { font-size: var(--plp-type-caption); }
+
+.plp-worker-assignment-card__assignment-heading,
+.plp-worker-assignment-card__assignment-item strong { color: var(--plp-color-text); }
+
+.plp-worker-assignment-card__assignment-list {
+  display: grid;
+  gap: var(--plp-space-8);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.plp-worker-assignment-card__assignment-item {
+  color: var(--plp-color-text-soft);
+  display: grid;
+  gap: var(--plp-space-4);
+  grid-template-columns: auto repeat(2, minmax(0, 1fr));
+  min-inline-size: 0;
+}
+
+.plp-worker-assignment-card__assignment-index { color: var(--plp-color-primary); }
+
+.plp-worker-assignment-card__assignment-item span {
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
+
 .plp-structured-list {
   display: grid;
   gap: var(--plp-space-8);
@@ -551,6 +656,14 @@ plp-product-metadata-item {
 }
 
 @media (max-width: 599px) {
+  .plp-worker-assignment-card__assignment-item {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .plp-worker-assignment-card__assignment-item span:last-child {
+    grid-column: 2;
+  }
+
   .plp-responsive-entity-row {
     align-items: stretch;
     grid-template-areas:
