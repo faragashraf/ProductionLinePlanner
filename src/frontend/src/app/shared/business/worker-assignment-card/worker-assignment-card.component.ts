@@ -34,6 +34,11 @@ export class WorkerAssignmentCardComponent {
     return (this.assignmentDetails?.length ?? 0) > 0;
   }
 
+  get assignmentExpansionLabel(): string {
+    const count = this.assignmentDetails?.length ?? 0;
+    return count > 1 ? `التسكينات (${count})` : 'التسكينات';
+  }
+
   onCheckboxChange(event: Event): void {
     this.selectionChange.emit((event.target as HTMLInputElement).checked);
   }

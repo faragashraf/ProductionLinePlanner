@@ -116,10 +116,28 @@ describe('WorkerAssignmentDetailsComponent', () => {
     expect(actual.querySelector('.plp-responsive-entity-row__status')?.textContent).toContain('مسكن');
 
     expect(unassigned.textContent).toContain('غير مسكن');
-    expect(unassigned.textContent).toContain('لا يوجد تسكين حالي');
+    expect(unassigned.textContent).not.toContain('لا يوجد تسكين حالي');
     expect(unassigned.textContent).not.toContain('خط الشاشة الحالي');
     expect(unassigned.textContent).not.toContain('عدد المراحل: 0');
     expect(unassigned.querySelector('.plp-worker-assignment-details__metadata--actual-line')).toBeNull();
+  });
+
+  it('uses immediately distinct success and danger badges for actual assignment state', () => {
+    const assigned = fixture.nativeElement.querySelector(
+      '[data-dialog="actual"] .plp-worker-assignment-details__assignment-status',
+    ) as HTMLElement;
+    const unassigned = fixture.nativeElement.querySelector(
+      '[data-dialog="unassigned"] .plp-worker-assignment-details__assignment-status',
+    ) as HTMLElement;
+
+    expect(assigned.classList).toContain('p-tag-success');
+    expect(assigned.querySelector('.pi-check-circle')).not.toBeNull();
+    expect(unassigned.classList).toContain('p-tag-danger');
+    expect(unassigned.querySelector('.pi-exclamation-triangle')).not.toBeNull();
+    expect(getComputedStyle(assigned).color).not.toBe(getComputedStyle(unassigned).color);
+    expect(getComputedStyle(assigned).backgroundColor).not.toBe(
+      getComputedStyle(unassigned).backgroundColor,
+    );
   });
 
   it('keeps the code compact, isolates its direction, and presents readable wrapping stage chips', () => {

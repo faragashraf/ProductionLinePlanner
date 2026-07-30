@@ -290,7 +290,7 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
       .filter(
         (worker) =>
           !this.departmentFilter ||
-          worker.departmentName?.trim() === this.departmentFilter,
+          worker.departmentName === this.departmentFilter,
       )
       .filter(worker => this.matchesAssignmentLineFilter(worker))
       .filter(
@@ -1273,7 +1273,10 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
       .subscribe({
         next: (workers) => {
           if (requestVersion !== this.workerDirectoryRequestVersion) return;
-          this.dialogWorkers = workers;
+          this.dialogWorkers = workers.map(worker => ({
+            ...worker,
+            departmentName: worker.departmentName?.trim() || null,
+          }));
           this.refreshDialogFilterOptions();
         },
         error: (error) => {

@@ -301,6 +301,7 @@ test('loads the permanent staffing workspace and keeps its dialog within tablet 
       .locator('xpath=ancestor::*[contains(@class,"p-treenode-content")][1]');
     await departmentNode.locator('.p-tree-toggler').click({ force: true });
     await structureTree.getByText(line.name, { exact: true }).click();
+    await expect(page.locator('.structure-selector__overlay')).toBeHidden();
     const modelSelect = page.getByLabel('الموديل').filter({ visible: true }).and(page.locator('select'));
     await expect(modelSelect).toBeEnabled();
     await modelSelect.selectOption(model.id);
@@ -351,19 +352,30 @@ test('loads the permanent staffing workspace and keeps its dialog within tablet 
         expect(Math.max(...mainRowCenters) - Math.min(...mainRowCenters)).toBeLessThanOrEqual(8);
       }
       await expect(unassignedWorkerCard).toContainText('غير مسكن');
-      await expect(unassignedWorkerCard).toContainText('لا يوجد تسكين حالي');
+      await expect(unassignedWorkerCard).not.toContainText('لا يوجد تسكين حالي');
       await expect(unassignedWorkerCard).not.toContainText(line.name);
       await expect(unassignedWorkerCard).not.toContainText('عدد المراحل: 0');
+      const assignedStatus = otherLineWorkerCard.locator('.plp-worker-assignment-details__assignment-status');
+      const unassignedStatus = unassignedWorkerCard.locator('.plp-worker-assignment-details__assignment-status');
+      await expect(assignedStatus).toHaveClass(/p-tag-success/);
+      await expect(unassignedStatus).toHaveClass(/p-tag-danger/);
+      const [assignedColors, unassignedColors] = await Promise.all([
+        assignedStatus.evaluate(element => ({ color: getComputedStyle(element).color, background: getComputedStyle(element).backgroundColor })),
+        unassignedStatus.evaluate(element => ({ color: getComputedStyle(element).color, background: getComputedStyle(element).backgroundColor })),
+      ]);
+      expect(assignedColors).not.toEqual(unassignedColors);
 
       const expandButton = otherLineWorkerCard.getByRole('button', { name: `عرض تسكينات ${workers[1].fullName}` });
+      await expect(expandButton).toContainText('التسكينات (2)');
       await expandButton.click();
       const assignmentExpansion = otherLineWorkerCard.locator('.plp-worker-assignment-card__assignment-expansion');
       await expect(assignmentExpansion).toContainText('التسكينات الحالية');
-      await expect(assignmentExpansion).toContainText(`الخط: ${otherLine.name}`);
-      await expect(assignmentExpansion).toContainText('المرحلة: مرحلة التشغيل الثانية');
-      await expect(assignmentExpansion).toContainText(`الخط: ${thirdLine.name}`);
-      await expect(assignmentExpansion).toContainText('المرحلة: ازدواج كاموشا');
+      await expect(assignmentExpansion).toContainText(otherLine.name);
+      await expect(assignmentExpansion).toContainText('مرحلة التشغيل الثانية');
+      await expect(assignmentExpansion).toContainText(thirdLine.name);
+      await expect(assignmentExpansion).toContainText('ازدواج كاموشا');
       await expect(assignmentExpansion.locator('.plp-worker-assignment-card__assignment-item')).toHaveCount(2);
+      await expect(assignmentExpansion.locator('.plp-worker-assignment-card__assignment-fact')).toHaveCount(4);
       await expect(otherLineWorkerCard.locator('input[type="checkbox"]')).not.toBeChecked();
 
       const lineFilter = dialog.getByTestId('staffing-worker-line-filter');
@@ -393,7 +405,10 @@ test('loads the permanent staffing workspace and keeps its dialog within tablet 
       const departmentFilterLabel = departmentFilter.locator('.p-dropdown-label');
       await expect(departmentFilterLabel).toHaveText('كل الأقسام');
       await departmentFilter.click();
-      await page.locator('.p-dropdown-panel:visible').last().getByRole('option', { name: workerDepartmentNames[1], exact: true }).click();
+      const departmentPanel = page.locator('.p-dropdown-panel:visible').last();
+      await expect(departmentPanel.getByRole('option', { name: workerDepartmentNames[0], exact: true })).toBeVisible();
+      await expect(departmentPanel.getByRole('option', { name: workerDepartmentNames[1], exact: true })).toBeVisible();
+      await departmentPanel.getByRole('option', { name: workerDepartmentNames[1], exact: true }).click();
       await expect(departmentFilterLabel).toHaveText(workerDepartmentNames[1]);
       await expect(otherLineWorkerCard).toBeVisible();
       await expect(currentWorkerCard).toBeHidden();

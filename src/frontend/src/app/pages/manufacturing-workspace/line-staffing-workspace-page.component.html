@@ -478,8 +478,8 @@
         class="line-staffing-page__dialog-note line-staffing-page__wide"
         *ngIf="assignmentDialogMode === 'default'"
       >
-        حدّد عمال المرحلة؛ التحديد والإلغاء يغيّران هذه المرحلة فقط دون التأثير
-        في تسكيناتهم الأخرى.
+        <i class="pi pi-info-circle" aria-hidden="true"></i>
+        <span>حدّد عمال المرحلة؛ أي تغيير هنا يخص هذه المرحلة فقط ولا يؤثر في تسكيناتهم الأخرى.</span>
       </p>
       <p
         class="line-staffing-page__dialog-note line-staffing-page__wide"
@@ -536,8 +536,8 @@
           </label>
         </div>
         <p class="line-staffing-page__dialog-selection-summary line-staffing-page__wide">
-          {{ selectedDefaultWorkersCount }} عامل محدد للتسكين الدائم في هذه
-          المرحلة. العامل المشارك في مراحل أخرى يظل قابلًا للاختيار.
+          <i class="pi pi-users" aria-hidden="true"></i>
+          <span><strong>{{ selectedDefaultWorkersCount }}</strong> عامل محدد لهذه المرحلة. العامل المسكن في مرحلة أخرى يظل قابلًا للاختيار.</span>
         </p>
         <section
           class="line-staffing-page__candidate-list line-staffing-page__wide"

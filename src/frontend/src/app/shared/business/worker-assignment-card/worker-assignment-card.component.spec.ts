@@ -126,6 +126,7 @@ describe('WorkerAssignmentCardComponent', () => {
     expect(mainRow.textContent).toContain('مسكن');
     expect(mainRow.textContent).not.toContain('خط الخياطة 1');
     expect(mainRow.textContent).not.toContain('تركيب العلامة');
+    expect(expandButton.textContent).toContain('التسكينات (2)');
     expect(expandButton.getAttribute('aria-expanded')).toBe('false');
     expect(checkbox.checked).toBeFalse();
 
@@ -134,11 +135,14 @@ describe('WorkerAssignmentCardComponent', () => {
 
     const expansion = actual.querySelector('.plp-worker-assignment-card__assignment-expansion') as HTMLElement;
     expect(expansion.textContent).toContain('التسكينات الحالية');
-    expect(expansion.textContent).toContain('الخط: خط الخياطة 1');
-    expect(expansion.textContent).toContain('المرحلة: تركيب العلامة');
-    expect(expansion.textContent).toContain('الخط: خط اللحام 2');
-    expect(expansion.textContent).toContain('المرحلة: ازدواج كاموشا');
+    expect(expansion.textContent).toContain('خط الإنتاج');
+    expect(expansion.textContent).toContain('خط الخياطة 1');
+    expect(expansion.textContent).toContain('المرحلة');
+    expect(expansion.textContent).toContain('تركيب العلامة');
+    expect(expansion.textContent).toContain('خط اللحام 2');
+    expect(expansion.textContent).toContain('ازدواج كاموشا');
     expect(expansion.querySelectorAll('.plp-worker-assignment-card__assignment-item').length).toBe(2);
+    expect(expansion.querySelectorAll('.plp-worker-assignment-card__assignment-fact').length).toBe(4);
     expect(checkbox.checked).toBeFalse();
     expect(fixture.componentInstance.actualSelected).toBeFalse();
   });

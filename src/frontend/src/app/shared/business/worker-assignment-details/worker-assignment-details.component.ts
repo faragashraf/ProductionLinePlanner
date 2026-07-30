@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, Input } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { TagModule } from 'primeng/tag';
 import { PlpProductMetadataItemComponent, PlpProductMetadataRowComponent } from '../../product/plp-metadata-row.component';
 import { PlpResponsiveEntityRowComponent } from '../../product/plp-responsive-entity-row.component';
 
@@ -19,6 +20,7 @@ export interface WorkerAssignmentDisplayItem {
   standalone: true,
   imports: [
     CommonModule,
+    TagModule,
     PlpProductMetadataItemComponent,
     PlpProductMetadataRowComponent,
     PlpResponsiveEntityRowComponent
@@ -29,18 +31,15 @@ export interface WorkerAssignmentDisplayItem {
   },
   template: `
     <plp-responsive-entity-row [title]="fullName" [code]="employeeCode">
-      <small
-        *ngIf="assignmentDetails !== null && !normalizedAssignmentDetails.length"
-        plp-entity-description
-        class="plp-worker-assignment-details__unassigned"
-      >لا يوجد تسكين حالي</small>
-      <plp-product-metadata-item
+      <p-tag
         *ngIf="assignmentDetails !== null"
         plp-entity-status
-        class="plp-worker-assignment-details__metadata plp-worker-assignment-details__metadata--assignment-state"
         [value]="actualAssignmentStatusLabel"
-        icon="pi pi-briefcase"
-      ></plp-product-metadata-item>
+        [severity]="actualAssignmentStatusSeverity"
+        [icon]="actualAssignmentStatusIcon"
+        [rounded]="true"
+        styleClass="plp-worker-assignment-details__assignment-status"
+      ></p-tag>
       <plp-product-metadata-row
         *ngIf="assignmentDetails === null"
         plp-entity-metadata
@@ -84,11 +83,6 @@ export interface WorkerAssignmentDisplayItem {
       overflow-wrap: anywhere;
     }
 
-    .plp-worker-assignment-details__unassigned {
-      color: var(--plp-color-text-subtle);
-      font-size: var(--plp-type-caption);
-    }
-
     .plp-worker-assignment-details__stages plp-product-metadata-item {
       min-width: 0;
       max-width: 100%;
@@ -120,10 +114,24 @@ export interface WorkerAssignmentDisplayItem {
       color: var(--plp-color-ready-strong);
     }
 
-    :host ::ng-deep .plp-worker-assignment-details__metadata--assignment-state .p-tag {
-      background: var(--plp-color-ready-soft);
-      border-color: color-mix(in oklab, var(--plp-color-ready) 35%, var(--plp-color-border-muted));
-      color: var(--plp-color-ready-strong);
+    :host ::ng-deep .p-tag.plp-worker-assignment-details__assignment-status {
+      border: var(--plp-border-width) solid currentColor;
+      font-size: var(--plp-type-caption);
+      font-weight: var(--plp-font-weight-bold);
+      min-block-size: 1.75rem;
+      padding-inline: var(--plp-space-8);
+    }
+
+    :host ::ng-deep .p-tag.plp-worker-assignment-details__assignment-status.p-tag-success {
+      background: var(--plp-color-success-soft);
+      border-color: color-mix(in oklab, var(--plp-color-success) 42%, var(--plp-color-border-muted));
+      color: var(--plp-color-success-strong);
+    }
+
+    :host ::ng-deep .p-tag.plp-worker-assignment-details__assignment-status.p-tag-danger {
+      background: var(--plp-color-danger-soft);
+      border-color: color-mix(in oklab, var(--plp-color-danger) 38%, var(--plp-color-border-muted));
+      color: var(--plp-color-danger-strong);
     }
 
     :host ::ng-deep .plp-worker-assignment-details__stage-chip .p-tag {
@@ -175,6 +183,16 @@ export class WorkerAssignmentDetailsComponent {
   get actualAssignmentStatusLabel(): string {
     const count = this.normalizedAssignmentDetails.length;
     return count === 0 ? 'غير مسكن' : 'مسكن';
+  }
+
+  get actualAssignmentStatusSeverity(): 'success' | 'danger' {
+    return this.normalizedAssignmentDetails.length ? 'success' : 'danger';
+  }
+
+  get actualAssignmentStatusIcon(): string {
+    return this.normalizedAssignmentDetails.length
+      ? 'pi pi-check-circle'
+      : 'pi pi-exclamation-triangle';
   }
 
   trackByStageName(index: number): number {

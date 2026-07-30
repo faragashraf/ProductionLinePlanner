@@ -28,6 +28,7 @@
         [attr.aria-label]="(expanded ? 'إخفاء تسكينات ' : 'عرض تسكينات ') + fullName"
         (click)="toggleExpanded($event)"
       >
+        <span class="plp-worker-assignment-card__expand-label">{{ assignmentExpansionLabel }}</span>
         <i [class]="expanded ? 'pi pi-chevron-down' : 'pi pi-chevron-left'" aria-hidden="true"></i>
       </button>
       <section
@@ -35,15 +36,35 @@
         class="plp-worker-assignment-card__assignment-expansion"
         [attr.aria-label]="'التسكينات الحالية للعامل ' + fullName"
       >
-        <strong class="plp-worker-assignment-card__assignment-heading">التسكينات الحالية</strong>
+        <header class="plp-worker-assignment-card__assignment-header">
+          <span class="plp-worker-assignment-card__assignment-header-icon" aria-hidden="true">
+            <i class="pi pi-briefcase"></i>
+          </span>
+          <span>
+            <strong class="plp-worker-assignment-card__assignment-heading">التسكينات الحالية</strong>
+            <small>{{ assignmentDetails.length }} {{ assignmentDetails.length === 1 ? 'تسكين دائم' : 'تسكينات دائمة' }}</small>
+          </span>
+        </header>
         <ol class="plp-worker-assignment-card__assignment-list">
           <li
             *ngFor="let assignment of assignmentDetails; let assignmentIndex = index; trackBy: trackByAssignment"
             class="plp-worker-assignment-card__assignment-item"
           >
-            <strong class="plp-worker-assignment-card__assignment-index">{{ assignmentIndex + 1 }}.</strong>
-            <span><strong>الخط:</strong> {{ assignment.productionLineName }}</span>
-            <span><strong>المرحلة:</strong> {{ assignment.subStageName }}</span>
+            <span class="plp-worker-assignment-card__assignment-index">{{ assignmentIndex + 1 }}</span>
+            <span class="plp-worker-assignment-card__assignment-fact">
+              <i class="pi pi-building" aria-hidden="true"></i>
+              <span>
+                <small>خط الإنتاج</small>
+                <strong>{{ assignment.productionLineName }}</strong>
+              </span>
+            </span>
+            <span class="plp-worker-assignment-card__assignment-fact">
+              <i class="pi pi-cog" aria-hidden="true"></i>
+              <span>
+                <small>المرحلة</small>
+                <strong>{{ assignment.subStageName }}</strong>
+              </span>
+            </span>
           </li>
         </ol>
       </section>
