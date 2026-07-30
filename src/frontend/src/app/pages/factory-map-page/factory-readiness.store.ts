@@ -16,6 +16,13 @@ import {
   ReadinessLevel,
   ReadinessWorkerFilter
 } from '../../shared/models/operational-readiness.model';
+import {
+  READINESS_STAGE_FILTER_DEFINITIONS,
+  ReadinessStageFilter,
+  ReadinessStageFilterOption,
+  compareReadinessStagesByDomainOrder,
+  matchesReadinessStageFilter
+} from './stage-readiness-filter';
 
 @Injectable()
 export class FactoryReadinessStore {
@@ -28,6 +35,7 @@ export class FactoryReadinessStore {
   readonly selectedModelId = signal<string | null>(null);
   readonly selectedStageId = signal<string | null>(null);
   readonly workerFilter = signal<ReadinessWorkerFilter>('all');
+  readonly selectedStageFilters = signal<ReadinessStageFilter[]>([]);
   readonly loading = signal(false);
   readonly loadingChildren = signal(false);
   readonly loadError = signal<string | null>(null);
@@ -41,6 +49,25 @@ export class FactoryReadinessStore {
   readonly selectedStage = computed(() => this.stages()?.stages.find(item => item.id === this.selectedStageId()) ?? null);
   readonly level = computed<ReadinessLevel>(() => this.selectedStageId() ? 'stage' : this.selectedLineId() ? 'line' : this.selectedDepartmentId() ? 'department' : 'factory');
   readonly visibleWorkers = computed(() => this.filterWorkers(this.workerResult()?.workers ?? [], this.workerFilter()));
+  readonly orderedStages = computed(() =>
+    [...(this.stages()?.stages ?? [])].sort(compareReadinessStagesByDomainOrder));
+  readonly visibleStages = computed(() => {
+    const stages = this.orderedStages();
+    const selected = this.selectedStageFilters();
+    if (selected.length === 0) return stages;
+    const selectedSet = new Set(selected);
+    return stages.filter(stage => READINESS_STAGE_FILTER_DEFINITIONS.some(definition =>
+      selectedSet.has(definition.value) && matchesReadinessStageFilter(stage, definition.value)));
+  });
+  readonly stageFilterOptions = computed<ReadinessStageFilterOption[]>(() => {
+    const stages = this.stages()?.stages ?? [];
+    return READINESS_STAGE_FILTER_DEFINITIONS.map(definition => ({
+      ...definition,
+      count: stages.filter(stage => matchesReadinessStageFilter(stage, definition.value)).length
+    }));
+  });
+  readonly totalStageCount = computed(() => this.stages()?.stages.length ?? 0);
+  readonly visibleStageCount = computed(() => this.visibleStages().length);
 
   private readonly seenDeltaIds = new Set<string>();
   private pendingChildLoads = 0;
@@ -156,6 +183,13 @@ export class FactoryReadinessStore {
   }
 
   setWorkerFilter(filter: ReadinessWorkerFilter): void { this.workerFilter.set(filter); }
+
+  setStageFilters(filters: ReadinessStageFilter[] | null | undefined): void {
+    const allowed = new Set(READINESS_STAGE_FILTER_DEFINITIONS.map(definition => definition.value));
+    this.selectedStageFilters.set([...new Set(filters ?? [])].filter(filter => allowed.has(filter)));
+  }
+
+  clearStageFilters(): void { this.selectedStageFilters.set([]); }
 
   retryChildren(): void {
     const lineId = this.selectedLineId();

@@ -1,0 +1,40 @@
+<section class="stage-filter" aria-label="فلترة المراحل حسب نوع المشكلة">
+  <div class="stage-filter__field">
+    <label for="readiness-stage-issues">نوع المشكلة</label>
+    <p-multiSelect
+      inputId="readiness-stage-issues"
+      [options]="options"
+      optionLabel="label"
+      optionValue="value"
+      [ngModel]="selectedFilters"
+      (ngModelChange)="updateSelection($event)"
+      placeholder="كل المراحل"
+      [selectedItemsLabel]="selectedFilters.length === 1 ? 'نوع مشكلة واحد' : '{0} أنواع مشكلات'"
+      [maxSelectedLabels]="0"
+      [showToggleAll]="true"
+      [filter]="false"
+      appendTo="body"
+      styleClass="app-full-width-select stage-filter__select"
+      panelStyleClass="stage-filter__panel"
+      [panelStyle]="{ 'max-inline-size': 'calc(100vw - 2rem)' }"
+      ariaLabel="نوع المشكلة">
+      <ng-template pTemplate="item" let-option>
+        <span class="stage-filter__option">
+          <i class="pi {{ option.icon }}" aria-hidden="true"></i>
+          <span>{{ option.label }}</span>
+          <small aria-label="عدد المراحل المطابقة">{{ option.count }}</small>
+        </span>
+      </ng-template>
+    </p-multiSelect>
+  </div>
+
+  <button class="stage-filter__clear" type="button" [disabled]="!hasSelection"
+    (click)="filtersCleared.emit()">
+    <i class="pi pi-filter-slash" aria-hidden="true"></i>
+    مسح الفلاتر
+  </button>
+
+  <p class="stage-filter__summary" aria-live="polite">
+    عرض <strong>{{ visibleCount }}</strong> من <strong>{{ totalCount }}</strong> مرحلة
+  </p>
+</section>

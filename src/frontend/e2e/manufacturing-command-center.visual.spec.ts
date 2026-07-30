@@ -90,7 +90,7 @@ const readinessSnapshot = {
     departments: [{
       id: 'department-1', factoryId: 'factory-1', name: 'قسم الإنتاج', code: 'PROD', metrics: readinessMetrics(6, 10, 2, 3, 1, 2),
       productionLines: [
-        { id: 'line-critical', factoryId: 'factory-1', departmentId: 'department-1', name: 'خط القص الحرج', code: 'L-01', metrics: readinessMetrics(3, 6, 1, 2, 1, 2), modelNames: ['موديل الحذاء اليومي', 'موديل السلامة'], models: [{ id: 'model-1', name: 'موديل الحذاء اليومي', code: 'SH-01', stageCount: 2 }, { id: 'model-2', name: 'موديل السلامة', code: 'SH-02', stageCount: 1 }] },
+        { id: 'line-critical', factoryId: 'factory-1', departmentId: 'department-1', name: 'خط القص الحرج', code: 'L-01', metrics: readinessMetrics(3, 6, 1, 2, 1, 2), modelNames: ['موديل الحذاء اليومي', 'موديل السلامة'], models: [{ id: 'model-1', name: 'موديل الحذاء اليومي', code: 'SH-01', stageCount: 4 }, { id: 'model-2', name: 'موديل السلامة', code: 'SH-02', stageCount: 1 }] },
         { id: 'line-ready', factoryId: 'factory-1', departmentId: 'department-1', name: 'خط التشطيب', code: 'L-02', metrics: readinessMetrics(3, 4, 1, 1, 0, 1), modelNames: ['موديل الحذاء اليومي'], models: [{ id: 'model-1', name: 'موديل الحذاء اليومي', code: 'SH-01', stageCount: 1 }] }
       ]
     }]
@@ -99,9 +99,11 @@ const readinessSnapshot = {
 const readinessStages = {
   operationalDate: '2026-07-29', calculatedAtUtc: '2026-07-29T07:00:00Z', attendanceSync: freshness,
   factoryId: 'factory-1', factoryName: 'مصنع الأحذية الرئيسي', departmentId: 'department-1', departmentName: 'قسم الإنتاج',
-  productionLineId: 'line-critical', productionLineName: 'خط القص الحرج', selectedProductModelId: 'model-1', selectedProductModelName: 'موديل الحذاء اليومي', requiresModelSelection: false, availableModels: [{ id: 'model-1', name: 'موديل الحذاء اليومي', code: 'SH-01', stageCount: 2 }, { id: 'model-2', name: 'موديل السلامة', code: 'SH-02', stageCount: 1 }], stages: [
-    { id: 'stage-cut', factoryId: 'factory-1', departmentId: 'department-1', productionLineId: 'line-critical', mainStageId: 'main-1', name: 'القص', code: 'ST-01', mainStageName: 'التجهيز', metrics: readinessMetrics(2, 3, 1, 1, 1, 3), modelNames: ['موديل الحذاء اليومي'] },
-    { id: 'stage-sew', factoryId: 'factory-1', departmentId: 'department-1', productionLineId: 'line-critical', mainStageId: 'main-2', name: 'الحياكة', code: 'ST-02', mainStageName: 'الخياطة', metrics: readinessMetrics(2, 3, 1, 1, 0, 3), modelNames: ['موديل الحذاء اليومي', 'موديل السلامة'] }
+  productionLineId: 'line-critical', productionLineName: 'خط القص الحرج', selectedProductModelId: 'model-1', selectedProductModelName: 'موديل الحذاء اليومي', requiresModelSelection: false, availableModels: [{ id: 'model-1', name: 'موديل الحذاء اليومي', code: 'SH-01', stageCount: 4 }, { id: 'model-2', name: 'موديل السلامة', code: 'SH-02', stageCount: 1 }], stages: [
+    { id: 'stage-cut', factoryId: 'factory-1', departmentId: 'department-1', productionLineId: 'line-critical', mainStageId: 'main-1', name: 'القص', code: 'ST-01', mainStageName: 'التجهيز', stageOrder: 30, metrics: readinessMetrics(2, 3, 1, 1, 1, 3), modelNames: ['موديل الحذاء اليومي'] },
+    { id: 'stage-sew', factoryId: 'factory-1', departmentId: 'department-1', productionLineId: 'line-critical', mainStageId: 'main-2', name: 'الحياكة', code: 'ST-02', mainStageName: 'الخياطة', stageOrder: 10, metrics: readinessMetrics(2, 2, 0, 0, 0, 2), modelNames: ['موديل الحذاء اليومي'] },
+    { id: 'stage-late', factoryId: 'factory-1', departmentId: 'department-1', productionLineId: 'line-critical', mainStageId: 'main-3', name: 'التجميع', code: 'ST-03', mainStageName: 'التجميع', stageOrder: 20, metrics: readinessMetrics(2, 2, 1, 0, 0, 2), modelNames: ['موديل الحذاء اليومي'] },
+    { id: 'stage-empty', factoryId: 'factory-1', departmentId: 'department-1', productionLineId: 'line-critical', mainStageId: 'main-4', name: 'التغليف', code: 'ST-04', mainStageName: 'التشطيب', stageOrder: null, metrics: readinessMetrics(0, 0, 0, 0, 0, 0), modelNames: ['موديل الحذاء اليومي'] }
   ]
 };
 const readinessWorkers = {
@@ -213,6 +215,51 @@ test('hides previous-scope dashboard figures while a filter response is pending'
   await expect(page.locator('.command-page__loading-notice')).toBeVisible();
   await expect(page.locator('.metric-grid')).toHaveCount(0);
   await expect(page.locator('.metric-grid').first()).toBeVisible();
+});
+
+test('filters model stages by multiple issue types on an Android tablet', async ({ page }) => {
+  await preparePage(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto('/factory-map');
+  await page.getByRole('button', { name: /مصنع الأحذية الرئيسي/ }).click();
+  await page.getByRole('button', { name: /قسم الإنتاج/ }).click();
+  await page.getByRole('button', { name: /خط القص الحرج/ }).click();
+  await page.locator('app-readiness-model-selector').getByRole('button', { name: /موديل الحذاء اليومي/ }).click();
+
+  const filter = page.locator('app-readiness-stage-filter');
+  const stageCards = page.locator('.readiness-map__grid app-readiness-node-card');
+  await expect(filter.getByText('عرض 4 من 4 مرحلة')).toBeVisible();
+  await expect(stageCards).toHaveCount(4);
+  await expect(stageCards.nth(0)).toContainText('الحياكة');
+  await expect(stageCards.nth(1)).toContainText('التجميع');
+  await expect(stageCards.nth(2)).toContainText('القص');
+  await expect(stageCards.nth(3)).toContainText('التغليف');
+
+  await filter.locator('.p-multiselect').click();
+  await page.locator('.p-multiselect-panel:visible').last().getByRole('option', { name: /بها غائبون/ }).click();
+  await expect(filter.getByText('عرض 1 من 4 مرحلة')).toBeVisible();
+  await filter.locator('.p-multiselect').click();
+  await page.locator('.p-multiselect-panel:visible').last().getByRole('option', { name: /بها متأخرون/ }).click();
+  await expect(filter.locator('.p-multiselect-label')).toContainText('2 أنواع مشكلات');
+  await expect(filter.getByText('عرض 2 من 4 مرحلة')).toBeVisible();
+  await expect(stageCards).toHaveCount(2);
+  await expect(stageCards.nth(0)).toContainText('التجميع');
+  await expect(stageCards.nth(1)).toContainText('القص');
+
+  await page.getByRole('button', { name: /^القص ST-01/ }).click();
+  await page.locator('.readiness-map__breadcrumb').getByRole('button', { name: 'خط القص الحرج', exact: true }).click();
+  await expect(filter.getByText('عرض 2 من 4 مرحلة')).toBeVisible();
+
+  await filter.getByRole('button', { name: 'مسح الفلاتر' }).click();
+  await expect(filter.getByText('عرض 4 من 4 مرحلة')).toBeVisible();
+  await filter.locator('.p-multiselect').click();
+  await page.locator('.p-multiselect-panel:visible').last().getByRole('option', { name: /حضور غير مؤكد/ }).click();
+  await expect(page.getByText('لا توجد مراحل تطابق أنواع المشكلات المحددة')).toBeVisible();
+  await page.locator('.readiness-map__empty--filtered').getByRole('button', { name: 'مسح الفلاتر' }).click();
+  await expect(stageCards).toHaveCount(4);
+  await expect(page.locator('.p-multiselect-panel:visible')).toHaveCount(0);
+  await expectViewportSafe(page);
+  await page.screenshot({ path: path.join(visualOutput, 'android-tablet-stage-filters.png'), fullPage: true });
 });
 
 test('shows an honest readiness loading state before rendering the hierarchy', async ({ page }) => {

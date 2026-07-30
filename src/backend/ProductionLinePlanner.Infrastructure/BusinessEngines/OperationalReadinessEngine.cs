@@ -181,8 +181,8 @@ public sealed class OperationalReadinessEngine(
                                   where stageIds.Contains(stage.Id) && stage.IsActive && mainStage.IsActive
                                         && stage.DepartmentId == line.DepartmentId
                                   select new StageContext(
-                                      stage.Id, stage.Name, stage.Code, stage.MainStageId, mainStage.Name,
-                                      stage.DefaultOrder)).ToArrayAsync(cancellationToken);
+                                      stage.Id, stage.Name, stage.Code, stage.MainStageId, mainStage.Name))
+            .ToArrayAsync(cancellationToken);
 
         var stages = stageDetails.Select(stage => new OperationalReadinessStageDto(
             stage.Id,
@@ -193,13 +193,17 @@ public sealed class OperationalReadinessEngine(
             stage.Name,
             stage.Code,
             stage.MainStageName,
+            catalogByStage.GetValueOrDefault(stage.Id)?.Min(item => item.StageOrder),
             OperationalReadinessCalculator.Calculate(
                 assignments.Where(item => item.SubStageId == stage.Id).Select(item => item.WorkerId),
                 states,
                 freshness.IsTrusted,
                 assignments.Where(item => item.SubStageId == stage.Id).Select(item => item.WorkerId).Distinct().Count()),
             catalogByStage.GetValueOrDefault(stage.Id)?.Select(item => item.ModelName).Distinct().Order().ToArray() ?? []))
-            .OrderByReadiness(item => item.Metrics, item => item.Name)
+            .OrderBy(item => item.StageOrder is > 0 ? 0 : 1)
+            .ThenBy(item => item.StageOrder is > 0 ? item.StageOrder : null)
+            .ThenBy(item => item.Name)
+            .ThenBy(item => item.Id)
             .ToArray();
 
         return Result<OperationalReadinessStagesDto>.Success(new OperationalReadinessStagesDto(
@@ -419,7 +423,7 @@ public sealed class OperationalReadinessEngine(
                                         && lineIds.Contains(modelStage.ProductionLineId)
                                   select new StageCatalogContext(
                                       modelStage.ProductionLineId, stage.Id, stage.MainStageId,
-                                      model.Id, model.Name, model.Code))
+                                      model.Id, model.Name, model.Code, modelStage.StageOrder))
             .Distinct().ToArrayAsync(cancellationToken);
 
         return new StructureContext(factories, departments, lines, assignments, stageCatalog);
@@ -585,7 +589,8 @@ public sealed class OperationalReadinessEngine(
         Guid MainStageId,
         Guid ModelId,
         string ModelName,
-        string ModelCode);
+        string ModelCode,
+        int StageOrder);
     private sealed record StructureContext(
         FactoryContext[] Factories,
         DepartmentContext[] Departments,
@@ -599,7 +604,7 @@ public sealed class OperationalReadinessEngine(
         string DepartmentName,
         Guid ProductionLineId,
         string ProductionLineName);
-    private sealed record StageContext(Guid Id, string Name, string Code, Guid MainStageId, string MainStageName, int Order);
+    private sealed record StageContext(Guid Id, string Name, string Code, Guid MainStageId, string MainStageName);
     private sealed record WorkerListContext(
         Guid FactoryId,
         string FactoryName,

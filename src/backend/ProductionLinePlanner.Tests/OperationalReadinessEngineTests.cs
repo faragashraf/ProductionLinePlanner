@@ -29,6 +29,27 @@ public sealed class OperationalReadinessEngineTests
     }
 
     [Fact]
+    public async Task Model_stages_are_returned_by_product_model_stage_order_not_readiness()
+    {
+        await using var fixture = await Fixture.CreateAsync(workerCount: 1, presentCount: 1);
+        var mappings = await fixture.Db.ProductModelStages.ToArrayAsync();
+        var firstMapping = Assert.Single(mappings, item => item.SubStageId == fixture.StageA.Id);
+        var secondMapping = Assert.Single(mappings, item => item.SubStageId != fixture.StageA.Id);
+        firstMapping.Update(
+            firstMapping.SubStageId, 2, firstMapping.PiecePrice, firstMapping.StandardSeconds,
+            firstMapping.CompensationMode, firstMapping.IsRequired, firstMapping.IsActive, firstMapping.EffectiveFrom);
+        secondMapping.Update(
+            secondMapping.SubStageId, 1, secondMapping.PiecePrice, secondMapping.StandardSeconds,
+            secondMapping.CompensationMode, secondMapping.IsRequired, secondMapping.IsActive, secondMapping.EffectiveFrom);
+        await fixture.Db.SaveChangesAsync();
+
+        var result = await fixture.Engine.GetLineStagesAsync(fixture.Line.Id, fixture.AsOfUtc);
+
+        Assert.Equal([secondMapping.SubStageId, firstMapping.SubStageId], result.Value!.Stages.Select(item => item.Id));
+        Assert.Equal([1, 2], result.Value.Stages.Select(item => item.StageOrder));
+    }
+
+    [Fact]
     public async Task New_check_in_updates_stage_line_department_and_factory_from_absolute_worker_counts()
     {
         await using var fixture = await Fixture.CreateAsync(workerCount: 10, presentCount: 6);
@@ -225,12 +246,24 @@ public sealed class OperationalReadinessEngineTests
     public async Task Attendance_realtime_delta_updates_worker_stage_line_department_and_factory_path()
     {
         await using var fixture = await Fixture.CreateAsync(workerCount: 1, presentCount: 0);
-        fixture.SetAttendance(0, AttendanceStatus.Present);
-        (await fixture.Db.AttendanceSyncStates.SingleAsync()).RecordSuccess(DateTime.UtcNow);
+        var now = DateTime.UtcNow;
+        var workdayPolicy = new AttendanceWorkdayPolicy(
+            Options.Create(new AttendanceSourceOptions()),
+            TestCairoTimeZoneProvider.Instance);
+        var operationalDate = workdayPolicy.GetOperationalDate(now);
+        fixture.SetAttendance(0, AttendanceStatus.Present, workdayPolicy.GetWindow(operationalDate).StartUtc.AddHours(2));
+        var syncState = await fixture.Db.AttendanceSyncStates.SingleAsync();
+        if (syncState.OperationalDate != operationalDate)
+        {
+            fixture.Db.AttendanceSyncStates.Remove(syncState);
+            syncState = new AttendanceSyncState(Guid.NewGuid(), "AttendanceSync", operationalDate);
+            fixture.Db.AttendanceSyncStates.Add(syncState);
+        }
+        syncState.RecordSuccess(now);
         await fixture.Db.SaveChangesAsync();
         var change = new ManufacturingDataChanged(
             Guid.NewGuid(), ManufacturingEntityType.AttendanceRecord, ManufacturingChangeType.Updated,
-            Guid.NewGuid(), fixture.AsOfUtc, null, "test", WorkerId: fixture.Workers[0].Id);
+            Guid.NewGuid(), now, null, "test", WorkerId: fixture.Workers[0].Id);
 
         var delta = await fixture.Engine.GetDeltaAsync(change);
 

@@ -84,6 +84,7 @@ public sealed record OperationalReadinessStageDto(
     string Name,
     string Code,
     string MainStageName,
+    int? StageOrder,
     OperationalReadinessMetricsDto Metrics,
     IReadOnlyList<string> ModelNames);
 

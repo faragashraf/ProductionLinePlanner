@@ -76,6 +76,7 @@ export interface OperationalReadinessStage {
   name: string;
   code: string;
   mainStageName: string;
+  stageOrder: number | null;
   metrics: OperationalReadinessMetrics;
   modelNames: string[];
 }
