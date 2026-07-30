@@ -59,6 +59,18 @@ describe('PlpFormSheetComponent', () => {
     expect(fixture.componentInstance.transitionOptions).toContain('150ms');
   });
 
+  it('applies the opt-in compact header density without changing dialog action sizing', () => {
+    setViewportMode(false);
+    fixture = TestBed.createComponent(PlpFormSheetComponent);
+    fixture.componentRef.setInput('visible', true);
+    fixture.componentRef.setInput('compactHeader', true);
+    fixture.detectChanges();
+
+    expect(fixture.componentInstance.sheetClass).toContain('plp-form-sheet--compact-header');
+    const saveButton = document.body.querySelector('.p-dialog-footer .plp-action-button') as HTMLElement;
+    expect(parseFloat(getComputedStyle(saveButton).minHeight)).toBeGreaterThanOrEqual(44);
+  });
+
   it('honors reduced motion and prevents duplicate save requests while the request is active', () => {
     setViewportMode(true, true);
     fixture = TestBed.createComponent(PlpFormSheetComponent);

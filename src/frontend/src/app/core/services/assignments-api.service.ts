@@ -184,6 +184,7 @@ export interface LineStaffingParticipation {
   assignmentId: string;
   assignmentType: ApiAssignmentType;
   productionLineId: string;
+  productionLineName: string;
   subStageId: string;
   subStageName: string | null;
   fromSubStageId: string | null;

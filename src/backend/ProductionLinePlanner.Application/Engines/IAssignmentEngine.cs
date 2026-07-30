@@ -121,4 +121,5 @@ public sealed record WorkerAssignmentState(
     Guid? ToSubStageId,
     Guid? ReplacementForWorkerId,
     TemporaryAssignmentMode? ParticipationMode = null,
-    Guid? ProductionLineId = null);
+    Guid? ProductionLineId = null,
+    string? ProductionLineName = null);

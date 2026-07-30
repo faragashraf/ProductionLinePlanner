@@ -457,6 +457,7 @@
     [title]="assignmentDialogTitle"
     [subtitle]="assignmentDialogSubtitle"
     size="wide"
+    [compactHeader]="assignmentDialogMode === 'default'"
     [saving]="assignmentSaving"
     [error]="assignmentDialogError"
     [saveDisabled]="assignmentSaving"
@@ -477,9 +478,8 @@
         class="line-staffing-page__dialog-note line-staffing-page__wide"
         *ngIf="assignmentDialogMode === 'default'"
       >
-        حدّد عمال المرحلة دفعة واحدة. الاختيار يضيف مشاركة دائمة لهذه المرحلة
-        فقط، وإلغاء الاختيار يزيل مشاركة هذا العامل من هذه المرحلة فقط دون تغيير
-        مراحله الأخرى. لا يلزم سبب للإضافة.
+        حدّد عمال المرحلة؛ التحديد والإلغاء يغيّران هذه المرحلة فقط دون التأثير
+        في تسكيناتهم الأخرى.
       </p>
       <p
         class="line-staffing-page__dialog-note line-staffing-page__wide"
@@ -489,32 +489,47 @@
         لن يتغير أي سجل إنتاج تاريخي.
       </p>
       <ng-container *ngIf="isBulkDefaultAssignmentDialog">
-        <label class="line-staffing-page__wide"
-          >بحث العامل
-          <input
-            pInputText
-            type="search"
-            [(ngModel)]="workerSearch"
-            [ngModelOptions]="{ standalone: true }"
-            placeholder="الكود أو الاسم"
-          />
-        </label>
-        <label
-          >القسم
-          <select
-            [(ngModel)]="departmentFilter"
-            [ngModelOptions]="{ standalone: true }"
-          >
-            <option value="">كل الأقسام</option>
-            <option
-              *ngFor="let department of workerDepartments"
-              [value]="department"
+        <div class="line-staffing-page__dialog-filters line-staffing-page__wide">
+          <label
+            >بحث العامل
+            <input
+              pInputText
+              type="search"
+              [(ngModel)]="workerSearch"
+              [ngModelOptions]="{ standalone: true }"
+              placeholder="الكود أو الاسم"
+            />
+          </label>
+          <label
+            >القسم
+            <select
+              [(ngModel)]="departmentFilter"
+              [ngModelOptions]="{ standalone: true }"
             >
-              {{ department }}
-            </option>
-          </select>
-        </label>
-        <p class="line-staffing-page__dialog-note line-staffing-page__wide">
+              <option value="">كل الأقسام</option>
+              <option
+                *ngFor="let department of workerDepartments"
+                [value]="department"
+              >
+                {{ department }}
+              </option>
+            </select>
+          </label>
+          <label
+            >خط التسكين
+            <select
+              [(ngModel)]="assignmentLineFilter"
+              [ngModelOptions]="{ standalone: true }"
+            >
+              <option value="all">كل خطوط الإنتاج</option>
+              <option value="unassigned">غير مسكن</option>
+              <option *ngFor="let line of assignmentLineOptions" [value]="line.id">
+                {{ line.name }}
+              </option>
+            </select>
+          </label>
+        </div>
+        <p class="line-staffing-page__dialog-selection-summary line-staffing-page__wide">
           {{ selectedDefaultWorkersCount }} عامل محدد للتسكين الدائم في هذه
           المرحلة. العامل المشارك في مراحل أخرى يظل قابلًا للاختيار.
         </p>
@@ -548,13 +563,11 @@
             [disabled]="!!defaultWorkerSelectionUnavailableMessage(worker)"
             [fullName]="worker.fullName"
             [employeeCode]="worker.employeeCode"
-            [productionLineName]="plan?.productionLineName || ''"
             [isOnActiveService]="worker.isOnActiveService"
-            [stageNames]="workerParticipationStageNames(worker)"
+            [assignmentDetails]="workerActualAssignmentDetails(worker)"
             [hasPhoto]="worker.hasPhoto"
             [photoReference]="worker.photoReference"
             [photoVersion]="worker.photoVersion"
-            [statusMessage]="defaultWorkerAssignmentStateLabel(worker)"
             [unavailableMessage]="
               defaultWorkerSelectionUnavailableMessage(worker) || ''
             "
@@ -568,7 +581,7 @@
               !availableWorkers.length
             "
           >
-            لا توجد نتائج مطابقة للبحث أو القسم المحدد.
+            لا توجد نتائج مطابقة للفلاتر المحددة.
           </p>
         </section>
       </ng-container>

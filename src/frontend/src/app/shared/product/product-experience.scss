@@ -72,6 +72,41 @@
   overflow-wrap: anywhere;
 }
 
+.plp-form-sheet--compact-header .plp-form-sheet__header > div {
+  gap: 0;
+}
+
+.plp-form-sheet--compact-header .plp-form-sheet__header h2 {
+  font-size: 1.05rem;
+  line-height: 1.3;
+}
+
+.plp-form-sheet--compact-header .plp-form-sheet__header p {
+  font-size: var(--plp-type-supporting);
+  line-height: 1.3;
+}
+
+.line-staffing-page__dialog-filters {
+  display: grid;
+  grid-template-columns: minmax(13rem, 1.35fr) repeat(2, minmax(10rem, 1fr));
+  gap: var(--plp-space-8) var(--plp-space-12);
+  align-items: end;
+
+  label { min-width: 0; }
+  label, select, input { word-break: normal; overflow-wrap: normal; }
+}
+
+.line-staffing-page__dialog-selection-summary {
+  margin: 0;
+  color: var(--plp-color-text-subtle);
+  font-size: var(--plp-type-caption);
+}
+
+.line-staffing-page__candidate-list {
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
 .plp-product-dialog__body,
 .plp-form-sheet__body {
   display: grid;
@@ -641,6 +676,8 @@ plp-product-metadata-item {
 }
 
 @media (max-width: 599px) {
+  .line-staffing-page__dialog-filters { grid-template-columns: minmax(0, 1fr); }
+
   .plp-product-toolbar {
     align-items: stretch;
     flex-direction: column;
@@ -689,6 +726,11 @@ plp-product-metadata-item {
   .plp-product-toolbar__filters {
     flex: 1 1 auto;
   }
+}
+
+@media (min-width: 600px) and (max-width: 767px) {
+  .line-staffing-page__dialog-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .line-staffing-page__dialog-filters label:first-child { grid-column: 1 / -1; }
 }
 // Manufacturing stage catalogs wrap only between words. Short labels remain intact
 // while the local table scroller contains narrow viewport overflow.

@@ -207,6 +207,7 @@ public sealed class LineStaffingEngine(AppDbContext dbContext) : ILineStaffingEn
                     assignment.Id,
                     assignment.WorkerId,
                     assignment.ProductionLineId,
+                    assignment.ProductionLine!.Name,
                     assignment.SubStageId,
                     assignment.AssignedAt))
                 .ToArrayAsync(cancellationToken))
@@ -224,7 +225,8 @@ public sealed class LineStaffingEngine(AppDbContext dbContext) : ILineStaffingEn
                         null,
                         assignment.SubStageId,
                         null,
-                        ProductionLineId: assignment.ProductionLineId))
+                        ProductionLineId: assignment.ProductionLineId,
+                        ProductionLineName: assignment.ProductionLineName))
                     .ToArray());
         var referencedSubStageIds = resolvedAssignments.Values.SelectMany(assignments => assignments)
             .SelectMany(assignment => new[] { assignment.EffectiveSubStageId, assignment.FromSubStageId })
@@ -308,6 +310,7 @@ public sealed class LineStaffingEngine(AppDbContext dbContext) : ILineStaffingEn
                 assignment.AssignmentId!.Value,
                 assignment.AssignmentType!.Value.ToString(),
                 assignment.ProductionLineId!.Value,
+                assignment.ProductionLineName!,
                 assignment.EffectiveSubStageId!.Value,
                 NameFor(assignment.EffectiveSubStageId, subStageNames),
                 assignment.FromSubStageId,
@@ -316,7 +319,8 @@ public sealed class LineStaffingEngine(AppDbContext dbContext) : ILineStaffingEn
                 assignment.EndsAtUtc,
                 assignment.ReplacementForWorkerId,
                 assignment.ParticipationMode?.ToString()))
-            .OrderBy(participation => participation.SubStageName, StringComparer.Ordinal)
+            .OrderBy(participation => participation.ProductionLineName, StringComparer.Ordinal)
+            .ThenBy(participation => participation.SubStageName, StringComparer.Ordinal)
             .ThenBy(participation => participation.SubStageId)
             .ToArray();
         var defaultAssignment = effectiveAssignments
@@ -389,6 +393,7 @@ public sealed class LineStaffingEngine(AppDbContext dbContext) : ILineStaffingEn
         Guid Id,
         Guid WorkerId,
         Guid ProductionLineId,
+        string ProductionLineName,
         Guid SubStageId,
         DateTime AssignedAt);
 }

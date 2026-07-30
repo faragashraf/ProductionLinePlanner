@@ -53,6 +53,51 @@ public sealed class LineStaffingEngineTests
     }
 
     [Fact]
+    public async Task Staffing_worker_directory_returns_actual_line_and_stage_for_every_permanent_participation()
+    {
+        await using var fixture = await StaffingFixture.CreateAsync();
+        var otherLine = new ProductionLine(
+            Guid.NewGuid(),
+            fixture.Factory.Id,
+            "Line 2",
+            2,
+            departmentId: fixture.Line.DepartmentId);
+        var unassignedWorker = new Worker(Guid.NewGuid(), "104", "Unassigned worker");
+        fixture.Db.AddRange(
+            otherLine,
+            unassignedWorker,
+            new WorkerDefaultAssignment(
+                Guid.NewGuid(),
+                fixture.TemporarilyMovedWorker.Id,
+                fixture.TemporarySubStage.Id,
+                Guid.NewGuid(),
+                new DateTime(2026, 7, 11, 8, 0, 0, DateTimeKind.Utc),
+                productionLineId: otherLine.Id));
+        await fixture.Db.SaveChangesAsync();
+
+        var result = await fixture.Engine.GetActiveStaffingWorkersAsync(fixture.ReferenceDate);
+
+        Assert.True(result.IsSuccess);
+        var workers = result.Value!;
+        var assignedWorker = workers.Single(worker => worker.WorkerId == fixture.TemporarilyMovedWorker.Id);
+        Assert.Equal(2, assignedWorker.Participations.Count);
+        Assert.Contains(
+            assignedWorker.Participations,
+            participation => participation.ProductionLineId == fixture.Line.Id
+                             && participation.ProductionLineName == fixture.Line.Name
+                             && participation.SubStageId == fixture.DefaultSubStage.Id
+                             && participation.SubStageName == fixture.DefaultSubStage.Name);
+        Assert.Contains(
+            assignedWorker.Participations,
+            participation => participation.ProductionLineId == otherLine.Id
+                             && participation.ProductionLineName == otherLine.Name
+                             && participation.SubStageId == fixture.TemporarySubStage.Id
+                             && participation.SubStageName == fixture.TemporarySubStage.Name);
+        Assert.All(assignedWorker.Participations, participation => Assert.Equal("Default", participation.AssignmentType));
+        Assert.Empty(workers.Single(worker => worker.WorkerId == unassignedWorker.Id).Participations);
+    }
+
+    [Fact]
     public async Task Historical_temporary_assignment_is_not_included_in_the_permanent_staffing_read_model()
     {
         await using var fixture = await StaffingFixture.CreateAsync();

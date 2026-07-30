@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, EventEmitter, Input, Output } from '@angular/core';
+import { WorkerAssignmentDisplayItem } from '../worker-assignment-details/worker-assignment-details.component';
 
 export type WorkerAssignmentCardSelectionMode = 'single' | 'multiple';
 
@@ -18,6 +19,7 @@ export class WorkerAssignmentCardComponent {
   @Input() productionLineName = '';
   @Input() isOnActiveService = true;
   @Input() stageNames: readonly string[] = [];
+  @Input() assignmentDetails: readonly WorkerAssignmentDisplayItem[] | null = null;
   @Input() hasPhoto = false;
   @Input() photoReference: string | null = null;
   @Input() photoVersion: string | null = null;

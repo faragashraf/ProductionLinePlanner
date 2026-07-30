@@ -14,6 +14,7 @@ const permissions = [
 const factory = { id: 'factory-1', code: 'F-01', name: 'مصنع الاختبار المتجاوب', location: 'القاهرة', isActive: true };
 const department = { id: 'department-1', factoryId: factory.id, code: 'CUT', nameAr: 'قسم القص والتجهيز', nameEn: 'Cutting', sequenceOrder: 1, productionLineCount: 1, isActive: true };
 const line = { id: 'line-1', factoryId: factory.id, departmentId: department.id, departmentCode: department.code, departmentNameAr: department.nameAr, lineCode: 'L-01', name: 'خط الإنتاج الرئيسي طويل الاسم', sequenceOrder: 1, isActive: true };
+const otherLine = { id: 'line-2', name: 'خط التجميع المساند' };
 const model = { id: 'model-1', code: 'MODEL-01', name: 'موديل التشغيل التجريبي', isActive: true };
 const subStageIds = [
   '11111111-1111-1111-1111-111111111111',
@@ -21,7 +22,7 @@ const subStageIds = [
   '33333333-3333-3333-3333-333333333333'
 ];
 
-const workers = Array.from({ length: 4 }, (_, index) => ({
+const workers = Array.from({ length: 8 }, (_, index) => ({
   workerId: `aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa${index}`,
   employeeCode: `W-${String(index + 1).padStart(3, '0')}`,
   fullName: index === 0 ? 'عامل تشغيل باسم عربي طويل لاختبار الالتفاف الآمن داخل اللوحي' : `عامل التشغيل ${index + 1}`,
@@ -30,12 +31,12 @@ const workers = Array.from({ length: 4 }, (_, index) => ({
   hasPhoto: false,
   photoReference: null,
   photoVersion: null,
-  defaultSubStageId: index < 2 ? subStageIds[0] : null,
-  defaultSubStageName: index < 2 ? 'مرحلة القص والتجهيز الأولي' : null,
+  defaultSubStageId: index < 2 ? subStageIds[index] : null,
+  defaultSubStageName: index < 2 ? (index === 0 ? 'مرحلة القص والتجهيز الأولي' : 'مرحلة التشغيل الثانية') : null,
   effectiveAssignmentId: index < 2 ? `assignment-${index + 1}` : null,
   effectiveAssignmentType: index < 2 ? 'Default' : null,
-  effectiveSubStageId: index < 2 ? subStageIds[0] : null,
-  effectiveSubStageName: index < 2 ? 'مرحلة القص والتجهيز الأولي' : null,
+  effectiveSubStageId: index < 2 ? subStageIds[index] : null,
+  effectiveSubStageName: index < 2 ? (index === 0 ? 'مرحلة القص والتجهيز الأولي' : 'مرحلة التشغيل الثانية') : null,
   fromSubStageId: null,
   fromSubStageName: null,
   temporaryStartsAtUtc: null,
@@ -44,9 +45,10 @@ const workers = Array.from({ length: 4 }, (_, index) => ({
   participations: index < 2 ? [{
     assignmentId: `assignment-${index + 1}`,
     assignmentType: 'Default',
-    productionLineId: line.id,
-    subStageId: subStageIds[0],
-    subStageName: 'مرحلة القص والتجهيز الأولي',
+    productionLineId: index === 0 ? line.id : otherLine.id,
+    productionLineName: index === 0 ? line.name : otherLine.name,
+    subStageId: subStageIds[index],
+    subStageName: index === 0 ? 'مرحلة القص والتجهيز الأولي' : 'مرحلة التشغيل الثانية',
     fromSubStageId: null,
     fromSubStageName: null,
     startsAtUtc: '2026-07-01T06:00:00Z',
@@ -67,14 +69,14 @@ const stages = subStageIds.map((subStageId, index) => ({
   compensationMode: 'SharedPercentage',
   compensationConfigurationStatus: 'Configured',
   isFinancialReviewPending: false,
-  defaultAssignedWorkersCount: index === 0 ? 2 : 0,
-  effectiveAssignedWorkersCount: index === 0 ? 2 : 0,
+  defaultAssignedWorkersCount: index === 0 ? 1 : 0,
+  effectiveAssignedWorkersCount: index === 0 ? 1 : 0,
   temporaryAssignedWorkersCount: 0,
   requiredWorkers: index === 0 ? 2 : null,
   hasAuthoritativeRequiredWorkerCount: index === 0,
   staffingStatus: index === 0 ? 'Ready' : 'NeedsStaffingReview',
   workerStatusText: index === 0 ? 'التسكين مطابق للعدد المطلوب' : 'تحتاج المرحلة إلى تسكين',
-  effectiveWorkerIds: index === 0 ? workers.slice(0, 2).map(worker => worker.workerId) : []
+  effectiveWorkerIds: index === 0 ? [workers[0].workerId] : []
 }));
 
 const staffingPlan = {
@@ -269,14 +271,17 @@ test('loads the permanent staffing workspace and keeps its dialog within tablet 
   ] as const) {
     await page.setViewportSize({ width, height });
     await page.goto('/manufacturing/line-staffing');
-    await page.getByRole('button', { name: /اختر من شجرة المصنع/ }).click();
+    await page.waitForLoadState('networkidle');
+    const structureTrigger = page.getByRole('button', { name: /اختر من شجرة المصنع/ });
+    await expect(structureTrigger).toBeEnabled();
+    await structureTrigger.click();
     const structureTree = page.locator('.structure-selector__overlay .factory-structure-tree-view');
     const factoryNode = structureTree.getByText(factory.name, { exact: true })
       .locator('xpath=ancestor::*[contains(@class,"p-treenode-content")][1]');
-    await factoryNode.locator('.p-tree-toggler').click();
+    await factoryNode.locator('.p-tree-toggler').click({ force: true });
     const departmentNode = structureTree.getByText(department.nameAr, { exact: true })
       .locator('xpath=ancestor::*[contains(@class,"p-treenode-content")][1]');
-    await departmentNode.locator('.p-tree-toggler').click();
+    await departmentNode.locator('.p-tree-toggler').click({ force: true });
     await structureTree.getByText(line.name, { exact: true }).click();
     const modelSelect = page.getByLabel('الموديل').filter({ visible: true }).and(page.locator('select'));
     await expect(modelSelect).toBeEnabled();
@@ -292,6 +297,65 @@ test('loads the permanent staffing workspace and keeps its dialog within tablet 
       const dialog = page.getByRole('dialog');
       await expect(dialog).toBeVisible();
       await expect(dialog.locator('.plp-responsive-entity-row__title').filter({ hasText: workers[0].fullName })).toBeVisible();
+      const header = dialog.locator('.p-dialog-header');
+      const headerBox = await header.boundingBox();
+      expect(headerBox?.height ?? Number.POSITIVE_INFINITY).toBeLessThan(name === 'mobile-390x844' ? 112 : 88);
+
+      const dialogFilters = dialog.locator('.line-staffing-page__dialog-filters label');
+      await expect(dialogFilters).toHaveCount(3);
+      const filterBoxes = await dialogFilters.evaluateAll(elements => elements.map(element => {
+        const box = element.getBoundingClientRect();
+        return { top: box.top, bottom: box.bottom, width: box.width };
+      }));
+      if (name === 'tablet-portrait-800x1280') {
+        expect(Math.max(...filterBoxes.map(box => box.bottom)) - Math.min(...filterBoxes.map(box => box.bottom))).toBeLessThanOrEqual(2);
+      } else {
+        expect(filterBoxes[1].top).toBeGreaterThan(filterBoxes[0].bottom - 1);
+        expect(filterBoxes[2].top).toBeGreaterThan(filterBoxes[1].bottom - 1);
+      }
+
+      const currentWorkerCard = dialog.locator('plp-worker-assignment-card').filter({ hasText: workers[0].fullName });
+      const otherLineWorkerCard = dialog.locator('plp-worker-assignment-card').filter({ hasText: workers[1].fullName });
+      const unassignedWorkerCard = dialog.locator('plp-worker-assignment-card').filter({ hasText: workers[2].fullName });
+      await expect(currentWorkerCard.locator('input[type="checkbox"]')).toBeChecked();
+      await expect(otherLineWorkerCard.locator('input[type="checkbox"]')).not.toBeChecked();
+      await expect(otherLineWorkerCard).toContainText(otherLine.name);
+      await expect(otherLineWorkerCard).toContainText('مرحلة التشغيل الثانية');
+      await expect(otherLineWorkerCard).not.toContainText(line.name);
+      await expect(unassignedWorkerCard).toContainText('غير مسكن');
+      await expect(unassignedWorkerCard).toContainText('لا يوجد تسكين حالي');
+      await expect(unassignedWorkerCard).not.toContainText(line.name);
+      await expect(unassignedWorkerCard).not.toContainText('عدد المراحل: 0');
+
+      const lineFilter = dialog.getByLabel('خط التسكين');
+      await lineFilter.selectOption(otherLine.id);
+      await expect(otherLineWorkerCard).toBeVisible();
+      await expect(currentWorkerCard).toBeHidden();
+      await lineFilter.selectOption('unassigned');
+      await expect(unassignedWorkerCard).toBeVisible();
+      await expect(otherLineWorkerCard).toBeHidden();
+      await lineFilter.selectOption('all');
+
+      const candidateList = dialog.locator('.line-staffing-page__candidate-list');
+      const scrollGeometry = await candidateList.evaluate(element => ({
+        clientHeight: element.clientHeight,
+        scrollHeight: element.scrollHeight,
+        overflowY: getComputedStyle(element).overflowY,
+      }));
+      expect(scrollGeometry.overflowY).toBe('auto');
+      expect(scrollGeometry.scrollHeight).toBeGreaterThan(scrollGeometry.clientHeight);
+      await candidateList.evaluate(element => { element.scrollTop = element.scrollHeight; });
+      const lastCard = dialog.locator('plp-worker-assignment-card').last();
+      const [listBox, lastCardBox, footerBox] = await Promise.all([
+        candidateList.boundingBox(),
+        lastCard.boundingBox(),
+        dialog.locator('.p-dialog-footer').boundingBox(),
+      ]);
+      expect(lastCardBox ? lastCardBox.y + lastCardBox.height : Number.POSITIVE_INFINITY)
+        .toBeLessThanOrEqual(listBox ? listBox.y + listBox.height + 1 : 0);
+      expect(listBox ? listBox.y + listBox.height : Number.POSITIVE_INFINITY)
+        .toBeLessThanOrEqual((footerBox?.y ?? 0) + 1);
+      await candidateList.evaluate(element => { element.scrollTop = 0; });
       await expectViewportSafe(page);
       await page.screenshot({ path: path.join(visualOutput, `line-staffing-dialog-${name}.png`) });
       await page.getByRole('button', { name: 'إلغاء', exact: true }).click();
