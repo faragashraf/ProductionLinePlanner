@@ -53,6 +53,35 @@ public sealed class LineStaffingEngineTests
     }
 
     [Fact]
+    public async Task Staffing_worker_directory_returns_the_workers_organizational_department_with_legacy_local_fallback()
+    {
+        await using var fixture = await StaffingFixture.CreateAsync();
+        var sewing = new Department(Guid.NewGuid(), fixture.Factory.Id, "SEW", "الخياطة", "Sewing", 2);
+        var preparation = new Department(Guid.NewGuid(), fixture.Factory.Id, "PREP", "التجهيز", "Preparation", 3);
+        var legacyLocalWorker = new Worker(Guid.NewGuid(), "105", "Legacy local department worker");
+        legacyLocalWorker.SetLocalDepartmentName("التجهيز المحلي");
+        fixture.Db.AddRange(sewing, preparation, legacyLocalWorker);
+        fixture.TemporarilyMovedWorker.SetLocalDepartmentName("قسم قديم لا يجب عرضه");
+        fixture.TemporarilyMovedWorker.AssignOrganizationalDepartment(sewing.Id);
+        fixture.DefaultWorker.AssignOrganizationalDepartment(preparation.Id);
+        await fixture.Db.SaveChangesAsync();
+
+        var result = await fixture.Engine.GetActiveStaffingWorkersAsync(fixture.ReferenceDate);
+
+        Assert.True(result.IsSuccess);
+        var workers = result.Value!;
+        Assert.Equal(
+            "الخياطة",
+            workers.Single(worker => worker.WorkerId == fixture.TemporarilyMovedWorker.Id).DepartmentName);
+        Assert.Equal(
+            "التجهيز",
+            workers.Single(worker => worker.WorkerId == fixture.DefaultWorker.Id).DepartmentName);
+        Assert.Equal(
+            "التجهيز المحلي",
+            workers.Single(worker => worker.WorkerId == legacyLocalWorker.Id).DepartmentName);
+    }
+
+    [Fact]
     public async Task Staffing_worker_directory_returns_actual_line_and_stage_for_every_permanent_participation()
     {
         await using var fixture = await StaffingFixture.CreateAsync();

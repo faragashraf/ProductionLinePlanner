@@ -291,6 +291,32 @@ describe('LineStaffingWorkspacePageComponent', () => {
     ]);
   });
 
+  it('rebuilds department options after the asynchronous staffing-directory response replaces dialog workers', () => {
+    const directory = new Subject<LineStaffingPlan['workers']>();
+    assignments.getActiveLineStaffingWorkers.and.returnValue(directory.asObservable());
+    initialize(component);
+    component.openDefaultAssignment();
+
+    expect(component.dialogWorkers).toEqual([]);
+    expect(component.departmentFilterOptions).toEqual([{ label: 'كل الأقسام', value: '' }]);
+
+    const filterSource = lineFilterPlan();
+    directory.next(filterSource.workers.map((worker, index) => ({
+      ...worker,
+      departmentName: index === 0 ? ' الخياطة ' : index === 1 ? 'التجهيز' : null,
+    })));
+
+    expect(component.dialogWorkers.map(worker => worker.departmentName)).toEqual(['الخياطة', 'التجهيز', null]);
+    expect(component.departmentFilterOptions).toEqual([
+      { label: 'كل الأقسام', value: '' },
+      { label: 'التجهيز', value: 'التجهيز' },
+      { label: 'الخياطة', value: 'الخياطة' },
+    ]);
+    component.changeDepartmentFilter('الخياطة');
+    expect(component.selectedDepartmentFilterLabel).toBe('الخياطة');
+    expect(component.availableWorkers.map(worker => worker.workerId)).toEqual(['worker-one']);
+  });
+
   it('filters workers by the actual assignment line and by the unassigned state', () => {
     const filterSource = lineFilterPlan();
     assignments.getLineStaffingPlan.and.returnValue(of(filterSource));

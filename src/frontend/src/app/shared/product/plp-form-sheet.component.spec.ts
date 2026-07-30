@@ -71,6 +71,17 @@ describe('PlpFormSheetComponent', () => {
     expect(parseFloat(getComputedStyle(saveButton).minHeight)).toBeGreaterThanOrEqual(44);
   });
 
+  it('applies an optional capability layout class to the real PrimeNG surface', () => {
+    setViewportMode(false);
+    fixture = TestBed.createComponent(PlpFormSheetComponent);
+    fixture.componentRef.setInput('visible', true);
+    fixture.componentRef.setInput('styleClass', 'plp-form-sheet--staffing-directory');
+    fixture.detectChanges();
+
+    expect(fixture.componentInstance.sheetClass).toContain('plp-form-sheet--staffing-directory');
+    expect(document.body.querySelector('.p-dialog.plp-form-sheet--staffing-directory')).not.toBeNull();
+  });
+
   it('honors reduced motion and prevents duplicate save requests while the request is active', () => {
     setViewportMode(true, true);
     fixture = TestBed.createComponent(PlpFormSheetComponent);

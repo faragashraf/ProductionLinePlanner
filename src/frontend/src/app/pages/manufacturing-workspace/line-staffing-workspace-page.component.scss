@@ -30,7 +30,7 @@
 .line-staffing-page__worker-data { display: grid; gap: .12rem; min-width: 0; }
 .line-staffing-page__worker-data small { color: #667085; overflow-wrap: anywhere; }
 .line-staffing-page__worker-actions { display: flex; gap: .25rem; flex-wrap: wrap; justify-content: flex-end; }
-.line-staffing-page__candidate-list { display: grid; gap: .45rem; max-height: min(20rem, 28dvh); overflow-x: hidden; overflow-y: auto; padding: .35rem; border: 1px solid #eaecf0; border-radius: .55rem; background: #fcfcfd; }
+.line-staffing-page__candidate-list { align-content: start; display: grid; gap: .375rem; min-height: 0; overflow-x: hidden; overflow-y: auto; padding: .35rem; border: 1px solid #eaecf0; border-radius: .55rem; background: #fcfcfd; }
 .line-staffing-page__candidate-list small { color: #667085; }
 .line-staffing-page__move-warning { color: #9a6700; background: #fffaeb; border-inline-start: 3px solid #f79009; }
 .line-staffing-page__validation-summary { display: grid; gap: .25rem; padding-inline-start: 1.4rem; color: #9a3412; background: #fff7ed; border-inline-start: 3px solid #f97316; }

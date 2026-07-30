@@ -283,7 +283,10 @@ export class AssignmentsApiService {
     const query = new URLSearchParams({ staffingReferenceDate });
     return this.http
       .get<ApiResponse<LineStaffingWorker[]>>(buildApiUrl(`/api/line-staffing/workers?${query.toString()}`))
-      .pipe(timeout(STANDARD_API_TIMEOUT_MS), map((response) => this.extractPayload(response)));
+      .pipe(
+        timeout(STANDARD_API_TIMEOUT_MS),
+        map((response) => this.extractPayload(response).map(worker => this.mapLineStaffingWorker(worker)))
+      );
   }
 
   getSubStageWorkers(subStageId: string): Observable<SubStageWorkersData> {
@@ -493,6 +496,20 @@ export class AssignmentsApiService {
       assignmentEndsAtUtc: this.pickNullableString(record, ['assignmentEndsAtUtc', 'endsAtUtc', 'endAtUtc']),
       effectiveSubStageId: this.pickNullableString(record, ['effectiveSubStageId', 'subStageId']),
       isAvailable: this.toBoolean(this.pickFirst(record, ['isAvailable', 'available']))
+    };
+  }
+
+  private mapLineStaffingWorker(worker: LineStaffingWorker): LineStaffingWorker {
+    const record = this.normalizeObject(worker);
+    const departmentName = ['departmentName', 'organizationalDepartmentName', 'localDepartmentName']
+      .map(key => record[key])
+      .find(value => typeof value === 'string' && value.trim().length > 0);
+    return {
+      ...worker,
+      // `departmentName` is the current API contract. The other two keys keep
+      // the directory usable during rolling deployments without inventing a
+      // department from the selected line or screen context.
+      departmentName: typeof departmentName === 'string' ? departmentName.trim() : null
     };
   }
 

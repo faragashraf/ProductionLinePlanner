@@ -189,7 +189,9 @@ public sealed class LineStaffingEngine(AppDbContext dbContext) : ILineStaffingEn
                 worker.Id,
                 worker.EmployeeCode,
                 worker.FullName,
-                worker.LocalDepartmentName,
+                worker.OrganizationalDepartment != null
+                    ? worker.OrganizationalDepartment.NameAr
+                    : worker.LocalDepartmentName,
                 worker.IsActive && worker.EmploymentStatus == EmploymentStatus.Active,
                 worker.PhotoReference))
             .ToArrayAsync(cancellationToken);

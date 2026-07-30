@@ -100,6 +100,8 @@ export class PlpFormSheetComponent implements OnChanges, OnDestroy {
   @Input() readOnly = false;
   @Input() focusOnShow = true;
   @Input() compactHeader = false;
+  /** Optional capability class for a dialog-specific layout without leaking page styles globally. */
+  @Input() styleClass = '';
   /** Operational screens are RTL-first; callers can opt out for an LTR-only surface. */
   @Input() rtl = true;
   @Output() visibleChange = new EventEmitter<boolean>();
@@ -152,6 +154,7 @@ export class PlpFormSheetComponent implements OnChanges, OnDestroy {
       'plp-form-sheet',
       PLP_DIALOG_SIZE_CLASS[this.size],
       this.compactHeader ? 'plp-form-sheet--compact-header' : '',
+      this.styleClass,
       this.isBottomSheet ? 'plp-form-sheet--bottom' : 'plp-form-sheet--desktop'
     ].filter(Boolean).join(' ');
   }

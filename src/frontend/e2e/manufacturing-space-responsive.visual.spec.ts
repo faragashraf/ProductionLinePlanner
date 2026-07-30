@@ -343,6 +343,7 @@ test('loads the permanent staffing workspace and keeps its dialog within tablet 
       const unassignedWorkerCard = dialog.locator('plp-worker-assignment-card').filter({ hasText: workers[2].fullName });
       await expect(currentWorkerCard.locator('input[type="checkbox"]')).toBeChecked();
       await expect(otherLineWorkerCard.locator('input[type="checkbox"]')).not.toBeChecked();
+      await expect(currentWorkerCard.locator('.plp-responsive-entity-row__title')).toHaveAttribute('title', workers[0].fullName);
       const otherLineMainRow = otherLineWorkerCard.locator('.plp-responsive-entity-row');
       await expect(otherLineMainRow).toContainText(workers[1].fullName);
       await expect(otherLineMainRow).toContainText(workers[1].employeeCode);
@@ -369,6 +370,17 @@ test('loads the permanent staffing workspace and keeps its dialog within tablet 
         unassignedStatus.evaluate(element => ({ color: getComputedStyle(element).color, background: getComputedStyle(element).backgroundColor })),
       ]);
       expect(assignedColors).not.toEqual(unassignedColors);
+
+      if (name !== 'mobile-390x844') {
+        const statusColumnStarts = await dialog.locator('plp-worker-assignment-card .plp-responsive-entity-row__status').evaluateAll(elements =>
+          elements.map(element => element.getBoundingClientRect().left));
+        expect(Math.max(...statusColumnStarts) - Math.min(...statusColumnStarts)).toBeLessThanOrEqual(2);
+        const expansionButtonWidths = await dialog.locator('.plp-worker-assignment-card__expand').evaluateAll(elements =>
+          elements.map(element => element.getBoundingClientRect().width));
+        expect(Math.max(...expansionButtonWidths) - Math.min(...expansionButtonWidths)).toBeLessThanOrEqual(2);
+        const dialogBox = await dialog.boundingBox();
+        expect(dialogBox?.height ?? 0).toBeGreaterThanOrEqual(height * .9);
+      }
 
       const expandButton = otherLineWorkerCard.getByRole('button', { name: `عرض تسكينات ${workers[1].fullName}` });
       await expect(expandButton).toContainText('التسكينات (2)');
@@ -421,16 +433,29 @@ test('loads the permanent staffing workspace and keeps its dialog within tablet 
       await page.locator('.p-dropdown-panel:visible').last().getByRole('option', { name: 'كل الأقسام', exact: true }).click();
       await expect(departmentFilterLabel).toHaveText('كل الأقسام');
 
+      const candidateList = dialog.locator('.line-staffing-page__candidate-list');
+      if (name === 'tablet-landscape-1280x800') {
+        const fullyVisibleCollapsedRows = await candidateList.locator('plp-worker-assignment-card').evaluateAll(elements => {
+          const listBox = elements[0]?.parentElement?.getBoundingClientRect();
+          return listBox
+            ? elements.filter(element => element.getBoundingClientRect().bottom <= listBox.bottom + 1).length
+            : 0;
+        });
+        expect(fullyVisibleCollapsedRows).toBeGreaterThanOrEqual(5);
+      }
+
       await otherLineWorkerCard.getByRole('button', { name: `عرض تسكينات ${workers[1].fullName}` }).click();
 
-      const candidateList = dialog.locator('.line-staffing-page__candidate-list');
       const scrollGeometry = await candidateList.evaluate(element => ({
         clientHeight: element.clientHeight,
         scrollHeight: element.scrollHeight,
         overflowY: getComputedStyle(element).overflowY,
       }));
       expect(scrollGeometry.overflowY).toBe('auto');
-      expect(scrollGeometry.scrollHeight).toBeGreaterThan(scrollGeometry.clientHeight);
+      expect(scrollGeometry.scrollHeight).toBeGreaterThanOrEqual(scrollGeometry.clientHeight);
+      if (name === 'tablet-landscape-1280x800' || name === 'mobile-390x844') {
+        expect(scrollGeometry.scrollHeight).toBeGreaterThan(scrollGeometry.clientHeight);
+      }
       await candidateList.evaluate(element => { element.scrollTop = element.scrollHeight; });
       const lastCard = dialog.locator('plp-worker-assignment-card').last();
       const [listBox, lastCardBox, footerBox] = await Promise.all([

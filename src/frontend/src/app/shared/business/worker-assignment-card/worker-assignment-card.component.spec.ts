@@ -39,6 +39,13 @@ import { SharedModule } from '../../shared.module';
         (selectionChange)="actualSelected = $event"
         (expandedChange)="actualExpanded = $event"
       ></plp-worker-assignment-card>
+      <plp-worker-assignment-card
+        data-context="actual-unassigned"
+        selectionMode="multiple"
+        fullName="عامل باسم عربي بالغ الطول لاختبار ثبات عمود الحالة وعدم تحريك الأعمدة الأخرى في صف العامل"
+        employeeCode="W-1080-LONG"
+        [assignmentDetails]="[]"
+      ></plp-worker-assignment-card>
     </section>
   `
 })
@@ -145,6 +152,27 @@ describe('WorkerAssignmentCardComponent', () => {
     expect(expansion.querySelectorAll('.plp-worker-assignment-card__assignment-fact').length).toBe(4);
     expect(checkbox.checked).toBeFalse();
     expect(fixture.componentInstance.actualSelected).toBeFalse();
+  });
+
+  it('keeps the actual-assignment identity, status, and expansion in stable grid columns', () => {
+    const assigned = fixture.nativeElement.querySelector('[data-context="actual"]') as HTMLElement;
+    const unassigned = fixture.nativeElement.querySelector('[data-context="actual-unassigned"]') as HTMLElement;
+    const assignedStatus = assigned.querySelector('.plp-responsive-entity-row__status') as HTMLElement;
+    const unassignedStatus = unassigned.querySelector('.plp-responsive-entity-row__status') as HTMLElement;
+    const longName = unassigned.querySelector('.plp-responsive-entity-row__title') as HTMLElement;
+
+    expect(getComputedStyle(assigned.querySelector('.plp-worker-assignment-card__shell')!).display).toBe('grid');
+    expect(getComputedStyle(assigned.querySelector('.plp-responsive-entity-row')!).display).toBe('grid');
+    expect(Math.abs(assignedStatus.getBoundingClientRect().left - unassignedStatus.getBoundingClientRect().left)).toBeLessThanOrEqual(1);
+    expect(longName.getAttribute('title')).toContain('عامل باسم عربي بالغ الطول');
+    expect(getComputedStyle(longName).textOverflow).toBe('ellipsis');
+    expect(unassigned.querySelector('.plp-worker-assignment-card__expand')).toBeNull();
+
+    fixture.componentInstance.actualExpanded = true;
+    fixture.detectChanges();
+    const shellBox = assigned.querySelector('.plp-worker-assignment-card__shell')!.getBoundingClientRect();
+    const expansionBox = assigned.querySelector('.plp-worker-assignment-card__assignment-expansion')!.getBoundingClientRect();
+    expect(Math.abs(shellBox.width - expansionBox.width)).toBeLessThanOrEqual(2);
   });
 
   it('provides keyboard focus semantics and a stable touch target for both modes', () => {
