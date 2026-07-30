@@ -103,6 +103,19 @@ public sealed class AttendanceWorkforceHttpIntegrationTests
         Assert.Equal(new DateOnly(2026, 7, 19), fixture.AttendanceEngine.LastSyncedDate);
     }
 
+    [Fact]
+    public async Task Processed_orphan_admin_endpoints_require_attendance_sync_permission()
+    {
+        await using var fixture = await AttendanceFixture.CreateAsync();
+
+        Assert.Equal(
+            HttpStatusCode.Forbidden,
+            (await fixture.PostAsync("/api/attendance/processed-orphans/preview", ["attendance.view"])).StatusCode);
+        Assert.Equal(
+            HttpStatusCode.Forbidden,
+            (await fixture.PostAsync("/api/attendance/processed-orphans/repair", ["attendance.view"])).StatusCode);
+    }
+
     private sealed class AttendanceFixture : IAsyncDisposable
     {
         private readonly WebApplication app;

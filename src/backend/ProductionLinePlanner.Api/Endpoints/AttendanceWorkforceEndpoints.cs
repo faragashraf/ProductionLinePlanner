@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using ProductionLinePlanner.Api.Authorization;
+using ProductionLinePlanner.Api.Diagnostics;
+using ProductionLinePlanner.Application.Abstractions;
 using ProductionLinePlanner.Application.DTOs;
 using ProductionLinePlanner.Application.Engines;
 using ProductionLinePlanner.Application.Services;
@@ -25,6 +27,16 @@ public static class AttendanceWorkforceEndpoints
             .WithTags("Attendance")
             .WithName("SyncAttendanceForProductionDate");
 
+        attendanceApi.MapPost("/processed-orphans/preview", PreviewProcessedOrphansAsync)
+            .RequirePermission("attendance.sync")
+            .WithTags("Attendance")
+            .WithName("PreviewProcessedAttendanceOrphans");
+
+        attendanceApi.MapPost("/processed-orphans/repair", RepairProcessedOrphansAsync)
+            .RequirePermission("attendance.sync")
+            .WithTags("Attendance")
+            .WithName("RepairProcessedAttendanceOrphans");
+
         attendanceApi.MapGet("/workforce", GetPageAsync)
             .RequirePermission("attendance.view")
             .RequirePermission("assignments.view")
@@ -43,6 +55,39 @@ public static class AttendanceWorkforceEndpoints
             .WithName("GetWorkerAttendanceProfileSummary");
 
         return attendanceApi;
+    }
+
+    private static async Task<IResult> PreviewProcessedOrphansAsync(
+        ProcessedAttendanceOrphanQuery query,
+        [FromServices] IProcessedAttendanceOrphanEngine engine,
+        CancellationToken cancellationToken)
+    {
+        var result = await engine.PreviewAsync(query, cancellationToken);
+        return result.IsFailure
+            ? ApiResponse.Failure(result.Error?.Code ?? "ProcessedOrphanPreviewFailed", result.Error?.Message ?? "Unable to preview processed attendance orphans.", MapFailureStatusCode(result.Error?.Code))
+            : Results.Ok(ApiResponse.Success(result.Value!));
+    }
+
+    private static async Task<IResult> RepairProcessedOrphansAsync(
+        ProcessedAttendanceOrphanRepairRequest request,
+        [FromServices] IProcessedAttendanceOrphanEngine engine,
+        ICurrentUserService currentUserService,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        if (currentUserService.UserId is not { } actorUserId)
+        {
+            return ApiResponse.Failure("Unauthorized", "User context is required.", StatusCodes.Status401Unauthorized);
+        }
+
+        var result = await engine.RepairAsync(
+            actorUserId,
+            request,
+            AuditRequestMetadata.From(httpContext),
+            cancellationToken);
+        return result.IsFailure
+            ? ApiResponse.Failure(result.Error?.Code ?? "ProcessedOrphanRepairFailed", result.Error?.Message ?? "Unable to repair processed attendance orphans.", MapFailureStatusCode(result.Error?.Code))
+            : Results.Ok(ApiResponse.Success(result.Value!));
     }
 
     private static async Task<IResult> SyncProductionDateAsync(
@@ -151,7 +196,7 @@ public static class AttendanceWorkforceEndpoints
 
     private static int MapFailureStatusCode(string? code) => code switch
     {
-        "ValidationError" => StatusCodes.Status400BadRequest,
+        "ValidationError" or "ConfirmationRequired" or "BatchLimitExceeded" or "SelectionOutsidePreview" or "AttendanceStagingRequired" => StatusCodes.Status400BadRequest,
         "NotFound" => StatusCodes.Status404NotFound,
         "Unauthorized" or "InvalidToken" or "InvalidCredentials" => StatusCodes.Status401Unauthorized,
         "Conflict" or "AttendanceSyncInProgress" => StatusCodes.Status409Conflict,

@@ -31,8 +31,11 @@ public sealed record SourceProcessingOutcome(
     string? ResolutionCode = null,
     string? ResolutionDetails = null)
 {
-    public static SourceProcessingOutcome Processed(long sourceRecordId, string? resolutionCode = null) =>
-        new(sourceRecordId, SourceProcessingDisposition.Processed, resolutionCode);
+    public static SourceProcessingOutcome Processed(
+        long sourceRecordId,
+        string? resolutionCode = null,
+        string? details = null) =>
+        new(sourceRecordId, SourceProcessingDisposition.Processed, resolutionCode, details);
 
     public static SourceProcessingOutcome Retry(long sourceRecordId, string resolutionCode, string? details = null) =>
         new(sourceRecordId, SourceProcessingDisposition.Pending, resolutionCode, details);

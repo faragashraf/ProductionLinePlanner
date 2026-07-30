@@ -231,6 +231,32 @@ public sealed class ZkTimeStagingSqlContractTests
         }
     }
 
+    [Fact]
+    public void Attendance_diagnostics_is_read_only_and_detects_exact_processed_orphans()
+    {
+        var diagnostics = Read("database/tools/Attendance-Diagnostics.sql");
+        var executableSql = Regex.Replace(diagnostics, @"(?s)/\*.*?\*/|--[^\r\n]*", string.Empty);
+
+        Assert.DoesNotMatch(new Regex(@"\b(?:INSERT|UPDATE|DELETE|MERGE)\b", RegexOptions.IgnoreCase), executableSql);
+        Assert.Contains("Processed Attendance Orphans", diagnostics, StringComparison.Ordinal);
+        Assert.Contains("ProcessedWithoutAttendance", diagnostics, StringComparison.Ordinal);
+        Assert.Contains("ERROR — Processed Inbox Orphan", diagnostics, StringComparison.Ordinal);
+        Assert.Contains("SourceRawId = Candidate.SourceRawId", diagnostics, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("$.FirstInUtc", diagnostics, StringComparison.Ordinal);
+        Assert.Contains("$.LastOutUtc", diagnostics, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Attendance_diagnostics_parses_with_sql_server_2016_grammar()
+    {
+        var parser = new TSql130Parser(initialQuotedIdentifiers: true);
+        parser.Parse(new StringReader(Read("database/tools/Attendance-Diagnostics.sql")), out var errors);
+
+        Assert.True(
+            errors.Count == 0,
+            string.Join(" | ", errors.Select(error => $"L{error.Line},C{error.Column}: {error.Message}")));
+    }
+
     private static string ReadSqlFiles() => string.Join(
         Environment.NewLine,
         Directory.GetFiles(FindRepoDirectory("database/zktime-staging"), "*.sql")

@@ -114,6 +114,8 @@ public static class DependencyInjection
         services.AddScoped<IAttendanceSyncRunner>(serviceProvider => serviceProvider.GetRequiredService<AttendanceSyncService>());
         services.AddSingleton<IAttendanceSyncService, AttendanceSyncCoordinator>();
         services.AddScoped<IAttendanceEngine, AttendanceEngine>();
+        services.AddScoped<IProcessedAttendanceInboxStore, SqlProcessedAttendanceInboxStore>();
+        services.AddScoped<IProcessedAttendanceOrphanEngine, ProcessedAttendanceOrphanEngine>();
         services.AddScoped<IAssignmentEngine, AssignmentEngine>();
         services.AddScoped<IAttendanceWorkforceEngine, AttendanceWorkforceEngine>();
         services.AddScoped<IAssignmentRecommendationEngine, AssignmentRecommendationEngine>();
