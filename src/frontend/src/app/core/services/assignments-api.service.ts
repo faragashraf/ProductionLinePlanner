@@ -183,6 +183,7 @@ export interface LineStaffingWorker {
 export interface LineStaffingParticipation {
   assignmentId: string;
   assignmentType: ApiAssignmentType;
+  productionLineId: string;
   subStageId: string;
   subStageName: string | null;
   fromSubStageId: string | null;

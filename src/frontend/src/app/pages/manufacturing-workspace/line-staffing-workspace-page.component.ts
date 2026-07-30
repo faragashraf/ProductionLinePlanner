@@ -937,8 +937,9 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
 
   workerAssignmentLabel(worker: LineStaffingWorker): string {
     if (this.participationForStage(worker)) return 'تسكين دائم فعّال';
-    return worker.participations.length
-      ? `مشارك في ${worker.participations.length} مراحل`
+    const lineParticipations = this.participationsForSelectedLine(worker);
+    return lineParticipations.length
+      ? `مشارك في ${lineParticipations.length} مراحل`
       : 'دون تسكين فعّال';
   }
 
@@ -1731,20 +1732,30 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
   ): LineStaffingParticipation | null {
     return (
       worker.participations.find(
-        (participation) => participation.subStageId === subStageId,
+        (participation) =>
+          participation.productionLineId === this.selectedProductionLineId &&
+          participation.subStageId === subStageId,
       ) ?? null
     );
   }
 
   otherParticipations(worker: LineStaffingWorker): LineStaffingParticipation[] {
-    return worker.participations.filter(
+    return this.participationsForSelectedLine(worker).filter(
       (participation) => participation.subStageId !== this.selectedSubStageId,
     );
   }
 
   workerParticipationStageNames(worker: LineStaffingWorker): string[] {
-    return worker.participations.map(
+    return this.participationsForSelectedLine(worker).map(
       (participation) => participation.subStageName ?? 'مرحلة أخرى',
+    );
+  }
+
+  private participationsForSelectedLine(
+    worker: LineStaffingWorker,
+  ): LineStaffingParticipation[] {
+    return worker.participations.filter(
+      participation => participation.productionLineId === this.selectedProductionLineId,
     );
   }
 }

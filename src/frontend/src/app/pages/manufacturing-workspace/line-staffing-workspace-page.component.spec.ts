@@ -12,6 +12,7 @@ import { LineStaffingWorkspacePageComponent } from './line-staffing-workspace-pa
 const factoryId = '43dde27f-7ee3-4e90-9f3b-582fc90a3b0';
 const departmentId = '3adcd4d8-06da-4e9a-a2d8-5c1ac48274d9';
 const lineId = 'c0550d1f-4bf7-432c-b19b-672763d490fc';
+const otherLineId = 'fe4d9d6e-41eb-47dc-8672-52b7b5ec5b87';
 const modelId = '46593736-2fe2-450d-84a1-f304b712e07f';
 const defaultStageId = 'c0ec408d-74ab-4299-88cd-1a7543cc335b';
 const temporaryStageId = 'df19ab2b-49df-445d-a516-4d5d070d8de2';
@@ -182,6 +183,68 @@ describe('LineStaffingWorkspacePageComponent', () => {
 
     component.selectStage(temporaryStageId);
     expect(component.selectedStage?.stageName).toBe('تشطيب');
+  });
+
+  it('matches a stage participation only when both production line and sub-stage match', () => {
+    const scopedPlan = lineScopedPlan();
+    assignments.getLineStaffingPlan.and.returnValue(of(scopedPlan));
+    initialize(component);
+
+    expect(component.participationForStage(scopedPlan.workers[0])).toBeNull();
+    expect(component.participationForStage(scopedPlan.workers[1])?.productionLineId).toBe(lineId);
+  });
+
+  it('shows selected-stage workers from the selected production line only', () => {
+    const scopedPlan = lineScopedPlan();
+    assignments.getLineStaffingPlan.and.returnValue(of(scopedPlan));
+    initialize(component);
+
+    expect(component.selectedStageWorkers.map(worker => worker.workerId)).toEqual(['worker-two']);
+  });
+
+  it('does not preselect a worker assigned to the same sub-stage on another production line', () => {
+    const scopedPlan = lineScopedPlan();
+    assignments.getLineStaffingPlan.and.returnValue(of(scopedPlan));
+    assignments.getActiveLineStaffingWorkers.and.returnValue(of(scopedPlan.workers));
+    initialize(component);
+
+    component.openDefaultAssignment();
+
+    expect(component.isDefaultWorkerSelected(scopedPlan.workers[0])).toBeFalse();
+    expect(component.isDefaultWorkerSelected(scopedPlan.workers[1])).toBeTrue();
+  });
+
+  it('excludes another-line participation from the selected-line bulk save payload', () => {
+    const scopedPlan = lineScopedPlan();
+    assignments.getLineStaffingPlan.and.returnValue(of(scopedPlan));
+    assignments.getActiveLineStaffingWorkers.and.returnValue(of(scopedPlan.workers));
+    initialize(component);
+
+    component.openDefaultAssignment();
+    component.saveAssignment();
+
+    expect(assignments.updateStageDefaultAssignments).toHaveBeenCalledWith(lineId, defaultStageId, ['worker-two']);
+  });
+
+  it('cancels only the participation matching the selected production line and sub-stage', () => {
+    const scopedPlan = lineScopedPlan();
+    assignments.getLineStaffingPlan.and.returnValue(of(scopedPlan));
+    assignments.getActiveLineStaffingWorkers.and.returnValue(of(scopedPlan.workers));
+    initialize(component);
+
+    component.openCancellation(scopedPlan.workers[0]);
+    expect(component.assignmentDialogVisible).toBeFalse();
+
+    component.openCancellation(scopedPlan.workers[1]);
+    component.assignmentForm.controls.reason.setValue('إنهاء تسكين الخط الثاني');
+    component.saveAssignment();
+
+    expect(assignments.removeDefaultAssignment).toHaveBeenCalledWith(
+      'worker-two',
+      lineId,
+      defaultStageId,
+      'إنهاء تسكين الخط الثاني',
+    );
   });
 
   it('saves checked permanent workers together, closes the dialog, and refreshes only the selected stage', () => {
@@ -829,7 +892,7 @@ function stageRefresh() {
     effectiveAssignmentType: 'Default' as const,
     effectiveSubStageId: defaultStageId,
     effectiveSubStageName: 'تجميع',
-    participations: [{ assignmentId: 'default-b', assignmentType: 'Default' as const, subStageId: defaultStageId, subStageName: 'تجميع', fromSubStageId: null, fromSubStageName: null, startsAtUtc: null, endsAtUtc: null, replacementForWorkerId: null, temporaryParticipationMode: null }]
+    participations: [{ assignmentId: 'default-b', assignmentType: 'Default' as const, productionLineId: lineId, subStageId: defaultStageId, subStageName: 'تجميع', fromSubStageId: null, fromSubStageName: null, startsAtUtc: null, endsAtUtc: null, replacementForWorkerId: null, temporaryParticipationMode: null }]
   };
   return {
     stage: { ...source.stages[0], defaultAssignedWorkersCount: 2, effectiveAssignedWorkersCount: 2, workerStatusText: 'يوجد عاملان', effectiveWorkerIds: ['worker-one', 'worker-two'] },
@@ -950,8 +1013,54 @@ function plan(): LineStaffingPlan {
       { productModelStageId: 'stage-two', subStageId: temporaryStageId, mainStageName: 'تشطيب', stageCode: 'S2', stageName: 'تشطيب', stageOrder: 2, piecePrice: .38, compensationMode: 'SharedPercentage', compensationConfigurationStatus: 'FinancialReviewPending', isFinancialReviewPending: true, defaultAssignedWorkersCount: 0, effectiveAssignedWorkersCount: 0, temporaryAssignedWorkersCount: 0, requiredWorkers: null, hasAuthoritativeRequiredWorkerCount: false, staffingStatus: 'NeedsStaffing', workerStatusText: 'لا يوجد عمال مسكنون', effectiveWorkerIds: [] }
     ],
     workers: [
-      { workerId: 'worker-one', employeeCode: '100', fullName: 'عامل أول', departmentName: 'التجميع', isOnActiveService: true, hasPhoto: false, photoReference: null, photoVersion: null, defaultSubStageId: defaultStageId, defaultSubStageName: 'تجميع', effectiveAssignmentId: 'default-a', effectiveAssignmentType: 'Default', effectiveSubStageId: defaultStageId, effectiveSubStageName: 'تجميع', fromSubStageId: null, fromSubStageName: null, temporaryStartsAtUtc: null, temporaryEndsAtUtc: null, replacementForWorkerId: null, participations: [{ assignmentId: 'default-a', assignmentType: 'Default', subStageId: defaultStageId, subStageName: 'تجميع', fromSubStageId: null, fromSubStageName: null, startsAtUtc: null, endsAtUtc: null, replacementForWorkerId: null, temporaryParticipationMode: null }] },
+      { workerId: 'worker-one', employeeCode: '100', fullName: 'عامل أول', departmentName: 'التجميع', isOnActiveService: true, hasPhoto: false, photoReference: null, photoVersion: null, defaultSubStageId: defaultStageId, defaultSubStageName: 'تجميع', effectiveAssignmentId: 'default-a', effectiveAssignmentType: 'Default', effectiveSubStageId: defaultStageId, effectiveSubStageName: 'تجميع', fromSubStageId: null, fromSubStageName: null, temporaryStartsAtUtc: null, temporaryEndsAtUtc: null, replacementForWorkerId: null, participations: [{ assignmentId: 'default-a', assignmentType: 'Default', productionLineId: lineId, subStageId: defaultStageId, subStageName: 'تجميع', fromSubStageId: null, fromSubStageName: null, startsAtUtc: null, endsAtUtc: null, replacementForWorkerId: null, temporaryParticipationMode: null }] },
       { workerId: 'worker-two', employeeCode: '101', fullName: 'عامل ثان', departmentName: 'التشطيب', isOnActiveService: true, hasPhoto: true, photoReference: '/api/workers/worker-two/photo?v=photo-v1', photoVersion: 'photo-v1', defaultSubStageId: null, defaultSubStageName: null, effectiveAssignmentId: null, effectiveAssignmentType: null, effectiveSubStageId: null, effectiveSubStageName: null, fromSubStageId: null, fromSubStageName: null, temporaryStartsAtUtc: null, temporaryEndsAtUtc: null, replacementForWorkerId: null, participations: [] }
     ]
+  };
+}
+
+function lineScopedPlan(): LineStaffingPlan {
+  const source = plan();
+  const otherLineWorker = {
+    ...source.workers[0],
+    participations: source.workers[0].participations.map(participation => ({
+      ...participation,
+      productionLineId: otherLineId,
+    })),
+  };
+  const selectedLineWorker = {
+    ...source.workers[1],
+    defaultSubStageId: defaultStageId,
+    defaultSubStageName: 'تجميع',
+    effectiveAssignmentId: 'default-line-two',
+    effectiveAssignmentType: 'Default' as const,
+    effectiveSubStageId: defaultStageId,
+    effectiveSubStageName: 'تجميع',
+    participations: [{
+      assignmentId: 'default-line-two',
+      assignmentType: 'Default' as const,
+      productionLineId: lineId,
+      subStageId: defaultStageId,
+      subStageName: 'تجميع',
+      fromSubStageId: null,
+      fromSubStageName: null,
+      startsAtUtc: null,
+      endsAtUtc: null,
+      replacementForWorkerId: null,
+      temporaryParticipationMode: null,
+    }],
+  };
+  return {
+    ...source,
+    stages: [
+      {
+        ...source.stages[0],
+        defaultAssignedWorkersCount: 1,
+        effectiveAssignedWorkersCount: 1,
+        effectiveWorkerIds: [selectedLineWorker.workerId],
+      },
+      source.stages[1],
+    ],
+    workers: [otherLineWorker, selectedLineWorker],
   };
 }

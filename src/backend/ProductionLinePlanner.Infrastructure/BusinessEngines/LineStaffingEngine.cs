@@ -95,7 +95,11 @@ public sealed class LineStaffingEngine(AppDbContext dbContext) : ILineStaffingEn
             .GroupBy(assignment => assignment.SubStageId)
             .Select(group => new { SubStageId = group.Key, Count = group.Count() })
             .ToDictionaryAsync(item => item.SubStageId, item => item.Count, cancellationToken);
-        var stagesWithWorkers = stages.Select(stage => ToStageDto(stage, workerDtos, defaultCounts.GetValueOrDefault(stage.SubStageId))).ToArray();
+        var stagesWithWorkers = stages.Select(stage => ToStageDto(
+            productionLineId,
+            stage,
+            workerDtos,
+            defaultCounts.GetValueOrDefault(stage.SubStageId))).ToArray();
         var withoutWorkers = stagesWithWorkers.Count(stage => stage.EffectiveAssignedWorkersCount == 0);
         var staffingReview = stagesWithWorkers.Count(stage => stage.StaffingStatus == "NeedsStaffingReview");
         var compensationReview = stagesWithWorkers.Count(stage => stage.IsFinancialReviewPending);
@@ -202,6 +206,7 @@ public sealed class LineStaffingEngine(AppDbContext dbContext) : ILineStaffingEn
                 .Select(assignment => new DefaultAssignmentRow(
                     assignment.Id,
                     assignment.WorkerId,
+                    assignment.ProductionLineId,
                     assignment.SubStageId,
                     assignment.AssignedAt))
                 .ToArrayAsync(cancellationToken))
@@ -218,7 +223,8 @@ public sealed class LineStaffingEngine(AppDbContext dbContext) : ILineStaffingEn
                         assignment.SubStageId,
                         null,
                         assignment.SubStageId,
-                        null))
+                        null,
+                        ProductionLineId: assignment.ProductionLineId))
                     .ToArray());
         var referencedSubStageIds = resolvedAssignments.Values.SelectMany(assignments => assignments)
             .SelectMany(assignment => new[] { assignment.EffectiveSubStageId, assignment.FromSubStageId })
@@ -242,10 +248,16 @@ public sealed class LineStaffingEngine(AppDbContext dbContext) : ILineStaffingEn
         return Result<IReadOnlyCollection<LineStaffingWorkerDto>>.Success(workerDtos);
     }
 
-    private static LineStaffingStageDto ToStageDto(StageRow stage, IReadOnlyCollection<LineStaffingWorkerDto> workers, int defaultCount)
+    private static LineStaffingStageDto ToStageDto(
+        Guid productionLineId,
+        StageRow stage,
+        IReadOnlyCollection<LineStaffingWorkerDto> workers,
+        int defaultCount)
     {
         var effectiveWorkers = workers
-            .Where(worker => worker.Participations.Any(participation => participation.SubStageId == stage.SubStageId))
+            .Where(worker => worker.Participations.Any(participation =>
+                participation.ProductionLineId == productionLineId &&
+                participation.SubStageId == stage.SubStageId))
             .OrderBy(worker => worker.EmployeeCode)
             .ToArray();
         var hasRequiredWorkers = stage.Capacity > 0;
@@ -287,10 +299,15 @@ public sealed class LineStaffingEngine(AppDbContext dbContext) : ILineStaffingEn
         IReadOnlyDictionary<Guid, string> subStageNames)
     {
         var participations = effectiveAssignments
-            .Where(assignment => assignment.AssignmentId.HasValue && assignment.EffectiveSubStageId.HasValue && assignment.AssignmentType.HasValue)
+            .Where(assignment =>
+                assignment.AssignmentId.HasValue &&
+                assignment.ProductionLineId.HasValue &&
+                assignment.EffectiveSubStageId.HasValue &&
+                assignment.AssignmentType.HasValue)
             .Select(assignment => new LineStaffingParticipationDto(
                 assignment.AssignmentId!.Value,
                 assignment.AssignmentType!.Value.ToString(),
+                assignment.ProductionLineId!.Value,
                 assignment.EffectiveSubStageId!.Value,
                 NameFor(assignment.EffectiveSubStageId, subStageNames),
                 assignment.FromSubStageId,
@@ -371,6 +388,7 @@ public sealed class LineStaffingEngine(AppDbContext dbContext) : ILineStaffingEn
     private sealed record DefaultAssignmentRow(
         Guid Id,
         Guid WorkerId,
+        Guid ProductionLineId,
         Guid SubStageId,
         DateTime AssignedAt);
 }

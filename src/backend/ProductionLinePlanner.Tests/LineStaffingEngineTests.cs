@@ -92,6 +92,81 @@ public sealed class LineStaffingEngineTests
     }
 
     [Fact]
+    public async Task Staffing_plan_and_stage_refresh_isolate_the_same_sub_stage_by_production_line()
+    {
+        await using var fixture = await StaffingFixture.CreateAsync();
+        var lineOneWorker = fixture.TemporarilyMovedWorker;
+        var lineTwo = new ProductionLine(
+            Guid.NewGuid(),
+            fixture.Factory.Id,
+            "Line 2",
+            2,
+            departmentId: fixture.Line.DepartmentId);
+        var lineTwoWorker = new Worker(Guid.NewGuid(), "104", "Line two worker");
+        var actorId = Guid.NewGuid();
+
+        var extraLineOneAssignment = await fixture.Db.WorkerDefaultAssignments
+            .SingleAsync(assignment => assignment.WorkerId == fixture.DefaultWorker.Id);
+        extraLineOneAssignment.Deactivate(DateTime.UtcNow);
+        fixture.Db.AddRange(lineTwo, lineTwoWorker);
+        fixture.Db.ProductModelStages.Add(new ProductModelStage(
+            Guid.NewGuid(),
+            fixture.Model.Id,
+            lineTwo.Id,
+            fixture.DefaultSubStage.Id,
+            1,
+            .38m,
+            10m,
+            CompensationMode.SharedPercentage));
+        fixture.Db.WorkerDefaultAssignments.Add(new WorkerDefaultAssignment(
+            Guid.NewGuid(),
+            lineTwoWorker.Id,
+            fixture.DefaultSubStage.Id,
+            actorId,
+            new DateTime(2026, 7, 10, 9, 0, 0, DateTimeKind.Utc),
+            productionLineId: lineTwo.Id));
+        await fixture.Db.SaveChangesAsync();
+
+        var lineOnePlanResult = await fixture.Engine.GetLineStaffingPlanAsync(
+            fixture.Factory.Id, fixture.Line.Id, fixture.Model.Id, fixture.ReferenceDate);
+        var lineTwoPlanResult = await fixture.Engine.GetLineStaffingPlanAsync(
+            fixture.Factory.Id, lineTwo.Id, fixture.Model.Id, fixture.ReferenceDate);
+
+        Assert.True(lineOnePlanResult.IsSuccess);
+        Assert.True(lineTwoPlanResult.IsSuccess);
+        var lineOneStage = Assert.Single(lineOnePlanResult.Value!.Stages, stage => stage.SubStageId == fixture.DefaultSubStage.Id);
+        var lineTwoStage = Assert.Single(lineTwoPlanResult.Value!.Stages, stage => stage.SubStageId == fixture.DefaultSubStage.Id);
+        Assert.Equal(1, lineOneStage.DefaultAssignedWorkersCount);
+        Assert.Equal(1, lineOneStage.EffectiveAssignedWorkersCount);
+        Assert.Equal([lineOneWorker.Id], lineOneStage.EffectiveWorkerIds);
+        Assert.Equal(1, lineTwoStage.DefaultAssignedWorkersCount);
+        Assert.Equal(1, lineTwoStage.EffectiveAssignedWorkersCount);
+        Assert.Equal([lineTwoWorker.Id], lineTwoStage.EffectiveWorkerIds);
+        Assert.DoesNotContain(lineTwoWorker.Id, lineOneStage.EffectiveWorkerIds);
+        Assert.DoesNotContain(lineOneWorker.Id, lineTwoStage.EffectiveWorkerIds);
+        Assert.Contains(
+            lineOnePlanResult.Value.Workers.Single(worker => worker.WorkerId == lineOneWorker.Id).Participations,
+            participation => participation.ProductionLineId == fixture.Line.Id && participation.SubStageId == fixture.DefaultSubStage.Id);
+        Assert.Contains(
+            lineTwoPlanResult.Value.Workers.Single(worker => worker.WorkerId == lineTwoWorker.Id).Participations,
+            participation => participation.ProductionLineId == lineTwo.Id && participation.SubStageId == fixture.DefaultSubStage.Id);
+
+        var lineOneRefresh = await fixture.Engine.GetLineStaffingStageRefreshAsync(
+            fixture.Factory.Id, fixture.Line.Id, fixture.Model.Id, fixture.DefaultSubStage.Id, fixture.ReferenceDate);
+        var lineTwoRefresh = await fixture.Engine.GetLineStaffingStageRefreshAsync(
+            fixture.Factory.Id, lineTwo.Id, fixture.Model.Id, fixture.DefaultSubStage.Id, fixture.ReferenceDate);
+
+        Assert.True(lineOneRefresh.IsSuccess);
+        Assert.True(lineTwoRefresh.IsSuccess);
+        Assert.Equal([lineOneWorker.Id], lineOneRefresh.Value!.Stage.EffectiveWorkerIds);
+        Assert.Equal([lineTwoWorker.Id], lineTwoRefresh.Value!.Stage.EffectiveWorkerIds);
+        Assert.Equal("Staffed", lineOneRefresh.Value.Stage.StaffingStatus);
+        Assert.Equal("Staffed", lineTwoRefresh.Value.Stage.StaffingStatus);
+        Assert.Equal("يوجد عامل واحد", lineOneRefresh.Value.Stage.WorkerStatusText);
+        Assert.Equal("يوجد عامل واحد", lineTwoRefresh.Value.Stage.WorkerStatusText);
+    }
+
+    [Fact]
     public async Task Stage_refresh_after_removing_the_last_worker_returns_needs_staffing_and_cleared_worker_state()
     {
         await using var fixture = await StaffingFixture.CreateAsync();

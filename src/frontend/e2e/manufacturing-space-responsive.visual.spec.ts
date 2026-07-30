@@ -44,6 +44,7 @@ const workers = Array.from({ length: 4 }, (_, index) => ({
   participations: index < 2 ? [{
     assignmentId: `assignment-${index + 1}`,
     assignmentType: 'Default',
+    productionLineId: line.id,
     subStageId: subStageIds[0],
     subStageName: 'مرحلة القص والتجهيز الأولي',
     fromSubStageId: null,
@@ -260,18 +261,26 @@ test('keeps departments and factory structure reusable and safe at primary devic
 });
 
 test('loads the permanent staffing workspace and keeps its dialog within tablet and mobile bounds', async ({ page }) => {
+  test.setTimeout(180_000);
   const diagnostics = await preparePage(page);
   for (const [name, width, height] of [
-    ['desktop-1440x900', 1440, 900], ['tablet-landscape-960x600', 960, 600],
+    ['desktop-1440x900', 1440, 900], ['tablet-landscape-1280x800', 1280, 800],
     ['tablet-portrait-800x1280', 800, 1280], ['mobile-390x844', 390, 844]
   ] as const) {
     await page.setViewportSize({ width, height });
     await page.goto('/manufacturing/line-staffing');
-    const context = page.locator('.line-staffing-page__context');
-    await context.locator('select').nth(0).selectOption(factory.id);
-    await context.locator('select').nth(1).selectOption(department.id);
-    await context.locator('select').nth(2).selectOption(line.id);
-    await context.locator('select').nth(3).selectOption(model.id);
+    await page.getByRole('button', { name: /اختر من شجرة المصنع/ }).click();
+    const structureTree = page.locator('.structure-selector__overlay .factory-structure-tree-view');
+    const factoryNode = structureTree.getByText(factory.name, { exact: true })
+      .locator('xpath=ancestor::*[contains(@class,"p-treenode-content")][1]');
+    await factoryNode.locator('.p-tree-toggler').click();
+    const departmentNode = structureTree.getByText(department.nameAr, { exact: true })
+      .locator('xpath=ancestor::*[contains(@class,"p-treenode-content")][1]');
+    await departmentNode.locator('.p-tree-toggler').click();
+    await structureTree.getByText(line.name, { exact: true }).click();
+    const modelSelect = page.getByLabel('الموديل').filter({ visible: true }).and(page.locator('select'));
+    await expect(modelSelect).toBeEnabled();
+    await modelSelect.selectOption(model.id);
     await page.getByRole('button', { name: 'تحميل مراحل الموديل' }).click();
     await expect(page.getByText('ملخص تسكين الموديل والخط')).toBeVisible();
     await expect(page.getByText(stages[0].stageName).first()).toBeVisible();

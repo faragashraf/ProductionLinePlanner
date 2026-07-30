@@ -193,7 +193,11 @@ describe('AssignmentsApiService', () => {
 
   it('loads one attendance-free permanent line staffing plan for the selected factory, line and model', () => {
     let planName = '';
-    service.getLineStaffingPlan(factoryId, productionLineId, productModelId, '2026-07-13').subscribe(plan => planName = plan.productModelName);
+    let participationLineId = '';
+    service.getLineStaffingPlan(factoryId, productionLineId, productModelId, '2026-07-13').subscribe(plan => {
+      planName = plan.productModelName;
+      participationLineId = plan.workers[0].participations[0].productionLineId;
+    });
 
     const request = http.expectOne(httpRequest =>
       httpRequest.method === 'GET' &&
@@ -212,11 +216,30 @@ describe('AssignmentsApiService', () => {
         productModelId,
         productModelName: 'جرومان',
         stages: [],
-        workers: [{ workerId, employeeCode: '119', fullName: 'عامل', hasPhoto: false }]
+        workers: [{
+          workerId,
+          employeeCode: '119',
+          fullName: 'عامل',
+          hasPhoto: false,
+          participations: [{
+            assignmentId: 'assignment-1',
+            assignmentType: 'Default',
+            productionLineId,
+            subStageId,
+            subStageName: 'الترفيع',
+            fromSubStageId: null,
+            fromSubStageName: null,
+            startsAtUtc: '2026-07-10T08:00:00Z',
+            endsAtUtc: null,
+            replacementForWorkerId: null,
+            temporaryParticipationMode: null
+          }]
+        }]
       }
     });
 
     expect(planName).toBe('جرومان');
+    expect(participationLineId).toBe(productionLineId);
   });
 
   it('loads the shared active permanent staffing worker source without attendance', () => {
