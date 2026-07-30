@@ -58,7 +58,7 @@ describe('RealtimeService', () => {
     connection.emitNotification(notification());
 
     expect(received.length).toBe(2);
-    expect(connection.notificationHandlerRegistrations).toBe(2);
+    expect(connection.eventHandlerRegistrations).toBe(3);
   });
 
   it('updates reconnect state without registering duplicate listeners', async () => {
@@ -74,7 +74,7 @@ describe('RealtimeService', () => {
 
     expect(statuses).toContain('reconnecting');
     expect(statuses.at(-1)).toBe('connected');
-    expect(connection.notificationHandlerRegistrations).toBe(2);
+    expect(connection.eventHandlerRegistrations).toBe(3);
   });
 
   it('disconnects and removes listeners on logout', async () => {
@@ -88,7 +88,7 @@ describe('RealtimeService', () => {
     await settle();
 
     expect(connection.stopCalls).toBe(1);
-    expect(connection.offCalls).toBe(2);
+    expect(connection.offCalls).toBe(3);
   });
 
   it('contains an initial SignalR start failure without crashing the app session', async () => {
@@ -115,7 +115,7 @@ describe('RealtimeService', () => {
     await settle();
 
     expect(connection.stopCalls).toBe(1);
-    expect(connection.offCalls).toBe(2);
+    expect(connection.offCalls).toBe(3);
   });
 
   function authenticatedUser(): AuthUser {
@@ -150,7 +150,7 @@ class FakeConnection implements RealtimeConnection {
   startCalls = 0;
   stopCalls = 0;
   offCalls = 0;
-  notificationHandlerRegistrations = 0;
+  eventHandlerRegistrations = 0;
   private notificationHandler?: (notification: NotificationSummary) => void;
   private reconnectingHandler?: () => void;
   private reconnectedHandler?: () => void;
@@ -163,7 +163,7 @@ class FakeConnection implements RealtimeConnection {
   }
   async stop(): Promise<void> { this.stopCalls++; this.state = HubConnectionState.Disconnected; this.closeHandler?.(); }
   on<T>(methodName: string, handler: (message: T) => void): void {
-    this.notificationHandlerRegistrations++;
+    this.eventHandlerRegistrations++;
     if (methodName === 'NotificationReceived') this.notificationHandler = handler as (notification: NotificationSummary) => void;
   }
   off(): void { this.offCalls++; this.notificationHandler = undefined; }

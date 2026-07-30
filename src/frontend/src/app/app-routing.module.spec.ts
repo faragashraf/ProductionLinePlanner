@@ -82,14 +82,19 @@ describe('IAM routing', () => {
     expect(workers?.data?.['permission']).toBe(PERMISSIONS.workers.view);
   });
 
-  it('requires both factory-structure.view and stages.view for Factory Map', () => {
+  it('keeps Factory Map lazy and requires structure, stages, assignments, and attendance access', () => {
     const shell = APP_ROUTES.find((route) => route.path === '');
     const factoryMap = shell?.children?.find((route) => route.path === 'factory-map');
 
+    expect(factoryMap?.loadChildren).toBeDefined();
+    expect(factoryMap?.component).toBeUndefined();
+    expect(factoryMap?.canMatch).toContain(PermissionCanMatchGuard);
     expect(factoryMap?.canActivate).toContain(PermissionCanActivateGuard);
     expect(factoryMap?.data?.['requireAll']).toEqual([
       PERMISSIONS.factoryStructure.view,
-      PERMISSIONS.stages.view
+      PERMISSIONS.stages.view,
+      PERMISSIONS.assignments.view,
+      PERMISSIONS.attendance.view
     ]);
   });
 

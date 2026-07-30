@@ -68,13 +68,14 @@ public sealed class NotificationsHub(
             throw new HubException("A valid authenticated user is required.");
         }
 
-        if (!ManufacturingRealtimeGroups.TryGetRequiredPermission(screen, out var permission))
+        var requiredPermissions = ManufacturingRealtimeGroups.RequiredPermissions(screen);
+        if (requiredPermissions.Count == 0)
         {
             throw new HubException("Unknown manufacturing realtime screen.");
         }
 
         var permissions = await permissionService.GetEffectivePermissionsAsync(userId, Context.ConnectionAborted);
-        if (!permissions.Contains(permission, StringComparer.OrdinalIgnoreCase))
+        if (requiredPermissions.Any(permission => !permissions.Contains(permission, StringComparer.OrdinalIgnoreCase)))
         {
             throw new HubException("You are not authorized for this manufacturing realtime screen.");
         }

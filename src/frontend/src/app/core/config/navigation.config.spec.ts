@@ -57,6 +57,7 @@ describe('navigation filtering', () => {
       PERMISSIONS.compensation.view,
       PERMISSIONS.factoryStructure.view,
       PERMISSIONS.assignments.view,
+      PERMISSIONS.attendance.view,
       PERMISSIONS.workers.manage
     ];
     const items = service(superAdminPermissions).filterNavigation(APP_NAVIGATION_ITEMS).map((item) => item.id);
@@ -73,11 +74,16 @@ describe('navigation filtering', () => {
     expect(items).not.toContain('models');
   });
 
-  it('hides Factory Map unless both its hierarchy permissions are granted', () => {
+  it('hides Factory Map unless hierarchy, assignments, and attendance permissions are granted', () => {
     const onlyFactoryStructure = service([PERMISSIONS.factoryStructure.view])
       .filterNavigation(APP_NAVIGATION_ITEMS)
       .map((item) => item.id);
-    const completeAccess = service([PERMISSIONS.factoryStructure.view, PERMISSIONS.stages.view])
+    const completeAccess = service([
+      PERMISSIONS.factoryStructure.view,
+      PERMISSIONS.stages.view,
+      PERMISSIONS.assignments.view,
+      PERMISSIONS.attendance.view
+    ])
       .filterNavigation(APP_NAVIGATION_ITEMS)
       .map((item) => item.id);
 

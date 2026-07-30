@@ -1,4 +1,7 @@
+using Microsoft.AspNetCore.Mvc;
 using ProductionLinePlanner.Api.Authorization;
+using ProductionLinePlanner.Api.Diagnostics;
+using ProductionLinePlanner.Application.Abstractions;
 using ProductionLinePlanner.Application.DTOs;
 using ProductionLinePlanner.Application.Engines;
 using ProductionLinePlanner.Application.Services;
@@ -24,6 +27,16 @@ public static class AttendanceWorkforceEndpoints
             .WithTags("Attendance")
             .WithName("SyncAttendanceForProductionDate");
 
+        attendanceApi.MapPost("/processed-orphans/preview", PreviewProcessedOrphansAsync)
+            .RequirePermission("attendance.sync")
+            .WithTags("Attendance")
+            .WithName("PreviewProcessedAttendanceOrphans");
+
+        attendanceApi.MapPost("/processed-orphans/repair", RepairProcessedOrphansAsync)
+            .RequirePermission("attendance.sync")
+            .WithTags("Attendance")
+            .WithName("RepairProcessedAttendanceOrphans");
+
         attendanceApi.MapGet("/workforce", GetPageAsync)
             .RequirePermission("attendance.view")
             .RequirePermission("assignments.view")
@@ -44,6 +57,39 @@ public static class AttendanceWorkforceEndpoints
         return attendanceApi;
     }
 
+    private static async Task<IResult> PreviewProcessedOrphansAsync(
+        ProcessedAttendanceOrphanQuery query,
+        [FromServices] IProcessedAttendanceOrphanEngine engine,
+        CancellationToken cancellationToken)
+    {
+        var result = await engine.PreviewAsync(query, cancellationToken);
+        return result.IsFailure
+            ? ApiResponse.Failure(result.Error?.Code ?? "ProcessedOrphanPreviewFailed", result.Error?.Message ?? "Unable to preview processed attendance orphans.", MapFailureStatusCode(result.Error?.Code))
+            : Results.Ok(ApiResponse.Success(result.Value!));
+    }
+
+    private static async Task<IResult> RepairProcessedOrphansAsync(
+        ProcessedAttendanceOrphanRepairRequest request,
+        [FromServices] IProcessedAttendanceOrphanEngine engine,
+        ICurrentUserService currentUserService,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        if (currentUserService.UserId is not { } actorUserId)
+        {
+            return ApiResponse.Failure("Unauthorized", "User context is required.", StatusCodes.Status401Unauthorized);
+        }
+
+        var result = await engine.RepairAsync(
+            actorUserId,
+            request,
+            AuditRequestMetadata.From(httpContext),
+            cancellationToken);
+        return result.IsFailure
+            ? ApiResponse.Failure(result.Error?.Code ?? "ProcessedOrphanRepairFailed", result.Error?.Message ?? "Unable to repair processed attendance orphans.", MapFailureStatusCode(result.Error?.Code))
+            : Results.Ok(ApiResponse.Success(result.Value!));
+    }
+
     private static async Task<IResult> SyncProductionDateAsync(
         DateOnly productionDate,
         IAttendanceEngine attendanceEngine,
@@ -57,7 +103,7 @@ public static class AttendanceWorkforceEndpoints
 
     private static async Task<IResult> GetPageAsync(
         IAttendanceWorkforceEngine workforceEngine,
-        ICairoTimeZoneProvider cairoTimeZoneProvider,
+        [FromServices] IAttendanceWorkdayPolicy workdayPolicy,
         DateOnly? productionDate = null,
         int page = 1,
         int pageSize = 25,
@@ -75,7 +121,7 @@ public static class AttendanceWorkforceEndpoints
         Guid? workerId = null,
         CancellationToken cancellationToken = default)
     {
-        var cairoDate = DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, cairoTimeZoneProvider.TimeZone));
+        var cairoDate = workdayPolicy.GetOperationalDate(DateTime.UtcNow);
         var result = await workforceEngine.GetPageAsync(new AttendanceWorkforceQuery(
             productionDate ?? cairoDate,
             page,
@@ -100,11 +146,11 @@ public static class AttendanceWorkforceEndpoints
     private static async Task<IResult> GetDetailAsync(
         Guid workerId,
         IAttendanceWorkforceEngine workforceEngine,
-        ICairoTimeZoneProvider cairoTimeZoneProvider,
+        [FromServices] IAttendanceWorkdayPolicy workdayPolicy,
         DateOnly? productionDate = null,
         CancellationToken cancellationToken = default)
     {
-        var cairoDate = DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, cairoTimeZoneProvider.TimeZone));
+        var cairoDate = workdayPolicy.GetOperationalDate(DateTime.UtcNow);
         var result = await workforceEngine.GetWorkerDetailAsync(workerId, productionDate ?? cairoDate, cancellationToken);
         return result.IsFailure
             ? ApiResponse.Failure(result.Error?.Code ?? "AttendanceWorkforceReadFailed", result.Error?.Message ?? "Unable to load worker attendance.", MapFailureStatusCode(result.Error?.Code))
@@ -114,11 +160,11 @@ public static class AttendanceWorkforceEndpoints
     private static async Task<IResult> GetProfileSummaryAsync(
         Guid workerId,
         IAttendanceWorkforceEngine workforceEngine,
-        ICairoTimeZoneProvider cairoTimeZoneProvider,
+        [FromServices] IAttendanceWorkdayPolicy workdayPolicy,
         DateOnly? productionDate = null,
         CancellationToken cancellationToken = default)
     {
-        var cairoDate = DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, cairoTimeZoneProvider.TimeZone));
+        var cairoDate = workdayPolicy.GetOperationalDate(DateTime.UtcNow);
         var result = await workforceEngine.GetWorkerProfileSummaryAsync(workerId, productionDate ?? cairoDate, cancellationToken);
         return result.IsFailure
             ? ApiResponse.Failure(result.Error?.Code ?? "AttendanceWorkforceReadFailed", result.Error?.Message ?? "Unable to load worker attendance summary.", MapFailureStatusCode(result.Error?.Code))
@@ -128,7 +174,7 @@ public static class AttendanceWorkforceEndpoints
     private static async Task<IResult> GetHistoryAsync(
         Guid workerId,
         IAttendanceWorkforceEngine workforceEngine,
-        ICairoTimeZoneProvider cairoTimeZoneProvider,
+        [FromServices] IAttendanceWorkdayPolicy workdayPolicy,
         DateOnly? fromDate = null,
         DateOnly? toDate = null,
         int page = 1,
@@ -136,7 +182,7 @@ public static class AttendanceWorkforceEndpoints
         string sortDirection = "desc",
         CancellationToken cancellationToken = default)
     {
-        var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, cairoTimeZoneProvider.TimeZone));
+        var today = workdayPolicy.GetOperationalDate(DateTime.UtcNow);
         var effectiveTo = toDate ?? today;
         var effectiveFrom = fromDate ?? effectiveTo.AddDays(-29);
         var result = await workforceEngine.GetWorkerAttendanceHistoryAsync(
@@ -150,7 +196,7 @@ public static class AttendanceWorkforceEndpoints
 
     private static int MapFailureStatusCode(string? code) => code switch
     {
-        "ValidationError" => StatusCodes.Status400BadRequest,
+        "ValidationError" or "ConfirmationRequired" or "BatchLimitExceeded" or "SelectionOutsidePreview" or "AttendanceStagingRequired" => StatusCodes.Status400BadRequest,
         "NotFound" => StatusCodes.Status404NotFound,
         "Unauthorized" or "InvalidToken" or "InvalidCredentials" => StatusCodes.Status401Unauthorized,
         "Conflict" or "AttendanceSyncInProgress" => StatusCodes.Status409Conflict,

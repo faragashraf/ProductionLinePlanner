@@ -1,0 +1,18 @@
+<section class="metrics" [attr.data-status]="metrics.status" title="من سجلوا حضورًا في يوم العمل من العمال ذوي التسكين الدائم النشط؛ الانصراف اللاحق لا يمحو اكتمال الحضور">
+  <div class="metrics__headline">
+    <strong>{{ percentageLabel }}</strong>
+    <span>اكتمال حضور تشغيل اليوم</span>
+  </div>
+  <div class="metrics__progress" *ngIf="metrics.operationalReadinessPercentage !== null"
+       role="progressbar" aria-label="نسبة الجاهزية التشغيلية"
+       [attr.aria-valuenow]="metrics.operationalReadinessPercentage" aria-valuemin="0" aria-valuemax="100">
+    <span [style.width.%]="metrics.operationalReadinessPercentage"></span>
+  </div>
+  <dl class="metrics__facts">
+    <div><dt><i class="pi pi-check-circle"></i> حاضر</dt><dd>{{ metrics.currentlyPresentCount }} / {{ metrics.assignedWorkerCount }}</dd></div>
+    <div><dt><i class="pi pi-times-circle"></i> غائب</dt><dd>{{ metrics.absentCount }}</dd></div>
+    <div><dt><i class="pi pi-clock"></i> متأخر</dt><dd>{{ metrics.lateCount }}</dd></div>
+    <div *ngIf="metrics.checkedOutCount"><dt><i class="pi pi-sign-out"></i> منصرف</dt><dd>{{ metrics.checkedOutCount }}</dd></div>
+    <div *ngIf="metrics.unknownCount"><dt><i class="pi pi-question-circle"></i> غير مؤكد</dt><dd>{{ metrics.unknownCount }}</dd></div>
+  </dl>
+</section>

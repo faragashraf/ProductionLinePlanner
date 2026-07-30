@@ -19,15 +19,16 @@ public sealed class AttendanceSyncCoordinator : IAttendanceSyncService
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly AttendanceSourceOptions _sourceOptions;
     private readonly ILogger<AttendanceSyncCoordinator> _logger;
-    private readonly ICairoTimeZoneProvider _cairoTimeZoneProvider;
+    private readonly IAttendanceWorkdayPolicy _attendanceWorkdayPolicy;
     private readonly Func<Task>? _afterFailedTryAddAsync;
 
     public AttendanceSyncCoordinator(
         IServiceScopeFactory scopeFactory,
         IOptions<AttendanceSourceOptions> sourceOptions,
         ILogger<AttendanceSyncCoordinator> logger,
-        ICairoTimeZoneProvider cairoTimeZoneProvider)
-        : this(scopeFactory, sourceOptions, logger, cairoTimeZoneProvider, null)
+        ICairoTimeZoneProvider cairoTimeZoneProvider,
+        IAttendanceWorkdayPolicy? attendanceWorkdayPolicy = null)
+        : this(scopeFactory, sourceOptions, logger, cairoTimeZoneProvider, null, attendanceWorkdayPolicy)
     {
     }
 
@@ -36,19 +37,19 @@ public sealed class AttendanceSyncCoordinator : IAttendanceSyncService
         IOptions<AttendanceSourceOptions> sourceOptions,
         ILogger<AttendanceSyncCoordinator> logger,
         ICairoTimeZoneProvider cairoTimeZoneProvider,
-        Func<Task>? afterFailedTryAddAsync)
+        Func<Task>? afterFailedTryAddAsync,
+        IAttendanceWorkdayPolicy? attendanceWorkdayPolicy = null)
     {
         _scopeFactory = scopeFactory;
         _sourceOptions = sourceOptions.Value;
         _logger = logger;
-        _cairoTimeZoneProvider = cairoTimeZoneProvider;
+        _attendanceWorkdayPolicy = attendanceWorkdayPolicy ?? new AttendanceWorkdayPolicy(sourceOptions, cairoTimeZoneProvider);
         _afterFailedTryAddAsync = afterFailedTryAddAsync;
     }
 
     public Task<Result<AttendanceSyncResultDto>> SyncTodayAsync(CancellationToken cancellationToken = default)
     {
-        var cairoNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, _cairoTimeZoneProvider.TimeZone);
-        return SyncForProductionDateAsync(DateOnly.FromDateTime(cairoNow), cancellationToken);
+        return SyncForProductionDateAsync(_attendanceWorkdayPolicy.GetOperationalDate(DateTime.UtcNow), cancellationToken);
     }
 
     public async Task<Result<AttendanceSyncResultDto>> SyncForProductionDateAsync(

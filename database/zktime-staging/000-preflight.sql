@@ -1,7 +1,7 @@
 SET NOCOUNT ON;
 SET XACT_ABORT ON;
 
-DECLARE @TargetSchemaVersion int = 2;
+DECLARE @TargetSchemaVersion int = 3;
 DECLARE @TargetDatabase sysname =
     NULLIF(LTRIM(RTRIM(N'$(TargetDatabase)')), N'');
 

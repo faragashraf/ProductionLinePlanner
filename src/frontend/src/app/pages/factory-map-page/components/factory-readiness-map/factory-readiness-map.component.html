@@ -1,0 +1,111 @@
+<section class="readiness-map" aria-label="خريطة جاهزية تشغيل المصنع">
+  <nav class="readiness-map__breadcrumb" aria-label="مسار خريطة المصنع">
+    <ol>
+      <li><button type="button" (click)="store.reset()">المصنع</button></li>
+      <li *ngIf="store.selectedFactory() as factory">
+        <i class="pi pi-angle-left" aria-hidden="true"></i>
+        <button type="button" (click)="store.showFactory()">{{ factory.name }}</button>
+      </li>
+      <li *ngIf="store.selectedDepartment() as department">
+        <i class="pi pi-angle-left" aria-hidden="true"></i>
+        <button type="button" (click)="store.goTo('department')">{{ department.name }}</button>
+      </li>
+      <li *ngIf="store.selectedLine() as line">
+        <i class="pi pi-angle-left" aria-hidden="true"></i>
+        <button type="button" (click)="store.goTo('line')">{{ line.name }}</button>
+      </li>
+      <li *ngIf="store.selectedModel() as model">
+        <i class="pi pi-angle-left" aria-hidden="true"></i><span>{{ model.name }}</span>
+      </li>
+      <li *ngIf="store.selectedStage() as stage" aria-current="page">
+        <i class="pi pi-angle-left" aria-hidden="true"></i><span>{{ stage.name }}</span>
+      </li>
+    </ol>
+  </nav>
+
+  <ng-container *ngIf="store.snapshot() as snapshot">
+    <section class="readiness-map__level" *ngIf="!store.selectedFactory()">
+      <header><div><span>المستوى الأول</span><h2>المصانع</h2></div><small>مرتبة حسب أكبر عجز تشغيلي</small></header>
+      <div class="readiness-map__grid" *ngIf="snapshot.factories.length; else noFactories">
+        <app-readiness-node-card *ngFor="let factory of snapshot.factories; trackBy: trackFactory"
+          [node]="factory" nodeType="Factory" [featured]="true" (activate)="store.openFactory(factory)"></app-readiness-node-card>
+      </div>
+      <ng-template #noFactories><div class="readiness-map__empty"><i class="pi pi-building"></i><strong>لا توجد مصانع نشطة</strong><span>لا توجد بنية مصنع متاحة ضمن صلاحياتك الآن.</span></div></ng-template>
+    </section>
+
+    <ng-container *ngIf="store.selectedFactory() as factory">
+      <app-readiness-node-card class="readiness-map__parent" [node]="factory" nodeType="Factory" [featured]="true" [interactive]="false"></app-readiness-node-card>
+
+      <section class="readiness-map__level" *ngIf="!store.selectedDepartment()">
+        <header><div><span>داخل {{ factory.name }}</span><h2>الأقسام</h2></div><small>{{ factory.metrics.childCount }} قسم</small></header>
+        <div class="readiness-map__connector" aria-hidden="true"></div>
+        <div class="readiness-map__grid" *ngIf="factory.departments.length; else noDepartments">
+          <app-readiness-node-card *ngFor="let department of factory.departments; trackBy: trackDepartment"
+            [node]="department" nodeType="Department" (activate)="store.openDepartment(department)"></app-readiness-node-card>
+        </div>
+        <ng-template #noDepartments><div class="readiness-map__empty"><i class="pi pi-sitemap"></i><strong>لا توجد أقسام نشطة</strong><span>أضف قسمًا وخطوطًا نشطة لبناء مسار الجاهزية.</span></div></ng-template>
+      </section>
+    </ng-container>
+
+    <ng-container *ngIf="store.selectedDepartment() as department">
+      <app-readiness-node-card class="readiness-map__parent" [node]="department" nodeType="Department" [featured]="true" [interactive]="false"></app-readiness-node-card>
+
+      <section class="readiness-map__level" *ngIf="!store.selectedLine()">
+        <header><div><span>داخل {{ department.name }}</span><h2>خطوط الإنتاج</h2></div><small>{{ department.metrics.childCount }} خط</small></header>
+        <div class="readiness-map__connector" aria-hidden="true"></div>
+        <div class="readiness-map__grid" *ngIf="department.productionLines.length; else noLines">
+          <app-readiness-node-card *ngFor="let line of department.productionLines; trackBy: trackLine"
+            [node]="line" nodeType="ProductionLine" (activate)="store.openLine(line)"></app-readiness-node-card>
+        </div>
+        <ng-template #noLines><div class="readiness-map__empty"><i class="pi pi-cog"></i><strong>لا توجد خطوط إنتاج نشطة</strong><span>لا يوجد خط نشط مرتبط بهذا القسم.</span></div></ng-template>
+      </section>
+    </ng-container>
+
+    <ng-container *ngIf="store.selectedLine() as line">
+      <app-readiness-node-card class="readiness-map__parent" [node]="line" nodeType="ProductionLine" [featured]="true" [interactive]="false"></app-readiness-node-card>
+
+      <section class="readiness-map__level" *ngIf="!store.selectedStage()">
+        <header><div><span>داخل {{ line.name }}</span><h2>المراحل</h2></div><small>نطاق موديل مستقل عن بيانات الإنتاج اليومي</small></header>
+        <div class="readiness-map__connector" aria-hidden="true"></div>
+        <app-readiness-model-selector *ngIf="line.models.length > 1"
+          [models]="line.models" [selectedModelId]="store.selectedModelId()"
+          (modelSelected)="store.selectModel($event)"></app-readiness-model-selector>
+        <div class="readiness-map__empty" *ngIf="line.models.length > 1 && !store.selectedModelId()">
+          <i class="pi pi-tags"></i><strong>اختر موديلًا لعرض مراحله</strong><span>لن تُجمع مراحل {{ line.models.length }} موديلات في نطاق تشغيلي واحد.</span>
+        </div>
+        <div class="readiness-map__skeleton" *ngIf="store.loadingChildren() && !store.stages()" role="status" aria-label="جار تحميل المراحل"><span></span><span></span><span></span></div>
+        <div class="readiness-map__error" *ngIf="store.childrenError() && !store.stages()" role="alert"><i class="pi pi-exclamation-triangle"></i><span>{{ store.childrenError() }}</span><button type="button" (click)="store.retryChildren()">إعادة المحاولة</button></div>
+        <ng-container *ngIf="store.stages() as result">
+          <ng-container *ngIf="result.stages.length; else noStages">
+            <app-readiness-stage-filter
+              [options]="store.stageFilterOptions()"
+              [selectedFilters]="store.selectedStageFilters()"
+              [visibleCount]="store.visibleStageCount()"
+              [totalCount]="store.totalStageCount()"
+              (filtersChanged)="store.setStageFilters($event)"
+              (filtersCleared)="store.clearStageFilters()"></app-readiness-stage-filter>
+            <div class="readiness-map__grid" *ngIf="store.visibleStages().length; else noMatchingStages">
+              <app-readiness-node-card *ngFor="let stage of store.visibleStages(); trackBy: trackStage"
+                [node]="stage" nodeType="Stage" (activate)="store.openStage(stage)"></app-readiness-node-card>
+            </div>
+            <ng-template #noMatchingStages>
+              <div class="readiness-map__empty readiness-map__empty--filtered">
+                <i class="pi pi-filter-slash" aria-hidden="true"></i>
+                <strong>لا توجد مراحل تطابق أنواع المشكلات المحددة</strong>
+                <span>غيّر نوع المشكلة أو امسح الفلاتر لعرض مراحل الموديل.</span>
+                <button type="button" (click)="store.clearStageFilters()">مسح الفلاتر</button>
+              </div>
+            </ng-template>
+          </ng-container>
+          <ng-template #noStages><div class="readiness-map__empty"><i class="pi pi-box"></i><strong>لا توجد مراحل مرتبطة بالخط</strong><span>لا توجد مراحل موديل أو تسكينات دائمة يمكن عرضها.</span></div></ng-template>
+        </ng-container>
+      </section>
+    </ng-container>
+
+    <ng-container *ngIf="store.selectedStage() as stage">
+      <app-readiness-node-card class="readiness-map__parent" [node]="stage" nodeType="Stage" [featured]="true" [interactive]="false"></app-readiness-node-card>
+
+      <app-readiness-worker-panel [stage]="stage"></app-readiness-worker-panel>
+    </ng-container>
+  </ng-container>
+</section>

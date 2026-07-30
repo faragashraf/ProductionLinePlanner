@@ -10,7 +10,7 @@ namespace ProductionLinePlanner.Infrastructure.Attendance.Services;
 public interface IZkStagingBacklogReader
 {
     Task<Result<DateOnly[]>> GetPendingProductionDatesAsync(
-        TimeSpan dayStartTime,
+        TimeSpan workdayBoundaryTime,
         int maximumDates,
         CancellationToken cancellationToken = default);
 }
@@ -22,7 +22,7 @@ public interface IZkStagingSchemaValidator
 
 public static class ZkTimeStagingSchema
 {
-    public const int CurrentVersion = 2;
+    public const int CurrentVersion = 3;
 
     public static void EnsureCompatible(bool contractInstalled, int installedVersion)
     {
@@ -250,7 +250,7 @@ public sealed class ZkTimeStagingSource(
     }
 
     public async Task<Result<DateOnly[]>> GetPendingProductionDatesAsync(
-        TimeSpan dayStartTime,
+        TimeSpan workdayBoundaryTime,
         int maximumDates,
         CancellationToken cancellationToken = default)
     {
@@ -259,7 +259,7 @@ public sealed class ZkTimeStagingSource(
             await using var connection = new SqlConnection(appConnectionString);
             await connection.OpenAsync(cancellationToken);
             await using var command = StoredProcedure(connection, "dbo.usp_ZkAttendanceInboxPendingDates");
-            command.Parameters.Add(new SqlParameter("@DayStartTime", SqlDbType.Time) { Value = dayStartTime });
+            command.Parameters.Add(new SqlParameter("@WorkdayBoundaryTime", SqlDbType.Time) { Value = workdayBoundaryTime });
             command.Parameters.Add(new SqlParameter("@MaximumDates", SqlDbType.Int) { Value = Math.Max(1, maximumDates) });
             command.Parameters.Add(new SqlParameter("@MaxAttempts", SqlDbType.Int) { Value = sourceOptions.Value.MaxProcessingAttempts });
             command.Parameters.Add(new SqlParameter("@LeaseMinutes", SqlDbType.Int) { Value = sourceOptions.Value.ProcessingLeaseMinutes });

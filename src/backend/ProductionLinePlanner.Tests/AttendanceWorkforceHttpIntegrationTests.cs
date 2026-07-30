@@ -19,6 +19,7 @@ using ProductionLinePlanner.Application.DTOs;
 using ProductionLinePlanner.Application.Engines;
 using ProductionLinePlanner.Application.Requests;
 using ProductionLinePlanner.Application.Services;
+using ProductionLinePlanner.Infrastructure.Attendance;
 
 namespace ProductionLinePlanner.Tests;
 
@@ -102,6 +103,19 @@ public sealed class AttendanceWorkforceHttpIntegrationTests
         Assert.Equal(new DateOnly(2026, 7, 19), fixture.AttendanceEngine.LastSyncedDate);
     }
 
+    [Fact]
+    public async Task Processed_orphan_admin_endpoints_require_attendance_sync_permission()
+    {
+        await using var fixture = await AttendanceFixture.CreateAsync();
+
+        Assert.Equal(
+            HttpStatusCode.Forbidden,
+            (await fixture.PostAsync("/api/attendance/processed-orphans/preview", ["attendance.view"])).StatusCode);
+        Assert.Equal(
+            HttpStatusCode.Forbidden,
+            (await fixture.PostAsync("/api/attendance/processed-orphans/repair", ["attendance.view"])).StatusCode);
+    }
+
     private sealed class AttendanceFixture : IAsyncDisposable
     {
         private readonly WebApplication app;
@@ -127,6 +141,9 @@ public sealed class AttendanceWorkforceHttpIntegrationTests
             builder.Services.AddSingleton<IAttendanceEngine>(attendanceEngine);
             builder.Services.AddSingleton<IAttendanceWorkforceEngine>(new WorkforceEngineStub(workerId));
             builder.Services.AddSingleton<ICairoTimeZoneProvider>(new CairoTimeZoneProviderStub());
+            builder.Services.AddSingleton<IAttendanceWorkdayPolicy>(services => new AttendanceWorkdayPolicy(
+                Options.Create(new AttendanceSourceOptions()),
+                services.GetRequiredService<ICairoTimeZoneProvider>()));
             var app = builder.Build();
             app.UseAuthentication();
             app.UseAuthorization();

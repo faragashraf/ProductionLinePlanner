@@ -1,3 +1,4 @@
+using ProductionLinePlanner.Application.DTOs;
 using ProductionLinePlanner.Application.Realtime;
 
 namespace ProductionLinePlanner.Api.Realtime;
@@ -30,9 +31,12 @@ public sealed record ManufacturingDataChangedMessage(
     int AddedAttendanceCount,
     int UpdatedAttendanceCount,
     IReadOnlyList<string> WorkerChangeKinds,
-    IReadOnlyList<string> AttendanceChangeKinds)
+    IReadOnlyList<string> AttendanceChangeKinds,
+    OperationalReadinessDeltaDto? OperationalReadiness)
 {
-    public static ManufacturingDataChangedMessage From(ManufacturingDataChanged change) => new(
+    public static ManufacturingDataChangedMessage From(
+        ManufacturingDataChanged change,
+        OperationalReadinessDeltaDto? operationalReadiness = null) => new(
         change.EventId,
         EventTypeValue(change),
         change.EntityType.ToString(),
@@ -56,11 +60,13 @@ public sealed record ManufacturingDataChangedMessage(
         change.AddedAttendanceCount,
         change.UpdatedAttendanceCount,
         change.WorkerChangeKinds ?? [],
-        change.AttendanceChangeKinds ?? []);
+        change.AttendanceChangeKinds ?? [],
+        operationalReadiness);
 
     private static string EventTypeValue(ManufacturingDataChanged change) => change.EntityType switch
     {
         ManufacturingEntityType.AttendanceRecord => "manufacturing.attendance.changed",
+        ManufacturingEntityType.AttendanceSyncState => "manufacturing.attendance-sync.changed",
         ManufacturingEntityType.Worker when change.WorkerChangeKinds?.Contains(
             "department-assignment",
             StringComparer.OrdinalIgnoreCase) == true => "manufacturing.worker-department.changed",

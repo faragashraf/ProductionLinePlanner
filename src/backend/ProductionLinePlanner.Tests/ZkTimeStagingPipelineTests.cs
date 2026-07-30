@@ -185,9 +185,64 @@ public sealed class ZkTimeStagingPipelineTests
         var outOnlyRecord = Assert.Single(records, record => record.WorkerId == outOnlyWorker.Id);
         Assert.Equal(AttendanceStatus.Absent, outOnlyRecord.AttendanceStatus);
         Assert.Null(outOnlyRecord.SourcePayload);
-        Assert.Contains(111, fixture.Source.ProcessedPunchIds);
+        Assert.Contains(111, fixture.Source.PendingPunchIds);
+        Assert.Equal("CheckInRequired", fixture.Source.GetPunchInbox(111).ResolutionCode);
         Assert.Contains(112, fixture.Source.FailedPunchIds);
         Assert.Contains(114, fixture.Source.FailedPunchIds);
+    }
+
+    [Fact]
+    public async Task Exact_existing_attendance_evidence_is_processed_as_already_imported_without_duplicate()
+    {
+        await using var fixture = await Fixture.CreateAsync(includeExistingWorker: false);
+        fixture.Source.AddWorkers(Worker(1, 3913, "1042"));
+        fixture.Source.AddPunches(Punch(5380, 3913, "1042", 7, 25, "I", 3));
+        await using (var setup = fixture.CreateDbContext())
+        {
+            var worker = new Worker(Guid.NewGuid(), "1042", "Regression worker 1042", "3913", "1042");
+            setup.Workers.Add(worker);
+            var firstInUtc = new DateTime(2026, 7, 16, 4, 25, 3, DateTimeKind.Utc);
+            setup.AttendanceRecords.Add(new AttendanceRecord(
+                Guid.NewGuid(),
+                worker.Id,
+                firstInUtc,
+                AttendanceStatus.Present,
+                source: "AttendanceSync",
+                sourcePayload: JsonSerializer.Serialize(new { FirstInUtc = firstInUtc, LastOutUtc = (DateTime?)null }),
+                sourceRawId: "source-5380",
+                attendanceUserId: "3913",
+                badgeNumber: "1042"));
+            await setup.SaveChangesAsync();
+        }
+
+        var result = await fixture.RunAsync();
+
+        Assert.True(result.IsSuccess, result.Error?.Message);
+        var inbox = fixture.Source.GetPunchInbox(5380);
+        Assert.Equal(FakeStagingSource.State.Processed, inbox.State);
+        Assert.Equal("AlreadyImported", inbox.ResolutionCode);
+        Assert.Contains("Exact In evidence already exists", inbox.ResolutionDetails);
+        await using var db = fixture.CreateDbContext();
+        Assert.Single(await db.AttendanceRecords.Where(item => item.BadgeNumber == "1042").ToArrayAsync());
+    }
+
+    [Fact]
+    public async Task Out_only_punch_is_not_completed_as_processed_without_exact_attendance_evidence()
+    {
+        await using var fixture = await Fixture.CreateAsync(includeExistingWorker: false);
+        fixture.Source.AddWorkers(Worker(1, 3913, "1042"));
+        fixture.Source.AddPunches(Punch(6139, 3913, "1042", 8, 4, "O", 14));
+
+        var result = await fixture.RunAsync();
+
+        Assert.True(result.IsSuccess, result.Error?.Message);
+        var inbox = fixture.Source.GetPunchInbox(6139);
+        Assert.Equal(FakeStagingSource.State.Pending, inbox.State);
+        Assert.Equal("CheckInRequired", inbox.ResolutionCode);
+        await using var db = fixture.CreateDbContext();
+        var worker = await db.Workers.SingleAsync(item => item.BadgeNumber == "1042");
+        var record = await db.AttendanceRecords.SingleAsync(item => item.WorkerId == worker.Id);
+        Assert.Null(record.SourcePayload);
     }
 
     [Fact]
@@ -249,11 +304,14 @@ public sealed class ZkTimeStagingPipelineTests
 
         var claimedBatches = fixture.Source.AttendanceClaims.Count;
         var publishedChanges = publisher.Changes.Count;
+        var publishedSyncChanges = publisher.Changes.Count(change => change.EntityType == ManufacturingEntityType.AttendanceSyncState);
         var replay = await fixture.RunAsync();
 
         Assert.True(replay.IsSuccess, replay.Error?.Message);
         Assert.Equal(claimedBatches, fixture.Source.AttendanceClaims.Count);
-        Assert.Equal(publishedChanges, publisher.Changes.Count);
+        Assert.Equal(publishedChanges + 1, publisher.Changes.Count);
+        Assert.Equal(publishedSyncChanges + 1, publisher.Changes.Count(change => change.EntityType == ManufacturingEntityType.AttendanceSyncState));
+        Assert.Single(publisher.Changes, change => change.EntityType == ManufacturingEntityType.Worker);
         Assert.Contains(101, fixture.Source.SkippedPunchIds);
     }
 
@@ -339,7 +397,7 @@ public sealed class ZkTimeStagingPipelineTests
     }
 
     [Fact]
-    public async Task Successful_staging_batch_publishes_one_event_per_changed_domain_type_and_replay_publishes_none()
+    public async Task Successful_staging_batch_publishes_domain_changes_and_replay_only_refreshes_sync_freshness()
     {
         var publisher = new RecordingPublisher();
         await using var fixture = await Fixture.CreateAsync(publisher: publisher);
@@ -354,20 +412,23 @@ public sealed class ZkTimeStagingPipelineTests
         var first = await fixture.RunAsync();
 
         Assert.True(first.IsSuccess, first.Error?.Message);
-        Assert.Equal(2, publisher.Changes.Count);
+        Assert.Equal(3, publisher.Changes.Count);
         var workerChange = Assert.Single(publisher.Changes, change => change.EntityType == ManufacturingEntityType.Worker);
         var attendanceChange = Assert.Single(publisher.Changes, change => change.EntityType == ManufacturingEntityType.AttendanceRecord);
+        var syncChange = Assert.Single(publisher.Changes, change => change.EntityType == ManufacturingEntityType.AttendanceSyncState);
         Assert.Equal("ZkTimeSync", workerChange.Source);
         Assert.Equal("ZkTimeSync", attendanceChange.Source);
         Assert.Equal(ProductionDate, attendanceChange.ProductionDate);
         Assert.Equal(2, attendanceChange.AddedAttendanceCount);
         Assert.Equal(0, attendanceChange.UpdatedAttendanceCount);
+        Assert.Equal("ZkTimeSync", syncChange.Source);
+        Assert.Equal(ProductionDate, syncChange.ProductionDate);
         publisher.Changes.Clear();
 
         var replay = await fixture.RunAsync();
 
         Assert.True(replay.IsSuccess, replay.Error?.Message);
-        Assert.Empty(publisher.Changes);
+        Assert.Collection(publisher.Changes, change => Assert.Equal(ManufacturingEntityType.AttendanceSyncState, change.EntityType));
     }
 
     [Fact]
@@ -393,6 +454,7 @@ public sealed class ZkTimeStagingPipelineTests
             Assert.Equal(FakeStagingSource.State.Processed, row.State);
             Assert.Equal(1, row.AttemptCount);
             Assert.Null(row.ProcessingLeaseId);
+            Assert.Equal("Imported", row.ResolutionCode);
         });
     }
 
@@ -564,7 +626,7 @@ public sealed class ZkTimeStagingPipelineTests
         public PunchInboxSnapshot GetPunchInbox(long inboxId)
         {
             var row = punches[inboxId];
-            return new PunchInboxSnapshot(row.State, row.Attempts, row.ProcessingLeaseId, row.ResolutionDetails);
+            return new PunchInboxSnapshot(row.State, row.Attempts, row.ProcessingLeaseId, row.ResolutionCode, row.ResolutionDetails);
         }
 
         public void AddWorkers(params WorkerIdentitySourceItem[] rows)
@@ -657,6 +719,7 @@ public sealed class ZkTimeStagingPipelineTests
 
                 row.State = ResolveState(outcome, row.Attempts);
                 row.ProcessingLeaseId = null;
+                row.ResolutionCode = outcome.ResolutionCode;
                 row.ResolutionDetails = outcome.ResolutionDetails;
             }
             if (batch.LeaseId.HasValue && outcomes.Count > 0)
@@ -683,12 +746,13 @@ public sealed class ZkTimeStagingPipelineTests
             public State State { get; set; } = State.Pending;
             public int Attempts { get; set; }
             public Guid? ProcessingLeaseId { get; set; }
+            public string? ResolutionCode { get; set; }
             public string? ResolutionDetails { get; set; }
         }
 
         public sealed record AttendanceClaim(Guid LeaseId, long[] InboxIds);
         public sealed record AttendanceCompletion(Guid LeaseId, long[] InboxIds);
-        public sealed record PunchInboxSnapshot(State State, int AttemptCount, Guid? ProcessingLeaseId, string? ResolutionDetails);
+        public sealed record PunchInboxSnapshot(State State, int AttemptCount, Guid? ProcessingLeaseId, string? ResolutionCode, string? ResolutionDetails);
         public enum State { Pending, Processing, Processed, Skipped, Failed }
     }
 

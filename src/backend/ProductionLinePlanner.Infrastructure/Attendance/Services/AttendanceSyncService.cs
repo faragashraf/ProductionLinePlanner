@@ -26,6 +26,7 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
     private readonly AttendanceSourceOptions _sourceOptions;
     private readonly ILogger<AttendanceSyncService> _logger;
     private readonly ICairoTimeZoneProvider _cairoTimeZoneProvider;
+    private readonly IAttendanceWorkdayPolicy _attendanceWorkdayPolicy;
     private readonly IWorkerInitialSyncService _workerSyncService;
     private readonly IManufacturingRealtimeChangeContext? _realtimeChangeContext;
 
@@ -36,7 +37,8 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
         ILogger<AttendanceSyncService> logger,
         ICairoTimeZoneProvider cairoTimeZoneProvider,
         IWorkerInitialSyncService workerSyncService,
-        IManufacturingRealtimeChangeContext? realtimeChangeContext = null)
+        IManufacturingRealtimeChangeContext? realtimeChangeContext = null,
+        IAttendanceWorkdayPolicy? attendanceWorkdayPolicy = null)
     {
         _appDbContext = appDbContext;
         _attendanceSource = attendanceSource;
@@ -45,6 +47,7 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
         _cairoTimeZoneProvider = cairoTimeZoneProvider;
         _workerSyncService = workerSyncService;
         _realtimeChangeContext = realtimeChangeContext;
+        _attendanceWorkdayPolicy = attendanceWorkdayPolicy ?? new AttendanceWorkdayPolicy(sourceOptions, cairoTimeZoneProvider);
     }
 
     public async Task<Result<AttendanceWorkerStateDto[]>> GetTodayAttendanceAsync(
@@ -306,8 +309,7 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
 
     public Task<Result<AttendanceSyncResultDto>> SyncTodayAsync(CancellationToken cancellationToken = default)
     {
-        var cairoNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, _cairoTimeZoneProvider.TimeZone);
-        return SyncForProductionDateAsync(DateOnly.FromDateTime(cairoNow), cancellationToken);
+        return SyncForProductionDateAsync(_attendanceWorkdayPolicy.GetOperationalDate(DateTime.UtcNow), cancellationToken);
     }
 
     public Task<Result<AttendanceSyncResultDto>> SyncForProductionDateAsync(DateOnly productionDate, CancellationToken cancellationToken = default)
@@ -343,7 +345,7 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
                 result.IsSuccess,
                 result.Value?.SourceUsersCount ?? 0,
                 result.Value?.SourceCheckInsCount ?? 0);
-            return result;
+            return await CompleteRunAsync(context, result);
         }
         catch (OperationCanceledException exception) when (AttendanceSyncFailureClassifier.Classify(exception, cancellationToken.IsCancellationRequested, internalTimeout.IsCancellationRequested) == AttendanceSyncFailureClassifier.ClientCancelled)
         {
@@ -354,7 +356,7 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
                 context.TriggerType,
                 stopwatch.ElapsedMilliseconds,
                 "request-token");
-            return Result<AttendanceSyncResultDto>.Failure(new Error(AttendanceSyncFailureClassifier.ClientCancelled, "Attendance synchronization request was cancelled by the client."));
+            return await CompleteRunAsync(context, Result<AttendanceSyncResultDto>.Failure(new Error(AttendanceSyncFailureClassifier.ClientCancelled, "Attendance synchronization request was cancelled by the client.")));
         }
         catch (OperationCanceledException exception) when (AttendanceSyncFailureClassifier.Classify(exception, cancellationToken.IsCancellationRequested, internalTimeout.IsCancellationRequested) == AttendanceSyncFailureClassifier.InternalTimeout)
         {
@@ -365,7 +367,7 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
                 context.TriggerType,
                 stopwatch.ElapsedMilliseconds,
                 "internal-timeout");
-            return Result<AttendanceSyncResultDto>.Failure(new Error(AttendanceSyncFailureClassifier.InternalTimeout, "Attendance synchronization exceeded its bounded source-read timeout."));
+            return await CompleteRunAsync(context, Result<AttendanceSyncResultDto>.Failure(new Error(AttendanceSyncFailureClassifier.InternalTimeout, "Attendance synchronization exceeded its bounded source-read timeout.")));
         }
         catch (OperationCanceledException exception)
         {
@@ -377,7 +379,7 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
                 context.TriggerType,
                 stopwatch.ElapsedMilliseconds,
                 "undetermined");
-            return Result<AttendanceSyncResultDto>.Failure(new Error(AttendanceSyncFailureClassifier.Cancelled, "Attendance synchronization was cancelled before completion."));
+            return await CompleteRunAsync(context, Result<AttendanceSyncResultDto>.Failure(new Error(AttendanceSyncFailureClassifier.Cancelled, "Attendance synchronization was cancelled before completion.")));
         }
         catch (Exception exception) when (AttendanceSyncFailureClassifier.Classify(exception, cancellationToken.IsCancellationRequested, internalTimeout.IsCancellationRequested) == AttendanceSyncFailureClassifier.SourceTimeout)
         {
@@ -389,8 +391,42 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
                 context.TriggerType,
                 stopwatch.ElapsedMilliseconds,
                 "sql-command-timeout");
-            return Result<AttendanceSyncResultDto>.Failure(new Error(AttendanceSyncFailureClassifier.SourceTimeout, "Attendance source query timed out."));
+            return await CompleteRunAsync(context, Result<AttendanceSyncResultDto>.Failure(new Error(AttendanceSyncFailureClassifier.SourceTimeout, "Attendance source query timed out.")));
         }
+    }
+
+    private async Task<Result<AttendanceSyncResultDto>> CompleteRunAsync(
+        AttendanceSyncExecutionContext context,
+        Result<AttendanceSyncResultDto> result)
+    {
+        try
+        {
+            var state = await _appDbContext.AttendanceSyncStates
+                .SingleOrDefaultAsync(item => item.SourceName == _sourceOptions.SourceName
+                    && item.OperationalDate == context.ProductionDate, CancellationToken.None);
+            state ??= new AttendanceSyncState(Guid.NewGuid(), _sourceOptions.SourceName, context.ProductionDate);
+            if (_appDbContext.Entry(state).State == EntityState.Detached)
+            {
+                _appDbContext.AttendanceSyncStates.Add(state);
+            }
+
+            if (result.IsSuccess) state.RecordSuccess(DateTime.UtcNow);
+            else state.RecordFailure(DateTime.UtcNow, result.Error?.Code);
+            await _appDbContext.SaveChangesAsync(CancellationToken.None);
+        }
+        catch (Exception exception)
+        {
+            // Attendance rows may already be committed. Freshness remains
+            // untrusted rather than turning a completed source synchronization
+            // into a false application failure.
+            _logger.LogError(
+                exception,
+                "Attendance sync freshness state could not be persisted. correlationId={CorrelationId}, date={SyncDate}",
+                context.CorrelationId,
+                context.ProductionDate);
+        }
+
+        return result;
     }
 
     private async Task<Result<AttendanceSyncResultDto>> SyncCoreAsync(
@@ -517,14 +553,8 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
             });
         }
 
-        var attendanceUserMap = BuildIdentityLookup(workers, x => x.AttendanceUserId);
-        var badgeMap = BuildIdentityLookup(workers, x => x.BadgeNumber);
+        var identityResolver = new AttendanceWorkerIdentityResolver(workers);
         var workersById = workers.ToDictionary(worker => worker.Id);
-        var badgeBySourceUserId = sourceCheckIns
-            .Where(x => x.UserId is not null)
-            .GroupBy(x => NormalizeIdentity(x.UserId!.ToString()))
-            .Where(g => g.Key is not null)
-            .ToDictionary(g => g.Key!, g => NormalizeIdentity(g.First().BadgeNumber), StringComparer.OrdinalIgnoreCase);
 
         var validCheckIns = sourceCheckIns
             .Where(x => ValidateSourcePunch(x) is null)
@@ -535,12 +565,14 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
                 CheckTimeUtc = ToUtcFromEgyptSourceTime(x.CheckTimeLocal),
                 CheckType = GetPunchType(x.CheckType)!.Value,
                 RawSourceIdentifier = x.SourceRawId,
+                BadgeNumber = NormalizeIdentity(x.BadgeNumber),
                 x.SourceRecordId
             })
             .Where(x => !string.IsNullOrWhiteSpace(x.WorkerUserId))
             .ToList();
 
         var matchedByWorker = new Dictionary<Guid, AttendanceWindow>();
+        var resolvedPunches = new List<ResolvedPunch>();
         var unmatchedSourceUsers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var processingOutcomes = sourceCheckIns
             .Where(punch => punch.SourceRecordId.HasValue)
@@ -553,18 +585,16 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
         foreach (var item in validCheckIns.OrderBy(x => x.CheckTimeUtc))
         {
             var sourceUserId = item.WorkerUserId;
-            var identityResolution = TryResolveWorkerId(
+            var identityResolution = identityResolver.Resolve(
                 sourceUserId,
-                attendanceUserMap,
-                badgeMap,
-                badgeBySourceUserId,
+                item.BadgeNumber,
                 out var workerId);
-            if (identityResolution != WorkerIdentityResolution.Resolved)
+            if (identityResolution != AttendanceWorkerIdentityResolution.Resolved)
             {
                 unmatchedSourceUsers.Add(sourceUserId);
                 if (item.SourceRecordId.HasValue)
                 {
-                    processingOutcomes[item.SourceRecordId.Value] = identityResolution == WorkerIdentityResolution.Ambiguous
+                    processingOutcomes[item.SourceRecordId.Value] = identityResolution == AttendanceWorkerIdentityResolution.Ambiguous
                         ? SourceProcessingOutcome.Failed(item.SourceRecordId.Value, "WorkerIdentityAmbiguous")
                         : SourceProcessingOutcome.Retry(item.SourceRecordId.Value, "WorkerIdentityNotResolved");
                 }
@@ -595,10 +625,12 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
                 continue;
             }
 
-            if (item.SourceRecordId.HasValue)
-            {
-                processingOutcomes[item.SourceRecordId.Value] = SourceProcessingOutcome.Processed(item.SourceRecordId.Value);
-            }
+            resolvedPunches.Add(new ResolvedPunch(
+                item.SourceRecordId,
+                workerId,
+                item.CheckTimeUtc,
+                item.CheckType,
+                item.RawSourceIdentifier));
 
             if (item.CheckType == PunchType.In)
             {
@@ -638,6 +670,35 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
             .ToDictionary(
                 g => g.Key,
                 g => g.OrderByDescending(x => x.AttendanceTimeUtc).First());
+
+        // Preserve a persisted check-in fallback if a staging provider supplies only the newly
+        // claimed checkout rather than full-day context. This still refuses an out-only punch
+        // when no committed check-in exists.
+        foreach (var checkoutGroup in resolvedPunches
+                     .Where(punch => punch.CheckType == PunchType.Out && !matchedByWorker.ContainsKey(punch.WorkerId))
+                     .GroupBy(punch => punch.WorkerId))
+        {
+            if (!existingByWorker.TryGetValue(checkoutGroup.Key, out var existingRecord)) continue;
+            var existingWindow = AttendancePunchEvidenceMatcher.ReadWindow(existingRecord.SourcePayload);
+            if (existingWindow.FirstInUtc is not { } firstInUtc) continue;
+            var lastOutUtc = checkoutGroup
+                .Select(punch => punch.CheckTimeUtc)
+                .Where(checkTimeUtc => checkTimeUtc > firstInUtc)
+                .Cast<DateTime?>()
+                .Max();
+            if (lastOutUtc is null) continue;
+            matchedByWorker[checkoutGroup.Key] = new AttendanceWindow(
+                firstInUtc,
+                lastOutUtc,
+                existingRecord.SourceRawId ?? SyncAbsentStatus);
+        }
+
+        var alreadyImportedInboxIds = resolvedPunches
+            .Where(punch => punch.SourceRecordId.HasValue
+                && existingByWorker.TryGetValue(punch.WorkerId, out var record)
+                && IsExactPunchEvidence(record, punch))
+            .Select(punch => punch.SourceRecordId!.Value)
+            .ToHashSet();
         var existingRecordIds = existingRecords.Select(record => record.Id).ToArray();
         var queuedNotificationKeys = existingRecordIds.Length == 0
             ? new HashSet<string>(StringComparer.Ordinal)
@@ -663,7 +724,7 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
             if (matchedByWorker.TryGetValue(worker.Id, out var match))
             {
                 statusTime = match.FirstInUtc;
-                status = CalculateStatus(match.FirstInUtc, startLocal);
+                status = CalculateStatus(match.FirstInUtc, productionDate);
                 sourceRawId = match.SourceRawId;
                 sourcePayload = JsonSerializer.Serialize(new
                 {
@@ -688,6 +749,7 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
                     createdAtUtc: syncRunAt);
 
                 _appDbContext.AttendanceRecords.Add(record);
+                existingByWorker[worker.Id] = record;
                 if (matchedByWorker.TryGetValue(worker.Id, out var insertedMatch))
                 {
                     QueueAttendanceNotification(record, worker, WorkerAttendanceNotificationType.CheckIn, insertedMatch.FirstInUtc, queuedNotificationKeys);
@@ -706,7 +768,7 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
                 continue;
             }
 
-            var previousWindow = ReadAttendanceWindow(existing.SourcePayload);
+            var previousWindow = AttendancePunchEvidenceMatcher.ReadWindow(existing.SourcePayload);
             existing.UpdateAttendanceStatus(
                 statusTime,
                 status,
@@ -731,6 +793,57 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
         }
 
         await _appDbContext.SaveChangesAsync(cancellationToken);
+
+        foreach (var punch in resolvedPunches.Where(item => item.SourceRecordId.HasValue))
+        {
+            var inboxId = punch.SourceRecordId!.Value;
+            if (existingByWorker.TryGetValue(punch.WorkerId, out var persistedRecord) &&
+                IsExactPunchEvidence(persistedRecord, punch))
+            {
+                var alreadyImported = alreadyImportedInboxIds.Contains(inboxId);
+                processingOutcomes[inboxId] = SourceProcessingOutcome.Processed(
+                    inboxId,
+                    alreadyImported ? "AlreadyImported" : "Imported",
+                    alreadyImported
+                        ? $"Exact {punch.CheckType} evidence already exists in AttendanceRecord {persistedRecord.Id:D}."
+                        : $"Exact {punch.CheckType} evidence was committed in AttendanceRecord {persistedRecord.Id:D}.");
+                continue;
+            }
+
+            if (!matchedByWorker.TryGetValue(punch.WorkerId, out var canonicalWindow))
+            {
+                processingOutcomes[inboxId] = SourceProcessingOutcome.Retry(
+                    inboxId,
+                    "CheckInRequired",
+                    "The checkout cannot be applied until a valid check-in exists in the operational-day window.");
+                continue;
+            }
+
+            if (punch.CheckType == PunchType.In && punch.CheckTimeUtc != canonicalWindow.FirstInUtc)
+            {
+                processingOutcomes[inboxId] = SourceProcessingOutcome.Skipped(
+                    inboxId,
+                    "NonCanonicalCheckIn",
+                    $"The daily summary preserves the earlier check-in at {canonicalWindow.FirstInUtc:O}.");
+                continue;
+            }
+
+            if (punch.CheckType == PunchType.Out && punch.CheckTimeUtc != canonicalWindow.LastOutUtc)
+            {
+                processingOutcomes[inboxId] = SourceProcessingOutcome.Skipped(
+                    inboxId,
+                    "NonCanonicalCheckOut",
+                    canonicalWindow.LastOutUtc.HasValue
+                        ? $"The daily summary preserves the later checkout at {canonicalWindow.LastOutUtc.Value:O}."
+                        : "No checkout is represented by the persisted daily summary.");
+                continue;
+            }
+
+            processingOutcomes[inboxId] = SourceProcessingOutcome.Failed(
+                inboxId,
+                "AttendancePersistenceNotProven",
+                "The processor could not prove exact persisted attendance evidence for this source punch.");
+        }
 
         var claimedInboxIds = sourceCheckIns
             .Where(punch => punch.SourceRecordId.HasValue)
@@ -909,26 +1022,6 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
             idempotencyKey));
     }
 
-    private static (DateTime? FirstInUtc, DateTime? LastOutUtc) ReadAttendanceWindow(string? sourcePayload)
-    {
-        if (string.IsNullOrWhiteSpace(sourcePayload)) return (null, null);
-        try
-        {
-            using var json = JsonDocument.Parse(sourcePayload);
-            DateTime? first = json.RootElement.TryGetProperty("FirstInUtc", out var firstValue) && firstValue.TryGetDateTime(out var parsedFirst)
-                ? DateTime.SpecifyKind(parsedFirst, DateTimeKind.Utc)
-                : null;
-            DateTime? last = json.RootElement.TryGetProperty("LastOutUtc", out var lastValue) && lastValue.ValueKind != JsonValueKind.Null && lastValue.TryGetDateTime(out var parsedLast)
-                ? DateTime.SpecifyKind(parsedLast, DateTimeKind.Utc)
-                : null;
-            return (first, last);
-        }
-        catch (JsonException)
-        {
-            return (null, null);
-        }
-    }
-
     private static string? NormalizeIdentity(string? value)
     {
         if (string.IsNullOrWhiteSpace(value))
@@ -947,74 +1040,9 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
     private DateTime GetDateOnly(DateTime? dateUtc)
     {
         var utc = dateUtc ?? DateTime.UtcNow;
-        var cairo = TimeZoneInfo.ConvertTimeFromUtc(utc.Kind == DateTimeKind.Utc ? utc : utc.ToUniversalTime(), _cairoTimeZoneProvider.TimeZone);
-        return GetEgyptDayBounds(DateOnly.FromDateTime(cairo)).StartUtc;
-    }
-
-    private static Dictionary<string, List<Guid>> BuildIdentityLookup(IEnumerable<Worker> workers, Func<Worker, string?> selector)
-    {
-        var result = new Dictionary<string, List<Guid>>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var worker in workers)
-        {
-            var key = NormalizeIdentity(selector(worker));
-            if (key is null)
-            {
-                continue;
-            }
-
-            if (!result.TryGetValue(key, out var ids))
-            {
-                ids = [];
-                result[key] = ids;
-            }
-
-            ids.Add(worker.Id);
-        }
-
-        return result;
-    }
-
-    private static WorkerIdentityResolution TryResolveWorkerId(
-        string sourceUserId,
-        Dictionary<string, List<Guid>> attendanceUserLookup,
-        Dictionary<string, List<Guid>> badgeLookup,
-        Dictionary<string, string?> sourceBadgeByUserId,
-        out Guid workerId)
-    {
-        workerId = Guid.Empty;
-
-        attendanceUserLookup.TryGetValue(sourceUserId, out var byAttendanceUserId);
-        var sourceBadge = sourceBadgeByUserId.TryGetValue(sourceUserId, out var badge)
-            ? badge
-            : null;
-        var byBadge = !string.IsNullOrWhiteSpace(sourceBadge) && badgeLookup.TryGetValue(sourceBadge, out var badgeMatches)
-            ? badgeMatches
-            : null;
-
-        if (byAttendanceUserId?.Count > 1 || byBadge?.Count > 1)
-        {
-            return WorkerIdentityResolution.Ambiguous;
-        }
-
-        if (byAttendanceUserId?.Count == 1)
-        {
-            if (byBadge?.Count == 1 && byBadge[0] != byAttendanceUserId[0])
-            {
-                return WorkerIdentityResolution.Ambiguous;
-            }
-
-            workerId = byAttendanceUserId[0];
-            return WorkerIdentityResolution.Resolved;
-        }
-
-        if (byBadge?.Count == 1)
-        {
-            workerId = byBadge[0];
-            return WorkerIdentityResolution.Resolved;
-        }
-
-        return WorkerIdentityResolution.NotResolved;
+        var operationalDate = _attendanceWorkdayPolicy.GetOperationalDate(
+            utc.Kind == DateTimeKind.Utc ? utc : utc.ToUniversalTime());
+        return _attendanceWorkdayPolicy.GetWindow(operationalDate).StartUtc;
     }
 
     private static string? ValidateSourcePunch(AttendanceSourcePunch punch)
@@ -1042,13 +1070,6 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
         return string.IsNullOrWhiteSpace(punch.SourceRawId) ? "InvalidSourcePayload" : null;
     }
 
-    private enum WorkerIdentityResolution
-    {
-        NotResolved,
-        Resolved,
-        Ambiguous
-    }
-
     private enum PunchType
     {
         In,
@@ -1057,9 +1078,33 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
 
     private sealed record AttendanceWindow(DateTime FirstInUtc, DateTime? LastOutUtc, string SourceRawId);
 
-    private AttendanceStatus CalculateStatus(DateTime checkTimeUtc, DateTime productionStartLocal)
+    private sealed record ResolvedPunch(
+        long? SourceRecordId,
+        Guid WorkerId,
+        DateTime CheckTimeUtc,
+        PunchType CheckType,
+        string SourceRawId);
+
+    private bool IsExactPunchEvidence(AttendanceRecord record, ResolvedPunch punch)
     {
-        var shiftStart = productionStartLocal.Add(_sourceOptions.DayStartTime);
+        if (record.WorkerId != punch.WorkerId ||
+            !string.Equals(record.Source, _sourceOptions.SourceName, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return AttendancePunchEvidenceMatcher.IsExact(
+            record,
+            punch.WorkerId,
+            _sourceOptions.SourceName,
+            punch.CheckTimeUtc,
+            punch.CheckType == PunchType.In,
+            punch.SourceRawId);
+    }
+
+    private AttendanceStatus CalculateStatus(DateTime checkTimeUtc, DateOnly productionDate)
+    {
+        var shiftStart = _attendanceWorkdayPolicy.GetShiftStartLocal(productionDate);
         var lateThreshold = shiftStart.AddMinutes(_sourceOptions.LateThresholdMinutes);
         var localCheckTime = TimeZoneInfo.ConvertTimeFromUtc(checkTimeUtc, _cairoTimeZoneProvider.TimeZone);
         return localCheckTime <= lateThreshold ? AttendanceStatus.Present : AttendanceStatus.Late;
@@ -1092,13 +1137,8 @@ public sealed class AttendanceSyncService : IAttendanceReadService, IAttendanceS
 
     private (DateTime StartUtc, DateTime EndUtc, DateTime StartLocal, DateTime EndLocal) GetEgyptDayBounds(DateOnly date)
     {
-        var startLocal = date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified);
-        var endLocal = startLocal.AddDays(1);
-        return (
-            TimeZoneInfo.ConvertTimeToUtc(startLocal, _cairoTimeZoneProvider.TimeZone),
-            TimeZoneInfo.ConvertTimeToUtc(endLocal, _cairoTimeZoneProvider.TimeZone),
-            startLocal,
-            endLocal);
+        var window = _attendanceWorkdayPolicy.GetWindow(date);
+        return (window.StartUtc, window.EndUtc, window.StartLocal, window.EndLocal);
     }
 
     private static PunchType? GetPunchType(string? checkType) => checkType?.Trim() switch

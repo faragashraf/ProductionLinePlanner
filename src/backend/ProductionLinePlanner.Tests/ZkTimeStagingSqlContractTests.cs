@@ -70,7 +70,7 @@ public sealed class ZkTimeStagingSqlContractTests
         Assert.Contains(":r database/zktime-staging/004-create-processing-procedures.sql", install, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("ALTER PROCEDURE dbo.usp_ZkStageWorkers", ingestion, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("ALTER PROCEDURE dbo.usp_ZkWorkerInboxReadSnapshot", processing, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("@Version int = 2", Read("database/zktime-staging/005-record-schema-version.sql"), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("@Version int = 3", Read("database/zktime-staging/005-record-schema-version.sql"), StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -89,14 +89,14 @@ public sealed class ZkTimeStagingSqlContractTests
     }
 
     [Fact]
-    public void Pending_date_backlog_uses_the_same_calendar_day_contract_as_attendance_claims()
+    public void Pending_date_backlog_uses_the_same_operational_day_boundary_as_attendance_claims()
     {
         var processing = Read("database/zktime-staging/004-create-processing-procedures.sql");
         var pendingDates = processing[processing.IndexOf("ALTER PROCEDURE dbo.usp_ZkAttendanceInboxPendingDates", StringComparison.OrdinalIgnoreCase)..];
 
-        Assert.Contains("CONVERT(date, SourceCheckTimeLocal) AS ProductionDate", pendingDates, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("DATEADD(DAY, -1, SourceCheckTimeLocal)", pendingDates, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("same calendar-day contract used by usp_ZkAttendanceInboxClaim", pendingDates, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("@WorkdayBoundaryTime", pendingDates, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("DATEADD(SECOND, -DATEDIFF(SECOND", pendingDates, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("AttendanceSyncService uses the same boundary", pendingDates, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -135,7 +135,7 @@ public sealed class ZkTimeStagingSqlContractTests
         Assert.Contains(":On Error exit", install, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("ZkSyncSchemaVersions", Read("database/zktime-staging/001-create-staging-schema.sql"), StringComparison.OrdinalIgnoreCase);
         Assert.Contains("IF NOT EXISTS", Read("database/zktime-staging/005-record-schema-version.sql"), StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("@Version int = 2", Read("database/zktime-staging/005-record-schema-version.sql"), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("@Version int = 3", Read("database/zktime-staging/005-record-schema-version.sql"), StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -166,10 +166,20 @@ public sealed class ZkTimeStagingSqlContractTests
         Assert.Contains("COL_LENGTH(N'dbo.ZkWorkerSyncInbox', N'ResolutionCode') IS NULL", schema, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("COL_LENGTH(N'dbo.ZkAttendanceSyncInbox', N'ResolvedAtUtc') IS NULL", schema, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("'Skipped'", schema, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("@TargetSchemaVersion int = 2", preflight, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("@TargetSchemaVersion int = 3", preflight, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("SkippedCount", verification, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Completed with skipped records", verification, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("DELETE", schema, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Version_three_groups_pending_attendance_by_the_shared_workday_boundary()
+    {
+        var processing = Read("database/zktime-staging/004-create-processing-procedures.sql");
+
+        Assert.Contains("@WorkdayBoundaryTime time(7)", processing, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("DATEADD(SECOND, -DATEDIFF(SECOND", processing, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("CONVERT(date, SourceCheckTimeLocal) AS ProductionDate", processing, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -219,6 +229,32 @@ public sealed class ZkTimeStagingSqlContractTests
                     $"{Path.GetFileName(path)} batch {batchIndex + 1}: {string.Join(" | ", errors.Select(error => $"L{error.Line},C{error.Column}: {error.Message}"))}");
             }
         }
+    }
+
+    [Fact]
+    public void Attendance_diagnostics_is_read_only_and_detects_exact_processed_orphans()
+    {
+        var diagnostics = Read("database/tools/Attendance-Diagnostics.sql");
+        var executableSql = Regex.Replace(diagnostics, @"(?s)/\*.*?\*/|--[^\r\n]*", string.Empty);
+
+        Assert.DoesNotMatch(new Regex(@"\b(?:INSERT|UPDATE|DELETE|MERGE)\b", RegexOptions.IgnoreCase), executableSql);
+        Assert.Contains("Processed Attendance Orphans", diagnostics, StringComparison.Ordinal);
+        Assert.Contains("ProcessedWithoutAttendance", diagnostics, StringComparison.Ordinal);
+        Assert.Contains("ERROR — Processed Inbox Orphan", diagnostics, StringComparison.Ordinal);
+        Assert.Contains("SourceRawId = Candidate.SourceRawId", diagnostics, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("$.FirstInUtc", diagnostics, StringComparison.Ordinal);
+        Assert.Contains("$.LastOutUtc", diagnostics, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Attendance_diagnostics_parses_with_sql_server_2016_grammar()
+    {
+        var parser = new TSql130Parser(initialQuotedIdentifiers: true);
+        parser.Parse(new StringReader(Read("database/tools/Attendance-Diagnostics.sql")), out var errors);
+
+        Assert.True(
+            errors.Count == 0,
+            string.Join(" | ", errors.Select(error => $"L{error.Line},C{error.Column}: {error.Message}")));
     }
 
     private static string ReadSqlFiles() => string.Join(

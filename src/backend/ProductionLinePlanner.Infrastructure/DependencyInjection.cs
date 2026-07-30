@@ -34,8 +34,10 @@ public static class DependencyInjection
 
         var sourceName = attendanceSourceSection["SourceName"]?.Trim();
         var sourceMode = attendanceSourceSection["Mode"]?.Trim();
+        var workdayBoundaryTime = attendanceSourceSection["WorkdayBoundaryTime"];
         var dayStartTime = attendanceSourceSection["DayStartTime"];
         var lateThresholdMinutes = attendanceSourceSection["LateThresholdMinutes"];
+        var freshnessThresholdMinutes = attendanceSourceSection["FreshnessThresholdMinutes"];
         var userInfoTable = attendanceSourceSection["UserInfoTable"]?.Trim();
         var checkInOutTable = attendanceSourceSection["CheckInOutTable"]?.Trim();
         var departmentsTable = attendanceSourceSection["DepartmentsTable"]?.Trim();
@@ -53,8 +55,10 @@ public static class DependencyInjection
             ConnectionString = attendanceConnectionString,
             Mode = AttendanceSourceOptions.ResolveMode(sourceMode),
             SourceName = string.IsNullOrWhiteSpace(sourceName) ? "AttendanceSync" : sourceName,
+            WorkdayBoundaryTime = TimeSpan.TryParse(workdayBoundaryTime, out var parsedWorkdayBoundary) ? parsedWorkdayBoundary : new TimeSpan(5, 0, 0),
             DayStartTime = TimeSpan.TryParse(dayStartTime, out var parsedDayStart) ? parsedDayStart : new TimeSpan(8, 0, 0),
             LateThresholdMinutes = int.TryParse(lateThresholdMinutes, out var parsedLateThreshold) ? parsedLateThreshold : 15,
+            FreshnessThresholdMinutes = int.TryParse(freshnessThresholdMinutes, out var parsedFreshnessThreshold) ? Math.Clamp(parsedFreshnessThreshold, 1, 1440) : 5,
             UserInfoTable = string.IsNullOrWhiteSpace(userInfoTable) ? "USERINFO" : userInfoTable,
             CheckInOutTable = string.IsNullOrWhiteSpace(checkInOutTable) ? "CHECKINOUT" : checkInOutTable,
             DepartmentsTable = string.IsNullOrWhiteSpace(departmentsTable) ? "DEPARTMENTS" : departmentsTable,
@@ -70,6 +74,7 @@ public static class DependencyInjection
 
         services.AddSingleton(Options.Create(attendanceSourceOptions));
         services.AddSingleton<ICairoTimeZoneProvider, CairoTimeZoneProvider>();
+        services.AddSingleton<IAttendanceWorkdayPolicy, AttendanceWorkdayPolicy>();
 
         services.AddScoped<IManufacturingDataChangePublisher, NoopManufacturingDataChangePublisher>();
         services.AddScoped<IManufacturingRealtimeCorrelationContext, NoopManufacturingRealtimeCorrelationContext>();
@@ -109,10 +114,13 @@ public static class DependencyInjection
         services.AddScoped<IAttendanceSyncRunner>(serviceProvider => serviceProvider.GetRequiredService<AttendanceSyncService>());
         services.AddSingleton<IAttendanceSyncService, AttendanceSyncCoordinator>();
         services.AddScoped<IAttendanceEngine, AttendanceEngine>();
+        services.AddScoped<IProcessedAttendanceInboxStore, SqlProcessedAttendanceInboxStore>();
+        services.AddScoped<IProcessedAttendanceOrphanEngine, ProcessedAttendanceOrphanEngine>();
         services.AddScoped<IAssignmentEngine, AssignmentEngine>();
         services.AddScoped<IAttendanceWorkforceEngine, AttendanceWorkforceEngine>();
         services.AddScoped<IAssignmentRecommendationEngine, AssignmentRecommendationEngine>();
         services.AddScoped<IReadinessEngine, ReadinessEngine>();
+        services.AddScoped<IOperationalReadinessEngine, OperationalReadinessEngine>();
         services.AddScoped<IManufacturingCommandCenterEngine, ManufacturingCommandCenterEngine>();
         services.AddScoped<INotificationEngine, NotificationEngine>();
         services.AddSingleton<INotificationEventCatalog, CodeNotificationEventCatalog>();

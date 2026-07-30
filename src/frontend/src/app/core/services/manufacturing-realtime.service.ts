@@ -4,12 +4,14 @@ import { ManufacturingDataChanged, RealtimeConnectionStatus } from '../models/re
 import { generateUuidV4 } from '../utils/uuid-v4';
 import { RealtimeService } from './realtime.service';
 
-export type ManufacturingRealtimeScreen = 'factory-structure' | 'departments' | 'stages' | 'models' | 'employees' | 'line-staffing' | 'daily-production-operations' | 'manufacturing-command-center' | 'attendance-workforce' | 'reports';
+export type ManufacturingRealtimeScreen = 'factory-structure' | 'departments' | 'stages' | 'models' | 'employees' | 'line-staffing' | 'daily-production-operations' | 'manufacturing-command-center' | 'factory-readiness' | 'attendance-workforce' | 'reports';
 
 export interface ManufacturingRealtimeWatch {
   screen: ManufacturingRealtimeScreen;
   refresh: (change?: ManufacturingDataChanged) => void;
   matches?: (change: ManufacturingDataChanged) => boolean;
+  /** Zero delivers every delta; refetch-based screens keep the default coalescing window. */
+  coalesceMs?: number;
 }
 
 interface ActiveWatch extends ManufacturingRealtimeWatch {
@@ -55,7 +57,10 @@ export class ManufacturingRealtimeService implements OnDestroy {
   watchScreen(watch: ManufacturingRealtimeWatch): () => void {
     const id = this.nextWatchId++;
     const refreshes = new Subject<ManufacturingDataChanged | undefined>();
-    const subscription = refreshes.pipe(auditTime(400)).subscribe(change => watch.refresh(change));
+    const coalesceMs = watch.coalesceMs ?? 400;
+    const subscription = coalesceMs > 0
+      ? refreshes.pipe(auditTime(coalesceMs)).subscribe(change => watch.refresh(change))
+      : refreshes.subscribe(change => watch.refresh(change));
     this.watches.set(id, { ...watch, id, refreshes, subscription });
     if (this.isConnected) void this.joinScreen(watch.screen);
     return () => this.stopWatching(id);
@@ -156,32 +161,34 @@ export class ManufacturingRealtimeService implements OnDestroy {
     switch (change.entityType) {
       case 'Factory':
       case 'ProductionLine':
-        return new Set(['factory-structure', 'stages', 'manufacturing-command-center']);
+        return new Set(['factory-structure', 'stages', 'manufacturing-command-center', 'factory-readiness']);
       case 'Department':
-        return new Set(['factory-structure', 'departments', 'stages', 'manufacturing-command-center']);
+        return new Set(['factory-structure', 'departments', 'stages', 'manufacturing-command-center', 'factory-readiness']);
       case 'MainStage':
       case 'SubStage':
-        return new Set(['stages', 'models', 'manufacturing-command-center']);
+        return new Set(['stages', 'models', 'manufacturing-command-center', 'factory-readiness']);
       case 'ProductModel':
       case 'ProductModelStage':
-        return new Set(['models', 'manufacturing-command-center']);
+        return new Set(['models', 'manufacturing-command-center', 'factory-readiness']);
       case 'ProductionOrder':
       case 'StageProductionRecord':
         return new Set(['daily-production-operations', 'manufacturing-command-center', 'reports']);
       case 'AttendanceRecord':
-        return new Set(['attendance-workforce', 'daily-production-operations', 'manufacturing-command-center']);
+        return new Set(['attendance-workforce', 'daily-production-operations', 'manufacturing-command-center', 'factory-readiness']);
+      case 'AttendanceSyncState':
+        return new Set(['factory-readiness']);
       case 'Worker': {
         const screens: ManufacturingRealtimeScreen[] = ['employees'];
         const kinds = change.workerChangeKinds ?? [];
         const affectsOperationalWorkerViews = kinds.length === 0 || kinds.some(kind =>
           kind === 'created' || kind === 'deleted' || kind === 'employment-status' || kind === 'profile');
         if (affectsOperationalWorkerViews) {
-          screens.push('attendance-workforce', 'line-staffing', 'daily-production-operations', 'manufacturing-command-center');
+          screens.push('attendance-workforce', 'line-staffing', 'daily-production-operations', 'manufacturing-command-center', 'factory-readiness');
         }
         return new Set(screens);
       }
       case 'WorkerDefaultAssignment':
-        return new Set(['line-staffing', 'daily-production-operations', 'manufacturing-command-center']);
+        return new Set(['line-staffing', 'daily-production-operations', 'manufacturing-command-center', 'factory-readiness']);
       default:
         return new Set();
     }

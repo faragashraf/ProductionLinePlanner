@@ -1,0 +1,17 @@
+<section class="workers">
+  <header><div><span>داخل {{ stage.name }}</span><h2>العمال المسكنون</h2></div><small>المشكلات والغياب أولًا</small></header>
+  <div class="workers__filters" role="group" aria-label="تصفية حالات العمال">
+    <button type="button" *ngFor="let filter of filters" [class.is-active]="store.workerFilter() === filter.value"
+      [attr.aria-pressed]="store.workerFilter() === filter.value" (click)="store.setWorkerFilter(filter.value)">
+      <i class="pi" [ngClass]="filter.icon" aria-hidden="true"></i>{{ filter.label }}
+    </button>
+  </div>
+  <div class="workers__skeleton" *ngIf="store.loadingChildren() && !store.workerResult()" role="status" aria-label="جار تحميل العمال"><span></span><span></span><span></span><span></span></div>
+  <div class="workers__error" *ngIf="store.childrenError() && !store.workerResult()" role="alert"><i class="pi pi-exclamation-triangle"></i><span>{{ store.childrenError() }}</span><button type="button" (click)="store.retryChildren()">إعادة المحاولة</button></div>
+  <ng-container *ngIf="store.workerResult()">
+    <cdk-virtual-scroll-viewport class="workers__viewport" itemSize="76" minBufferPx="304" maxBufferPx="608" *ngIf="store.visibleWorkers().length; else noWorkers">
+      <app-worker-attendance-status *cdkVirtualFor="let worker of store.visibleWorkers(); trackBy: trackWorker" [worker]="worker"></app-worker-attendance-status>
+    </cdk-virtual-scroll-viewport>
+    <ng-template #noWorkers><div class="workers__empty"><i class="pi pi-users"></i><strong>{{ store.workerFilter() === 'all' ? 'لا توجد تسكينات دائمة' : 'لا يوجد عمال بهذه الحالة' }}</strong><span>{{ store.workerFilter() === 'all' ? 'لن تُعرض نسبة 100% دون عمال مسكنين.' : 'اختر «الكل» لعرض بقية العمال.' }}</span></div></ng-template>
+  </ng-container>
+</section>
