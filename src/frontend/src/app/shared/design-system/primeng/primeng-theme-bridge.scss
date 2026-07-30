@@ -403,6 +403,10 @@ p-radiobutton,
   padding: var(--plp-space-12) var(--plp-space-16);
 }
 
+.p-dialog.plp-form-sheet.plp-form-sheet--compact-header .p-dialog-header {
+  padding-block: var(--plp-space-8);
+}
+
 .p-dialog.plp-form-sheet .p-dialog-header-icons {
   align-self: flex-start;
   margin-inline-start: var(--plp-space-4);

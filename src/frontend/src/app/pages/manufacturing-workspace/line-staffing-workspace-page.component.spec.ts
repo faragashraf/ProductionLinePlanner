@@ -12,6 +12,7 @@ import { LineStaffingWorkspacePageComponent } from './line-staffing-workspace-pa
 const factoryId = '43dde27f-7ee3-4e90-9f3b-582fc90a3b0';
 const departmentId = '3adcd4d8-06da-4e9a-a2d8-5c1ac48274d9';
 const lineId = 'c0550d1f-4bf7-432c-b19b-672763d490fc';
+const otherLineId = 'fe4d9d6e-41eb-47dc-8672-52b7b5ec5b87';
 const modelId = '46593736-2fe2-450d-84a1-f304b712e07f';
 const defaultStageId = 'c0ec408d-74ab-4299-88cd-1a7543cc335b';
 const temporaryStageId = 'df19ab2b-49df-445d-a516-4d5d070d8de2';
@@ -182,6 +183,291 @@ describe('LineStaffingWorkspacePageComponent', () => {
 
     component.selectStage(temporaryStageId);
     expect(component.selectedStage?.stageName).toBe('تشطيب');
+  });
+
+  it('matches a stage participation only when both production line and sub-stage match', () => {
+    const scopedPlan = lineScopedPlan();
+    assignments.getLineStaffingPlan.and.returnValue(of(scopedPlan));
+    initialize(component);
+
+    expect(component.participationForStage(scopedPlan.workers[0])).toBeNull();
+    expect(component.participationForStage(scopedPlan.workers[1])?.productionLineId).toBe(lineId);
+  });
+
+  it('shows selected-stage workers from the selected production line only', () => {
+    const scopedPlan = lineScopedPlan();
+    assignments.getLineStaffingPlan.and.returnValue(of(scopedPlan));
+    initialize(component);
+
+    expect(component.selectedStageWorkers.map(worker => worker.workerId)).toEqual(['worker-two']);
+  });
+
+  it('uses actual participation line and stage details without falling back to the selected line', () => {
+    const filterSource = lineFilterPlan();
+    assignments.getLineStaffingPlan.and.returnValue(of(filterSource));
+    assignments.getActiveLineStaffingWorkers.and.returnValue(of(filterSource.workers));
+    initialize(component);
+    component.openDefaultAssignment();
+
+    const otherLineWorker = filterSource.workers.find(worker => worker.workerId === 'worker-two')!;
+    const unassignedWorker = filterSource.workers.find(worker => worker.workerId === 'worker-three')!;
+
+    expect(component.workerActualAssignmentDetails(otherLineWorker)).toEqual([jasmine.objectContaining({
+      productionLineId: otherLineId,
+      productionLineName: 'خط التجميع 2',
+      subStageId: temporaryStageId,
+      subStageName: 'تشطيب',
+    })]);
+    expect(component.workerActualAssignmentDetails(otherLineWorker)[0].productionLineName).not.toBe(filterSource.productionLineName);
+    expect(component.workerActualAssignmentDetails(unassignedWorker)).toEqual([]);
+  });
+
+  it('derives distinct sorted line-filter options from actual worker participations', () => {
+    const filterSource = lineFilterPlan();
+    assignments.getLineStaffingPlan.and.returnValue(of(filterSource));
+    assignments.getActiveLineStaffingWorkers.and.returnValue(of(filterSource.workers));
+    initialize(component);
+    component.openDefaultAssignment();
+
+    expect(component.assignmentLineOptions).toEqual([
+      { id: otherLineId, name: 'خط التجميع 2' },
+      { id: lineId, name: 'خط الخياطة' },
+    ]);
+    expect(component.assignmentLineFilterOptions).toEqual([
+      { label: 'كل خطوط الإنتاج', value: 'all' },
+      { label: 'غير مسكن', value: 'unassigned' },
+      { label: 'خط التجميع 2', value: otherLineId },
+      { label: 'خط الخياطة', value: lineId },
+    ]);
+  });
+
+  it('keeps the selected line label synchronized with its primitive filter value', () => {
+    const filterSource = lineFilterPlan();
+    assignments.getLineStaffingPlan.and.returnValue(of(filterSource));
+    assignments.getActiveLineStaffingWorkers.and.returnValue(of(filterSource.workers));
+    initialize(component);
+    component.openDefaultAssignment();
+
+    component.changeAssignmentLineFilter(lineId);
+    expect(component.assignmentLineFilter).toBe(lineId);
+    expect(component.selectedAssignmentLineFilterLabel).toBe('خط الخياطة');
+    component.changeAssignmentLineFilter(otherLineId);
+    expect(component.selectedAssignmentLineFilterLabel).toBe('خط التجميع 2');
+    component.changeAssignmentLineFilter('unassigned');
+    expect(component.selectedAssignmentLineFilterLabel).toBe('غير مسكن');
+    component.changeAssignmentLineFilter('all');
+    expect(component.selectedAssignmentLineFilterLabel).toBe('كل خطوط الإنتاج');
+  });
+
+  it('derives unique sorted department options from the loaded worker directory', () => {
+    const filterSource = lineFilterPlan();
+    filterSource.workers.push({
+      ...filterSource.workers[2],
+      workerId: 'worker-four',
+      employeeCode: '103',
+      departmentName: '  الخياطة  ',
+    });
+    filterSource.workers.push({
+      ...filterSource.workers[2],
+      workerId: 'worker-five',
+      employeeCode: '104',
+      departmentName: null,
+    });
+    assignments.getLineStaffingPlan.and.returnValue(of(filterSource));
+    assignments.getActiveLineStaffingWorkers.and.returnValue(of(filterSource.workers));
+    initialize(component);
+    component.openDefaultAssignment();
+
+    expect(component.departmentFilterOptions).toEqual([
+      { label: 'كل الأقسام', value: '' },
+      { label: 'التجهيز', value: 'التجهيز' },
+      { label: 'الخياطة', value: 'الخياطة' },
+    ]);
+    component.changeDepartmentFilter('الخياطة');
+    expect(component.availableWorkers.map(worker => worker.workerId)).toEqual([
+      'worker-one',
+      'worker-three',
+      'worker-four',
+    ]);
+  });
+
+  it('rebuilds department options after the asynchronous staffing-directory response replaces dialog workers', () => {
+    const directory = new Subject<LineStaffingPlan['workers']>();
+    assignments.getActiveLineStaffingWorkers.and.returnValue(directory.asObservable());
+    initialize(component);
+    component.openDefaultAssignment();
+
+    expect(component.dialogWorkers).toEqual([]);
+    expect(component.departmentFilterOptions).toEqual([{ label: 'كل الأقسام', value: '' }]);
+
+    const filterSource = lineFilterPlan();
+    directory.next(filterSource.workers.map((worker, index) => ({
+      ...worker,
+      departmentName: index === 0 ? ' الخياطة ' : index === 1 ? 'التجهيز' : null,
+    })));
+
+    expect(component.dialogWorkers.map(worker => worker.departmentName)).toEqual(['الخياطة', 'التجهيز', null]);
+    expect(component.departmentFilterOptions).toEqual([
+      { label: 'كل الأقسام', value: '' },
+      { label: 'التجهيز', value: 'التجهيز' },
+      { label: 'الخياطة', value: 'الخياطة' },
+    ]);
+    component.changeDepartmentFilter('الخياطة');
+    expect(component.selectedDepartmentFilterLabel).toBe('الخياطة');
+    expect(component.availableWorkers.map(worker => worker.workerId)).toEqual(['worker-one']);
+  });
+
+  it('filters workers by the actual assignment line and by the unassigned state', () => {
+    const filterSource = lineFilterPlan();
+    assignments.getLineStaffingPlan.and.returnValue(of(filterSource));
+    assignments.getActiveLineStaffingWorkers.and.returnValue(of(filterSource.workers));
+    initialize(component);
+    component.openDefaultAssignment();
+
+    component.changeAssignmentLineFilter(lineId);
+    expect(component.availableWorkers.map(worker => worker.workerId)).toEqual(['worker-one']);
+    component.changeAssignmentLineFilter(otherLineId);
+    expect(component.availableWorkers.map(worker => worker.workerId)).toEqual(['worker-two']);
+    component.changeAssignmentLineFilter('unassigned');
+    expect(component.availableWorkers.map(worker => worker.workerId)).toEqual(['worker-three']);
+    component.changeAssignmentLineFilter('all');
+    expect(component.availableWorkers.map(worker => worker.workerId)).toEqual(['worker-one', 'worker-two', 'worker-three']);
+  });
+
+  it('combines assignment-line, department, and worker-search filters', () => {
+    const filterSource = lineFilterPlan();
+    assignments.getLineStaffingPlan.and.returnValue(of(filterSource));
+    assignments.getActiveLineStaffingWorkers.and.returnValue(of(filterSource.workers));
+    initialize(component);
+    component.openDefaultAssignment();
+
+    component.changeAssignmentLineFilter(otherLineId);
+    component.changeDepartmentFilter('التجهيز');
+    component.workerSearch = '101 عامل ثان';
+
+    expect(component.availableWorkers.map(worker => worker.workerId)).toEqual(['worker-two']);
+    expect(component.selectedDepartmentFilterLabel).toBe('التجهيز');
+    component.changeDepartmentFilter('الخياطة');
+    expect(component.availableWorkers).toEqual([]);
+  });
+
+  it('filters each loaded department and restores all departments explicitly', () => {
+    const filterSource = lineFilterPlan();
+    assignments.getLineStaffingPlan.and.returnValue(of(filterSource));
+    assignments.getActiveLineStaffingWorkers.and.returnValue(of(filterSource.workers));
+    initialize(component);
+    component.openDefaultAssignment();
+
+    component.changeDepartmentFilter('الخياطة');
+    expect(component.selectedDepartmentFilterLabel).toBe('الخياطة');
+    expect(component.availableWorkers.map(worker => worker.workerId)).toEqual(['worker-one', 'worker-three']);
+    component.changeDepartmentFilter('التجهيز');
+    expect(component.selectedDepartmentFilterLabel).toBe('التجهيز');
+    expect(component.availableWorkers.map(worker => worker.workerId)).toEqual(['worker-two']);
+    component.changeDepartmentFilter('');
+    expect(component.selectedDepartmentFilterLabel).toBe('كل الأقسام');
+    expect(component.availableWorkers.map(worker => worker.workerId)).toEqual(['worker-one', 'worker-two', 'worker-three']);
+  });
+
+  it('resets the assignment-line filter whenever the dialog closes or opens for a new context', () => {
+    const filterSource = lineFilterPlan();
+    assignments.getLineStaffingPlan.and.returnValue(of(filterSource));
+    assignments.getActiveLineStaffingWorkers.and.returnValue(of(filterSource.workers));
+    initialize(component);
+    component.openDefaultAssignment();
+    component.assignmentLineFilter = otherLineId;
+    component.departmentFilter = 'التجهيز';
+
+    component.closeAssignmentDialog();
+    expect(component.assignmentLineFilter).toBe('all');
+    expect(component.departmentFilter).toBe('');
+    expect(component.selectedDepartmentFilterLabel).toBe('كل الأقسام');
+
+    component.openDefaultAssignment();
+    expect(component.assignmentLineFilter).toBe('all');
+    expect(component.selectedAssignmentLineFilterLabel).toBe('كل خطوط الإنتاج');
+    expect(component.selectedDepartmentFilterLabel).toBe('كل الأقسام');
+  });
+
+  it('closes worker expansions on line-filter changes without changing checkbox selection', () => {
+    const filterSource = lineFilterPlan();
+    assignments.getLineStaffingPlan.and.returnValue(of(filterSource));
+    assignments.getActiveLineStaffingWorkers.and.returnValue(of(filterSource.workers));
+    initialize(component);
+    component.openDefaultAssignment();
+    const currentWorker = filterSource.workers[0];
+
+    expect(component.isDefaultWorkerSelected(currentWorker)).toBeTrue();
+    component.toggleWorkerAssignmentExpansion(currentWorker, true);
+    expect(component.isWorkerAssignmentExpanded(currentWorker)).toBeTrue();
+
+    component.changeAssignmentLineFilter(otherLineId);
+
+    expect(component.isWorkerAssignmentExpanded(currentWorker)).toBeFalse();
+    expect(component.isDefaultWorkerSelected(currentWorker)).toBeTrue();
+    expect(component.availableWorkers.map(worker => worker.workerId)).toEqual(['worker-two']);
+  });
+
+  it('reloads actual assignment lines for another-line realtime changes while preserving the open filter', () => {
+    const filterSource = lineFilterPlan();
+    assignments.getLineStaffingPlan.and.returnValue(of(filterSource));
+    assignments.getActiveLineStaffingWorkers.and.returnValue(of(filterSource.workers));
+    initialize(component);
+    component.openDefaultAssignment();
+    component.assignmentLineFilter = otherLineId;
+    const previousRequests = assignments.getActiveLineStaffingWorkers.calls.count();
+    const otherLineChange = permanentAssignmentChange({ productionLineId: otherLineId });
+
+    expect(realtimeWatch.matches?.(otherLineChange)).toBeTrue();
+    realtimeWatch.refresh(otherLineChange);
+
+    expect(assignments.getActiveLineStaffingWorkers).toHaveBeenCalledTimes(previousRequests + 1);
+    expect(component.assignmentLineFilter).toBe(otherLineId);
+  });
+
+  it('does not preselect a worker assigned to the same sub-stage on another production line', () => {
+    const scopedPlan = lineScopedPlan();
+    assignments.getLineStaffingPlan.and.returnValue(of(scopedPlan));
+    assignments.getActiveLineStaffingWorkers.and.returnValue(of(scopedPlan.workers));
+    initialize(component);
+
+    component.openDefaultAssignment();
+
+    expect(component.isDefaultWorkerSelected(scopedPlan.workers[0])).toBeFalse();
+    expect(component.isDefaultWorkerSelected(scopedPlan.workers[1])).toBeTrue();
+  });
+
+  it('excludes another-line participation from the selected-line bulk save payload', () => {
+    const scopedPlan = lineScopedPlan();
+    assignments.getLineStaffingPlan.and.returnValue(of(scopedPlan));
+    assignments.getActiveLineStaffingWorkers.and.returnValue(of(scopedPlan.workers));
+    initialize(component);
+
+    component.openDefaultAssignment();
+    component.saveAssignment();
+
+    expect(assignments.updateStageDefaultAssignments).toHaveBeenCalledWith(lineId, defaultStageId, ['worker-two']);
+  });
+
+  it('cancels only the participation matching the selected production line and sub-stage', () => {
+    const scopedPlan = lineScopedPlan();
+    assignments.getLineStaffingPlan.and.returnValue(of(scopedPlan));
+    assignments.getActiveLineStaffingWorkers.and.returnValue(of(scopedPlan.workers));
+    initialize(component);
+
+    component.openCancellation(scopedPlan.workers[0]);
+    expect(component.assignmentDialogVisible).toBeFalse();
+
+    component.openCancellation(scopedPlan.workers[1]);
+    component.assignmentForm.controls.reason.setValue('إنهاء تسكين الخط الثاني');
+    component.saveAssignment();
+
+    expect(assignments.removeDefaultAssignment).toHaveBeenCalledWith(
+      'worker-two',
+      lineId,
+      defaultStageId,
+      'إنهاء تسكين الخط الثاني',
+    );
   });
 
   it('saves checked permanent workers together, closes the dialog, and refreshes only the selected stage', () => {
@@ -829,7 +1115,7 @@ function stageRefresh() {
     effectiveAssignmentType: 'Default' as const,
     effectiveSubStageId: defaultStageId,
     effectiveSubStageName: 'تجميع',
-    participations: [{ assignmentId: 'default-b', assignmentType: 'Default' as const, subStageId: defaultStageId, subStageName: 'تجميع', fromSubStageId: null, fromSubStageName: null, startsAtUtc: null, endsAtUtc: null, replacementForWorkerId: null, temporaryParticipationMode: null }]
+    participations: [{ assignmentId: 'default-b', assignmentType: 'Default' as const, productionLineId: lineId, productionLineName: 'خط الخياطة', subStageId: defaultStageId, subStageName: 'تجميع', fromSubStageId: null, fromSubStageName: null, startsAtUtc: null, endsAtUtc: null, replacementForWorkerId: null, temporaryParticipationMode: null }]
   };
   return {
     stage: { ...source.stages[0], defaultAssignedWorkersCount: 2, effectiveAssignedWorkersCount: 2, workerStatusText: 'يوجد عاملان', effectiveWorkerIds: ['worker-one', 'worker-two'] },
@@ -950,8 +1236,103 @@ function plan(): LineStaffingPlan {
       { productModelStageId: 'stage-two', subStageId: temporaryStageId, mainStageName: 'تشطيب', stageCode: 'S2', stageName: 'تشطيب', stageOrder: 2, piecePrice: .38, compensationMode: 'SharedPercentage', compensationConfigurationStatus: 'FinancialReviewPending', isFinancialReviewPending: true, defaultAssignedWorkersCount: 0, effectiveAssignedWorkersCount: 0, temporaryAssignedWorkersCount: 0, requiredWorkers: null, hasAuthoritativeRequiredWorkerCount: false, staffingStatus: 'NeedsStaffing', workerStatusText: 'لا يوجد عمال مسكنون', effectiveWorkerIds: [] }
     ],
     workers: [
-      { workerId: 'worker-one', employeeCode: '100', fullName: 'عامل أول', departmentName: 'التجميع', isOnActiveService: true, hasPhoto: false, photoReference: null, photoVersion: null, defaultSubStageId: defaultStageId, defaultSubStageName: 'تجميع', effectiveAssignmentId: 'default-a', effectiveAssignmentType: 'Default', effectiveSubStageId: defaultStageId, effectiveSubStageName: 'تجميع', fromSubStageId: null, fromSubStageName: null, temporaryStartsAtUtc: null, temporaryEndsAtUtc: null, replacementForWorkerId: null, participations: [{ assignmentId: 'default-a', assignmentType: 'Default', subStageId: defaultStageId, subStageName: 'تجميع', fromSubStageId: null, fromSubStageName: null, startsAtUtc: null, endsAtUtc: null, replacementForWorkerId: null, temporaryParticipationMode: null }] },
+      { workerId: 'worker-one', employeeCode: '100', fullName: 'عامل أول', departmentName: 'التجميع', isOnActiveService: true, hasPhoto: false, photoReference: null, photoVersion: null, defaultSubStageId: defaultStageId, defaultSubStageName: 'تجميع', effectiveAssignmentId: 'default-a', effectiveAssignmentType: 'Default', effectiveSubStageId: defaultStageId, effectiveSubStageName: 'تجميع', fromSubStageId: null, fromSubStageName: null, temporaryStartsAtUtc: null, temporaryEndsAtUtc: null, replacementForWorkerId: null, participations: [{ assignmentId: 'default-a', assignmentType: 'Default', productionLineId: lineId, productionLineName: 'خط الخياطة', subStageId: defaultStageId, subStageName: 'تجميع', fromSubStageId: null, fromSubStageName: null, startsAtUtc: null, endsAtUtc: null, replacementForWorkerId: null, temporaryParticipationMode: null }] },
       { workerId: 'worker-two', employeeCode: '101', fullName: 'عامل ثان', departmentName: 'التشطيب', isOnActiveService: true, hasPhoto: true, photoReference: '/api/workers/worker-two/photo?v=photo-v1', photoVersion: 'photo-v1', defaultSubStageId: null, defaultSubStageName: null, effectiveAssignmentId: null, effectiveAssignmentType: null, effectiveSubStageId: null, effectiveSubStageName: null, fromSubStageId: null, fromSubStageName: null, temporaryStartsAtUtc: null, temporaryEndsAtUtc: null, replacementForWorkerId: null, participations: [] }
     ]
+  };
+}
+
+function lineScopedPlan(): LineStaffingPlan {
+  const source = plan();
+  const otherLineWorker = {
+    ...source.workers[0],
+    participations: source.workers[0].participations.map(participation => ({
+      ...participation,
+      productionLineId: otherLineId,
+      productionLineName: 'خط التجميع 2',
+    })),
+  };
+  const selectedLineWorker = {
+    ...source.workers[1],
+    defaultSubStageId: defaultStageId,
+    defaultSubStageName: 'تجميع',
+    effectiveAssignmentId: 'default-line-two',
+    effectiveAssignmentType: 'Default' as const,
+    effectiveSubStageId: defaultStageId,
+    effectiveSubStageName: 'تجميع',
+    participations: [{
+      assignmentId: 'default-line-two',
+      assignmentType: 'Default' as const,
+      productionLineId: lineId,
+      productionLineName: 'خط الخياطة',
+      subStageId: defaultStageId,
+      subStageName: 'تجميع',
+      fromSubStageId: null,
+      fromSubStageName: null,
+      startsAtUtc: null,
+      endsAtUtc: null,
+      replacementForWorkerId: null,
+      temporaryParticipationMode: null,
+    }],
+  };
+  return {
+    ...source,
+    stages: [
+      {
+        ...source.stages[0],
+        defaultAssignedWorkersCount: 1,
+        effectiveAssignedWorkersCount: 1,
+        effectiveWorkerIds: [selectedLineWorker.workerId],
+      },
+      source.stages[1],
+    ],
+    workers: [otherLineWorker, selectedLineWorker],
+  };
+}
+
+function lineFilterPlan(): LineStaffingPlan {
+  const source = plan();
+  const selectedLineWorker = {
+    ...source.workers[0],
+    departmentName: 'الخياطة',
+  };
+  const otherLineWorker = {
+    ...source.workers[1],
+    workerId: 'worker-two',
+    employeeCode: '101',
+    fullName: 'عامل ثان',
+    departmentName: 'التجهيز',
+    defaultSubStageId: temporaryStageId,
+    defaultSubStageName: 'تشطيب',
+    effectiveAssignmentId: 'default-other-line',
+    effectiveAssignmentType: 'Default' as const,
+    effectiveSubStageId: temporaryStageId,
+    effectiveSubStageName: 'تشطيب',
+    participations: [{
+      assignmentId: 'default-other-line',
+      assignmentType: 'Default' as const,
+      productionLineId: otherLineId,
+      productionLineName: 'خط التجميع 2',
+      subStageId: temporaryStageId,
+      subStageName: 'تشطيب',
+      fromSubStageId: null,
+      fromSubStageName: null,
+      startsAtUtc: null,
+      endsAtUtc: null,
+      replacementForWorkerId: null,
+      temporaryParticipationMode: null,
+    }],
+  };
+  const unassignedWorker = {
+    ...source.workers[1],
+    workerId: 'worker-three',
+    employeeCode: '102',
+    fullName: 'عامل ثالث',
+    departmentName: 'الخياطة',
+    participations: [],
+  };
+  return {
+    ...source,
+    workers: [selectedLineWorker, otherLineWorker, unassignedWorker],
   };
 }

@@ -19,6 +19,7 @@ import {
   LineStaffingWorker,
 } from '../../core/services/assignments-api.service';
 import { PlpSectionNavigationItem } from '../../shared/product/plp-section-navigation.component';
+import { WorkerAssignmentDisplayItem } from '../../shared/business/worker-assignment-details/worker-assignment-details.component';
 import {
   FactoryItem,
   DepartmentItem,
@@ -38,6 +39,8 @@ type StageFilter = 'all' | 'without-workers' | 'default' | 'review';
 type AssignmentDialogMode = 'default' | 'remove-default';
 type WorkspaceScrollPosition = { stageList: number; selectedPanel: number };
 type StaffingSection = 'choices' | 'summary' | 'stages' | 'workers';
+type AssignmentLineOption = { id: string; name: string };
+type DialogFilterOption = { label: string; value: string };
 
 @Component({
   selector: 'app-line-staffing-workspace-page',
@@ -88,7 +91,16 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
   stageSearch = '';
   workerSearch = '';
   departmentFilter = '';
+  assignmentLineFilter = 'all';
   dialogWorkers: LineStaffingWorker[] = [];
+  departmentFilterOptions: DialogFilterOption[] = [
+    { label: 'كل الأقسام', value: '' },
+  ];
+  assignmentLineFilterOptions: DialogFilterOption[] = [
+    { label: 'كل خطوط الإنتاج', value: 'all' },
+    { label: 'غير مسكن', value: 'unassigned' },
+  ];
+  expandedWorkerIds = new Set<string>();
 
   factoriesLoading = false;
   departmentsLoading = false;
@@ -280,6 +292,7 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
           !this.departmentFilter ||
           worker.departmentName === this.departmentFilter,
       )
+      .filter(worker => this.matchesAssignmentLineFilter(worker))
       .filter(
         (worker) =>
           !search ||
@@ -292,14 +305,27 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
       );
   }
 
+  get assignmentLineOptions(): AssignmentLineOption[] {
+    return this.assignmentLineFilterOptions.slice(2).map(option => ({
+      id: option.value,
+      name: option.label,
+    }));
+  }
+
   get workerDepartments(): string[] {
-    return [
-      ...new Set(
-        this.dialogWorkers
-          .map((worker) => worker.departmentName)
-          .filter((name): name is string => Boolean(name)),
-      ),
-    ].sort();
+    return this.departmentFilterOptions.slice(1).map(option => option.label);
+  }
+
+  get selectedAssignmentLineFilterLabel(): string {
+    return this.assignmentLineFilterOptions.find(
+      option => option.value === this.assignmentLineFilter,
+    )?.label ?? 'كل خطوط الإنتاج';
+  }
+
+  get selectedDepartmentFilterLabel(): string {
+    return this.departmentFilterOptions.find(
+      option => option.value === this.departmentFilter,
+    )?.label ?? 'كل الأقسام';
   }
 
   get selectedDialogWorker(): LineStaffingWorker | null {
@@ -626,7 +652,7 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
     this.selectedDefaultWorkerIds = new Set<string>();
     this.dialogWorkers = [];
     this.workerSearch = '';
-    this.departmentFilter = '';
+    this.resetDialogFilters();
     this.workerDirectoryError = '';
     this.workerDirectoryLoading = false;
   }
@@ -647,12 +673,6 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
     if (!worker.isOnActiveService)
       return 'العامل خارج الخدمة ولا يمكن إضافته إلى خطة التسكين.';
     return null;
-  }
-
-  defaultWorkerAssignmentStateLabel(worker: LineStaffingWorker): string {
-    if (this.selectedDefaultWorkerIds.has(worker.workerId))
-      return 'مشارك دائم في هذه المرحلة';
-    return 'متاح للإضافة إلى هذه المرحلة';
   }
 
   toggleDefaultWorker(worker: LineStaffingWorker, selected: boolean): void {
@@ -683,6 +703,33 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
     event.stopPropagation();
     const input = event.target as HTMLInputElement;
     this.toggleDefaultWorker(worker, input.checked);
+  }
+
+  changeDepartmentFilter(value: string | null | undefined): void {
+    this.departmentFilter = this.departmentFilterOptions.some(
+      option => option.value === value,
+    ) ? (value ?? '') : '';
+  }
+
+  changeAssignmentLineFilter(value: string | null | undefined): void {
+    this.assignmentLineFilter = this.assignmentLineFilterOptions.some(
+      option => option.value === value,
+    ) ? (value ?? 'all') : 'all';
+    this.expandedWorkerIds = new Set<string>();
+  }
+
+  isWorkerAssignmentExpanded(worker: LineStaffingWorker): boolean {
+    return this.expandedWorkerIds.has(worker.workerId);
+  }
+
+  toggleWorkerAssignmentExpansion(
+    worker: LineStaffingWorker,
+    expanded: boolean,
+  ): void {
+    const next = new Set(this.expandedWorkerIds);
+    if (expanded) next.add(worker.workerId);
+    else next.delete(worker.workerId);
+    this.expandedWorkerIds = next;
   }
 
   onAssignmentFormSubmitted(): void {
@@ -846,6 +893,9 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
             stages: refreshedStage.stages,
             workers: refreshedStage.workers,
           };
+          if (this.assignmentDialogVisible && this.isBulkDefaultAssignmentDialog) {
+            this.loadActiveStaffingWorkers();
+          }
           this.clearRemoteUpdateNotice();
         },
         error: (error) => {
@@ -868,13 +918,23 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
       matches: change => change.entityType === 'Worker'
         ? this.hasCompleteContext
         : change.entityType === 'WorkerDefaultAssignment' &&
-          !!this.selectedFactoryId &&
-          !!this.selectedProductionLineId &&
-          change.factoryId === this.selectedFactoryId &&
-          change.productionLineId === this.selectedProductionLineId,
-      refresh: change => change?.entityType === 'Worker'
-        ? this.handleWorkerRealtimeChange()
-        : this.handleLineStaffingRealtimeChange(change?.subStageId ?? ''),
+          (this.assignmentDialogVisible || (
+            !!this.selectedFactoryId &&
+            !!this.selectedProductionLineId &&
+            change.factoryId === this.selectedFactoryId &&
+            change.productionLineId === this.selectedProductionLineId
+          )),
+      refresh: change => {
+        if (change?.entityType === 'Worker') {
+          this.handleWorkerRealtimeChange();
+          return;
+        }
+        if (this.assignmentDialogVisible && change?.productionLineId !== this.selectedProductionLineId) {
+          this.loadActiveStaffingWorkers();
+          return;
+        }
+        this.handleLineStaffingRealtimeChange(change?.subStageId ?? '');
+      },
     });
   }
 
@@ -937,8 +997,9 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
 
   workerAssignmentLabel(worker: LineStaffingWorker): string {
     if (this.participationForStage(worker)) return 'تسكين دائم فعّال';
-    return worker.participations.length
-      ? `مشارك في ${worker.participations.length} مراحل`
+    const lineParticipations = this.participationsForSelectedLine(worker);
+    return lineParticipations.length
+      ? `مشارك في ${lineParticipations.length} مراحل`
       : 'دون تسكين فعّال';
   }
 
@@ -1154,7 +1215,7 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
     this.assignmentDialogError = '';
     this.assignmentValidationSummary = '';
     this.workerSearch = '';
-    this.departmentFilter = '';
+    this.resetDialogFilters();
     this.dialogWorkers = [];
     this.workerDirectoryError = '';
     this.assignmentForm.reset({
@@ -1212,7 +1273,11 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
       .subscribe({
         next: (workers) => {
           if (requestVersion !== this.workerDirectoryRequestVersion) return;
-          this.dialogWorkers = workers;
+          this.dialogWorkers = workers.map(worker => ({
+            ...worker,
+            departmentName: worker.departmentName?.trim() || null,
+          }));
+          this.refreshDialogFilterOptions();
         },
         error: (error) => {
           if (requestVersion !== this.workerDirectoryRequestVersion) return;
@@ -1731,20 +1796,111 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
   ): LineStaffingParticipation | null {
     return (
       worker.participations.find(
-        (participation) => participation.subStageId === subStageId,
+        (participation) =>
+          participation.productionLineId === this.selectedProductionLineId &&
+          participation.subStageId === subStageId,
       ) ?? null
     );
   }
 
   otherParticipations(worker: LineStaffingWorker): LineStaffingParticipation[] {
-    return worker.participations.filter(
+    return this.participationsForSelectedLine(worker).filter(
       (participation) => participation.subStageId !== this.selectedSubStageId,
     );
   }
 
   workerParticipationStageNames(worker: LineStaffingWorker): string[] {
-    return worker.participations.map(
+    return this.participationsForSelectedLine(worker).map(
       (participation) => participation.subStageName ?? 'مرحلة أخرى',
+    );
+  }
+
+  workerActualAssignmentDetails(worker: LineStaffingWorker): WorkerAssignmentDisplayItem[] {
+    return this.permanentParticipations(worker).map(participation => ({
+      productionLineId: participation.productionLineId,
+      productionLineName: participation.productionLineName,
+      subStageId: participation.subStageId,
+      subStageName: participation.subStageName ?? '',
+    }));
+  }
+
+  private matchesAssignmentLineFilter(worker: LineStaffingWorker): boolean {
+    if (this.assignmentLineFilter === 'all') return true;
+    const participations = this.permanentParticipations(worker);
+    if (this.assignmentLineFilter === 'unassigned') return participations.length === 0;
+    return participations.some(
+      participation => participation.productionLineId === this.assignmentLineFilter,
+    );
+  }
+
+  private permanentParticipations(worker: LineStaffingWorker): LineStaffingParticipation[] {
+    return worker.participations.filter(
+      participation => participation.assignmentType === 'Default',
+    );
+  }
+
+  private refreshDialogFilterOptions(): void {
+    const lineNames = new Map<string, string>();
+    this.dialogWorkers.forEach(worker => {
+      this.permanentParticipations(worker).forEach(participation => {
+        const id = participation.productionLineId.trim();
+        const name = participation.productionLineName.trim();
+        if (id && name && !lineNames.has(id)) lineNames.set(id, name);
+      });
+    });
+    this.assignmentLineFilterOptions = [
+      { label: 'كل خطوط الإنتاج', value: 'all' },
+      { label: 'غير مسكن', value: 'unassigned' },
+      ...[...lineNames.entries()]
+        .map(([value, label]) => ({ label, value }))
+        .sort((left, right) => left.label.localeCompare(right.label, 'ar')),
+    ];
+
+    const departments = new Set(
+      this.dialogWorkers
+        .map(worker => worker.departmentName?.trim() ?? '')
+        .filter(Boolean),
+    );
+    this.departmentFilterOptions = [
+      { label: 'كل الأقسام', value: '' },
+      ...[...departments]
+        .sort((left, right) => left.localeCompare(right, 'ar'))
+        .map(name => ({ label: name, value: name })),
+    ];
+
+    if (!this.assignmentLineFilterOptions.some(
+      option => option.value === this.assignmentLineFilter,
+    )) {
+      this.assignmentLineFilter = 'all';
+      this.expandedWorkerIds = new Set<string>();
+    }
+    if (!this.departmentFilterOptions.some(
+      option => option.value === this.departmentFilter,
+    )) {
+      this.departmentFilter = '';
+    }
+    const workerIds = new Set(this.dialogWorkers.map(worker => worker.workerId));
+    this.expandedWorkerIds = new Set(
+      [...this.expandedWorkerIds].filter(workerId => workerIds.has(workerId)),
+    );
+  }
+
+  private resetDialogFilters(): void {
+    this.departmentFilter = '';
+    this.assignmentLineFilter = 'all';
+    this.departmentFilterOptions = [{ label: 'كل الأقسام', value: '' }];
+    this.assignmentLineFilterOptions = [
+      { label: 'كل خطوط الإنتاج', value: 'all' },
+      { label: 'غير مسكن', value: 'unassigned' },
+    ];
+    this.expandedWorkerIds = new Set<string>();
+  }
+
+  private participationsForSelectedLine(
+    worker: LineStaffingWorker,
+  ): LineStaffingParticipation[] {
+    return worker.participations.filter(
+      participation => participation.productionLineId === this.selectedProductionLineId,
     );
   }
 }

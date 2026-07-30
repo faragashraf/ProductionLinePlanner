@@ -53,6 +53,80 @@ public sealed class LineStaffingEngineTests
     }
 
     [Fact]
+    public async Task Staffing_worker_directory_returns_the_workers_organizational_department_with_legacy_local_fallback()
+    {
+        await using var fixture = await StaffingFixture.CreateAsync();
+        var sewing = new Department(Guid.NewGuid(), fixture.Factory.Id, "SEW", "الخياطة", "Sewing", 2);
+        var preparation = new Department(Guid.NewGuid(), fixture.Factory.Id, "PREP", "التجهيز", "Preparation", 3);
+        var legacyLocalWorker = new Worker(Guid.NewGuid(), "105", "Legacy local department worker");
+        legacyLocalWorker.SetLocalDepartmentName("التجهيز المحلي");
+        fixture.Db.AddRange(sewing, preparation, legacyLocalWorker);
+        fixture.TemporarilyMovedWorker.SetLocalDepartmentName("قسم قديم لا يجب عرضه");
+        fixture.TemporarilyMovedWorker.AssignOrganizationalDepartment(sewing.Id);
+        fixture.DefaultWorker.AssignOrganizationalDepartment(preparation.Id);
+        await fixture.Db.SaveChangesAsync();
+
+        var result = await fixture.Engine.GetActiveStaffingWorkersAsync(fixture.ReferenceDate);
+
+        Assert.True(result.IsSuccess);
+        var workers = result.Value!;
+        Assert.Equal(
+            "الخياطة",
+            workers.Single(worker => worker.WorkerId == fixture.TemporarilyMovedWorker.Id).DepartmentName);
+        Assert.Equal(
+            "التجهيز",
+            workers.Single(worker => worker.WorkerId == fixture.DefaultWorker.Id).DepartmentName);
+        Assert.Equal(
+            "التجهيز المحلي",
+            workers.Single(worker => worker.WorkerId == legacyLocalWorker.Id).DepartmentName);
+    }
+
+    [Fact]
+    public async Task Staffing_worker_directory_returns_actual_line_and_stage_for_every_permanent_participation()
+    {
+        await using var fixture = await StaffingFixture.CreateAsync();
+        var otherLine = new ProductionLine(
+            Guid.NewGuid(),
+            fixture.Factory.Id,
+            "Line 2",
+            2,
+            departmentId: fixture.Line.DepartmentId);
+        var unassignedWorker = new Worker(Guid.NewGuid(), "104", "Unassigned worker");
+        fixture.Db.AddRange(
+            otherLine,
+            unassignedWorker,
+            new WorkerDefaultAssignment(
+                Guid.NewGuid(),
+                fixture.TemporarilyMovedWorker.Id,
+                fixture.TemporarySubStage.Id,
+                Guid.NewGuid(),
+                new DateTime(2026, 7, 11, 8, 0, 0, DateTimeKind.Utc),
+                productionLineId: otherLine.Id));
+        await fixture.Db.SaveChangesAsync();
+
+        var result = await fixture.Engine.GetActiveStaffingWorkersAsync(fixture.ReferenceDate);
+
+        Assert.True(result.IsSuccess);
+        var workers = result.Value!;
+        var assignedWorker = workers.Single(worker => worker.WorkerId == fixture.TemporarilyMovedWorker.Id);
+        Assert.Equal(2, assignedWorker.Participations.Count);
+        Assert.Contains(
+            assignedWorker.Participations,
+            participation => participation.ProductionLineId == fixture.Line.Id
+                             && participation.ProductionLineName == fixture.Line.Name
+                             && participation.SubStageId == fixture.DefaultSubStage.Id
+                             && participation.SubStageName == fixture.DefaultSubStage.Name);
+        Assert.Contains(
+            assignedWorker.Participations,
+            participation => participation.ProductionLineId == otherLine.Id
+                             && participation.ProductionLineName == otherLine.Name
+                             && participation.SubStageId == fixture.TemporarySubStage.Id
+                             && participation.SubStageName == fixture.TemporarySubStage.Name);
+        Assert.All(assignedWorker.Participations, participation => Assert.Equal("Default", participation.AssignmentType));
+        Assert.Empty(workers.Single(worker => worker.WorkerId == unassignedWorker.Id).Participations);
+    }
+
+    [Fact]
     public async Task Historical_temporary_assignment_is_not_included_in_the_permanent_staffing_read_model()
     {
         await using var fixture = await StaffingFixture.CreateAsync();
@@ -89,6 +163,81 @@ public sealed class LineStaffingEngineTests
         Assert.Contains(worker.Participations, participation => participation.SubStageId == fixture.TemporarySubStage.Id);
         Assert.Contains(result.Value.Stages.Single(stage => stage.SubStageId == fixture.DefaultSubStage.Id).EffectiveWorkerIds, id => id == fixture.TemporarilyMovedWorker.Id);
         Assert.Contains(result.Value.Stages.Single(stage => stage.SubStageId == fixture.TemporarySubStage.Id).EffectiveWorkerIds, id => id == fixture.TemporarilyMovedWorker.Id);
+    }
+
+    [Fact]
+    public async Task Staffing_plan_and_stage_refresh_isolate_the_same_sub_stage_by_production_line()
+    {
+        await using var fixture = await StaffingFixture.CreateAsync();
+        var lineOneWorker = fixture.TemporarilyMovedWorker;
+        var lineTwo = new ProductionLine(
+            Guid.NewGuid(),
+            fixture.Factory.Id,
+            "Line 2",
+            2,
+            departmentId: fixture.Line.DepartmentId);
+        var lineTwoWorker = new Worker(Guid.NewGuid(), "104", "Line two worker");
+        var actorId = Guid.NewGuid();
+
+        var extraLineOneAssignment = await fixture.Db.WorkerDefaultAssignments
+            .SingleAsync(assignment => assignment.WorkerId == fixture.DefaultWorker.Id);
+        extraLineOneAssignment.Deactivate(DateTime.UtcNow);
+        fixture.Db.AddRange(lineTwo, lineTwoWorker);
+        fixture.Db.ProductModelStages.Add(new ProductModelStage(
+            Guid.NewGuid(),
+            fixture.Model.Id,
+            lineTwo.Id,
+            fixture.DefaultSubStage.Id,
+            1,
+            .38m,
+            10m,
+            CompensationMode.SharedPercentage));
+        fixture.Db.WorkerDefaultAssignments.Add(new WorkerDefaultAssignment(
+            Guid.NewGuid(),
+            lineTwoWorker.Id,
+            fixture.DefaultSubStage.Id,
+            actorId,
+            new DateTime(2026, 7, 10, 9, 0, 0, DateTimeKind.Utc),
+            productionLineId: lineTwo.Id));
+        await fixture.Db.SaveChangesAsync();
+
+        var lineOnePlanResult = await fixture.Engine.GetLineStaffingPlanAsync(
+            fixture.Factory.Id, fixture.Line.Id, fixture.Model.Id, fixture.ReferenceDate);
+        var lineTwoPlanResult = await fixture.Engine.GetLineStaffingPlanAsync(
+            fixture.Factory.Id, lineTwo.Id, fixture.Model.Id, fixture.ReferenceDate);
+
+        Assert.True(lineOnePlanResult.IsSuccess);
+        Assert.True(lineTwoPlanResult.IsSuccess);
+        var lineOneStage = Assert.Single(lineOnePlanResult.Value!.Stages, stage => stage.SubStageId == fixture.DefaultSubStage.Id);
+        var lineTwoStage = Assert.Single(lineTwoPlanResult.Value!.Stages, stage => stage.SubStageId == fixture.DefaultSubStage.Id);
+        Assert.Equal(1, lineOneStage.DefaultAssignedWorkersCount);
+        Assert.Equal(1, lineOneStage.EffectiveAssignedWorkersCount);
+        Assert.Equal([lineOneWorker.Id], lineOneStage.EffectiveWorkerIds);
+        Assert.Equal(1, lineTwoStage.DefaultAssignedWorkersCount);
+        Assert.Equal(1, lineTwoStage.EffectiveAssignedWorkersCount);
+        Assert.Equal([lineTwoWorker.Id], lineTwoStage.EffectiveWorkerIds);
+        Assert.DoesNotContain(lineTwoWorker.Id, lineOneStage.EffectiveWorkerIds);
+        Assert.DoesNotContain(lineOneWorker.Id, lineTwoStage.EffectiveWorkerIds);
+        Assert.Contains(
+            lineOnePlanResult.Value.Workers.Single(worker => worker.WorkerId == lineOneWorker.Id).Participations,
+            participation => participation.ProductionLineId == fixture.Line.Id && participation.SubStageId == fixture.DefaultSubStage.Id);
+        Assert.Contains(
+            lineTwoPlanResult.Value.Workers.Single(worker => worker.WorkerId == lineTwoWorker.Id).Participations,
+            participation => participation.ProductionLineId == lineTwo.Id && participation.SubStageId == fixture.DefaultSubStage.Id);
+
+        var lineOneRefresh = await fixture.Engine.GetLineStaffingStageRefreshAsync(
+            fixture.Factory.Id, fixture.Line.Id, fixture.Model.Id, fixture.DefaultSubStage.Id, fixture.ReferenceDate);
+        var lineTwoRefresh = await fixture.Engine.GetLineStaffingStageRefreshAsync(
+            fixture.Factory.Id, lineTwo.Id, fixture.Model.Id, fixture.DefaultSubStage.Id, fixture.ReferenceDate);
+
+        Assert.True(lineOneRefresh.IsSuccess);
+        Assert.True(lineTwoRefresh.IsSuccess);
+        Assert.Equal([lineOneWorker.Id], lineOneRefresh.Value!.Stage.EffectiveWorkerIds);
+        Assert.Equal([lineTwoWorker.Id], lineTwoRefresh.Value!.Stage.EffectiveWorkerIds);
+        Assert.Equal("Staffed", lineOneRefresh.Value.Stage.StaffingStatus);
+        Assert.Equal("Staffed", lineTwoRefresh.Value.Stage.StaffingStatus);
+        Assert.Equal("يوجد عامل واحد", lineOneRefresh.Value.Stage.WorkerStatusText);
+        Assert.Equal("يوجد عامل واحد", lineTwoRefresh.Value.Stage.WorkerStatusText);
     }
 
     [Fact]

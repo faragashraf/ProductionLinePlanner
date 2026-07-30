@@ -17,7 +17,7 @@ import { normalizePrimeIconClass } from '../design-system/icons/production-icon-
     <span class="plp-responsive-entity-row__identity">
       <span class="plp-responsive-entity-row__title-line">
         <i *ngIf="iconClass" [class]="iconClass" aria-hidden="true"></i>
-        <strong class="plp-responsive-entity-row__title" [attr.dir]="titleDirection">{{ title }}</strong>
+        <strong class="plp-responsive-entity-row__title" [attr.dir]="titleDirection" [attr.title]="title">{{ title }}</strong>
         <p-tag *ngIf="code" [value]="code" [rounded]="true" styleClass="plp-responsive-entity-row__code"></p-tag>
       </span>
       <ng-content select="[plp-entity-description]"></ng-content>
@@ -39,4 +39,3 @@ export class PlpResponsiveEntityRowComponent {
     return this.icon ? normalizePrimeIconClass(this.icon) : undefined;
   }
 }
-

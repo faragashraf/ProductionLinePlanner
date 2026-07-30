@@ -1,20 +1,95 @@
-<label
-  *ngIf="selectionMode === 'multiple'; else singleSelectionCard"
-  class="plp-worker-assignment-card plp-worker-assignment-card--multiple"
-  [class.is-selected]="selected"
-  [class.is-disabled]="disabled"
-  [attr.aria-disabled]="disabled"
->
-  <input
-    class="plp-worker-assignment-card__checkbox"
-    type="checkbox"
-    [checked]="selected"
-    [disabled]="disabled"
-    [attr.aria-label]="'تحديد ' + fullName"
-    (change)="onCheckboxChange($event)"
-  >
-  <ng-container *ngTemplateOutlet="cardContent"></ng-container>
-</label>
+<ng-container *ngIf="selectionMode === 'multiple'; else singleSelectionCard">
+  <ng-container *ngIf="assignmentDetails !== null; else legacyMultipleSelectionCard">
+    <div
+      class="plp-worker-assignment-card__shell"
+      [class.is-selected]="selected"
+      [class.is-disabled]="disabled"
+      [class.is-expanded]="expanded"
+    >
+      <label
+        class="plp-worker-assignment-card plp-worker-assignment-card--multiple plp-worker-assignment-card--actual"
+        [attr.aria-disabled]="disabled"
+      >
+        <input
+          class="plp-worker-assignment-card__checkbox"
+          type="checkbox"
+          [checked]="selected"
+          [disabled]="disabled"
+          [attr.aria-label]="'تحديد ' + fullName"
+          (change)="onCheckboxChange($event)"
+        >
+        <ng-container *ngTemplateOutlet="cardContent"></ng-container>
+      </label>
+      <button
+        *ngIf="hasAssignmentDetails"
+        type="button"
+        class="plp-worker-assignment-card__expand"
+        [attr.aria-expanded]="expanded"
+        [attr.aria-label]="(expanded ? 'إخفاء تسكينات ' : 'عرض تسكينات ') + fullName"
+        (click)="toggleExpanded($event)"
+      >
+        <span class="plp-worker-assignment-card__expand-label">{{ assignmentExpansionLabel }}</span>
+        <i [class]="expanded ? 'pi pi-chevron-down' : 'pi pi-chevron-left'" aria-hidden="true"></i>
+      </button>
+      <section
+        *ngIf="expanded && hasAssignmentDetails"
+        class="plp-worker-assignment-card__assignment-expansion"
+        [attr.aria-label]="'التسكينات الحالية للعامل ' + fullName"
+      >
+        <header class="plp-worker-assignment-card__assignment-header">
+          <span class="plp-worker-assignment-card__assignment-header-icon" aria-hidden="true">
+            <i class="pi pi-briefcase"></i>
+          </span>
+          <span>
+            <strong class="plp-worker-assignment-card__assignment-heading">التسكينات الحالية</strong>
+            <small>{{ assignmentDetails.length }} {{ assignmentDetails.length === 1 ? 'تسكين دائم' : 'تسكينات دائمة' }}</small>
+          </span>
+        </header>
+        <ol class="plp-worker-assignment-card__assignment-list">
+          <li
+            *ngFor="let assignment of assignmentDetails; let assignmentIndex = index; trackBy: trackByAssignment"
+            class="plp-worker-assignment-card__assignment-item"
+          >
+            <span class="plp-worker-assignment-card__assignment-index">{{ assignmentIndex + 1 }}</span>
+            <span class="plp-worker-assignment-card__assignment-fact">
+              <i class="pi pi-building" aria-hidden="true"></i>
+              <span>
+                <small>خط الإنتاج</small>
+                <strong>{{ assignment.productionLineName }}</strong>
+              </span>
+            </span>
+            <span class="plp-worker-assignment-card__assignment-fact">
+              <i class="pi pi-cog" aria-hidden="true"></i>
+              <span>
+                <small>المرحلة</small>
+                <strong>{{ assignment.subStageName }}</strong>
+              </span>
+            </span>
+          </li>
+        </ol>
+      </section>
+    </div>
+  </ng-container>
+
+  <ng-template #legacyMultipleSelectionCard>
+    <label
+      class="plp-worker-assignment-card plp-worker-assignment-card--multiple"
+      [class.is-selected]="selected"
+      [class.is-disabled]="disabled"
+      [attr.aria-disabled]="disabled"
+    >
+      <input
+        class="plp-worker-assignment-card__checkbox"
+        type="checkbox"
+        [checked]="selected"
+        [disabled]="disabled"
+        [attr.aria-label]="'تحديد ' + fullName"
+        (change)="onCheckboxChange($event)"
+      >
+      <ng-container *ngTemplateOutlet="cardContent"></ng-container>
+    </label>
+  </ng-template>
+</ng-container>
 
 <ng-template #singleSelectionCard>
   <button
@@ -47,6 +122,7 @@
       [productionLineName]="productionLineName"
       [isOnActiveService]="isOnActiveService"
       [stageNames]="stageNames"
+      [assignmentDetails]="assignmentDetails"
     ></plp-worker-assignment-details>
     <span class="plp-worker-assignment-card__state-list" *ngIf="statusMessage || unavailableMessage">
       <small class="plp-worker-assignment-card__state" *ngIf="statusMessage">{{ statusMessage }}</small>

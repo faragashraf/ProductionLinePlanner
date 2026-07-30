@@ -28,13 +28,37 @@ import { SharedModule } from '../../shared.module';
         [stageNames]="stageNames"
         (selectionChange)="temporarySelected = $event"
       ></plp-worker-assignment-card>
+      <plp-worker-assignment-card
+        data-context="actual"
+        selectionMode="multiple"
+        [selected]="actualSelected"
+        [expanded]="actualExpanded"
+        fullName="عامل متعدد التسكينات"
+        employeeCode="W-1079"
+        [assignmentDetails]="actualAssignments"
+        (selectionChange)="actualSelected = $event"
+        (expandedChange)="actualExpanded = $event"
+      ></plp-worker-assignment-card>
+      <plp-worker-assignment-card
+        data-context="actual-unassigned"
+        selectionMode="multiple"
+        fullName="عامل باسم عربي بالغ الطول لاختبار ثبات عمود الحالة وعدم تحريك الأعمدة الأخرى في صف العامل"
+        employeeCode="W-1080-LONG"
+        [assignmentDetails]="[]"
+      ></plp-worker-assignment-card>
     </section>
   `
 })
 class WorkerAssignmentCardTestHostComponent {
   permanentSelected = false;
   temporarySelected = false;
+  actualSelected = false;
+  actualExpanded = false;
   stageNames = ['مرحلة أولى', 'اسم مرحلة طويل يلتف داخل البطاقة على شاشة Android Tablet'];
+  actualAssignments = [
+    { productionLineId: 'line-1', productionLineName: 'خط الخياطة 1', subStageId: 'stage-1', subStageName: 'تركيب العلامة' },
+    { productionLineId: 'line-2', productionLineName: 'خط اللحام 2', subStageId: 'stage-2', subStageName: 'ازدواج كاموشا' },
+  ];
 }
 
 describe('WorkerAssignmentCardComponent', () => {
@@ -96,6 +120,59 @@ describe('WorkerAssignmentCardComponent', () => {
     fixture.detectChanges();
     expect(host.permanentSelected).toBeFalse();
     expect(checkbox.checked).toBeFalse();
+  });
+
+  it('keeps identity, code, and assignment state in the main row and expands every actual participation', () => {
+    const actual = fixture.nativeElement.querySelector('[data-context="actual"]') as HTMLElement;
+    const mainRow = actual.querySelector('.plp-responsive-entity-row') as HTMLElement;
+    const expandButton = actual.querySelector('.plp-worker-assignment-card__expand') as HTMLButtonElement;
+    const checkbox = actual.querySelector('input[type="checkbox"]') as HTMLInputElement;
+
+    expect(mainRow.textContent).toContain('عامل متعدد التسكينات');
+    expect(mainRow.textContent).toContain('W-1079');
+    expect(mainRow.textContent).toContain('مسكن');
+    expect(mainRow.textContent).not.toContain('خط الخياطة 1');
+    expect(mainRow.textContent).not.toContain('تركيب العلامة');
+    expect(expandButton.textContent).toContain('التسكينات (2)');
+    expect(expandButton.getAttribute('aria-expanded')).toBe('false');
+    expect(checkbox.checked).toBeFalse();
+
+    expandButton.click();
+    fixture.detectChanges();
+
+    const expansion = actual.querySelector('.plp-worker-assignment-card__assignment-expansion') as HTMLElement;
+    expect(expansion.textContent).toContain('التسكينات الحالية');
+    expect(expansion.textContent).toContain('خط الإنتاج');
+    expect(expansion.textContent).toContain('خط الخياطة 1');
+    expect(expansion.textContent).toContain('المرحلة');
+    expect(expansion.textContent).toContain('تركيب العلامة');
+    expect(expansion.textContent).toContain('خط اللحام 2');
+    expect(expansion.textContent).toContain('ازدواج كاموشا');
+    expect(expansion.querySelectorAll('.plp-worker-assignment-card__assignment-item').length).toBe(2);
+    expect(expansion.querySelectorAll('.plp-worker-assignment-card__assignment-fact').length).toBe(4);
+    expect(checkbox.checked).toBeFalse();
+    expect(fixture.componentInstance.actualSelected).toBeFalse();
+  });
+
+  it('keeps the actual-assignment identity, status, and expansion in stable grid columns', () => {
+    const assigned = fixture.nativeElement.querySelector('[data-context="actual"]') as HTMLElement;
+    const unassigned = fixture.nativeElement.querySelector('[data-context="actual-unassigned"]') as HTMLElement;
+    const assignedStatus = assigned.querySelector('.plp-responsive-entity-row__status') as HTMLElement;
+    const unassignedStatus = unassigned.querySelector('.plp-responsive-entity-row__status') as HTMLElement;
+    const longName = unassigned.querySelector('.plp-responsive-entity-row__title') as HTMLElement;
+
+    expect(getComputedStyle(assigned.querySelector('.plp-worker-assignment-card__shell')!).display).toBe('grid');
+    expect(getComputedStyle(assigned.querySelector('.plp-responsive-entity-row')!).display).toBe('grid');
+    expect(Math.abs(assignedStatus.getBoundingClientRect().left - unassignedStatus.getBoundingClientRect().left)).toBeLessThanOrEqual(1);
+    expect(longName.getAttribute('title')).toContain('عامل باسم عربي بالغ الطول');
+    expect(getComputedStyle(longName).textOverflow).toBe('ellipsis');
+    expect(unassigned.querySelector('.plp-worker-assignment-card__expand')).toBeNull();
+
+    fixture.componentInstance.actualExpanded = true;
+    fixture.detectChanges();
+    const shellBox = assigned.querySelector('.plp-worker-assignment-card__shell')!.getBoundingClientRect();
+    const expansionBox = assigned.querySelector('.plp-worker-assignment-card__assignment-expansion')!.getBoundingClientRect();
+    expect(Math.abs(shellBox.width - expansionBox.width)).toBeLessThanOrEqual(2);
   });
 
   it('provides keyboard focus semantics and a stable touch target for both modes', () => {

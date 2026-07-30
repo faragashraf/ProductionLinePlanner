@@ -25,10 +25,31 @@ import { WorkerAssignmentDetailsComponent } from './worker-assignment-details.co
         [stageNames]="stageNames"
       ></plp-worker-assignment-details>
     </section>
+    <section data-dialog="actual" style="width: 640px">
+      <plp-worker-assignment-details
+        fullName="عامل متعدد التسكينات"
+        employeeCode="1079"
+        productionLineName="اسم سياق لا يجب عرضه"
+        [assignmentDetails]="actualAssignments"
+      ></plp-worker-assignment-details>
+    </section>
+    <section data-dialog="unassigned" style="width: 640px">
+      <plp-worker-assignment-details
+        fullName="عامل غير مسكن"
+        employeeCode="1080"
+        productionLineName="خط الشاشة الحالي"
+        [assignmentDetails]="[]"
+      ></plp-worker-assignment-details>
+    </section>
   `
 })
 class AssignmentDialogsHostComponent {
   stageNames = ['علم وش / 2', 'اسم مرحلة طويل جدًا يلتف داخل حدود صف العامل دون توسيع النافذة'];
+  actualAssignments = [
+    { productionLineId: 'line-1', productionLineName: 'خط الخياطة 1', subStageId: 'stage-1', subStageName: 'تركيب العلامة' },
+    { productionLineId: 'line-2', productionLineName: 'خط التجميع 2', subStageId: 'stage-2', subStageName: 'التشطيب' },
+    { productionLineId: 'line-3', productionLineName: 'خط التعبئة 3', subStageId: 'stage-3', subStageName: 'التغليف' },
+  ];
 }
 
 describe('WorkerAssignmentDetailsComponent', () => {
@@ -81,6 +102,42 @@ describe('WorkerAssignmentDetailsComponent', () => {
     expect(stageItems[0].nativeElement.textContent).toContain('علم وش / 2');
     expect(stageItems[1].nativeElement.textContent).toContain('اسم مرحلة طويل جدًا');
     expect(text).not.toContain('مشارك حاليًا في مرحلتين:');
+  });
+
+  it('keeps only the actual assignment state in the main row', () => {
+    const actual = fixture.nativeElement.querySelector('[data-dialog="actual"]') as HTMLElement;
+    const unassigned = fixture.nativeElement.querySelector('[data-dialog="unassigned"]') as HTMLElement;
+
+    expect(actual.textContent).toContain('مسكن');
+    expect(actual.textContent).not.toContain('الخط: خط الخياطة 1');
+    expect(actual.textContent).not.toContain('المرحلة: تركيب العلامة');
+    expect(actual.textContent).not.toContain('+2 تسكينات أخرى');
+    expect(actual.textContent).not.toContain('اسم سياق لا يجب عرضه');
+    expect(actual.querySelector('.plp-responsive-entity-row__status')?.textContent).toContain('مسكن');
+
+    expect(unassigned.textContent).toContain('غير مسكن');
+    expect(unassigned.textContent).not.toContain('لا يوجد تسكين حالي');
+    expect(unassigned.textContent).not.toContain('خط الشاشة الحالي');
+    expect(unassigned.textContent).not.toContain('عدد المراحل: 0');
+    expect(unassigned.querySelector('.plp-worker-assignment-details__metadata--actual-line')).toBeNull();
+  });
+
+  it('uses immediately distinct success and danger badges for actual assignment state', () => {
+    const assigned = fixture.nativeElement.querySelector(
+      '[data-dialog="actual"] .plp-worker-assignment-details__assignment-status',
+    ) as HTMLElement;
+    const unassigned = fixture.nativeElement.querySelector(
+      '[data-dialog="unassigned"] .plp-worker-assignment-details__assignment-status',
+    ) as HTMLElement;
+
+    expect(assigned.classList).toContain('p-tag-success');
+    expect(assigned.querySelector('.pi-check-circle')).not.toBeNull();
+    expect(unassigned.classList).toContain('p-tag-danger');
+    expect(unassigned.querySelector('.pi-exclamation-triangle')).not.toBeNull();
+    expect(getComputedStyle(assigned).color).not.toBe(getComputedStyle(unassigned).color);
+    expect(getComputedStyle(assigned).backgroundColor).not.toBe(
+      getComputedStyle(unassigned).backgroundColor,
+    );
   });
 
   it('keeps the code compact, isolates its direction, and presents readable wrapping stage chips', () => {

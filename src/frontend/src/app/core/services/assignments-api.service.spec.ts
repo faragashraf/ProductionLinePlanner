@@ -193,7 +193,13 @@ describe('AssignmentsApiService', () => {
 
   it('loads one attendance-free permanent line staffing plan for the selected factory, line and model', () => {
     let planName = '';
-    service.getLineStaffingPlan(factoryId, productionLineId, productModelId, '2026-07-13').subscribe(plan => planName = plan.productModelName);
+    let participationLineId = '';
+    let participationLineName = '';
+    service.getLineStaffingPlan(factoryId, productionLineId, productModelId, '2026-07-13').subscribe(plan => {
+      planName = plan.productModelName;
+      participationLineId = plan.workers[0].participations[0].productionLineId;
+      participationLineName = plan.workers[0].participations[0].productionLineName;
+    });
 
     const request = http.expectOne(httpRequest =>
       httpRequest.method === 'GET' &&
@@ -212,16 +218,37 @@ describe('AssignmentsApiService', () => {
         productModelId,
         productModelName: 'جرومان',
         stages: [],
-        workers: [{ workerId, employeeCode: '119', fullName: 'عامل', hasPhoto: false }]
+        workers: [{
+          workerId,
+          employeeCode: '119',
+          fullName: 'عامل',
+          hasPhoto: false,
+          participations: [{
+            assignmentId: 'assignment-1',
+            assignmentType: 'Default',
+            productionLineId,
+            productionLineName: 'خط الخياطة 1',
+            subStageId,
+            subStageName: 'الترفيع',
+            fromSubStageId: null,
+            fromSubStageName: null,
+            startsAtUtc: '2026-07-10T08:00:00Z',
+            endsAtUtc: null,
+            replacementForWorkerId: null,
+            temporaryParticipationMode: null
+          }]
+        }]
       }
     });
 
     expect(planName).toBe('جرومان');
+    expect(participationLineId).toBe(productionLineId);
+    expect(participationLineName).toBe('خط الخياطة 1');
   });
 
-  it('loads the shared active permanent staffing worker source without attendance', () => {
-    let workers = 0;
-    service.getActiveLineStaffingWorkers('2026-07-13').subscribe(items => workers = items.length);
+  it('maps the real staffing directory department contract without attendance or screen-context fallbacks', () => {
+    let workers: Array<{ departmentName: string | null }> = [];
+    service.getActiveLineStaffingWorkers('2026-07-13').subscribe(items => workers = items);
 
     const request = http.expectOne(httpRequest =>
       httpRequest.method === 'GET' &&
@@ -231,9 +258,12 @@ describe('AssignmentsApiService', () => {
     );
     request.flush({
       success: true,
-      data: [{ workerId, employeeCode: '119', fullName: 'عامل', isOnActiveService: true, hasPhoto: false }]
+      data: [
+        { workerId, employeeCode: '119', fullName: 'عامل', departmentName: '  الخياطة  ', isOnActiveService: true, hasPhoto: false },
+        { workerId: 'worker-legacy', employeeCode: '120', fullName: 'عامل قديم', departmentName: ' ', organizationalDepartmentName: 'التجهيز', isOnActiveService: true, hasPhoto: false }
+      ]
     });
 
-    expect(workers).toBe(1);
+    expect(workers.map(worker => worker.departmentName)).toEqual(['الخياطة', 'التجهيز']);
   });
 });

@@ -457,6 +457,8 @@
     [title]="assignmentDialogTitle"
     [subtitle]="assignmentDialogSubtitle"
     size="wide"
+    [compactHeader]="assignmentDialogMode === 'default'"
+    styleClass="plp-form-sheet--staffing-directory"
     [saving]="assignmentSaving"
     [error]="assignmentDialogError"
     [saveDisabled]="assignmentSaving"
@@ -477,9 +479,8 @@
         class="line-staffing-page__dialog-note line-staffing-page__wide"
         *ngIf="assignmentDialogMode === 'default'"
       >
-        حدّد عمال المرحلة دفعة واحدة. الاختيار يضيف مشاركة دائمة لهذه المرحلة
-        فقط، وإلغاء الاختيار يزيل مشاركة هذا العامل من هذه المرحلة فقط دون تغيير
-        مراحله الأخرى. لا يلزم سبب للإضافة.
+        <i class="pi pi-info-circle" aria-hidden="true"></i>
+        <span>حدّد عمال المرحلة؛ أي تغيير هنا يخص هذه المرحلة فقط ولا يؤثر في تسكيناتهم الأخرى.</span>
       </p>
       <p
         class="line-staffing-page__dialog-note line-staffing-page__wide"
@@ -489,34 +490,55 @@
         لن يتغير أي سجل إنتاج تاريخي.
       </p>
       <ng-container *ngIf="isBulkDefaultAssignmentDialog">
-        <label class="line-staffing-page__wide"
-          >بحث العامل
-          <input
-            pInputText
-            type="search"
-            [(ngModel)]="workerSearch"
-            [ngModelOptions]="{ standalone: true }"
-            placeholder="الكود أو الاسم"
-          />
-        </label>
-        <label
-          >القسم
-          <select
-            [(ngModel)]="departmentFilter"
-            [ngModelOptions]="{ standalone: true }"
-          >
-            <option value="">كل الأقسام</option>
-            <option
-              *ngFor="let department of workerDepartments"
-              [value]="department"
-            >
-              {{ department }}
-            </option>
-          </select>
-        </label>
-        <p class="line-staffing-page__dialog-note line-staffing-page__wide">
-          {{ selectedDefaultWorkersCount }} عامل محدد للتسكين الدائم في هذه
-          المرحلة. العامل المشارك في مراحل أخرى يظل قابلًا للاختيار.
+        <div class="line-staffing-page__dialog-filters line-staffing-page__wide">
+          <label
+            >بحث العامل
+            <input
+              pInputText
+              type="search"
+              [(ngModel)]="workerSearch"
+              [ngModelOptions]="{ standalone: true }"
+              placeholder="الكود أو الاسم"
+            />
+          </label>
+          <label for="staffing-worker-department-filter"
+            >القسم
+            <p-dropdown
+              data-testid="staffing-worker-department-filter"
+              inputId="staffing-worker-department-filter"
+              [options]="departmentFilterOptions"
+              [ngModel]="departmentFilter"
+              (ngModelChange)="changeDepartmentFilter($event)"
+              [ngModelOptions]="{ standalone: true }"
+              optionLabel="label"
+              optionValue="value"
+              appendTo="body"
+              styleClass="app-full-width-select line-staffing-page__dialog-filter-control"
+              panelStyleClass="line-staffing-page__dialog-filter-panel"
+              ariaLabel="القسم"
+            ></p-dropdown>
+          </label>
+          <label for="staffing-worker-line-filter"
+            >خط التسكين
+            <p-dropdown
+              data-testid="staffing-worker-line-filter"
+              inputId="staffing-worker-line-filter"
+              [options]="assignmentLineFilterOptions"
+              [ngModel]="assignmentLineFilter"
+              (ngModelChange)="changeAssignmentLineFilter($event)"
+              [ngModelOptions]="{ standalone: true }"
+              optionLabel="label"
+              optionValue="value"
+              appendTo="body"
+              styleClass="app-full-width-select line-staffing-page__dialog-filter-control"
+              panelStyleClass="line-staffing-page__dialog-filter-panel"
+              ariaLabel="خط التسكين"
+            ></p-dropdown>
+          </label>
+        </div>
+        <p class="line-staffing-page__dialog-selection-summary line-staffing-page__wide">
+          <i class="pi pi-users" aria-hidden="true"></i>
+          <span><strong>{{ selectedDefaultWorkersCount }}</strong> عامل محدد لهذه المرحلة. العامل المسكن في مرحلة أخرى يظل قابلًا للاختيار.</span>
         </p>
         <section
           class="line-staffing-page__candidate-list line-staffing-page__wide"
@@ -548,17 +570,17 @@
             [disabled]="!!defaultWorkerSelectionUnavailableMessage(worker)"
             [fullName]="worker.fullName"
             [employeeCode]="worker.employeeCode"
-            [productionLineName]="plan?.productionLineName || ''"
             [isOnActiveService]="worker.isOnActiveService"
-            [stageNames]="workerParticipationStageNames(worker)"
+            [assignmentDetails]="workerActualAssignmentDetails(worker)"
+            [expanded]="isWorkerAssignmentExpanded(worker)"
             [hasPhoto]="worker.hasPhoto"
             [photoReference]="worker.photoReference"
             [photoVersion]="worker.photoVersion"
-            [statusMessage]="defaultWorkerAssignmentStateLabel(worker)"
             [unavailableMessage]="
               defaultWorkerSelectionUnavailableMessage(worker) || ''
             "
             (selectionChange)="toggleDefaultWorker(worker, $event)"
+            (expandedChange)="toggleWorkerAssignmentExpansion(worker, $event)"
           ></plp-worker-assignment-card>
           <p
             class="line-staffing-page__note"
@@ -568,7 +590,7 @@
               !availableWorkers.length
             "
           >
-            لا توجد نتائج مطابقة للبحث أو القسم المحدد.
+            لا توجد نتائج مطابقة للفلاتر المحددة.
           </p>
         </section>
       </ng-container>

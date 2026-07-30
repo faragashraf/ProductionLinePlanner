@@ -93,6 +93,8 @@ public sealed record LineStaffingWorkerDto(
 public sealed record LineStaffingParticipationDto(
     Guid AssignmentId,
     string AssignmentType,
+    Guid ProductionLineId,
+    string ProductionLineName,
     Guid SubStageId,
     string? SubStageName,
     Guid? FromSubStageId,

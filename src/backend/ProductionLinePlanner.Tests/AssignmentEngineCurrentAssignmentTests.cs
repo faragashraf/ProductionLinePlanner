@@ -248,6 +248,46 @@ public sealed class AssignmentEngineCurrentAssignmentTests
             entry.ActionType == "Cancel");
     }
 
+    [Fact]
+    public async Task Bulk_stage_selection_on_one_line_does_not_remove_the_same_worker_stage_from_another_line()
+    {
+        await using var fixture = AssignmentFixture.Create();
+        var existingLine = await fixture.Db.ProductionLines.SingleAsync(line => line.Id == fixture.ProductionLineId);
+        var otherLine = new ProductionLine(
+            Guid.NewGuid(),
+            existingLine.FactoryId,
+            "Line 2",
+            2,
+            departmentId: existingLine.DepartmentId);
+        fixture.Db.AddRange(
+            otherLine,
+            new WorkerDefaultAssignment(
+                Guid.NewGuid(), fixture.Worker.Id, fixture.DefaultSubStage.Id, fixture.ActorId,
+                DateTime.UtcNow.AddMinutes(-2), productionLineId: fixture.ProductionLineId),
+            new WorkerDefaultAssignment(
+                Guid.NewGuid(), fixture.Worker.Id, fixture.DefaultSubStage.Id, fixture.ActorId,
+                DateTime.UtcNow.AddMinutes(-1), productionLineId: otherLine.Id));
+        await fixture.Db.SaveChangesAsync();
+
+        var result = await fixture.Engine.UpdateStageDefaultAssignmentsAsync(
+            otherLine.Id,
+            fixture.DefaultSubStage.Id,
+            [],
+            fixture.ActorId);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(1, result.Value!.RemovedWorkersCount);
+        Assert.Contains(
+            await fixture.Db.WorkerDefaultAssignments.Where(assignment => assignment.IsActive).ToArrayAsync(),
+            assignment => assignment.WorkerId == fixture.Worker.Id
+                          && assignment.ProductionLineId == fixture.ProductionLineId
+                          && assignment.SubStageId == fixture.DefaultSubStage.Id);
+        Assert.DoesNotContain(
+            await fixture.Db.WorkerDefaultAssignments.Where(assignment => assignment.IsActive).ToArrayAsync(),
+            assignment => assignment.ProductionLineId == otherLine.Id
+                          && assignment.SubStageId == fixture.DefaultSubStage.Id);
+    }
+
     [Theory]
     [InlineData("TemporaryMove")]
     [InlineData("AdditionalParticipation")]
