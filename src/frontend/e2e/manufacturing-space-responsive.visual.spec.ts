@@ -311,7 +311,12 @@ test('loads the permanent staffing workspace and keeps its dialog within tablet 
     await expectViewportSafe(page);
     await page.screenshot({ path: path.join(visualOutput, `line-staffing-${name}.png`) });
 
-    if (name === 'desktop-1440x900' || name === 'tablet-portrait-800x1280' || name === 'mobile-390x844') {
+    if (
+      name === 'desktop-1440x900' ||
+      name === 'tablet-landscape-1280x800' ||
+      name === 'tablet-portrait-800x1280' ||
+      name === 'mobile-390x844'
+    ) {
       await page.getByRole('button', { name: 'إضافة إلى المرحلة' }).click();
       const dialog = page.getByRole('dialog');
       await expect(dialog).toBeVisible();
