@@ -20,6 +20,14 @@ import {
 } from '../../shared/models/manufacturing-command-center.model';
 
 type DashboardDetail = 'present' | 'present-assigned' | 'present-unassigned' | 'not-present' | 'drafts' | 'approved' | 'quality' | 'stage-shortage' | null;
+type DecisionIndicatorTone = 'success' | 'warning' | 'danger' | 'neutral';
+
+interface DecisionIndicator {
+  label: string;
+  value: string;
+  context: string;
+  tone: DecisionIndicatorTone;
+}
 
 @Component({
   selector: 'app-dashboard-page',
@@ -39,6 +47,9 @@ export class DashboardPageComponent implements OnInit, OnDestroy {
   private stopRealtimeWatch?: () => void;
   private activeLoad?: Subscription;
   private loadVersion = 0;
+  private loadInProgress = false;
+  private backgroundRefreshPending = false;
+  private destroyed = false;
 
   constructor(
     private readonly api: ManufacturingCommandCenterApiService,
@@ -57,6 +68,7 @@ export class DashboardPageComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    this.destroyed = true;
     this.stopRealtimeWatch?.();
     this.activeLoad?.unsubscribe();
     this.destroy$.next();
@@ -75,9 +87,54 @@ export class DashboardPageComponent implements OnInit, OnDestroy {
   operationLabel(status: string): string { return commandCenterOperationLabel(status); }
   realtimeLabel(status: RealtimeConnectionStatus): string { return realtimeConnectionStatusLabel(status); }
   realtimeClass(status: RealtimeConnectionStatus): string { return `realtime-status--${status}`; }
-  lineDimensions(line: CommandCenterLine): CommandCenterLineStatusDimension[] { return commandCenterLineStatusDimensions(line); }
+  lineDimensions(line: CommandCenterLine): CommandCenterLineStatusDimension[] {
+    return commandCenterLineStatusDimensions(line, this.data?.attendanceSync.isTrusted ?? false);
+  }
   dimensionClass(dimension: CommandCenterLineStatusDimension): string { return `line-dimension--${dimension.tone}`; }
   ratioText(percentage: number | null): string { return percentage === null ? 'لا توجد بيانات' : `${percentage}%`; }
+  metricText(value: number | null): string { return value === null ? 'غير مؤكد' : `${value}`; }
+
+  get decisionIndicators(): DecisionIndicator[] {
+    if (!this.data || !this.dataIsCurrent) return [];
+    const { lineSummary, operations, attendanceSync } = this.data;
+    const activeLines = lineSummary.activeLines;
+    const operationCoverage = this.percentage(operations.linesWithOperation, activeLines);
+    const measurableOperations = operations.items.filter(operation => operation.status !== 'Cancelled');
+    const registeredStages = measurableOperations.reduce((total, operation) => total + operation.registeredStages, 0);
+    const journeyStages = measurableOperations.reduce((total, operation) => total + operation.journeyStages, 0);
+    const stageCoverage = this.percentage(registeredStages, journeyStages);
+    const lineReadiness = attendanceSync.isTrusted ? this.percentage(lineSummary.readyLines, activeLines) : null;
+    const interventions = this.problemLines.length;
+
+    return [
+      {
+        label: 'جاهزية الخطوط',
+        value: lineReadiness === null ? 'غير مؤكدة' : `${lineReadiness}%`,
+        context: attendanceSync.isTrusted
+          ? `${lineSummary.readyLines} جاهز من ${activeLines} خط نشط`
+          : 'تحتاج مزامنة حضور موثوقة قبل الحكم',
+        tone: lineReadiness === null ? 'neutral' : lineReadiness >= 85 ? 'success' : lineReadiness >= 60 ? 'warning' : 'danger'
+      },
+      {
+        label: 'بدء تشغيل الخطوط',
+        value: operationCoverage === null ? '—' : `${operationCoverage}%`,
+        context: `${operations.linesWithOperation} لديها تشغيل من ${activeLines} خط نشط`,
+        tone: operationCoverage === null ? 'neutral' : operationCoverage >= 90 ? 'success' : operationCoverage >= 60 ? 'warning' : 'danger'
+      },
+      {
+        label: 'اكتمال تسجيل المراحل',
+        value: stageCoverage === null ? '—' : `${stageCoverage}%`,
+        context: journeyStages ? `${registeredStages} مرحلة مسجلة من ${journeyStages}` : 'لا توجد مراحل تشغيل قابلة للقياس',
+        tone: stageCoverage === null ? 'neutral' : stageCoverage >= 90 ? 'success' : stageCoverage >= 60 ? 'warning' : 'danger'
+      },
+      {
+        label: 'خطوط تحتاج تدخلًا',
+        value: `${interventions}`,
+        context: interventions ? `من ${activeLines} خط نشط؛ مرتبة حسب الأولوية` : 'لا توجد مشكلات تشغيلية ظاهرة',
+        tone: interventions === 0 ? 'success' : interventions <= Math.max(1, Math.floor(activeLines * .25)) ? 'warning' : 'danger'
+      }
+    ];
+  }
 
   get problemLines(): CommandCenterProblemLine[] {
     return this.data && this.dataIsCurrent ? commandCenterProblemLines(this.data) : [];
@@ -123,8 +180,17 @@ export class DashboardPageComponent implements OnInit, OnDestroy {
   }
 
   private load(background = false): void {
+    if (background && this.loadInProgress) {
+      this.backgroundRefreshPending = true;
+      return;
+    }
+
     const loadVersion = ++this.loadVersion;
-    this.activeLoad?.unsubscribe();
+    if (!background) {
+      this.backgroundRefreshPending = false;
+      this.activeLoad?.unsubscribe();
+    }
+    this.loadInProgress = true;
     if (background && this.data) this.isRefreshing = true;
     else this.isLoading = true;
     this.hasLoadError = false;
@@ -135,8 +201,15 @@ export class DashboardPageComponent implements OnInit, OnDestroy {
       }),
       finalize(() => {
         if (loadVersion !== this.loadVersion) return;
+        this.loadInProgress = false;
         this.isLoading = false;
         this.isRefreshing = false;
+        if (this.backgroundRefreshPending) {
+          this.backgroundRefreshPending = false;
+          queueMicrotask(() => {
+            if (!this.destroyed) this.load(true);
+          });
+        }
       }),
       takeUntil(this.destroy$)
     ).subscribe(data => {
@@ -149,5 +222,9 @@ export class DashboardPageComponent implements OnInit, OnDestroy {
 
   private matchesCurrentScope(change: ManufacturingDataChanged): boolean {
     return commandCenterScopeMatches(this.filters, change);
+  }
+
+  private percentage(numerator: number, denominator: number): number | null {
+    return denominator > 0 ? Math.round(numerator * 1000 / denominator) / 10 : null;
   }
 }

@@ -112,6 +112,58 @@ describe('LineStaffingWorkspacePageComponent', () => {
     expect(assignments.getLineStaffingStageRefresh).not.toHaveBeenCalled();
   });
 
+  it('refreshes worker realtime changes in place without putting the whole workspace into loading state', () => {
+    initialize(component);
+    const workerChange = {
+      entityType: 'Worker',
+      eventId: 'worker-profile-change',
+      workerIds: ['worker-one'],
+      workerChangeKinds: ['profile'],
+    };
+
+    expect(realtimeWatch.matches?.(workerChange)).toBeTrue();
+    realtimeWatch.refresh(workerChange);
+
+    expect(assignments.getLineStaffingStageRefresh).toHaveBeenCalledWith(
+      factoryId,
+      lineId,
+      modelId,
+      defaultStageId,
+      component.staffingReferenceDate,
+    );
+    expect(assignments.getLineStaffingPlan).toHaveBeenCalledTimes(1);
+    expect(component.planLoading).toBeFalse();
+  });
+
+  it('refreshes the open worker directory silently after realtime stage data arrives', () => {
+    const directory = new Subject<LineStaffingPlan['workers']>();
+    initialize(component);
+    component.openDefaultAssignment();
+    assignments.getActiveLineStaffingWorkers.and.returnValue(directory.asObservable());
+
+    realtimeWatch.refresh(permanentAssignmentChange());
+
+    expect(assignments.getActiveLineStaffingWorkers).toHaveBeenCalledTimes(2);
+    expect(component.workerDirectoryLoading).toBeFalse();
+    expect(component.availableWorkers.length).toBeGreaterThan(0);
+  });
+
+  it('does not supersede the visible initial worker-directory load with a silent realtime refresh', () => {
+    const initialDirectory = new Subject<LineStaffingPlan['workers']>();
+    assignments.getActiveLineStaffingWorkers.and.returnValue(initialDirectory.asObservable());
+    initialize(component);
+    component.openDefaultAssignment();
+
+    expect(component.workerDirectoryLoading).toBeTrue();
+    realtimeWatch.refresh(permanentAssignmentChange());
+
+    expect(assignments.getActiveLineStaffingWorkers).toHaveBeenCalledTimes(1);
+    initialDirectory.next(plan().workers);
+    initialDirectory.complete();
+    expect(component.workerDirectoryLoading).toBeFalse();
+    expect(component.availableWorkers.length).toBeGreaterThan(0);
+  });
+
   it('releases the line-staffing realtime watcher on destroy', () => {
     component.ngOnInit();
     component.ngOnDestroy();
@@ -351,6 +403,35 @@ describe('LineStaffingWorkspacePageComponent', () => {
     expect(component.availableWorkers).toEqual([]);
   });
 
+  it('toggles between all workers and selected workers while preserving the other filters', () => {
+    const filterSource = lineFilterPlan();
+    assignments.getLineStaffingPlan.and.returnValue(of(filterSource));
+    assignments.getActiveLineStaffingWorkers.and.returnValue(of(filterSource.workers));
+    initialize(component);
+    component.openDefaultAssignment();
+
+    component.toggleDefaultWorker(filterSource.workers[1], true);
+    component.setWorkerSelectionFilter('selected');
+
+    expect(component.availableWorkers.map(worker => worker.workerId)).toEqual([
+      'worker-one',
+      'worker-two',
+    ]);
+
+    component.changeDepartmentFilter('التجهيز');
+    expect(component.availableWorkers.map(worker => worker.workerId)).toEqual([
+      'worker-two',
+    ]);
+
+    component.toggleDefaultWorker(filterSource.workers[1], false);
+    expect(component.availableWorkers).toEqual([]);
+
+    component.setWorkerSelectionFilter('all');
+    expect(component.availableWorkers.map(worker => worker.workerId)).toEqual([
+      'worker-two',
+    ]);
+  });
+
   it('filters each loaded department and restores all departments explicitly', () => {
     const filterSource = lineFilterPlan();
     assignments.getLineStaffingPlan.and.returnValue(of(filterSource));
@@ -377,15 +458,18 @@ describe('LineStaffingWorkspacePageComponent', () => {
     component.openDefaultAssignment();
     component.assignmentLineFilter = otherLineId;
     component.departmentFilter = 'التجهيز';
+    component.workerSelectionFilter = 'selected';
 
     component.closeAssignmentDialog();
     expect(component.assignmentLineFilter).toBe('all');
     expect(component.departmentFilter).toBe('');
+    expect(component.workerSelectionFilter).toBe('all');
     expect(component.selectedDepartmentFilterLabel).toBe('كل الأقسام');
 
     component.openDefaultAssignment();
     expect(component.assignmentLineFilter).toBe('all');
     expect(component.selectedAssignmentLineFilterLabel).toBe('كل خطوط الإنتاج');
+    expect(component.workerSelectionFilter).toBe('all');
     expect(component.selectedDepartmentFilterLabel).toBe('كل الأقسام');
   });
 

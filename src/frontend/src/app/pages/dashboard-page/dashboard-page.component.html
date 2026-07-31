@@ -3,7 +3,7 @@
     <div>
       <span class="command-page__eyebrow">غرفة تشغيل المصنع</span>
       <h1>لوحة تحكم التصنيع</h1>
-      <p>أرقام مسجلة وقابلة للتتبع للحضور، والتسكين الدائم، ورحلات الموديلات، وتشغيل اليوم.</p>
+      <p>مؤشرات تشغيلية قابلة للتتبع، تفصل بين ما يحتاج قرارًا وما لا تسمح البيانات بالحكم عليه.</p>
     </div>
     <div class="command-page__updated" *ngIf="data && dataIsCurrent">
       <ng-container *ngIf="realtimeStatus$ | async as realtimeStatus">
@@ -11,6 +11,7 @@
         <strong>{{ realtimeLabel(realtimeStatus) }}</strong>
       </ng-container>
       <span>آخر تحديث ناجح: {{ data.calculatedAtUtc | date:'yyyy/MM/dd، HH:mm' }}</span>
+      <span class="command-page__refreshing" *ngIf="isRefreshing">جارٍ التقاط آخر تغيير…</span>
     </div>
   </header>
 
@@ -26,6 +27,12 @@
     <strong>{{ data.scope.productionDate }}</strong>
     <span>{{ data.scope.description }}</span>
   </section>
+
+  <app-attendance-sync-status
+    *ngIf="data && dataIsCurrent"
+    [sync]="data.attendanceSync"
+    [realtimeDisconnected]="(realtimeStatus$ | async) === 'disconnected'"
+  ></app-attendance-sync-status>
 
   <section class="command-page__loading-notice" *ngIf="isLoading && data && !dataIsCurrent" role="status">
     <i class="pi pi-spin pi-spinner" aria-hidden="true"></i>
@@ -57,26 +64,40 @@
     </section>
 
     <ng-container *ngIf="current.lineSummary.activeLines > 0">
+      <section class="decision-strip" aria-labelledby="decision-strip-title">
+        <header>
+          <div><span>الملخص التنفيذي</span><h2 id="decision-strip-title">ماذا يحتاج قرارًا الآن؟</h2></div>
+          <p>كل نسبة توضح بسطها ومقامها، ومؤشرات الحضور تتوقف تلقائيًا إذا فقد المصدر موثوقيته.</p>
+        </header>
+        <div class="decision-strip__grid">
+          <article *ngFor="let indicator of decisionIndicators" class="decision-indicator" [ngClass]="'decision-indicator--' + indicator.tone">
+            <span>{{ indicator.label }}</span>
+            <strong>{{ indicator.value }}</strong>
+            <small>{{ indicator.context }}</small>
+          </article>
+        </div>
+      </section>
+
       <section class="command-section" aria-labelledby="workforce-title">
         <header><div><span>01</span><h2 id="workforce-title">الحضور والقوى العاملة</h2></div><p>{{ current.workforce.attributionNote }}</p></header>
         <div class="metric-grid">
           <article class="metric metric--ink">
             <span>العمال النشطون</span><strong>{{ current.workforce.activeWorkers === null ? 'غير متاح' : current.workforce.activeWorkers }}</strong><small>عمال بسجل نشط وخدمة عمل نشطة؛ لا يُنسب للنطاق الجزئي دون علاقة مصدر موثوقة.</small>
           </article>
-          <button class="metric metric--ink" type="button" (click)="selectDetail('present')">
-            <span>الحاضرون في النطاق</span><strong>{{ current.workforce.presentWorkers }}</strong><small>عمال مميزون بحالة حاضر أو متأخر في يوم القاهرة.</small>
+          <button class="metric metric--ink" type="button" (click)="selectDetail('present')" [disabled]="current.workforce.presentWorkers === null">
+            <span>الحاضرون في النطاق</span><strong>{{ metricText(current.workforce.presentWorkers) }}</strong><small>عمال مميزون بحالة حاضر أو متأخر في يوم القاهرة.</small>
           </button>
-          <button class="metric metric--ready" type="button" (click)="selectDetail('present-assigned')">
-            <span>حاضرون ومسكنون دائمًا</span><strong>{{ current.workforce.presentPermanentlyAssignedWorkers }}</strong><small>تقاطع الحضور مع التسكين الدائم النشط فقط.</small>
+          <button class="metric metric--ready" type="button" (click)="selectDetail('present-assigned')" [disabled]="current.workforce.presentPermanentlyAssignedWorkers === null">
+            <span>حاضرون ومسكنون دائمًا</span><strong>{{ metricText(current.workforce.presentPermanentlyAssignedWorkers) }}</strong><small>تقاطع الحضور مع التسكين الدائم النشط فقط.</small>
           </button>
           <button class="metric metric--warning" type="button" (click)="selectDetail('present-unassigned')" [disabled]="current.workforce.presentUnassignedWorkers === null">
-            <span>حاضرون غير مسكنين</span><strong>{{ current.workforce.presentUnassignedWorkers === null ? 'غير متاح' : current.workforce.presentUnassignedWorkers }}</strong><small>لا يُنسب لقسم أو خط دون علاقة مصدر موثوقة.</small>
+            <span>حاضرون غير مسكنين</span><strong>{{ current.workforce.presentUnassignedWorkers === null ? (current.attendanceSync.isTrusted ? 'غير متاح' : 'غير مؤكد') : current.workforce.presentUnassignedWorkers }}</strong><small>لا يُنسب لقسم أو خط دون علاقة مصدر موثوقة.</small>
           </button>
-          <button class="metric metric--danger" type="button" (click)="selectDetail('not-present')">
-            <span>مسكنون دائمًا غير حاضرين</span><strong>{{ current.workforce.permanentlyAssignedNotPresentWorkers }}</strong><small>يشمل الغياب الصريح أو غياب سجل اليوم مع إظهار الحالة بالتفاصيل.</small>
+          <button class="metric metric--danger" type="button" (click)="selectDetail('not-present')" [disabled]="current.workforce.permanentlyAssignedNotPresentWorkers === null">
+            <span>مسكنون دائمًا غير حاضرين</span><strong>{{ metricText(current.workforce.permanentlyAssignedNotPresentWorkers) }}</strong><small>لا يظهر كحقيقة إلا مع مزامنة حضور موثوقة.</small>
           </button>
           <article class="metric metric--ratio">
-            <span>تغطية تسكين الحاضرين</span><strong>{{ ratioText(current.workforce.assignmentCoverage.percentage) }}</strong>
+            <span>تغطية تسكين الحاضرين</span><strong>{{ current.attendanceSync.isTrusted ? ratioText(current.workforce.assignmentCoverage.percentage) : 'غير مؤكدة' }}</strong>
             <small>{{ current.workforce.assignmentCoverage.numerator }} ÷ {{ current.workforce.assignmentCoverage.denominator }} · {{ current.scope.productionDate }}</small>
           </article>
         </div>
@@ -89,7 +110,7 @@
           <article class="metric metric--muted"><span>لا يوجد تشغيل</span><strong>{{ current.operations.linesWithoutOperation }}</strong><small>خطوط نشطة بلا أمر يوم مسجل.</small></article>
           <button class="metric metric--warning" type="button" (click)="selectDetail('drafts')"><span>مسودات تحتاج إجراء</span><strong>{{ current.operations.draftOperations + current.operations.approvalCancelledOperations }}</strong><small>Draft + ملغي الاعتماد.</small></button>
           <button class="metric metric--ready" type="button" (click)="selectDetail('approved')"><span>عمليات معتمدة</span><strong>{{ current.operations.approvedOperations }}</strong><small>ProductionOrder بحالة Completed.</small></button>
-          <article class="metric metric--ink"><span>أجور عمال مسجلة لعمليات معتمدة</span><strong>{{ current.operations.approvedRecordedValue | number:'1.2-2' }}</strong><small>مجموع TotalWorkerEarnings، وليس قيمة إنتاج أوكمية.</small></article>
+          <article class="metric metric--ink"><span>أجور عمال مسجلة لعمليات معتمدة</span><strong>{{ current.operations.approvedRecordedValue | number:'1.2-2' }}</strong><small>مجموع أجور العمال المسجلة، وليس قيمة إنتاج أو كمية.</small></article>
         </div>
       </section>
 
@@ -97,10 +118,12 @@
         <article class="command-panel">
           <header><div><span>03</span><h2>جاهزية الخطوط</h2></div><a routerLink="/factory-map">فتح الخريطة</a></header>
           <div class="line-rollup">
-            <div><strong>{{ current.lineSummary.activeLines }}</strong><span>خط نشط</span></div>
-            <div class="state-ready"><strong>{{ current.lineSummary.readyLines }}</strong><span>دون مشكلة جاهزية</span></div>
+            <div class="state-ready"><strong>{{ current.lineSummary.readyLines }}</strong><span>جاهز</span></div>
+            <div class="state-no-operation"><strong>{{ current.lineSummary.noOperationLines }}</strong><span>بلا تشغيل</span></div>
             <div class="state-staffing-shortage"><strong>{{ current.lineSummary.staffingShortageLines }}</strong><span>نقص عمالة</span></div>
             <div class="state-journey-not-configured"><strong>{{ current.lineSummary.journeyNotConfiguredLines }}</strong><span>بلا رحلة</span></div>
+            <div class="state-data-incomplete"><strong>{{ current.lineSummary.dataIncompleteLines }}</strong><span>بيانات ناقصة</span></div>
+            <div class="state-attendance-untrusted"><strong>{{ current.lineSummary.attendanceUntrustedLines }}</strong><span>حضور غير مؤكد</span></div>
           </div>
           <ul class="problem-lines" *ngIf="problemLines.length; else noProblemLines">
             <li *ngFor="let problem of problemLines">
@@ -120,7 +143,7 @@
             <section class="problem-lines__empty">
               <i class="pi pi-check-circle" aria-hidden="true"></i>
               <strong>لا توجد خطوط تحتاج تدخلًا في النطاق الحالي</strong>
-              <span>لم تظهر مسودات أوإلغاءات أوفجوات مسار أوعمالة أوبيانات.</span>
+              <span>لم تظهر مسودات أو إلغاءات أو فجوات مسار أو عمالة أو بيانات.</span>
             </section>
           </ng-template>
         </article>
@@ -129,7 +152,7 @@
           <header><div><span>04</span><h2>اكتمال البيانات</h2></div><button type="button" (click)="selectDetail('quality')">كل التفاصيل</button></header>
           <button type="button" (click)="selectDetail('quality')"><strong>{{ current.dataQuality.modelStagesWithoutPrice }}</strong><span>مرحلة موديل بلا سعر</span><i class="pi pi-chevron-left"></i></button>
           <button type="button" (click)="selectDetail('quality')"><strong>{{ current.dataQuality.modelStagesWithoutStandardTime }}</strong><span>مرحلة بلا زمن معياري</span><i class="pi pi-chevron-left"></i></button>
-          <button type="button" (click)="selectDetail('stage-shortage')"><strong>{{ current.dataQuality.activeJourneyStagesWithoutPresentWorker }}</strong><span>مرحلة تشغيل بلا عامل حاضر</span><i class="pi pi-chevron-left"></i></button>
+          <button type="button" (click)="selectDetail('stage-shortage')" [disabled]="current.dataQuality.activeJourneyStagesWithoutPresentWorker === null"><strong>{{ current.dataQuality.activeJourneyStagesWithoutPresentWorker === null ? 'غير مؤكد' : current.dataQuality.activeJourneyStagesWithoutPresentWorker }}</strong><span>مرحلة تشغيل بلا عامل حاضر</span><i class="pi pi-chevron-left"></i></button>
           <button type="button" (click)="selectDetail('quality')" [disabled]="current.dataQuality.activeModelsWithoutJourney === null"><strong>{{ current.dataQuality.activeModelsWithoutJourney === null ? '—' : current.dataQuality.activeModelsWithoutJourney }}</strong><span>موديل نشط بلا رحلة</span><i class="pi pi-chevron-left"></i></button>
           <p>{{ current.dataQuality.modelsWithoutJourneyScopeNote }}</p>
         </article>

@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using ProductionLinePlanner.Application.Common;
 using ProductionLinePlanner.Application.DTOs;
 using ProductionLinePlanner.Application.Engines;
+using ProductionLinePlanner.Application.Services;
 using ProductionLinePlanner.Domain.Entities;
 using ProductionLinePlanner.Domain.Enums;
 using ProductionLinePlanner.Infrastructure.BusinessEngines;
@@ -142,13 +143,36 @@ public sealed class ManufacturingCommandCenterEngineTests
         await using var db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
             .Options);
-        var engine = new ManufacturingCommandCenterEngine(db, new AttendanceStub(new Dictionary<Guid, AttendanceStatusRecord>()));
+        var engine = CreateEngine(db, new AttendanceStub(new Dictionary<Guid, AttendanceStatusRecord>()));
 
         var data = (await engine.GetAsync(new(new DateOnly(2026, 7, 22)))).Value!;
 
         Assert.Equal(0, data.Workforce.AssignmentCoverage.Denominator);
         Assert.Null(data.Workforce.AssignmentCoverage.Percentage);
         Assert.Equal("NoData", data.Workforce.AssignmentCoverage.ZeroBehavior);
+    }
+
+    [Fact]
+    public async Task Untrusted_attendance_never_reports_absence_or_staffing_shortage_as_fact()
+    {
+        await using var fixture = await Fixture.CreateAsync(attendanceTrusted: false);
+
+        var data = (await fixture.Engine.GetAsync(new(fixture.Date))).Value!;
+
+        Assert.False(data.AttendanceSync.IsTrusted);
+        Assert.Null(data.Workforce.PresentWorkers);
+        Assert.Null(data.Workforce.PermanentlyAssignedNotPresentWorkers);
+        Assert.Equal(0, data.Workforce.AssignmentCoverage.Numerator);
+        Assert.Equal(0, data.Workforce.AssignmentCoverage.Denominator);
+        Assert.Empty(data.Workforce.PresentAssignedDetails);
+        Assert.Empty(data.Workforce.PresentUnassignedDetails);
+        Assert.Empty(data.Workforce.AssignedNotPresentDetails);
+        Assert.Null(data.LineSummary.StagesWithoutPresentWorker);
+        Assert.Null(data.DataQuality.ActiveJourneyStagesWithoutPresentWorker);
+        Assert.DoesNotContain(data.DataQuality.Issues, issue => issue.Type == "StageWithoutPresentWorker");
+        Assert.Contains(
+            data.Factories.SelectMany(factory => factory.Departments).SelectMany(department => department.Lines),
+            line => line.Name == "Line B" && line.ReadinessStatus == "AttendanceUntrusted");
     }
 
     private sealed class Fixture : IAsyncDisposable
@@ -184,7 +208,7 @@ public sealed class ManufacturingCommandCenterEngineTests
         private readonly Guid actor;
         private readonly DateTime now;
 
-        public static async Task<Fixture> CreateAsync()
+        public static async Task<Fixture> CreateAsync(bool attendanceTrusted = true)
         {
             var db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>()
                 .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
@@ -242,7 +266,7 @@ public sealed class ManufacturingCommandCenterEngineTests
                 [unassignedPresent.Id] = new(unassignedPresent.Id, AttendanceStatus.Late, now, "test"),
                 [assignedAbsent.Id] = new(assignedAbsent.Id, AttendanceStatus.Absent, now, "test")
             };
-            return new Fixture(db, new ManufacturingCommandCenterEngine(db, new AttendanceStub(attendance)), date, factory, department, lineA, lineB, model, stageA1, subA1, actor, now);
+            return new Fixture(db, CreateEngine(db, new AttendanceStub(attendance), attendanceTrusted), date, factory, department, lineA, lineB, model, stageA1, subA1, actor, now);
         }
 
         public async Task AddApprovedOperationToLineAAsync()
@@ -272,5 +296,34 @@ public sealed class ManufacturingCommandCenterEngineTests
         public Task<Result<AttendanceSyncResultDto>> SyncTodayAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<Result<AttendanceSyncResultDto>> SyncForProductionDateAsync(DateOnly productionDate, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<Result<Dictionary<Guid, AttendancePresenceWindowDto>>> GetPresenceWindowsByWorkerAsync(IEnumerable<Guid> workerIds, DateOnly productionDate, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    }
+
+    private static ManufacturingCommandCenterEngine CreateEngine(
+        AppDbContext db,
+        IAttendanceEngine attendance,
+        bool attendanceTrusted = true) =>
+        new(db, attendance, new FreshnessStub(attendanceTrusted), new WorkdayPolicyStub());
+
+    private sealed class FreshnessStub(bool trusted) : IAttendanceFreshnessEngine
+    {
+        public Task<AttendanceSyncFreshnessDto> GetAsync(DateOnly operationalDate, DateTime asOfUtc, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new AttendanceSyncFreshnessDto(
+                trusted ? "Fresh" : "Stale",
+                trusted,
+                asOfUtc,
+                trusted ? asOfUtc : asOfUtc.AddMinutes(-30),
+                null,
+                trusted ? 0 : 30));
+    }
+
+    private sealed class WorkdayPolicyStub : IAttendanceWorkdayPolicy
+    {
+        public DateOnly GetOperationalDate(DateTime asOfUtc) => DateOnly.FromDateTime(asOfUtc);
+        public AttendanceWorkdayWindow GetWindow(DateOnly operationalDate)
+        {
+            var start = DateTime.SpecifyKind(operationalDate.ToDateTime(TimeOnly.MinValue), DateTimeKind.Utc);
+            return new AttendanceWorkdayWindow(operationalDate, start, start.AddDays(1), start, start.AddDays(1));
+        }
+        public DateTime GetShiftStartLocal(DateOnly operationalDate) => operationalDate.ToDateTime(TimeOnly.MinValue);
     }
 }

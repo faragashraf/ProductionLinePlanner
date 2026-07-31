@@ -37,6 +37,27 @@ describe('DashboardPageComponent', () => {
     expect(api.load).toHaveBeenCalledTimes(2);
   });
 
+  it('coalesces realtime events while a refresh is running instead of cancelling it repeatedly', async () => {
+    const api = jasmine.createSpyObj<ManufacturingCommandCenterApiService>('api', ['load']);
+    const realtime = jasmine.createSpyObj<ManufacturingRealtimeService>('realtime', ['watchScreen']);
+    const runningRefresh = new Subject<ManufacturingCommandCenter>();
+    let refresh: (() => void) | undefined;
+    realtime.watchScreen.and.callFake(watch => { refresh = watch.refresh; return () => undefined; });
+    api.load.and.returnValues(of(sampleData()), runningRefresh, of(sampleData()));
+    const component = new DashboardPageComponent(api, realtime);
+    component.ngOnInit();
+
+    refresh?.();
+    refresh?.();
+    refresh?.();
+
+    expect(api.load).toHaveBeenCalledTimes(2);
+    runningRefresh.next(sampleData());
+    runningRefresh.complete();
+    await Promise.resolve();
+    expect(api.load).toHaveBeenCalledTimes(3);
+  });
+
   it('shows an explicit initial API error instead of fallback figures', () => {
     const api = jasmine.createSpyObj<ManufacturingCommandCenterApiService>('api', ['load']);
     const realtime = jasmine.createSpyObj<ManufacturingRealtimeService>('realtime', ['watchScreen']);
@@ -103,6 +124,26 @@ describe('DashboardPageComponent', () => {
     expect(component.lineDimensions(draft).map(dimension => dimension.key)).toEqual(['execution', 'route', 'staffing', 'data']);
     expect(component.lineDimensions(draft).find(dimension => dimension.key === 'execution')?.value).toBe('مسودة تحتاج استكمالًا');
   });
+
+  it('turns attendance-derived indicators into unknown values when attendance is untrusted', () => {
+    const api = jasmine.createSpyObj<ManufacturingCommandCenterApiService>('api', ['load']);
+    const realtime = jasmine.createSpyObj<ManufacturingRealtimeService>('realtime', ['watchScreen']);
+    realtime.watchScreen.and.returnValue(() => undefined);
+    const response = sampleData();
+    response.attendanceSync = { ...response.attendanceSync, status: 'Stale', isTrusted: false, ageMinutes: 30 };
+    response.workforce.presentWorkers = null;
+    response.workforce.permanentlyAssignedNotPresentWorkers = null;
+    response.lineSummary.stagesWithoutPresentWorker = null;
+    response.dataQuality.activeJourneyStagesWithoutPresentWorker = null;
+    api.load.and.returnValue(of(response));
+    const component = new DashboardPageComponent(api, realtime);
+
+    component.ngOnInit();
+
+    expect(component.metricText(component.data!.workforce.presentWorkers)).toBe('غير مؤكد');
+    expect(component.decisionIndicators[0].value).toBe('غير مؤكدة');
+    expect(component.decisionIndicators[0].context).toContain('مزامنة حضور موثوقة');
+  });
 });
 
 function operation(status: CommandCenterOperation['status']): CommandCenterOperation {
@@ -128,13 +169,14 @@ function sampleData(): ManufacturingCommandCenter {
   return {
     scope: { productionDate: '2026-07-22', factoryId: null, departmentId: null, productionLineId: null, operationStatus: 'All', description: 'scope' },
     filterCatalog: { factories: [], departments: [], lines: [] },
+    attendanceSync: { status: 'Fresh', isTrusted: true, lastAttemptAtUtc: '2026-07-22T08:00:00Z', lastSuccessfulAtUtc: '2026-07-22T08:00:00Z', lastErrorCode: null, ageMinutes: 0 },
     workforce: {
       activeWorkers: 3, presentWorkers: 1, presentPermanentlyAssignedWorkers: 0, presentUnassignedWorkers: 1, permanentlyAssignedNotPresentWorkers: 0,
       assignmentCoverage: { numerator: 0, denominator: 0, percentage: null, scope: 'scope', date: '2026-07-22', zeroBehavior: 'NoData' },
       attendanceEvidenceComplete: true, attributionNote: 'note', presentAssignedDetails: [],
       presentUnassignedDetails: [{ workerId: 'w2', workerCode: '2', workerName: 'عامل', attendanceStatus: 'Present', permanentAssignments: [] }], assignedNotPresentDetails: []
     },
-    lineSummary: { activeLines: 1, readyLines: 0, staffingShortageLines: 0, journeyNotConfiguredLines: 0, dataIncompleteLines: 0, problemLines: 1, stagesWithoutPresentWorker: 0 },
+    lineSummary: { activeLines: 1, readyLines: 0, noOperationLines: 1, staffingShortageLines: 0, journeyNotConfiguredLines: 0, dataIncompleteLines: 0, attendanceUntrustedLines: 0, problemLines: 1, stagesWithoutPresentWorker: 0 },
     operations: { linesWithOperation: 0, linesWithoutOperation: 1, draftOperations: 0, approvedOperations: 0, approvalCancelledOperations: 0, cancelledOperations: 0, approvedRecordedValue: 0, items: [] },
     dataQuality: { modelStagesWithoutPrice: 0, modelStagesWithoutStandardTime: 0, activeJourneyStagesWithoutPresentWorker: 0, activeModelsWithoutJourney: 0, issues: [], modelsWithoutJourneyScopeNote: '' },
     factories: [], calculatedAtUtc: '2026-07-22T08:00:00Z'

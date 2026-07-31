@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using ProductionLinePlanner.Application.Common;
 using ProductionLinePlanner.Application.DTOs;
 using ProductionLinePlanner.Application.Engines;
+using ProductionLinePlanner.Application.Services;
 using ProductionLinePlanner.Domain.Enums;
 using ProductionLinePlanner.Infrastructure.Data;
 
@@ -9,7 +10,9 @@ namespace ProductionLinePlanner.Infrastructure.BusinessEngines;
 
 public sealed class ManufacturingCommandCenterEngine(
     AppDbContext db,
-    IAttendanceEngine attendanceEngine) : IManufacturingCommandCenterEngine
+    IAttendanceEngine attendanceEngine,
+    IAttendanceFreshnessEngine attendanceFreshnessEngine,
+    IAttendanceWorkdayPolicy workdayPolicy) : IManufacturingCommandCenterEngine
 {
     private const string AllStatuses = "All";
     private static readonly string[] SupportedOperationStatuses =
@@ -28,6 +31,15 @@ public sealed class ManufacturingCommandCenterEngine(
         }
 
         var calculatedAtUtc = DateTime.UtcNow;
+        var currentOperationalDate = workdayPolicy.GetOperationalDate(calculatedAtUtc);
+        var freshnessAsOfUtc = query.ProductionDate < currentOperationalDate
+            ? workdayPolicy.GetWindow(query.ProductionDate).EndUtc
+            : calculatedAtUtc;
+        var attendanceFreshness = await attendanceFreshnessEngine.GetAsync(
+            query.ProductionDate,
+            freshnessAsOfUtc,
+            cancellationToken);
+        var attendanceTrusted = attendanceFreshness.IsTrusted;
         var factories = await db.Factories.AsNoTracking()
             .Where(factory => factory.IsActive)
             .OrderBy(factory => factory.Name)
@@ -203,11 +215,11 @@ public sealed class ManufacturingCommandCenterEngine(
             ? presentWorkerIds.Where(id => !allActiveAssignedWorkerIds.Contains(id)).ToHashSet()
             : [];
         var coverage = Ratio(
-            assignedPresentIds.Count,
-            attributionComplete ? presentWorkerIds.Count : 0,
+            attendanceTrusted ? assignedPresentIds.Count : 0,
+            attributionComplete && attendanceTrusted ? presentWorkerIds.Count : 0,
             ScopeDescription(query, operationStatus),
             query.ProductionDate,
-            attributionComplete);
+            attributionComplete && attendanceTrusted);
 
         var modelIds = operationRows.Select(operation => operation.ProductModelId).Distinct().ToArray();
         var journeyRows = modelIds.Length == 0 || scopedLineIds.Length == 0
@@ -270,6 +282,7 @@ public sealed class ManufacturingCommandCenterEngine(
                 recordsByOrder.GetValueOrDefault(operation.Id, []),
                 assignments,
                 presentWorkerIds,
+                attendanceTrusted,
                 query.ProductionDate,
                 ScopeDescription(query, operationStatus)))
             .ToArray();
@@ -282,7 +295,10 @@ public sealed class ManufacturingCommandCenterEngine(
         {
             var lineOperations = operationsByLine.GetValueOrDefault(line.Id, []);
             var lineAssignments = assignmentsByLine.GetValueOrDefault(line.Id, []);
-            var stages = lineOperations.SelectMany(operation => operation.Stages).ToArray();
+            var stages = lineOperations.SelectMany(operation => operation.Stages)
+                .GroupBy(stage => stage.ProductModelStageId)
+                .Select(group => group.First())
+                .ToArray();
             var hasJourney = lineOperations.Length > 0
                 ? stages.Length > 0
                 : availableJourneyLineIds.Contains(line.Id);
@@ -291,10 +307,16 @@ public sealed class ManufacturingCommandCenterEngine(
             if (!hasJourney) alerts.Add("لا توجد رحلة موديل قابلة للتشغيل على الخط.");
             var incompleteStages = stages.Count(stage => !stage.HasPrice || !stage.HasStandardTime);
             if (incompleteStages > 0) alerts.Add($"{incompleteStages} مرحلة ببيانات سعر أو زمن غير مكتملة.");
-            var stagesWithoutPresent = stages.Count(stage => stage.PresentPermanentlyAssignedWorkers == 0);
-            if (stagesWithoutPresent > 0) alerts.Add($"{stagesWithoutPresent} مرحلة مطلوبة بلا عامل حاضر مسكن دائم.");
-            var understaffedStages = stages.Count(stage => stage.PresentPermanentlyAssignedWorkers < stage.RequiredWorkers);
-            if (understaffedStages > 0) alerts.Add($"{understaffedStages} مرحلة دون تغطية الحضور المطلوبة.");
+            var stagesWithoutPresent = attendanceTrusted
+                ? stages.Count(stage => stage.PresentPermanentlyAssignedWorkers == 0)
+                : 0;
+            if (attendanceTrusted && stagesWithoutPresent > 0)
+                alerts.Add($"{stagesWithoutPresent} مرحلة مطلوبة بلا عامل حاضر مسكن دائم.");
+            var understaffedStages = attendanceTrusted
+                ? stages.Count(stage => stage.PresentPermanentlyAssignedWorkers < stage.RequiredWorkers)
+                : 0;
+            if (attendanceTrusted && understaffedStages > 0)
+                alerts.Add($"{understaffedStages} مرحلة دون تغطية الحضور المطلوبة.");
 
             var readinessStatus = !hasJourney
                     ? "JourneyNotConfigured"
@@ -302,6 +324,8 @@ public sealed class ManufacturingCommandCenterEngine(
                     ? "NoOperation"
                     : incompleteStages > 0
                         ? "DataIncomplete"
+                        : !attendanceTrusted
+                            ? "AttendanceUntrusted"
                         : understaffedStages > 0
                             ? "StaffingShortage"
                             : "Ready";
@@ -333,7 +357,7 @@ public sealed class ManufacturingCommandCenterEngine(
         // Data-quality warnings describe the active configured journeys in scope, not only
         // the model selected by a persisted order. A configured line with no order must not
         // hide a missing price or standard time.
-        var qualityIssues = BuildQualityIssues(commandLines, configurationJourneyRows, scopedLines);
+        var qualityIssues = BuildQualityIssues(commandLines, configurationJourneyRows, scopedLines, attendanceTrusted);
         int? modelsWithoutJourney = null;
         var modelsWithoutJourneyScopeNote = "متاح فقط في نطاق كل المصانع لأن الموديل بلا رحلة لا يمكن نسبه إلى مصنع أو خط.";
         if (!query.FactoryId.HasValue && !query.DepartmentId.HasValue && !query.ProductionLineId.HasValue
@@ -362,20 +386,24 @@ public sealed class ManufacturingCommandCenterEngine(
         var workforce = new CommandCenterWorkforceDto
         {
             ActiveWorkers = attributionComplete ? attendanceWorkers.Length : null,
-            PresentWorkers = presentWorkers,
-            PresentPermanentlyAssignedWorkers = assignedPresentIds.Count,
-            PresentUnassignedWorkers = attributionComplete ? presentUnassignedIds.Count : null,
-            PermanentlyAssignedNotPresentWorkers = assignedNotPresentIds.Count,
+            PresentWorkers = attendanceTrusted ? presentWorkers : null,
+            PresentPermanentlyAssignedWorkers = attendanceTrusted ? assignedPresentIds.Count : null,
+            PresentUnassignedWorkers = attributionComplete && attendanceTrusted ? presentUnassignedIds.Count : null,
+            PermanentlyAssignedNotPresentWorkers = attendanceTrusted ? assignedNotPresentIds.Count : null,
             AssignmentCoverage = coverage,
-            AttendanceEvidenceComplete = attendance.Count == attendanceWorkers.Length,
+            AttendanceEvidenceComplete = attendanceTrusted && attendance.Count == attendanceWorkers.Length,
             AttributionNote = attributionComplete
                 ? "الحاضر غير المسكن محسوب من كل العمال النشطين مقابل التسكين الدائم فقط."
                 : "لا توجد علاقة موثوقة تربط العامل غير المسكن بقسم أو خط؛ لذلك لا يُنسب هذا العدد إلى النطاق المحدد.",
-            PresentAssignedDetails = WorkerDetails(assignedPresentIds, workerById, attendance, assignments),
-            PresentUnassignedDetails = attributionComplete
+            PresentAssignedDetails = attendanceTrusted
+                ? WorkerDetails(assignedPresentIds, workerById, attendance, assignments)
+                : [],
+            PresentUnassignedDetails = attributionComplete && attendanceTrusted
                 ? WorkerDetails(presentUnassignedIds, workerById, attendance, [])
                 : [],
-            AssignedNotPresentDetails = WorkerDetails(assignedNotPresentIds, workerById, attendance, assignments)
+            AssignedNotPresentDetails = attendanceTrusted
+                ? WorkerDetails(assignedNotPresentIds, workerById, attendance, assignments)
+                : []
         };
 
         var factoriesHierarchy = BuildHierarchy(
@@ -389,12 +417,18 @@ public sealed class ManufacturingCommandCenterEngine(
         var lineSummary = new CommandCenterLineSummaryDto(
             commandLines.Length,
             commandLines.Count(line => line.ReadinessStatus == "Ready"),
+            commandLines.Count(line => line.ReadinessStatus == "NoOperation"),
             commandLines.Count(line => line.ReadinessStatus == "StaffingShortage"),
             commandLines.Count(line => line.ReadinessStatus == "JourneyNotConfigured"),
             commandLines.Count(line => line.ReadinessStatus == "DataIncomplete"),
+            commandLines.Count(line => line.ReadinessStatus == "AttendanceUntrusted"),
             commandLines.Count(IsProblemLine),
-            commandLines.SelectMany(line => line.Operations).SelectMany(operation => operation.Stages)
-                .Count(stage => stage.PresentPermanentlyAssignedWorkers == 0));
+            attendanceTrusted
+                ? commandLines.SelectMany(line => line.Operations
+                    .SelectMany(operation => operation.Stages.Select(stage => new { line.Id, Stage = stage })))
+                    .GroupBy(item => new { item.Id, item.Stage.ProductModelStageId })
+                    .Count(group => group.First().Stage.PresentPermanentlyAssignedWorkers == 0)
+                : null);
         var operationsSummary = new CommandCenterOperationsSummaryDto(
             commandOperations.Select(operation => operation.ProductionLineId).Distinct().Count(),
             commandLines.Count(line => line.Operations.Count == 0),
@@ -407,7 +441,7 @@ public sealed class ManufacturingCommandCenterEngine(
         var dataQuality = new CommandCenterDataQualityDto(
             qualityIssues.Count(issue => issue.Type == "MissingPrice"),
             qualityIssues.Count(issue => issue.Type == "MissingStandardTime"),
-            qualityIssues.Count(issue => issue.Type == "StageWithoutPresentWorker"),
+            attendanceTrusted ? qualityIssues.Count(issue => issue.Type == "StageWithoutPresentWorker") : null,
             modelsWithoutJourney,
             qualityIssues,
             modelsWithoutJourneyScopeNote);
@@ -425,6 +459,7 @@ public sealed class ManufacturingCommandCenterEngine(
                 factories.Select(factory => new CommandCenterFactoryOptionDto(factory.Id, factory.Name, factory.Code)).ToArray(),
                 departments.Select(department => new CommandCenterDepartmentOptionDto(department.Id, department.FactoryId, department.Name, department.Code)).ToArray(),
                 catalogLines.Select(line => new CommandCenterLineOptionDto(line.Id, line.FactoryId, line.DepartmentId, line.Name, line.Code)).ToArray()),
+            AttendanceSync = attendanceFreshness,
             Workforce = workforce,
             LineSummary = lineSummary,
             Operations = operationsSummary,
@@ -441,6 +476,7 @@ public sealed class ManufacturingCommandCenterEngine(
         IReadOnlyCollection<ProductionRecordRow> records,
         IReadOnlyCollection<AssignmentRow> assignments,
         IReadOnlySet<Guid> presentWorkerIds,
+        bool attendanceTrusted,
         DateOnly productionDate,
         string scope)
     {
@@ -463,8 +499,8 @@ public sealed class ManufacturingCommandCenterEngine(
             var alerts = new List<string>();
             if (stage.PiecePrice <= 0) alerts.Add("السعر غير مسجل.");
             if (!stage.StandardSeconds.HasValue || stage.StandardSeconds <= 0) alerts.Add("الزمن المعياري غير مسجل.");
-            if (presentCount == 0) alerts.Add("لا يوجد عامل حاضر مسكن دائم.");
-            else if (presentCount < stage.Capacity) alerts.Add($"الحضور يغطي {presentCount} من احتياج {stage.Capacity}.");
+            if (attendanceTrusted && presentCount == 0) alerts.Add("لا يوجد عامل حاضر مسكن دائم.");
+            else if (attendanceTrusted && presentCount < stage.Capacity) alerts.Add($"الحضور يغطي {presentCount} من احتياج {stage.Capacity}.");
             if (!registeredStageIds.Contains(stage.Id)) alerts.Add("لم تُسجل المرحلة في تشغيل اليوم.");
             return new CommandCenterStageDto(
                 stage.Id,
@@ -509,7 +545,8 @@ public sealed class ManufacturingCommandCenterEngine(
     private static List<CommandCenterQualityIssueDto> BuildQualityIssues(
         IReadOnlyCollection<CommandCenterLineDto> lines,
         IReadOnlyCollection<JourneyStageRow> journeyRows,
-        IReadOnlyCollection<LineRow> lineRows)
+        IReadOnlyCollection<LineRow> lineRows,
+        bool attendanceTrusted)
     {
         var lineById = lineRows.ToDictionary(line => line.Id);
         var issues = new List<CommandCenterQualityIssueDto>();
@@ -524,19 +561,23 @@ public sealed class ManufacturingCommandCenterEngine(
             if (!stage.StandardSeconds.HasValue || stage.StandardSeconds <= 0)
                 issues.Add(Issue("MissingStandardTime", stage, line, "مرحلة بلا زمن معياري", $"{stage.MainStageName} / {stage.StageName}"));
         }
-        foreach (var line in lines)
-        foreach (var operation in line.Operations)
-        foreach (var stage in operation.Stages.Where(stage => stage.PresentPermanentlyAssignedWorkers == 0))
+        foreach (var item in attendanceTrusted
+                     ? lines.SelectMany(line => line.Operations.SelectMany(operation => operation.Stages
+                         .Where(stage => stage.PresentPermanentlyAssignedWorkers == 0)
+                         .Select(stage => new { Line = line, Operation = operation, Stage = stage })))
+                         .GroupBy(item => new { item.Line.Id, item.Stage.ProductModelStageId })
+                         .Select(group => group.First())
+                     : [])
         {
             issues.Add(new CommandCenterQualityIssueDto(
                 "StageWithoutPresentWorker",
-                $"{line.Name} - {stage.StageName}",
-                $"{operation.ProductModelCode}: مرحلة مطلوبة بلا عامل حاضر مسكن دائم.",
-                line.FactoryId,
-                line.DepartmentId,
-                line.Id,
-                operation.ProductModelId,
-                stage.ProductModelStageId));
+                $"{item.Line.Name} - {item.Stage.StageName}",
+                $"{item.Operation.ProductModelCode}: مرحلة مطلوبة بلا عامل حاضر مسكن دائم.",
+                item.Line.FactoryId,
+                item.Line.DepartmentId,
+                item.Line.Id,
+                item.Operation.ProductModelId,
+                item.Stage.ProductModelStageId));
         }
         foreach (var line in lineRows.Where(line => line.DepartmentId is null))
         {

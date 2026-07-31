@@ -41,6 +41,7 @@ type WorkspaceScrollPosition = { stageList: number; selectedPanel: number };
 type StaffingSection = 'choices' | 'summary' | 'stages' | 'workers';
 type AssignmentLineOption = { id: string; name: string };
 type DialogFilterOption = { label: string; value: string };
+type WorkerSelectionFilter = 'all' | 'selected';
 
 @Component({
   selector: 'app-line-staffing-workspace-page',
@@ -92,6 +93,7 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
   workerSearch = '';
   departmentFilter = '';
   assignmentLineFilter = 'all';
+  workerSelectionFilter: WorkerSelectionFilter = 'all';
   dialogWorkers: LineStaffingWorker[] = [];
   departmentFilterOptions: DialogFilterOption[] = [
     { label: 'كل الأقسام', value: '' },
@@ -293,6 +295,11 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
           worker.departmentName === this.departmentFilter,
       )
       .filter(worker => this.matchesAssignmentLineFilter(worker))
+      .filter(
+        worker =>
+          this.workerSelectionFilter === 'all' ||
+          this.isDefaultWorkerSelected(worker),
+      )
       .filter(
         (worker) =>
           !search ||
@@ -718,6 +725,12 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
     this.expandedWorkerIds = new Set<string>();
   }
 
+  setWorkerSelectionFilter(filter: WorkerSelectionFilter): void {
+    if (filter === this.workerSelectionFilter) return;
+    this.workerSelectionFilter = filter;
+    this.expandedWorkerIds = new Set<string>();
+  }
+
   isWorkerAssignmentExpanded(worker: LineStaffingWorker): boolean {
     return this.expandedWorkerIds.has(worker.workerId);
   }
@@ -894,7 +907,7 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
             workers: refreshedStage.workers,
           };
           if (this.assignmentDialogVisible && this.isBulkDefaultAssignmentDialog) {
-            this.loadActiveStaffingWorkers();
+            this.loadActiveStaffingWorkers(false);
           }
           this.clearRemoteUpdateNotice();
         },
@@ -930,7 +943,7 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
           return;
         }
         if (this.assignmentDialogVisible && change?.productionLineId !== this.selectedProductionLineId) {
-          this.loadActiveStaffingWorkers();
+          this.loadActiveStaffingWorkers(false);
           return;
         }
         this.handleLineStaffingRealtimeChange(change?.subStageId ?? '');
@@ -946,6 +959,11 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
     }
     if (this.planLoading) {
       this.realtimeRefreshQueued = true;
+      return;
+    }
+    const stageId = this.selectedSubStageId;
+    if (stageId) {
+      this.refreshStageAfterAssignment(stageId);
       return;
     }
     this.loadProductStages(true, true);
@@ -1257,15 +1275,21 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
     return [];
   }
 
-  private loadActiveStaffingWorkers(): void {
+  private loadActiveStaffingWorkers(showLoading = true): void {
+    if (!showLoading && this.workerDirectoryLoading) return;
     const requestVersion = ++this.workerDirectoryRequestVersion;
-    this.workerDirectoryLoading = true;
-    this.workerDirectoryError = '';
+    if (showLoading) {
+      this.workerDirectoryLoading = true;
+      this.workerDirectoryError = '';
+    }
     this.assignments
       .getActiveLineStaffingWorkers(this.staffingReferenceDate)
       .pipe(
         finalize(() => {
-          if (requestVersion === this.workerDirectoryRequestVersion)
+          if (
+            showLoading &&
+            requestVersion === this.workerDirectoryRequestVersion
+          )
             this.workerDirectoryLoading = false;
         }),
         takeUntil(this.destroy$),
@@ -1277,10 +1301,12 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
             ...worker,
             departmentName: worker.departmentName?.trim() || null,
           }));
+          this.workerDirectoryError = '';
           this.refreshDialogFilterOptions();
         },
         error: (error) => {
           if (requestVersion !== this.workerDirectoryRequestVersion) return;
+          if (!showLoading) return;
           this.workerDirectoryError = this.formValidation.serverMessage(
             error,
             'تعذر تحميل دليل العمال بالخدمة الفعالة. أعد المحاولة.',
@@ -1888,6 +1914,7 @@ export class LineStaffingWorkspacePageComponent implements OnInit, OnDestroy {
   private resetDialogFilters(): void {
     this.departmentFilter = '';
     this.assignmentLineFilter = 'all';
+    this.workerSelectionFilter = 'all';
     this.departmentFilterOptions = [{ label: 'كل الأقسام', value: '' }];
     this.assignmentLineFilterOptions = [
       { label: 'كل خطوط الإنتاج', value: 'all' },

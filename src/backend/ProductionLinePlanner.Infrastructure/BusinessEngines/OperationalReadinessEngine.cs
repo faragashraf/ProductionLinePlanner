@@ -16,7 +16,8 @@ public sealed class OperationalReadinessEngine(
     IOptions<AttendanceSourceOptions> sourceOptions,
     ICairoTimeZoneProvider cairoTimeZoneProvider,
     IAttendanceEngine? attendanceEngine = null,
-    IAttendanceWorkdayPolicy? attendanceWorkdayPolicy = null) : IOperationalReadinessEngine
+    IAttendanceWorkdayPolicy? attendanceWorkdayPolicy = null,
+    IAttendanceFreshnessEngine? attendanceFreshnessEngine = null) : IOperationalReadinessEngine
 {
     private readonly AttendanceSourceOptions options = sourceOptions.Value;
     private readonly IAttendanceWorkdayPolicy workdayPolicy = attendanceWorkdayPolicy ??
@@ -27,6 +28,11 @@ public sealed class OperationalReadinessEngine(
             null!,
             dbContext,
             cairoTimeZoneProvider,
+            attendanceWorkdayPolicy ?? new AttendanceWorkdayPolicy(sourceOptions, cairoTimeZoneProvider));
+    private readonly IAttendanceFreshnessEngine freshnessEngine = attendanceFreshnessEngine ??
+        new AttendanceFreshnessEngine(
+            dbContext,
+            sourceOptions,
             attendanceWorkdayPolicy ?? new AttendanceWorkdayPolicy(sourceOptions, cairoTimeZoneProvider));
 
     public async Task<Result<OperationalReadinessSnapshotDto>> GetSnapshotAsync(
@@ -40,7 +46,7 @@ public sealed class OperationalReadinessEngine(
         if (factoryId.HasValue && structure.Factories.All(factory => factory.Id != factoryId.Value))
             return Result<OperationalReadinessSnapshotDto>.Failure(new Error("NotFound", "Factory not found."));
 
-        var freshness = await GetFreshnessAsync(operationalDate, asOf, cancellationToken);
+        var freshness = await freshnessEngine.GetAsync(operationalDate, asOf, cancellationToken);
         var evidence = await LoadAttendanceEvidenceAsync(
             structure.Assignments.Select(item => item.WorkerId), operationalDate, freshness.IsTrusted, cancellationToken);
         var states = evidence.ToDictionary(
@@ -140,7 +146,7 @@ public sealed class OperationalReadinessEngine(
 
         var structure = await LoadStructureAsync(line.FactoryId, asOf, cancellationToken);
         var operationalDate = workdayPolicy.GetOperationalDate(asOf);
-        var freshness = await GetFreshnessAsync(operationalDate, asOf, cancellationToken);
+        var freshness = await freshnessEngine.GetAsync(operationalDate, asOf, cancellationToken);
         var assignments = structure.Assignments.Where(item => item.ProductionLineId == productionLineId).ToArray();
         var evidence = await LoadAttendanceEvidenceAsync(
             assignments.Select(item => item.WorkerId), operationalDate, freshness.IsTrusted, cancellationToken);
@@ -248,7 +254,7 @@ public sealed class OperationalReadinessEngine(
                                      select new WorkerContext(worker.Id, worker.EmployeeCode, worker.FullName))
             .Distinct().ToArrayAsync(cancellationToken);
         var operationalDate = workdayPolicy.GetOperationalDate(asOf);
-        var freshness = await GetFreshnessAsync(operationalDate, asOf, cancellationToken);
+        var freshness = await freshnessEngine.GetAsync(operationalDate, asOf, cancellationToken);
         var evidence = await LoadAttendanceEvidenceAsync(
             assignedWorkers.Select(worker => worker.Id), operationalDate, freshness.IsTrusted, cancellationToken);
 
@@ -286,7 +292,7 @@ public sealed class OperationalReadinessEngine(
     {
         var asOf = DateTime.UtcNow;
         var operationalDate = workdayPolicy.GetOperationalDate(asOf);
-        var freshness = await GetFreshnessAsync(operationalDate, asOf, cancellationToken);
+        var freshness = await freshnessEngine.GetAsync(operationalDate, asOf, cancellationToken);
         if (change.EntityType == ManufacturingEntityType.AttendanceSyncState)
         {
             return Result<OperationalReadinessDeltaDto>.Success(new OperationalReadinessDeltaDto(
@@ -427,42 +433,6 @@ public sealed class OperationalReadinessEngine(
             .Distinct().ToArrayAsync(cancellationToken);
 
         return new StructureContext(factories, departments, lines, assignments, stageCatalog);
-    }
-
-    private async Task<AttendanceSyncFreshnessDto> GetFreshnessAsync(
-        DateOnly operationalDate,
-        DateTime asOfUtc,
-        CancellationToken cancellationToken)
-    {
-        var window = workdayPolicy.GetWindow(operationalDate);
-        var state = await dbContext.AttendanceSyncStates.AsNoTracking()
-            .SingleOrDefaultAsync(item => item.SourceName == options.SourceName && item.OperationalDate == operationalDate, cancellationToken);
-        if (state is null)
-        {
-            var latestImportedRecordAtUtc = await dbContext.AttendanceRecords.AsNoTracking()
-                .Where(record => record.AttendanceTimeUtc >= window.StartUtc && record.AttendanceTimeUtc < window.EndUtc)
-                .MaxAsync(record => (DateTime?)record.CreatedAtUtc, cancellationToken);
-            if (!latestImportedRecordAtUtc.HasValue)
-                return new AttendanceSyncFreshnessDto("NeverSynced", false, null, null, null, null);
-
-            var recordAge = Math.Max(
-                0,
-                (int)Math.Floor((asOfUtc - DateTime.SpecifyKind(latestImportedRecordAtUtc.Value, DateTimeKind.Utc)).TotalMinutes));
-            return new AttendanceSyncFreshnessDto("RecordsAvailable", true, null, null, null, recordAge);
-        }
-
-        var age = state.LastSuccessfulAtUtc.HasValue
-            ? Math.Max(0, (int)Math.Floor((asOfUtc - DateTime.SpecifyKind(state.LastSuccessfulAtUtc.Value, DateTimeKind.Utc)).TotalMinutes))
-            : (int?)null;
-        var trusted = state.LastAttemptSucceeded && age.HasValue && age.Value <= options.FreshnessThresholdMinutes;
-        var status = !state.LastAttemptSucceeded ? "Failed" : trusted ? "Fresh" : "Stale";
-        return new AttendanceSyncFreshnessDto(
-            status,
-            trusted,
-            state.LastAttemptAtUtc,
-            state.LastSuccessfulAtUtc,
-            state.LastErrorCode,
-            age);
     }
 
     private async Task<Dictionary<Guid, AttendanceEvidence>> LoadAttendanceEvidenceAsync(

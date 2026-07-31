@@ -71,10 +71,13 @@ export class FactoryReadinessStore {
 
   private readonly seenDeltaIds = new Set<string>();
   private pendingChildLoads = 0;
+  private backgroundSnapshotLoading = false;
 
   constructor(private readonly api: OperationalReadinessApiService) {}
 
   loadSnapshot(background = false): void {
+    if (background && this.backgroundSnapshotLoading) return;
+    if (background) this.backgroundSnapshotLoading = true;
     if (!background || !this.snapshot()) this.loading.set(true);
     this.loadError.set(null);
     this.api.loadSnapshot().pipe(
@@ -82,7 +85,10 @@ export class FactoryReadinessStore {
         this.loadError.set('تعذر تحميل خريطة الجاهزية الحالية.');
         return EMPTY;
       }),
-      finalize(() => this.loading.set(false))
+      finalize(() => {
+        this.loading.set(false);
+        if (background) this.backgroundSnapshotLoading = false;
+      })
     ).subscribe(snapshot => {
       this.snapshot.set(snapshot);
       this.realtimeDegraded.set(false);
@@ -93,9 +99,7 @@ export class FactoryReadinessStore {
         const stageId = this.selectedStageId();
         const canLoadStages = lineId && ((line?.models.length ?? 0) <= 1 || !!this.selectedModelId());
         if (canLoadStages) {
-          this.stages.set(null);
-          this.workerResult.set(null);
-          this.loadStages(lineId!, stageId, this.selectedModelId());
+          this.loadStages(lineId!, stageId, this.selectedModelId(), true);
         }
       }
     });
@@ -244,20 +248,29 @@ export class FactoryReadinessStore {
     }
   }
 
-  private loadStages(lineId: string, stageToReload: string | null = null, productModelId: string | null = null): void {
-    this.beginChildLoad();
+  private loadStages(
+    lineId: string,
+    stageToReload: string | null = null,
+    productModelId: string | null = null,
+    background = false
+  ): void {
+    const showLoading = !background || !this.stages();
+    if (showLoading) this.beginChildLoad();
     this.childrenError.set(null);
     this.api.loadStages(lineId, productModelId).pipe(
       catchError(() => {
-        this.childrenError.set('تعذر تحميل مراحل الخط.');
+        if (!this.stages()) this.childrenError.set('تعذر تحميل مراحل الخط.');
         return EMPTY;
       }),
-      finalize(() => this.endChildLoad())
+      finalize(() => {
+        if (showLoading) this.endChildLoad();
+      })
     ).subscribe(result => {
       if (this.selectedLineId() !== lineId) return;
+      if (productModelId && this.selectedModelId() !== productModelId) return;
       this.stages.set(result);
       if (!stageToReload) return;
-      if (result.stages.some(stage => stage.id === stageToReload)) this.loadWorkers(lineId, stageToReload);
+      if (result.stages.some(stage => stage.id === stageToReload)) this.loadWorkers(lineId, stageToReload, background);
       else {
         this.selectedStageId.set(null);
         this.workerResult.set(null);
@@ -265,15 +278,18 @@ export class FactoryReadinessStore {
     });
   }
 
-  private loadWorkers(lineId: string, stageId: string): void {
-    this.beginChildLoad();
+  private loadWorkers(lineId: string, stageId: string, background = false): void {
+    const showLoading = !background || !this.workerResult();
+    if (showLoading) this.beginChildLoad();
     this.childrenError.set(null);
     this.api.loadWorkers(lineId, stageId).pipe(
       catchError(() => {
-        this.childrenError.set('تعذر تحميل العمال المسكنين في المرحلة.');
+        if (!this.workerResult()) this.childrenError.set('تعذر تحميل العمال المسكنين في المرحلة.');
         return EMPTY;
       }),
-      finalize(() => this.endChildLoad())
+      finalize(() => {
+        if (showLoading) this.endChildLoad();
+      })
     ).subscribe(result => {
       if (this.selectedLineId() === lineId && this.selectedStageId() === stageId) {
         this.workerResult.set({ ...result, workers: this.sortWorkers(result.workers) });

@@ -1,4 +1,4 @@
-import { of } from 'rxjs';
+import { Subject, of, throwError } from 'rxjs';
 import { OperationalReadinessApiService } from '../../core/services/operational-readiness-api.service';
 import {
   AttendanceSyncFreshness,
@@ -93,6 +93,62 @@ describe('FactoryReadinessStore', () => {
     expect(api.loadStages).toHaveBeenCalledOnceWith('line-1', 'model-1');
     expect(api.loadWorkers).toHaveBeenCalledOnceWith('line-1', 'stage-1');
     expect(store.selectedStage()?.id).toBe('stage-1');
+  });
+
+  it('keeps the open stages and workers mounted throughout a background reconciliation', () => {
+    openWorkers(store);
+    const visibleStages = store.stages();
+    const visibleWorkers = store.workerResult();
+    const snapshotRefresh = new Subject<OperationalReadinessSnapshot>();
+    const stagesRefresh = new Subject<OperationalReadinessStages>();
+    const workersRefresh = new Subject<OperationalReadinessWorkers>();
+    api.loadSnapshot.and.returnValue(snapshotRefresh);
+    api.loadStages.and.returnValue(stagesRefresh);
+    api.loadWorkers.and.returnValue(workersRefresh);
+
+    store.loadSnapshot(true);
+    expect(store.stages()).toBe(visibleStages);
+    expect(store.workerResult()).toBe(visibleWorkers);
+    expect(store.loadingChildren()).toBeFalse();
+
+    snapshotRefresh.next(snapshot());
+    expect(store.stages()).toBe(visibleStages);
+    expect(store.workerResult()).toBe(visibleWorkers);
+
+    stagesRefresh.next(stages());
+    expect(store.stages()).not.toBe(visibleStages);
+    expect(store.workerResult()).toBe(visibleWorkers);
+
+    workersRefresh.next(workers());
+    expect(store.workerResult()).not.toBe(visibleWorkers);
+    expect(store.selectedStage()?.id).toBe('stage-1');
+    expect(store.loadingChildren()).toBeFalse();
+  });
+
+  it('coalesces overlapping background snapshot requests', () => {
+    const refresh = new Subject<OperationalReadinessSnapshot>();
+    api.loadSnapshot.and.returnValue(refresh);
+    api.loadSnapshot.calls.reset();
+
+    store.loadSnapshot(true);
+    store.loadSnapshot(true);
+
+    expect(api.loadSnapshot).toHaveBeenCalledTimes(1);
+    refresh.complete();
+  });
+
+  it('keeps the last successful child data when a background child refresh fails', () => {
+    openWorkers(store);
+    const visibleStages = store.stages();
+    const visibleWorkers = store.workerResult();
+    api.loadStages.and.returnValue(throwError(() => new Error('offline')));
+
+    store.loadSnapshot(true);
+
+    expect(store.stages()).toBe(visibleStages);
+    expect(store.workerResult()).toBe(visibleWorkers);
+    expect(store.childrenError()).toBeNull();
+    expect(store.loadingChildren()).toBeFalse();
   });
 
   it('preserves no-assignment semantics as unknown percentage rather than 100%', () => {
