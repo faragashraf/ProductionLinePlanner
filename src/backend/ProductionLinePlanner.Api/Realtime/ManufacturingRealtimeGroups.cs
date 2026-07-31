@@ -55,7 +55,7 @@ public static class ManufacturingRealtimeGroups
         ManufacturingEntityType.ProductModel or ManufacturingEntityType.ProductModelStage => [ForScreen(Models), ForScreen(ManufacturingCommandCenter), ForScreen(FactoryReadiness)],
         ManufacturingEntityType.ProductionOrder or ManufacturingEntityType.StageProductionRecord => [ForScreen(DailyProductionOperations), ForScreen(ManufacturingCommandCenter), ForScreen(Reports)],
         ManufacturingEntityType.AttendanceRecord => [ForScreen(AttendanceWorkforce), ForScreen(DailyProductionOperations), ForScreen(ManufacturingCommandCenter), ForScreen(FactoryReadiness)],
-        ManufacturingEntityType.AttendanceSyncState => [ForScreen(AttendanceWorkforce), ForScreen(FactoryReadiness)],
+        ManufacturingEntityType.AttendanceSyncState => [ForScreen(AttendanceWorkforce), ForScreen(ManufacturingCommandCenter), ForScreen(FactoryReadiness)],
         ManufacturingEntityType.Worker => WorkerGroups(change),
         ManufacturingEntityType.WorkerDefaultAssignment => [ForScreen(LineStaffing), ForScreen(DailyProductionOperations), ForScreen(ManufacturingCommandCenter), ForScreen(FactoryReadiness)],
         _ => []

@@ -3,7 +3,7 @@ import { HubConnectionState } from '@microsoft/signalr';
 import { AuthUser } from '../models/auth.models';
 import { NotificationSummary } from '../models/realtime-notification.models';
 import { AuthService } from './auth.service';
-import { RealtimeConnection, RealtimeService, SignalRConnectionFactory } from './realtime.service';
+import { realtimeReconnectDelay, RealtimeConnection, RealtimeService, SignalRConnectionFactory } from './realtime.service';
 
 describe('RealtimeService', () => {
   let users: BehaviorSubject<AuthUser | null>;
@@ -116,6 +116,25 @@ describe('RealtimeService', () => {
 
     expect(connection.stopCalls).toBe(1);
     expect(connection.offCalls).toBe(3);
+  });
+
+  it('keeps reconnecting forever with a bounded backoff instead of negotiating in a tight loop', () => {
+    expect(realtimeReconnectDelay(-1)).toBe(2_000);
+    expect(realtimeReconnectDelay(0)).toBe(2_000);
+    expect(realtimeReconnectDelay(1)).toBe(10_000);
+    expect(realtimeReconnectDelay(2)).toBe(30_000);
+    expect(realtimeReconnectDelay(3)).toBe(60_000);
+    expect(realtimeReconnectDelay(99)).toBe(60_000);
+  });
+
+  it('configures keep-alive traffic below aggressive LAN proxy idle timeouts', () => {
+    const configured = new SignalRConnectionFactory().create(() => 'token') as RealtimeConnection & {
+      keepAliveIntervalInMilliseconds: number;
+      serverTimeoutInMilliseconds: number;
+    };
+
+    expect(configured.keepAliveIntervalInMilliseconds).toBe(5_000);
+    expect(configured.serverTimeoutInMilliseconds).toBe(30_000);
   });
 
   function authenticatedUser(): AuthUser {

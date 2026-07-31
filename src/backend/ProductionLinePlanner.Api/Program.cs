@@ -69,6 +69,8 @@ var criticalProductionPermitLimit = Math.Max(1, builder.Configuration.GetValue("
 var workerPhotoPermitLimit = Math.Max(1, builder.Configuration.GetValue("Security:RateLimit:WorkerPhotoPermitLimit", 120));
 var workerPhotoWritePermitLimit = Math.Max(1, builder.Configuration.GetValue("Security:RateLimit:WorkerPhotoWritePermitLimit", 20));
 var normalReadPermitLimit = Math.Max(1, builder.Configuration.GetValue("Security:RateLimit:NormalReadPermitLimit", 240));
+var realtimeKeepAliveSeconds = Math.Clamp(builder.Configuration.GetValue("Realtime:KeepAliveIntervalSeconds", 5), 2, 15);
+var realtimeClientTimeoutSeconds = Math.Max(realtimeKeepAliveSeconds * 2, builder.Configuration.GetValue("Realtime:ClientTimeoutIntervalSeconds", 30));
 const string SecurityCorsPolicy = "ProductionLinePlannerCors";
 const string SecurityBootstrapEndpoint = "/api/admin/bootstrap";
 var jwtSection = builder.Configuration.GetSection("Authentication:Jwt");
@@ -200,7 +202,12 @@ builder.Services.AddScoped<ICurrentUserService, CurrentUserService>();
 builder.Services.AddScoped<IManufacturingRealtimeCorrelationContext, HttpManufacturingRealtimeCorrelationContext>();
 builder.Services.AddSingleton<IPasswordHasher<AppUser>, PasswordHasher<AppUser>>();
 builder.Services.AddSingleton<IUserPasswordHasher, UserPasswordHasher>();
-builder.Services.AddSignalR(options => options.EnableDetailedErrors = false);
+builder.Services.AddSignalR(options =>
+{
+    options.EnableDetailedErrors = false;
+    options.KeepAliveInterval = TimeSpan.FromSeconds(realtimeKeepAliveSeconds);
+    options.ClientTimeoutInterval = TimeSpan.FromSeconds(realtimeClientTimeoutSeconds);
+});
 builder.Services.AddHostedService<AttendanceNotificationOutboxBackgroundService>();
 builder.Services.AddSingleton<IUserIdProvider, AuthenticatedUserIdProvider>();
 builder.Services.AddScoped<INotificationLiveDispatcher, SignalRNotificationLiveDispatcher>();

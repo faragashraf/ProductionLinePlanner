@@ -45,6 +45,8 @@ export class ManufacturingRealtimeService implements OnDestroy {
   private readonly subscriptions = new Subscription();
   private nextWatchId = 1;
   private isConnected = false;
+  private lastReconnectRefreshAt = Number.NEGATIVE_INFINITY;
+  private readonly reconnectRefreshCooldownMs = 30_000;
 
   constructor(private readonly realtime: RealtimeService) {
     this.subscriptions.add(this.realtime.manufacturingDataChanged$.subscribe(change => this.handleChange(change)));
@@ -104,6 +106,9 @@ export class ManufacturingRealtimeService implements OnDestroy {
       this.isConnected = false;
       this.joinedScreens.clear();
       this.joiningScreens.clear();
+      // A later authenticated start is a new session, not another flap in the
+      // same reconnect burst, so it must receive one authoritative refresh.
+      this.lastReconnectRefreshAt = Number.NEGATIVE_INFINITY;
       return;
     }
     this.isConnected = true;
@@ -113,6 +118,9 @@ export class ManufacturingRealtimeService implements OnDestroy {
   private async restoreAfterReconnect(): Promise<void> {
     this.joinedScreens.clear();
     await this.joinActiveScreens();
+    const now = Date.now();
+    if (now - this.lastReconnectRefreshAt < this.reconnectRefreshCooldownMs) return;
+    this.lastReconnectRefreshAt = now;
     for (const watch of this.watches.values()) watch.refreshes.next(undefined);
   }
 
@@ -176,7 +184,7 @@ export class ManufacturingRealtimeService implements OnDestroy {
       case 'AttendanceRecord':
         return new Set(['attendance-workforce', 'daily-production-operations', 'manufacturing-command-center', 'factory-readiness']);
       case 'AttendanceSyncState':
-        return new Set(['factory-readiness']);
+        return new Set(['attendance-workforce', 'manufacturing-command-center', 'factory-readiness']);
       case 'Worker': {
         const screens: ManufacturingRealtimeScreen[] = ['employees'];
         const kinds = change.workerChangeKinds ?? [];
