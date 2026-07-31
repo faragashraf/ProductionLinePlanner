@@ -38,9 +38,11 @@ describe('NotificationInboxService', () => {
   it('loads the persisted inbox after connect and reconnect without breaking on API failure', () => {
     flushSessionBootstrap();
     const counts: number[] = [];
+    let now = 1_000;
+    spyOn(Date, 'now').and.callFake(() => now);
     service.unreadCount$.subscribe(count => counts.push(count));
 
-    realtime.connectionStatus.next('connected');
+    realtime.reconnected.next();
     http.expectOne('/api/notifications/unread-count').flush({ success: true, data: { unreadCount: 3 } });
     http.expectOne(request => request.url === '/api/notifications').flush({
       success: true,
@@ -48,12 +50,32 @@ describe('NotificationInboxService', () => {
     });
 
     realtime.connectionStatus.next('reconnecting');
-    realtime.connectionStatus.next('connected');
+    now += 30_001;
+    realtime.reconnected.next();
     http.expectOne('/api/notifications/unread-count').flush('unavailable', { status: 503, statusText: 'Unavailable' });
     http.expectOne(request => request.url === '/api/notifications').flush('unavailable', { status: 503, statusText: 'Unavailable' });
 
     expect(counts).toContain(3);
     expect(counts.at(-1)).toBe(3);
+  });
+
+  it('does not duplicate the session bootstrap on initial connect and dampens rapid reconnect refreshes', () => {
+    flushSessionBootstrap();
+
+    realtime.connectionStatus.next('connected');
+    http.expectNone('/api/notifications/unread-count');
+    http.expectNone(request => request.url === '/api/notifications');
+
+    realtime.reconnected.next();
+    http.expectOne('/api/notifications/unread-count').flush({ success: true, data: { unreadCount: 0 } });
+    http.expectOne(request => request.url === '/api/notifications').flush({
+      success: true,
+      data: { items: [], totalCount: 0, pageNumber: 1, pageSize: 20 }
+    });
+
+    realtime.reconnected.next();
+    http.expectNone('/api/notifications/unread-count');
+    http.expectNone(request => request.url === '/api/notifications');
   });
 
   it('updates unread state from a live event without duplicate inbox entries', () => {
@@ -134,7 +156,7 @@ describe('NotificationInboxService', () => {
     service.liveNotifications$.subscribe(value => live.push(value));
     const persisted = notification();
 
-    realtime.connectionStatus.next('connected');
+    realtime.reconnected.next();
     http.expectOne('/api/notifications/unread-count').flush({ success: true, data: { unreadCount: 1 } });
     http.expectOne(request => request.url === '/api/notifications').flush({
       success: true,
@@ -165,7 +187,7 @@ describe('NotificationInboxService', () => {
 
   it('preserves a live row while replacing an older connect count request', () => {
     flushSessionBootstrap();
-    realtime.connectionStatus.next('connected');
+    realtime.reconnected.next();
     const liveValue = notification();
     const olderValue = notification('44444444-4444-4444-4444-444444444444', '2026-07-19T08:00:00Z');
 
@@ -248,9 +270,11 @@ describe('NotificationInboxService', () => {
 
 class RealtimeStub {
   readonly connectionStatus = new BehaviorSubject<RealtimeConnectionStatus>('disconnected');
+  readonly reconnected = new Subject<void>();
   readonly notifications = new Subject<NotificationSummary>();
   readonly notificationReadStateChanged = new Subject<any>();
   readonly connectionStatus$ = this.connectionStatus.asObservable();
+  readonly reconnected$ = this.reconnected.asObservable();
   readonly notifications$ = this.notifications.asObservable();
   readonly notificationReadStateChanged$ = this.notificationReadStateChanged.asObservable();
 }

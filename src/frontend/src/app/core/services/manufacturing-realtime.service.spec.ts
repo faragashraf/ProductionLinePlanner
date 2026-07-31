@@ -68,6 +68,12 @@ describe('ManufacturingRealtimeService', () => {
     expect(realtime.invocations.filter(item => item[0] === 'JoinManufacturingScreen').length).toBe(4);
     expect(stages).toHaveBeenCalledTimes(1);
     expect(models).toHaveBeenCalledTimes(2);
+
+    realtime.reconnected.next();
+    await waitForCoalescing();
+    expect(realtime.invocations.filter(item => item[0] === 'JoinManufacturingScreen').length).toBe(6);
+    expect(stages).toHaveBeenCalledTimes(1);
+    expect(models).toHaveBeenCalledTimes(2);
   });
 
   it('ignores every local echo for one multi-entity operation and still refreshes for a concurrent remote change', async () => {
@@ -198,6 +204,24 @@ describe('ManufacturingRealtimeService', () => {
     expect(employees).toHaveBeenCalledTimes(1);
     expect(staffing).toHaveBeenCalledTimes(1);
     expect(commandCenter).toHaveBeenCalledTimes(1);
+  });
+
+  it('routes attendance sync-state changes to every screen that displays attendance trust', async () => {
+    const attendance = jasmine.createSpy('attendance');
+    const commandCenter = jasmine.createSpy('commandCenter');
+    const readiness = jasmine.createSpy('readiness');
+    const models = jasmine.createSpy('models');
+    service.watchScreen({ screen: 'attendance-workforce', coalesceMs: 0, refresh: attendance });
+    service.watchScreen({ screen: 'manufacturing-command-center', coalesceMs: 0, refresh: commandCenter });
+    service.watchScreen({ screen: 'factory-readiness', coalesceMs: 0, refresh: readiness });
+    service.watchScreen({ screen: 'models', coalesceMs: 0, refresh: models });
+
+    realtime.changes.next(change('sync-state', null, null, 'AttendanceSyncState'));
+
+    expect(attendance).toHaveBeenCalledTimes(1);
+    expect(commandCenter).toHaveBeenCalledTimes(1);
+    expect(readiness).toHaveBeenCalledTimes(1);
+    expect(models).not.toHaveBeenCalled();
   });
 
   function change(eventId: string, productionLineId: string | null = null, correlationId: string | null = null, entityType: ManufacturingDataChanged['entityType'] = 'ProductModel'): ManufacturingDataChanged {

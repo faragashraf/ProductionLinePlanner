@@ -1,6 +1,6 @@
 import { Injectable, OnDestroy } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { BehaviorSubject, EMPTY, Observable, Subject, Subscription, catchError, distinctUntilChanged, filter, map, tap, throwError } from 'rxjs';
+import { BehaviorSubject, EMPTY, Observable, Subject, Subscription, catchError, distinctUntilChanged, map, tap, throwError } from 'rxjs';
 import { buildApiUrl } from '../config/api.config';
 import { ApiResponse } from '../models/api-response.model';
 import { NotificationPage, NotificationReadStateChanged, NotificationSummary } from '../models/realtime-notification.models';
@@ -20,6 +20,8 @@ export class NotificationInboxService implements OnDestroy {
   private activeUserId: string | null = null;
   private sessionVersion = 0;
   private initialized = false;
+  private lastReconnectRefreshAt = Number.NEGATIVE_INFINITY;
+  private readonly reconnectRefreshCooldownMs = 30_000;
 
   readonly unreadCount$ = this.unreadCountSubject.asObservable();
   readonly recent$ = this.recentSubject.asObservable();
@@ -48,12 +50,10 @@ export class NotificationInboxService implements OnDestroy {
     this.subscriptions.add(this.realtime.notificationReadStateChanged$
       .subscribe(change => this.applyRealtimeReadState(change)));
 
-    this.subscriptions.add(this.realtime.connectionStatus$
-      .pipe(
-        distinctUntilChanged(),
-        filter(status => status === 'connected')
-      )
-      .subscribe(() => this.refresh()));
+    // beginSession already loads the inbox. Only actual reconnections need a
+    // catch-up request, and repeated short reconnects share a cooldown.
+    this.subscriptions.add(this.realtime.reconnected$
+      .subscribe(() => this.refreshAfterReconnect()));
   }
 
   refresh(): void {
@@ -163,10 +163,18 @@ export class NotificationInboxService implements OnDestroy {
     this.seenNotificationIds.clear();
     this.unreadCountSubject.next(0);
     this.recentSubject.next([]);
+    this.lastReconnectRefreshAt = Number.NEGATIVE_INFINITY;
     if (userId) {
       this.loadUnreadCount();
       this.loadRecent();
     }
+  }
+
+  private refreshAfterReconnect(): void {
+    const now = Date.now();
+    if (now - this.lastReconnectRefreshAt < this.reconnectRefreshCooldownMs) return;
+    this.lastReconnectRefreshAt = now;
+    this.refresh();
   }
 
   private acceptLiveNotification(notification: NotificationSummary): void {

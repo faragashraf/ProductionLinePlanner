@@ -409,6 +409,8 @@ public sealed class ManufacturingRealtimeFoundationTests
             ProductionLineId: Guid.NewGuid(), ProductModelId: Guid.NewGuid(), ProductionDate: new DateOnly(2026, 7, 21)));
         var attendanceGroups = ManufacturingRealtimeGroups.ForChange(new ManufacturingDataChanged(
             Guid.NewGuid(), ManufacturingEntityType.AttendanceRecord, ManufacturingChangeType.Updated, Guid.NewGuid(), DateTime.UtcNow, null, null));
+        var attendanceSyncGroups = ManufacturingRealtimeGroups.ForChange(new ManufacturingDataChanged(
+            Guid.NewGuid(), ManufacturingEntityType.AttendanceSyncState, ManufacturingChangeType.Updated, Guid.NewGuid(), DateTime.UtcNow, null, null));
         var stageRecordGroups = ManufacturingRealtimeGroups.ForChange(new ManufacturingDataChanged(
             Guid.NewGuid(), ManufacturingEntityType.StageProductionRecord, ManufacturingChangeType.Updated, Guid.NewGuid(), DateTime.UtcNow, null, null));
 
@@ -417,6 +419,7 @@ public sealed class ManufacturingRealtimeFoundationTests
         Assert.Equal(["manufacturing:employees", "manufacturing:attendance-workforce", "manufacturing:line-staffing", "manufacturing:daily-production-operations", "manufacturing:manufacturing-command-center", "manufacturing:factory-readiness"], workerGroups);
         Assert.Equal(["manufacturing:daily-production-operations", "manufacturing:manufacturing-command-center", "manufacturing:reports"], dailyGroups);
         Assert.Equal(["manufacturing:attendance-workforce", "manufacturing:daily-production-operations", "manufacturing:manufacturing-command-center", "manufacturing:factory-readiness"], attendanceGroups);
+        Assert.Equal(["manufacturing:attendance-workforce", "manufacturing:manufacturing-command-center", "manufacturing:factory-readiness"], attendanceSyncGroups);
         Assert.Equal(["manufacturing:daily-production-operations", "manufacturing:manufacturing-command-center", "manufacturing:reports"], stageRecordGroups);
         Assert.True(ManufacturingRealtimeGroups.TryGetRequiredPermission("models", out var permission));
         Assert.Equal("models.view", permission);

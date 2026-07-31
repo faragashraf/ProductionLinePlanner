@@ -13,6 +13,13 @@ import { AuthService } from './auth.service';
 const NOTIFICATION_EVENT = 'NotificationReceived';
 const NOTIFICATION_READ_STATE_CHANGED_EVENT = 'NotificationReadStateChanged';
 const MANUFACTURING_DATA_CHANGED_EVENT = 'ManufacturingDataChanged';
+const REALTIME_KEEP_ALIVE_MS = 5_000;
+const REALTIME_SERVER_TIMEOUT_MS = 30_000;
+const RECONNECT_DELAYS_MS = [2_000, 10_000, 30_000, 60_000] as const;
+
+export function realtimeReconnectDelay(previousRetryCount: number): number {
+  return RECONNECT_DELAYS_MS[Math.min(Math.max(previousRetryCount, 0), RECONNECT_DELAYS_MS.length - 1)];
+}
 
 export interface RealtimeConnection {
   readonly state: HubConnectionState;
@@ -29,11 +36,20 @@ export interface RealtimeConnection {
 @Injectable({ providedIn: 'root' })
 export class SignalRConnectionFactory {
   create(accessTokenFactory: () => string): RealtimeConnection {
-    return new HubConnectionBuilder()
+    const connection = new HubConnectionBuilder()
       .withUrl(buildHubUrl('/notifications'), { accessTokenFactory })
-      .withAutomaticReconnect([0, 2_000, 10_000, 30_000])
+      .withAutomaticReconnect({
+        // Keep retrying at a bounded pace. A short proxy interruption must not
+        // permanently put operational screens to sleep or create a negotiate storm.
+        nextRetryDelayInMilliseconds: context => realtimeReconnectDelay(context.previousRetryCount)
+      })
       .configureLogging(LogLevel.Warning)
       .build();
+    // Five-second traffic keeps LAN/IIS proxies with aggressive idle timeouts
+    // from closing an otherwise healthy connection before SignalR's defaults fire.
+    connection.keepAliveIntervalInMilliseconds = REALTIME_KEEP_ALIVE_MS;
+    connection.serverTimeoutInMilliseconds = REALTIME_SERVER_TIMEOUT_MS;
+    return connection;
   }
 }
 
