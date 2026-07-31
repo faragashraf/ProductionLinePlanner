@@ -13,6 +13,8 @@ public sealed class AttendanceSourceOptions
     public TimeSpan DayStartTime { get; init; } = new TimeSpan(8, 0, 0);
     public int LateThresholdMinutes { get; init; } = 15;
     public int FreshnessThresholdMinutes { get; init; } = 5;
+    public bool DirectSyncEnabled { get; init; } = true;
+    public int DirectSyncIntervalSeconds { get; init; } = 60;
     public string UserInfoTable { get; init; } = "USERINFO";
     public string CheckInOutTable { get; init; } = "CHECKINOUT";
     public string? DepartmentsTable { get; init; } = "DEPARTMENTS";
@@ -46,6 +48,12 @@ public sealed class AttendanceSourceOptions
 
     public static bool ResolveStagingProcessorEnabled(string? configuredValue) =>
         !bool.TryParse(configuredValue, out var enabled) || enabled;
+
+    public static bool ResolveDirectSyncEnabled(string? configuredValue) =>
+        !bool.TryParse(configuredValue, out var enabled) || enabled;
+
+    public static int ResolveDirectSyncIntervalSeconds(string? configuredValue) =>
+        int.TryParse(configuredValue, out var interval) ? Math.Clamp(interval, 15, 3600) : 60;
 
     public static int ResolveStagingProcessorIntervalSeconds(string? configuredValue) =>
         int.TryParse(configuredValue, out var interval) ? Math.Clamp(interval, 15, 3600) : 60;

@@ -17,6 +17,9 @@ public sealed class ZkTimeStagingConfigurationTests
         Assert.Equal(AttendanceSourceOptions.StagingMode, AttendanceSourceOptions.ResolveMode(" Staging "));
         Assert.True(AttendanceSourceOptions.ResolveStagingProcessorEnabled("not-a-boolean"));
         Assert.Equal(15, AttendanceSourceOptions.ResolveStagingProcessorIntervalSeconds("0"));
+        Assert.True(AttendanceSourceOptions.ResolveDirectSyncEnabled("not-a-boolean"));
+        Assert.False(AttendanceSourceOptions.ResolveDirectSyncEnabled("false"));
+        Assert.Equal(15, AttendanceSourceOptions.ResolveDirectSyncIntervalSeconds("0"));
     }
 
     [Fact]

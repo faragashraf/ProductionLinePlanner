@@ -227,6 +227,24 @@ public sealed class OperationalReadinessEngineTests
     }
 
     [Fact]
+    public async Task Recent_success_remains_trusted_during_a_transient_failed_retry()
+    {
+        await using var fixture = await Fixture.CreateAsync(workerCount: 1, presentCount: 1);
+        var syncState = await fixture.Db.AttendanceSyncStates.SingleAsync();
+        syncState.RecordFailure(fixture.AsOfUtc.AddSeconds(-10), "AttendanceSourceTimeout");
+        await fixture.Db.SaveChangesAsync();
+
+        var workers = await fixture.Engine.GetStageWorkersAsync(fixture.Line.Id, fixture.StageA.Id, fixture.AsOfUtc);
+        var snapshot = await fixture.Engine.GetSnapshotAsync(fixture.Factory.Id, fixture.AsOfUtc);
+
+        Assert.True(snapshot.Value!.AttendanceSync.IsTrusted);
+        Assert.Equal("Failed", snapshot.Value.AttendanceSync.Status);
+        Assert.Equal("AttendanceSourceTimeout", snapshot.Value.AttendanceSync.LastErrorCode);
+        Assert.Equal(OperationalAttendanceStates.Present, Assert.Single(workers.Value!.Workers).AttendanceState);
+        Assert.Equal(100m, Assert.Single(snapshot.Value.Factories).Metrics.OperationalReadinessPercentage);
+    }
+
+    [Fact]
     public void Calculator_deduplicates_repeated_assignment_rows()
     {
         var workerId = Guid.NewGuid();

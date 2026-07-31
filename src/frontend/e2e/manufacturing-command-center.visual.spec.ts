@@ -51,13 +51,14 @@ const commandCenter = {
     departments: [{ id: 'department-1', factoryId: 'factory-1', name: 'قسم الإنتاج', code: 'PROD' }],
     lines: [criticalLine, warningLine, healthyLine].map(line => ({ id: line.id, factoryId: 'factory-1', departmentId: 'department-1', name: line.name, code: line.code }))
   },
+  attendanceSync: { status: 'Fresh', isTrusted: true, lastAttemptAtUtc: '2026-07-24T07:00:00Z', lastSuccessfulAtUtc: '2026-07-24T07:00:00Z', lastErrorCode: null, ageMinutes: 0 },
   workforce: {
     activeWorkers: 28, presentWorkers: 24, presentPermanentlyAssignedWorkers: 22, presentUnassignedWorkers: 2,
     permanentlyAssignedNotPresentWorkers: 4,
     assignmentCoverage: { numerator: 22, denominator: 24, percentage: 91.7, scope: 'المصنع', date: '2026-07-24', zeroBehavior: 'Calculated' },
     attendanceEvidenceComplete: true, attributionNote: 'الحضور والتسكين الدائم في النطاق المحدد.', presentAssignedDetails: [], presentUnassignedDetails: [], assignedNotPresentDetails: []
   },
-  lineSummary: { activeLines: 3, readyLines: 2, staffingShortageLines: 1, journeyNotConfiguredLines: 0, dataIncompleteLines: 0, problemLines: 2, stagesWithoutPresentWorker: 1 },
+  lineSummary: { activeLines: 3, readyLines: 2, noOperationLines: 0, staffingShortageLines: 1, journeyNotConfiguredLines: 0, dataIncompleteLines: 0, attendanceUntrustedLines: 0, problemLines: 2, stagesWithoutPresentWorker: 1 },
   operations: { linesWithOperation: 3, linesWithoutOperation: 0, draftOperations: 1, approvedOperations: 1, approvalCancelledOperations: 0, cancelledOperations: 1, approvedRecordedValue: 480, items: [cancelledOperation, draftOperation, approvedOperation] },
   dataQuality: { modelStagesWithoutPrice: 0, modelStagesWithoutStandardTime: 0, activeJourneyStagesWithoutPresentWorker: 1, activeModelsWithoutJourney: 0, issues: [], modelsWithoutJourneyScopeNote: 'النطاق الكامل' },
   factories: [{
@@ -70,6 +71,34 @@ const commandCenter = {
     }]
   }],
   calculatedAtUtc: '2026-07-24T07:00:00Z'
+};
+
+const untrustedCommandCenter = {
+  ...commandCenter,
+  attendanceSync: { status: 'Stale', isTrusted: false, lastAttemptAtUtc: '2026-07-24T07:00:00Z', lastSuccessfulAtUtc: '2026-07-24T06:20:00Z', lastErrorCode: null, ageMinutes: 40 },
+  workforce: {
+    ...commandCenter.workforce,
+    presentWorkers: null,
+    presentPermanentlyAssignedWorkers: null,
+    presentUnassignedWorkers: null,
+    permanentlyAssignedNotPresentWorkers: null,
+    assignmentCoverage: { ...commandCenter.workforce.assignmentCoverage, numerator: 0, denominator: 0, percentage: null, zeroBehavior: 'NotAttributable' },
+    attendanceEvidenceComplete: false,
+    presentAssignedDetails: [],
+    presentUnassignedDetails: [],
+    assignedNotPresentDetails: []
+  },
+  lineSummary: { ...commandCenter.lineSummary, readyLines: 0, staffingShortageLines: 0, attendanceUntrustedLines: 3, stagesWithoutPresentWorker: null },
+  dataQuality: { ...commandCenter.dataQuality, activeJourneyStagesWithoutPresentWorker: null },
+  factories: commandCenter.factories.map(factory => ({
+    ...factory,
+    departments: factory.departments.map(department => ({
+      ...department,
+      readyLines: 0,
+      notReadyLines: department.activeLines,
+      lines: department.lines.map(line => ({ ...line, readinessStatus: 'AttendanceUntrusted' }))
+    }))
+  }))
 };
 
 const freshness = {
@@ -118,7 +147,11 @@ const readinessWorkers = {
 
 test.beforeAll(async () => { await mkdir(visualOutput, { recursive: true }); });
 
-async function preparePage(page: Page, readiness: 'success' | 'empty' | 'error' | 'delayed' = 'success'): Promise<void> {
+async function preparePage(
+  page: Page,
+  readiness: 'success' | 'empty' | 'error' | 'delayed' = 'success',
+  dashboardAttendance: 'trusted' | 'untrusted' = 'trusted'
+): Promise<void> {
   await page.addInitScript(({ userPermissions }) => {
     localStorage.setItem('plp.accessToken', 'command-center-visual-token');
     localStorage.setItem('plp.currentUser', JSON.stringify({ id: 'visual-user', fullName: 'مدير المصنع', email: 'visual@local.test', roles: ['Administrator'], permissions: userPermissions }));
@@ -153,7 +186,9 @@ async function preparePage(page: Page, readiness: 'success' | 'empty' | 'error' 
         ? readiness === 'empty' ? { ...readinessSnapshot, factories: [] } : readinessSnapshot
         : pathname.endsWith('/workers') && pathname.includes('/api/operational-readiness/lines/') ? readinessWorkers
         : pathname.endsWith('/stages') && pathname.includes('/api/operational-readiness/lines/') ? readinessStages
-        : pathname.endsWith('/api/manufacturing-command-center') ? commandCenter : { items: [] };
+        : pathname.endsWith('/api/manufacturing-command-center')
+          ? dashboardAttendance === 'untrusted' ? untrustedCommandCenter : commandCenter
+          : { items: [] };
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data, error: null }) });
   });
 }
@@ -182,6 +217,13 @@ test('reviews dashboard and factory map across the required RTL viewports', asyn
     await expect(page.getByText('متصل لحظيًا')).toBeVisible();
     await expectViewportSafe(page);
     await page.screenshot({ path: path.join(visualOutput, `${name}-dashboard.png`), fullPage: true });
+    const dashboardScroll = page.locator('.plp-app-shell__main');
+    const dashboardMaxScroll = await dashboardScroll.evaluate(element => element.scrollHeight - element.clientHeight);
+    await dashboardScroll.evaluate((element, top) => element.scrollTo({ top }), Math.round(dashboardMaxScroll / 2));
+    await page.screenshot({ path: path.join(visualOutput, `${name}-dashboard-middle.png`) });
+    await dashboardScroll.evaluate((element, top) => element.scrollTo({ top }), dashboardMaxScroll);
+    await page.screenshot({ path: path.join(visualOutput, `${name}-dashboard-bottom.png`) });
+    await dashboardScroll.evaluate(element => element.scrollTo({ top: 0 }));
 
     await page.goto('/factory-map');
     await expect(page.getByRole('heading', { name: 'جاهزية تشغيل المصنع الآن' })).toBeVisible();
@@ -215,6 +257,22 @@ test('hides previous-scope dashboard figures while a filter response is pending'
   await expect(page.locator('.command-page__loading-notice')).toBeVisible();
   await expect(page.locator('.metric-grid')).toHaveCount(0);
   await expect(page.locator('.metric-grid').first()).toBeVisible();
+});
+
+test('does not present absence or staffing shortage as facts when attendance is stale', async ({ page }) => {
+  await preparePage(page, 'success', 'untrusted');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/dashboard');
+
+  await expect(page.locator('app-attendance-sync-status')).toContainText('مزامنة الحضور قديمة');
+  await expect(page.locator('.decision-indicator').first()).toContainText('غير مؤكدة');
+  const absenceMetric = page.getByRole('button', { name: /مسكنون دائمًا غير حاضرين/ });
+  await expect(absenceMetric).toBeDisabled();
+  await expect(absenceMetric).toContainText('غير مؤكد');
+  await expect(page.locator('.state-attendance-untrusted')).toContainText('3');
+  await expectViewportSafe(page);
+  await page.locator('.plp-app-shell__main').evaluate(element => element.scrollTo({ top: 700 }));
+  await page.screenshot({ path: path.join(visualOutput, 'mobile-390x844-dashboard-untrusted.png') });
 });
 
 test('filters model stages by multiple issue types on an Android tablet', async ({ page }) => {

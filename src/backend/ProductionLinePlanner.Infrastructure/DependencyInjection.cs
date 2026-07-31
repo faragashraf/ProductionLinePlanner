@@ -38,6 +38,8 @@ public static class DependencyInjection
         var dayStartTime = attendanceSourceSection["DayStartTime"];
         var lateThresholdMinutes = attendanceSourceSection["LateThresholdMinutes"];
         var freshnessThresholdMinutes = attendanceSourceSection["FreshnessThresholdMinutes"];
+        var directSyncEnabled = attendanceSourceSection["DirectSyncEnabled"];
+        var directSyncIntervalSeconds = attendanceSourceSection["DirectSyncIntervalSeconds"];
         var userInfoTable = attendanceSourceSection["UserInfoTable"]?.Trim();
         var checkInOutTable = attendanceSourceSection["CheckInOutTable"]?.Trim();
         var departmentsTable = attendanceSourceSection["DepartmentsTable"]?.Trim();
@@ -59,6 +61,8 @@ public static class DependencyInjection
             DayStartTime = TimeSpan.TryParse(dayStartTime, out var parsedDayStart) ? parsedDayStart : new TimeSpan(8, 0, 0),
             LateThresholdMinutes = int.TryParse(lateThresholdMinutes, out var parsedLateThreshold) ? parsedLateThreshold : 15,
             FreshnessThresholdMinutes = int.TryParse(freshnessThresholdMinutes, out var parsedFreshnessThreshold) ? Math.Clamp(parsedFreshnessThreshold, 1, 1440) : 5,
+            DirectSyncEnabled = AttendanceSourceOptions.ResolveDirectSyncEnabled(directSyncEnabled),
+            DirectSyncIntervalSeconds = AttendanceSourceOptions.ResolveDirectSyncIntervalSeconds(directSyncIntervalSeconds),
             UserInfoTable = string.IsNullOrWhiteSpace(userInfoTable) ? "USERINFO" : userInfoTable,
             CheckInOutTable = string.IsNullOrWhiteSpace(checkInOutTable) ? "CHECKINOUT" : checkInOutTable,
             DepartmentsTable = string.IsNullOrWhiteSpace(departmentsTable) ? "DEPARTMENTS" : departmentsTable,
@@ -118,6 +122,7 @@ public static class DependencyInjection
         services.AddScoped<IProcessedAttendanceOrphanEngine, ProcessedAttendanceOrphanEngine>();
         services.AddScoped<IAssignmentEngine, AssignmentEngine>();
         services.AddScoped<IAttendanceWorkforceEngine, AttendanceWorkforceEngine>();
+        services.AddScoped<IAttendanceFreshnessEngine, AttendanceFreshnessEngine>();
         services.AddScoped<IAssignmentRecommendationEngine, AssignmentRecommendationEngine>();
         services.AddScoped<IReadinessEngine, ReadinessEngine>();
         services.AddScoped<IOperationalReadinessEngine, OperationalReadinessEngine>();

@@ -133,6 +133,7 @@ interface PageDiagnostics {
   consoleErrors: string[];
   failedRequests: string[];
   errorResponses: string[];
+  failWorkerDirectory: boolean;
 }
 
 test.beforeAll(async () => { await mkdir(visualOutput, { recursive: true }); });
@@ -142,16 +143,22 @@ function response(data: unknown) {
 }
 
 async function preparePage(page: Page): Promise<PageDiagnostics> {
-  const diagnostics: PageDiagnostics = { consoleErrors: [], failedRequests: [], errorResponses: [] };
+  const diagnostics: PageDiagnostics = { consoleErrors: [], failedRequests: [], errorResponses: [], failWorkerDirectory: false };
   page.on('console', message => {
-    if (message.type() === 'error' && !diagnostics.consoleErrors.includes(message.text())) diagnostics.consoleErrors.push(message.text());
+    const expectedWorkerDirectoryFailure = diagnostics.failWorkerDirectory
+      && message.text().includes('Failed to load resource: the server responded with a status of 500');
+    if (message.type() === 'error' && !expectedWorkerDirectoryFailure && !diagnostics.consoleErrors.includes(message.text()))
+      diagnostics.consoleErrors.push(message.text());
   });
   page.on('pageerror', error => {
     if (!diagnostics.consoleErrors.includes(error.message)) diagnostics.consoleErrors.push(error.message);
   });
   page.on('requestfailed', request => diagnostics.failedRequests.push(`${request.method()} ${request.url()} — ${request.failure()?.errorText ?? 'failed'}`));
   page.on('response', responseValue => {
-    if (responseValue.status() >= 400) diagnostics.errorResponses.push(`${responseValue.status()} ${responseValue.url()}`);
+    const expectedWorkerDirectoryFailure = diagnostics.failWorkerDirectory
+      && responseValue.url().includes('/api/line-staffing/workers');
+    if (responseValue.status() >= 400 && !expectedWorkerDirectoryFailure)
+      diagnostics.errorResponses.push(`${responseValue.status()} ${responseValue.url()}`);
   });
   await page.addInitScript(({ userPermissions }) => {
     localStorage.setItem('plp.accessToken', 'manufacturing-responsive-visual-token');
@@ -176,6 +183,14 @@ async function preparePage(page: Page): Promise<PageDiagnostics> {
     let data: unknown = { items: [] };
 
     if (pathname.endsWith('/api/auth/me')) data = { id: 'visual-user', fullName: 'مراجع مساحة التصنيع', email: 'manufacturing.qa@local.test', roles: ['Administrator'], permissions };
+    else if (pathname.endsWith('/api/line-staffing/workers') && diagnostics.failWorkerDirectory) {
+      await route.fulfill({
+        status: 500,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: false, data: null, error: { code: 'VisualTestError', message: 'فشل اختبار دليل العمال.' } })
+      });
+      return;
+    }
     else if (pathname.endsWith('/api/line-staffing/workers')) data = workers;
     else if (pathname.endsWith('/api/line-staffing')) data = staffingPlan;
     else if (pathname.endsWith('/api/factory-structure/delete-eligibility')) data = { factories: [{ entityId: factory.id, canDelete: false }], departments: [{ entityId: department.id, canDelete: false }], lines: [{ entityId: line.id, canDelete: false }] };
@@ -361,6 +376,17 @@ test('loads the permanent staffing workspace and keeps its dialog within tablet 
       await expect(unassignedWorkerCard).not.toContainText('لا يوجد تسكين حالي');
       await expect(unassignedWorkerCard).not.toContainText(line.name);
       await expect(unassignedWorkerCard).not.toContainText('عدد المراحل: 0');
+
+      const allWorkersFilter = dialog.getByRole('button', { name: 'الكل', exact: true });
+      const selectedWorkersFilter = dialog.getByRole('button', { name: /المحدد فقط \(1\)/ });
+      await expect(allWorkersFilter).toHaveAttribute('aria-pressed', 'true');
+      await selectedWorkersFilter.click();
+      await expect(selectedWorkersFilter).toHaveAttribute('aria-pressed', 'true');
+      await expect(currentWorkerCard).toBeVisible();
+      await expect(otherLineWorkerCard).toBeHidden();
+      await allWorkersFilter.click();
+      await expect(allWorkersFilter).toHaveAttribute('aria-pressed', 'true');
+      await expect(otherLineWorkerCard).toBeVisible();
       const assignedStatus = otherLineWorkerCard.locator('.plp-worker-assignment-details__assignment-status');
       const unassignedStatus = unassignedWorkerCard.locator('.plp-worker-assignment-details__assignment-status');
       await expect(assignedStatus).toHaveClass(/p-tag-success/);
@@ -472,10 +498,22 @@ test('loads the permanent staffing workspace and keeps its dialog within tablet 
       await expectViewportSafe(page);
       await page.screenshot({ path: path.join(visualOutput, `line-staffing-dialog-${name}.png`) });
       await page.getByRole('button', { name: 'إلغاء', exact: true }).click();
+
+      diagnostics.failWorkerDirectory = true;
+      await page.getByRole('button', { name: 'إضافة إلى المرحلة' }).click();
+      const errorDialog = page.getByRole('dialog');
+      await expect(errorDialog.locator('.line-staffing-page__error')).toBeVisible();
+      await expect(errorDialog.locator('.line-staffing-page__candidate-list')).toBeVisible();
+      await expectViewportSafe(page);
+      await page.screenshot({ path: path.join(visualOutput, `line-staffing-dialog-error-${name}.png`) });
+      await errorDialog.getByRole('button', { name: 'إلغاء', exact: true }).click();
+      diagnostics.failWorkerDirectory = false;
+
       await page.getByRole('button', { name: 'إضافة إلى المرحلة' }).click();
       const reopenedDialog = page.getByRole('dialog');
       await expect(reopenedDialog.getByTestId('staffing-worker-line-filter').locator('.p-dropdown-label')).toHaveText('كل خطوط الإنتاج');
       await expect(reopenedDialog.getByTestId('staffing-worker-department-filter').locator('.p-dropdown-label')).toHaveText('كل الأقسام');
+      await expect(reopenedDialog.getByRole('button', { name: 'الكل', exact: true })).toHaveAttribute('aria-pressed', 'true');
       await reopenedDialog.getByRole('button', { name: 'إلغاء', exact: true }).click();
     }
   }

@@ -1,5 +1,7 @@
+import { AttendanceSyncFreshness } from './operational-readiness.model';
+
 export type CommandCenterOperationStatus = 'All' | 'None' | 'Draft' | 'Approved' | 'ApprovalCancelled' | 'Cancelled';
-export type CommandCenterReadinessStatus = 'Ready' | 'NoOperation' | 'StaffingShortage' | 'JourneyNotConfigured' | 'DataIncomplete';
+export type CommandCenterReadinessStatus = 'Ready' | 'NoOperation' | 'StaffingShortage' | 'JourneyNotConfigured' | 'DataIncomplete' | 'AttendanceUntrusted';
 
 export interface CommandCenterFilters {
   operationDate: string;
@@ -46,10 +48,10 @@ export interface CommandCenterWorkerDetail {
 
 export interface CommandCenterWorkforce {
   activeWorkers: number | null;
-  presentWorkers: number;
-  presentPermanentlyAssignedWorkers: number;
+  presentWorkers: number | null;
+  presentPermanentlyAssignedWorkers: number | null;
   presentUnassignedWorkers: number | null;
-  permanentlyAssignedNotPresentWorkers: number;
+  permanentlyAssignedNotPresentWorkers: number | null;
   assignmentCoverage: CommandCenterRatio;
   attendanceEvidenceComplete: boolean;
   attributionNote: string;
@@ -61,11 +63,13 @@ export interface CommandCenterWorkforce {
 export interface CommandCenterLineSummary {
   activeLines: number;
   readyLines: number;
+  noOperationLines: number;
   staffingShortageLines: number;
   journeyNotConfiguredLines: number;
   dataIncompleteLines: number;
+  attendanceUntrustedLines: number;
   problemLines: number;
-  stagesWithoutPresentWorker: number;
+  stagesWithoutPresentWorker: number | null;
 }
 
 export interface CommandCenterOperationsSummary {
@@ -82,7 +86,7 @@ export interface CommandCenterOperationsSummary {
 export interface CommandCenterDataQuality {
   modelStagesWithoutPrice: number;
   modelStagesWithoutStandardTime: number;
-  activeJourneyStagesWithoutPresentWorker: number;
+  activeJourneyStagesWithoutPresentWorker: number | null;
   activeModelsWithoutJourney: number | null;
   issues: CommandCenterQualityIssue[];
   modelsWithoutJourneyScopeNote: string;
@@ -181,6 +185,7 @@ export interface CommandCenterStage {
 export interface ManufacturingCommandCenter {
   scope: CommandCenterScope;
   filterCatalog: CommandCenterStructureCatalog;
+  attendanceSync: AttendanceSyncFreshness;
   workforce: CommandCenterWorkforce;
   lineSummary: CommandCenterLineSummary;
   operations: CommandCenterOperationsSummary;
@@ -242,11 +247,12 @@ export function commandCenterReadinessLabel(status: string): string {
     NoOperation: 'لا يوجد تشغيل اليوم',
     StaffingShortage: 'نقص عمالة',
     JourneyNotConfigured: 'رحلة موديل غير مهيأة',
-    DataIncomplete: 'بيانات غير مكتملة'
+    DataIncomplete: 'بيانات غير مكتملة',
+    AttendanceUntrusted: 'الحضور غير مؤكد'
   } as Record<string, string>)[status] ?? 'غير معروف';
 }
 
-export function commandCenterLineStatusDimensions(line: CommandCenterLine): CommandCenterLineStatusDimension[] {
+export function commandCenterLineStatusDimensions(line: CommandCenterLine, attendanceTrusted = true): CommandCenterLineStatusDimension[] {
   const operationStatuses = [...new Set(line.operations.map(operation => operation.status))]
     .sort((first, second) => operationStatusSeverity(second) - operationStatusSeverity(first));
   const executionTone = operationStatuses.reduce<CommandCenterStatusTone>(
@@ -275,10 +281,14 @@ export function commandCenterLineStatusDimensions(line: CommandCenterLine): Comm
     {
       key: 'staffing',
       label: 'تغطية العمالة',
-      value: line.requiredWorkers === 0
+      value: !attendanceTrusted
+        ? 'غير مؤكدة'
+        : line.requiredWorkers === 0
         ? (line.journeyStages > 0 ? 'لا يوجد احتياج مسجل' : 'غير قابلة للقياس')
         : staffingGap > 0 ? `نقص ${staffingGap}` : 'مكتملة',
-      tone: line.requiredWorkers === 0
+      tone: !attendanceTrusted
+        ? 'neutral'
+        : line.requiredWorkers === 0
         ? (line.journeyStages > 0 ? 'success' : 'neutral')
         : staffingGap > 0 ? 'warning' : 'success'
     },
@@ -291,7 +301,7 @@ export function commandCenterLineStatusDimensions(line: CommandCenterLine): Comm
   ];
 }
 
-export function commandCenterLineProblemReasons(line: CommandCenterLine): string[] {
+export function commandCenterLineProblemReasons(line: CommandCenterLine, attendanceTrusted = true): string[] {
   const reasons: string[] = [];
   const operationStatuses = new Set(line.operations.map(operation => operation.status));
 
@@ -300,19 +310,22 @@ export function commandCenterLineProblemReasons(line: CommandCenterLine): string
   if (operationStatuses.has('ApprovalCancelled')) reasons.push('يوجد تشغيل ملغي الاعتماد');
   if (operationStatuses.has('Draft')) reasons.push('توجد مسودة تحتاج إجراء');
   if (line.journeyStages === 0 || line.readinessStatus === 'JourneyNotConfigured') reasons.push('مسار الموديل غير مهيأ');
-  if (line.requiredWorkers > line.presentPermanentlyAssignedWorkers) {
+  if (!attendanceTrusted) reasons.push('حالة الحضور غير مؤكدة؛ لا يمكن الحكم على تغطية العمالة');
+  if (attendanceTrusted && line.requiredWorkers > line.presentPermanentlyAssignedWorkers) {
     reasons.push(`نقص ${line.requiredWorkers - line.presentPermanentlyAssignedWorkers} من العمال الحاضرين المسكنين`);
   }
-  if (line.stagesWithoutPresentWorker > 0) reasons.push(`${line.stagesWithoutPresentWorker} مرحلة بلا عامل حاضر`);
+  if (attendanceTrusted && line.stagesWithoutPresentWorker > 0) reasons.push(`${line.stagesWithoutPresentWorker} مرحلة بلا عامل حاضر`);
   if (line.readinessStatus === 'DataIncomplete'
     || line.operations.some(operation => operation.stages.some(stage => !stage.hasPrice || !stage.hasStandardTime))) {
     reasons.push('بيانات المراحل غير مكتملة');
   }
 
-  return [...new Set([...reasons, ...line.alerts])];
+  const unique = new Map<string, string>();
+  for (const reason of [...reasons, ...line.alerts]) unique.set(reasonSemanticKey(reason), reason);
+  return [...unique.values()];
 }
 
-export function commandCenterLineProblemSeverity(line: CommandCenterLine): number {
+export function commandCenterLineProblemSeverity(line: CommandCenterLine, attendanceTrusted = true): number {
   const operationStatuses = new Set(line.operations.map(operation => operation.status));
   let severity = 0;
   if (operationStatuses.has('Cancelled')) severity = Math.max(severity, 700);
@@ -320,7 +333,8 @@ export function commandCenterLineProblemSeverity(line: CommandCenterLine): numbe
   if (line.operations.length === 0) severity = Math.max(severity, 600);
   if (line.journeyStages === 0 || line.readinessStatus === 'JourneyNotConfigured') severity = Math.max(severity, 550);
   if (line.readinessStatus === 'DataIncomplete') severity = Math.max(severity, 500);
-  if (line.requiredWorkers > line.presentPermanentlyAssignedWorkers || line.stagesWithoutPresentWorker > 0) {
+  if (!attendanceTrusted || line.readinessStatus === 'AttendanceUntrusted') severity = Math.max(severity, 450);
+  if (attendanceTrusted && (line.requiredWorkers > line.presentPermanentlyAssignedWorkers || line.stagesWithoutPresentWorker > 0)) {
     severity = Math.max(severity, 400 + Math.min(99, line.stagesWithoutPresentWorker));
   }
   if (operationStatuses.has('Draft')) severity = Math.max(severity, 300);
@@ -333,13 +347,18 @@ export function commandCenterProblemLines(data: ManufacturingCommandCenter): Com
   for (const factory of data.factories) {
     for (const department of factory.departments) {
       for (const line of department.lines) {
-        const reasons = commandCenterLineProblemReasons(line);
+        const reasons = commandCenterLineProblemReasons(line, data.attendanceSync.isTrusted);
         if (!reasons.length) continue;
-        problems.push({ factoryName: factory.name, departmentName: department.name, line, reasons, severity: commandCenterLineProblemSeverity(line) });
+        problems.push({ factoryName: factory.name, departmentName: department.name, line, reasons, severity: commandCenterLineProblemSeverity(line, data.attendanceSync.isTrusted) });
       }
     }
   }
   return problems.sort((first, second) => second.severity - first.severity || first.line.name.localeCompare(second.line.name, 'ar'));
+}
+
+function reasonSemanticKey(reason: string): string {
+  if (reason.includes('لا يوجد تشغيل مسجل')) return 'no-operation';
+  return reason.replace(/[.،؛:]/g, '').replace(/\s+/g, ' ').trim();
 }
 
 function operationStatusTone(status: Exclude<CommandCenterOperationStatus, 'All' | 'None'>): CommandCenterStatusTone {

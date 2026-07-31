@@ -11,6 +11,7 @@ public sealed class ManufacturingCommandCenterDto
 {
     public required CommandCenterScopeDto Scope { get; init; }
     public required CommandCenterStructureCatalogDto FilterCatalog { get; init; }
+    public required AttendanceSyncFreshnessDto AttendanceSync { get; init; }
     public required CommandCenterWorkforceDto Workforce { get; init; }
     public required CommandCenterLineSummaryDto LineSummary { get; init; }
     public required CommandCenterOperationsSummaryDto Operations { get; init; }
@@ -51,10 +52,10 @@ public sealed record CommandCenterRatioDto(
 public sealed class CommandCenterWorkforceDto
 {
     public int? ActiveWorkers { get; init; }
-    public int PresentWorkers { get; init; }
-    public int PresentPermanentlyAssignedWorkers { get; init; }
+    public int? PresentWorkers { get; init; }
+    public int? PresentPermanentlyAssignedWorkers { get; init; }
     public int? PresentUnassignedWorkers { get; init; }
-    public int PermanentlyAssignedNotPresentWorkers { get; init; }
+    public int? PermanentlyAssignedNotPresentWorkers { get; init; }
     public required CommandCenterRatioDto AssignmentCoverage { get; init; }
     public bool AttendanceEvidenceComplete { get; init; }
     public required string AttributionNote { get; init; }
@@ -73,11 +74,13 @@ public sealed record CommandCenterWorkerDetailDto(
 public sealed record CommandCenterLineSummaryDto(
     int ActiveLines,
     int ReadyLines,
+    int NoOperationLines,
     int StaffingShortageLines,
     int JourneyNotConfiguredLines,
     int DataIncompleteLines,
+    int AttendanceUntrustedLines,
     int ProblemLines,
-    int StagesWithoutPresentWorker);
+    int? StagesWithoutPresentWorker);
 
 public sealed record CommandCenterOperationsSummaryDto(
     int LinesWithOperation,
@@ -92,7 +95,7 @@ public sealed record CommandCenterOperationsSummaryDto(
 public sealed record CommandCenterDataQualityDto(
     int ModelStagesWithoutPrice,
     int ModelStagesWithoutStandardTime,
-    int ActiveJourneyStagesWithoutPresentWorker,
+    int? ActiveJourneyStagesWithoutPresentWorker,
     int? ActiveModelsWithoutJourney,
     IReadOnlyCollection<CommandCenterQualityIssueDto> Issues,
     string ModelsWithoutJourneyScopeNote);

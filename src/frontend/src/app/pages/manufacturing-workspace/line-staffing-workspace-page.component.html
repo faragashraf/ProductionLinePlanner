@@ -536,10 +536,32 @@
             ></p-dropdown>
           </label>
         </div>
-        <p class="line-staffing-page__dialog-selection-summary line-staffing-page__wide">
-          <i class="pi pi-users" aria-hidden="true"></i>
-          <span><strong>{{ selectedDefaultWorkersCount }}</strong> عامل محدد لهذه المرحلة. العامل المسكن في مرحلة أخرى يظل قابلًا للاختيار.</span>
-        </p>
+        <div class="line-staffing-page__dialog-list-toolbar line-staffing-page__wide">
+          <p class="line-staffing-page__dialog-selection-summary">
+            <i class="pi pi-users" aria-hidden="true"></i>
+            <span><strong>{{ selectedDefaultWorkersCount }}</strong> عامل محدد لهذه المرحلة. العامل المسكن في مرحلة أخرى يظل قابلًا للاختيار.</span>
+          </p>
+          <div class="plp-segmented-filter" role="group" aria-label="عرض العمال">
+            <button
+              pButton
+              type="button"
+              class="p-button-sm"
+              label="الكل"
+              [class.p-button-outlined]="workerSelectionFilter !== 'all'"
+              [attr.aria-pressed]="workerSelectionFilter === 'all'"
+              (click)="setWorkerSelectionFilter('all')"
+            ></button>
+            <button
+              pButton
+              type="button"
+              class="p-button-sm"
+              [label]="'المحدد فقط (' + selectedDefaultWorkersCount + ')'"
+              [class.p-button-outlined]="workerSelectionFilter !== 'selected'"
+              [attr.aria-pressed]="workerSelectionFilter === 'selected'"
+              (click)="setWorkerSelectionFilter('selected')"
+            ></button>
+          </div>
+        </div>
         <section
           class="line-staffing-page__candidate-list line-staffing-page__wide"
           aria-label="اختيار عمال المرحلة"
@@ -590,7 +612,11 @@
               !availableWorkers.length
             "
           >
-            لا توجد نتائج مطابقة للفلاتر المحددة.
+            {{
+              workerSelectionFilter === "selected"
+                ? "لا يوجد عمال محددون يطابقون الفلاتر الحالية."
+                : "لا توجد نتائج مطابقة للفلاتر المحددة."
+            }}
           </p>
         </section>
       </ng-container>

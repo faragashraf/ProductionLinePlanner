@@ -34,6 +34,7 @@ import { PlpResponsiveEntityRowComponent } from './product/plp-responsive-entity
 import { WorkerAssignmentDetailsComponent } from './business/worker-assignment-details/worker-assignment-details.component';
 import { WorkerAssignmentCardComponent } from './business/worker-assignment-card/worker-assignment-card.component';
 import { ManufacturingCommandCenterFiltersComponent } from './business/manufacturing-command-center-filters/manufacturing-command-center-filters.component';
+import { AttendanceSyncStatusComponent } from './business/attendance-sync-status/attendance-sync-status.component';
 
 @NgModule({
   declarations: [
@@ -61,7 +62,8 @@ import { ManufacturingCommandCenterFiltersComponent } from './business/manufactu
     IamListSkeletonComponent,
     PermissionSelectionComponent,
     WorkerAssignmentCardComponent,
-    ManufacturingCommandCenterFiltersComponent
+    ManufacturingCommandCenterFiltersComponent,
+    AttendanceSyncStatusComponent
   ],
   imports: [
     CommonModule,
@@ -106,7 +108,8 @@ import { ManufacturingCommandCenterFiltersComponent } from './business/manufactu
     PlpProductSectionHeaderComponent,
     WorkerAssignmentDetailsComponent,
     WorkerAssignmentCardComponent,
-    ManufacturingCommandCenterFiltersComponent
+    ManufacturingCommandCenterFiltersComponent,
+    AttendanceSyncStatusComponent
   ]
 })
 export class SharedModule {}

@@ -183,10 +183,15 @@ var configuredAttendanceSourceOptions = new AttendanceSourceOptions
 {
     Mode = AttendanceSourceOptions.ResolveMode(
         builder.Configuration[$"{AttendanceSourceOptions.SectionName}:Mode"]),
+    DirectSyncEnabled = AttendanceSourceOptions.ResolveDirectSyncEnabled(
+        builder.Configuration[$"{AttendanceSourceOptions.SectionName}:DirectSyncEnabled"]),
     StagingProcessorEnabled = AttendanceSourceOptions.ResolveStagingProcessorEnabled(
         builder.Configuration[$"{AttendanceSourceOptions.SectionName}:StagingProcessorEnabled"])
 };
 builder.Services.AddInfrastructure(builder.Configuration);
+var directSyncRegistered = DirectAttendanceSyncHostedServiceRegistration.Register(
+    builder.Services,
+    configuredAttendanceSourceOptions);
 var stagingProcessorRegistered = ZkStagingHostedServiceRegistration.Register(
     builder.Services,
     configuredAttendanceSourceOptions);
@@ -259,8 +264,10 @@ var resolvedAttendanceSourceOptions = app.Services
 app.Services.GetRequiredService<ILoggerFactory>()
     .CreateLogger("ProductionLinePlanner.Api.Startup")
     .LogInformation(
-        "Attendance mode resolved as {AttendanceMode}. Staging processor enabled resolved as {StagingProcessorEnabled}. ZkStagingProcessingBackgroundService registered={StagingProcessorRegistered}.",
+        "Attendance mode resolved as {AttendanceMode}. Direct sync enabled resolved as {DirectSyncEnabled}. DirectAttendanceSyncBackgroundService registered={DirectSyncRegistered}. Staging processor enabled resolved as {StagingProcessorEnabled}. ZkStagingProcessingBackgroundService registered={StagingProcessorRegistered}.",
         resolvedAttendanceSourceOptions.Mode,
+        resolvedAttendanceSourceOptions.DirectSyncEnabled,
+        directSyncRegistered,
         resolvedAttendanceSourceOptions.StagingProcessorEnabled,
         stagingProcessorRegistered);
 

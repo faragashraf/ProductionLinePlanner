@@ -4,7 +4,7 @@ import { NgModule } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterModule, Routes } from '@angular/router';
 import { MultiSelectModule } from 'primeng/multiselect';
-import { AttendanceSyncStatusComponent } from './components/attendance-sync-status/attendance-sync-status.component';
+import { SharedModule } from '../../shared/shared.module';
 import { FactoryReadinessMapComponent } from './components/factory-readiness-map/factory-readiness-map.component';
 import { ReadinessMetricsComponent } from './components/readiness-metrics/readiness-metrics.component';
 import { ReadinessModelSelectorComponent } from './components/readiness-model-selector/readiness-model-selector.component';
@@ -25,9 +25,8 @@ export const FACTORY_MAP_ROUTES: Routes = [{ path: '', component: FactoryMapPage
     ReadinessMetricsComponent,
     ReadinessModelSelectorComponent,
     ReadinessWorkerPanelComponent,
-    WorkerAttendanceStatusComponent,
-    AttendanceSyncStatusComponent
+    WorkerAttendanceStatusComponent
   ],
-  imports: [CommonModule, FormsModule, MultiSelectModule, ScrollingModule, RouterModule.forChild(FACTORY_MAP_ROUTES)]
+  imports: [CommonModule, FormsModule, MultiSelectModule, ScrollingModule, SharedModule, RouterModule.forChild(FACTORY_MAP_ROUTES)]
 })
 export class FactoryMapPageModule {}
