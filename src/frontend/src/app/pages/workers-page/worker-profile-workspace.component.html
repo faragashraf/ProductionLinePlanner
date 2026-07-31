@@ -1,6 +1,40 @@
 <section class="worker-profile plp-workspace-detail" data-workspace-view="profile" [attr.aria-label]="'ملف العامل ' + worker.local.displayName">
   <div class="worker-profile__back-row">
     <button pButton pRipple type="button" class="p-button-text" [icon]="backIcon" label="العودة إلى قائمة العاملين" (click)="closed.emit()"></button>
+    <div class="worker-profile__switcher">
+      <label for="workerProfileSearch">فتح ملف عامل آخر</label>
+      <div class="worker-profile__switcher-control">
+        <i class="pi pi-search" aria-hidden="true"></i>
+        <input
+          id="workerProfileSearch"
+          pInputText
+          type="search"
+          autocomplete="off"
+          [value]="workerSearchValue"
+          placeholder="ابحث بالاسم أو رقم العامل"
+          [attr.aria-expanded]="!!workerSearchValue"
+          aria-controls="workerProfileSearchResults"
+          (input)="onWorkerSearch($any($event.target).value)"
+        >
+        <i *ngIf="workerSearchLoading" class="pi pi-spin pi-spinner worker-profile__switcher-spinner" aria-label="جارٍ البحث"></i>
+      </div>
+      <div *ngIf="workerSearchValue" id="workerProfileSearchResults" class="worker-profile__switcher-results" role="listbox" aria-label="نتائج البحث عن عامل">
+        <button
+          *ngFor="let result of workerSearchResults"
+          type="button"
+          role="option"
+          aria-selected="false"
+          class="worker-profile__switcher-result"
+          (click)="requestWorkerSelection(result)"
+        >
+          <plp-worker-avatar [fullName]="result.localName" [code]="result.employeeCode || result.badgeNumber || ''" [photoReference]="result.photoUrl" [hasPhoto]="!!result.photoUrl" size="sm"></plp-worker-avatar>
+          <span><strong>{{ result.localName }}</strong><small>رقم العامل: <bdi>{{ result.employeeCode || result.badgeNumber || 'غير مسجل' }}</bdi></small></span>
+        </button>
+        <span *ngIf="workerSearchLoading" class="worker-profile__switcher-state">جارٍ البحث…</span>
+        <span *ngIf="!workerSearchLoading && workerSearchError" class="worker-profile__switcher-state worker-profile__switcher-state--error" role="alert">{{ workerSearchError }}</span>
+        <span *ngIf="!workerSearchLoading && !workerSearchError && workerSearchResults.length === 0" class="worker-profile__switcher-state">لا يوجد عامل مطابق.</span>
+      </div>
+    </div>
     <span class="worker-profile__demo-note"><i class="pi pi-database" aria-hidden="true"></i> بيانات حقيقية من قاعدة التطبيق</span>
   </div>
 
@@ -75,8 +109,8 @@
           <span *ngIf="selectedPhoto" class="worker-profile__selected-file"><i class="pi pi-check-circle" aria-hidden="true"></i>{{ selectedPhoto.name }}</span>
         </div>
         <div class="worker-profile__photo-actions">
-          <input #photoInput id="workerPhotoInput" class="plp-sr-only" type="file" accept="image/jpeg,image/png,image/bmp" [disabled]="!canManage || isPhotoBusy || isSaving" (change)="onPhotoSelected(photoInput)">
-          <label for="workerPhotoInput" class="p-button p-component p-button-outlined" [class.p-disabled]="!canManage || isPhotoBusy || isSaving"><i class="pi pi-image" aria-hidden="true"></i><span>{{ worker.local.photoUrl ? 'اختيار صورة بديلة' : 'اختيار صورة' }}</span></label>
+          <input #photoInput id="workerPhotoInput" hidden type="file" accept="image/jpeg,image/png,image/bmp" [disabled]="!canManage || isPhotoBusy || isSaving" (change)="onPhotoSelected(photoInput)">
+          <button pButton pRipple type="button" class="p-button-outlined" icon="pi pi-image" [label]="worker.local.photoUrl ? 'اختيار صورة بديلة' : 'اختيار صورة'" [disabled]="!canManage || isPhotoBusy || isSaving" (click)="openPhotoPicker(photoInput)"></button>
           <button pButton pRipple type="button" icon="pi pi-cloud-upload" [label]="worker.local.photoUrl ? 'حفظ الصورة البديلة' : 'حفظ الصورة'" [disabled]="!canManage || !selectedPhoto || isPhotoBusy || isSaving" (click)="uploadSelectedPhoto()"></button>
           <button *ngIf="selectedPhoto" pButton pRipple type="button" class="p-button-text" icon="pi pi-times" label="إلغاء الاختيار" [disabled]="isPhotoBusy || isSaving" (click)="cancelPhotoSelection()"></button>
           <button *ngIf="worker.local.photoUrl && !selectedPhoto" pButton pRipple type="button" class="p-button-danger p-button-outlined" icon="pi pi-trash" label="حذف الصورة" [disabled]="!canManage || isPhotoBusy || isSaving" (click)="deletePhoto()"></button>

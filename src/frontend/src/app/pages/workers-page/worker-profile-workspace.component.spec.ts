@@ -80,6 +80,15 @@ describe('WorkerProfileWorkspaceComponent', () => {
     expect(facade.uploadPhoto).not.toHaveBeenCalled();
   });
 
+  it('opens the native photo picker from a real button without focusing the hidden file input', () => {
+    const input = document.createElement('input');
+    const click = spyOn(input, 'click');
+
+    component.openPhotoPicker(input);
+
+    expect(click).toHaveBeenCalledOnceWith();
+  });
+
   it('rejects a photo larger than 5 MiB before the API call', async () => {
     const input = document.createElement('input');
     const oversized = new File([new Uint8Array((5 * 1024 * 1024) + 1)], 'worker.png', { type: 'image/png' });
@@ -133,6 +142,24 @@ describe('WorkerProfileWorkspaceComponent', () => {
 
     expect(component.selectedPhoto).toBeNull();
     expect(component.photoPreviewUrl).toBe('');
+  });
+
+  it('emits another worker selected from the profile search and protects unsaved changes', () => {
+    const otherWorker = {
+      id: '22222222-2222-2222-2222-222222222222', localName: 'عامل آخر', sourceName: null,
+      photoUrl: null, badgeNumber: 'B-2', employeeCode: 'EMP-2', assignmentLabel: 'غير مسكن',
+      factoryLineLabel: 'لا يوجد تسكين', sourceLinkStatus: 'linked' as const, localProfileStatus: 'complete' as const,
+      assignmentStatus: 'unassigned' as const, localEmploymentStatus: 'active' as const, factoryId: null,
+      productionLineId: null, hasIdentityConflict: false
+    };
+    spyOn(component.workerSelected, 'emit');
+    component.requestWorkerSelection(otherWorker);
+    expect(component.workerSelected.emit).toHaveBeenCalledOnceWith(otherWorker);
+
+    component.draftForm.patchValue({ displayName: 'اسم غير محفوظ' });
+    spyOn(window, 'confirm').and.returnValue(false);
+    component.requestWorkerSelection(otherWorker);
+    expect(component.workerSelected.emit).toHaveBeenCalledTimes(1);
   });
 
   it('does not create a preview after the workspace closes during asynchronous file validation', async () => {
