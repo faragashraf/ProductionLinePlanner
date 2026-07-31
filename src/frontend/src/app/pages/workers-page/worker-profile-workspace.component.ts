@@ -1,5 +1,5 @@
 import { HttpErrorResponse } from '@angular/common/http';
-import { Component, EventEmitter, Input, OnChanges, OnDestroy, Output, SimpleChanges } from '@angular/core';
+import { Component, ElementRef, EventEmitter, Input, OnChanges, OnDestroy, Output, SimpleChanges } from '@angular/core';
 import { FormBuilder, Validators } from '@angular/forms';
 import { finalize, Subject, takeUntil } from 'rxjs';
 import { productionNavigationIconFor } from '../../shared/design-system/icons/production-icon-map';
@@ -9,6 +9,7 @@ import {
   WorkerAttendanceHistoryPage,
   WorkerAttendanceHistoryRecord,
   WorkerLocalEmploymentStatus,
+  WorkerManagementListItem,
   WorkerManagementProfile
 } from './worker-management.models';
 import { WorkerManagementFacade } from './worker-management.facade';
@@ -44,10 +45,16 @@ export class WorkerProfileWorkspaceComponent implements OnChanges, OnDestroy {
   @Input() canViewAttendance = false;
   @Input() canViewCompensation = false;
   @Input() canAssignDepartment = false;
+  @Input() workerSearchValue = '';
+  @Input() workerSearchResults: readonly WorkerManagementListItem[] = [];
+  @Input() workerSearchLoading = false;
+  @Input() workerSearchError = '';
   @Output() closed = new EventEmitter<void>();
   @Output() changed = new EventEmitter<WorkerManagementProfile>();
   @Output() reloadRequested = new EventEmitter<void>();
   @Output() departmentAssignmentRequested = new EventEmitter<void>();
+  @Output() workerSearchChanged = new EventEmitter<string>();
+  @Output() workerSelected = new EventEmitter<WorkerManagementListItem>();
 
   readonly backIcon = productionNavigationIconFor('back', 'rtl');
   readonly sections: readonly PlpSectionNavigationItem[] = [
@@ -86,6 +93,9 @@ export class WorkerProfileWorkspaceComponent implements OnChanges, OnDestroy {
   private photoSelectionSequence = 0;
   private attendanceHistoryRequestSequence = 0;
   private destroyed = false;
+  private photoPickerScrollOwner: HTMLElement | null = null;
+  private photoPickerScrollTop = 0;
+  private removePhotoPickerFocusListener: (() => void) | null = null;
 
   readonly draftForm = this.formBuilder.nonNullable.group({
     displayName: ['', [Validators.required, Validators.maxLength(200)]],
@@ -94,7 +104,8 @@ export class WorkerProfileWorkspaceComponent implements OnChanges, OnDestroy {
 
   constructor(
     private readonly formBuilder: FormBuilder,
-    private readonly facade: WorkerManagementFacade
+    private readonly facade: WorkerManagementFacade,
+    private readonly elementRef: ElementRef<HTMLElement>
   ) {}
 
   ngOnChanges(changes: SimpleChanges): void {
@@ -117,7 +128,26 @@ export class WorkerProfileWorkspaceComponent implements OnChanges, OnDestroy {
     this.attendanceHistoryCancel$.complete();
     this.destroy$.next();
     this.destroy$.complete();
+    this.removePhotoPickerFocusListener?.();
+    this.removePhotoPickerFocusListener = null;
     this.clearSelectedPhoto();
+  }
+
+  openPhotoPicker(input: HTMLInputElement): void {
+    if (!this.canManage || this.isPhotoBusy || this.isSaving) return;
+    this.capturePhotoPickerViewport();
+    input.click();
+  }
+
+  onWorkerSearch(value: string): void {
+    this.workerSearchChanged.emit(value);
+  }
+
+  requestWorkerSelection(worker: WorkerManagementListItem): void {
+    if (worker.id === this.worker.id) return;
+    if ((this.hasDraftChanges || !!this.selectedPhoto) && typeof window !== 'undefined'
+      && !window.confirm('لديك تغييرات غير محفوظة في ملف العامل الحالي. هل تريد الانتقال إلى عامل آخر؟')) return;
+    this.workerSelected.emit(worker);
   }
 
   selectSection(sectionId: string): void {
@@ -209,10 +239,14 @@ export class WorkerProfileWorkspaceComponent implements OnChanges, OnDestroy {
     const file = input.files?.[0] ?? null;
     input.value = '';
     this.clearSelectedPhoto();
-    if (!file) return;
+    if (!file) {
+      this.restorePhotoPickerViewport();
+      return;
+    }
 
     if (file.size <= 0 || file.size > MAX_PHOTO_BYTES) {
       this.photoError = 'حجم الصورة يجب ألا يتجاوز 5 MiB.';
+      this.restorePhotoPickerViewport();
       return;
     }
 
@@ -224,6 +258,7 @@ export class WorkerProfileWorkspaceComponent implements OnChanges, OnDestroy {
       && (!ALLOWED_PHOTO_TYPES.has(declaredType) || declaredType !== detectedType);
     if (!detectedType || declaredTypeMismatch) {
       this.photoError = 'الأنواع المسموحة هي JPEG وPNG وBMP فقط.';
+      this.restorePhotoPickerViewport();
       return;
     }
 
@@ -231,6 +266,7 @@ export class WorkerProfileWorkspaceComponent implements OnChanges, OnDestroy {
     if (typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function') {
       this.photoPreviewUrl = URL.createObjectURL(file);
     }
+    this.restorePhotoPickerViewport();
   }
 
   uploadSelectedPhoto(): void {
@@ -344,6 +380,29 @@ export class WorkerProfileWorkspaceComponent implements OnChanges, OnDestroy {
     this.resetDraft();
     this.clearSelectedPhoto();
     this.changed.emit(worker);
+  }
+
+  private capturePhotoPickerViewport(): void {
+    this.removePhotoPickerFocusListener?.();
+    const scrollOwner = this.elementRef.nativeElement.closest('.plp-app-shell__main') as HTMLElement | null;
+    this.photoPickerScrollOwner = scrollOwner;
+    this.photoPickerScrollTop = scrollOwner?.scrollTop ?? 0;
+    if (typeof window === 'undefined') return;
+    const onFocus = () => {
+      window.setTimeout(() => this.restorePhotoPickerViewport(), 0);
+    };
+    window.addEventListener('focus', onFocus, { once: true });
+    this.removePhotoPickerFocusListener = () => window.removeEventListener('focus', onFocus);
+  }
+
+  private restorePhotoPickerViewport(): void {
+    this.removePhotoPickerFocusListener?.();
+    this.removePhotoPickerFocusListener = null;
+    const scrollOwner = this.photoPickerScrollOwner;
+    if (!scrollOwner) return;
+    const maximumScrollTop = Math.max(0, scrollOwner.scrollHeight - scrollOwner.clientHeight);
+    scrollOwner.scrollTop = Math.min(this.photoPickerScrollTop, maximumScrollTop);
+    this.photoPickerScrollOwner = null;
   }
 
   private loadAttendanceHistory(page: number): void {

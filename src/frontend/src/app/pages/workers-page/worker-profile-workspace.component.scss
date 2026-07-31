@@ -1,6 +1,7 @@
 .worker-profile {
   display: grid;
   gap: var(--plp-space-24);
+  min-inline-size: 0;
 }
 
 .worker-profile__back-row,
@@ -170,8 +171,10 @@
 
 .worker-profile__photo-draft {
   align-items: flex-start;
+  gap: var(--plp-space-12);
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
+  min-inline-size: 0;
 }
 
 .worker-profile__photo-preview {
@@ -214,8 +217,9 @@
   grid-column: 1 / -1;
 }
 
-.worker-profile__photo-actions :is(button, label.p-button) {
+.worker-profile__photo-actions button {
   min-block-size: 2.75rem;
+  min-inline-size: 0;
 }
 
 .worker-profile__draft-message,
@@ -240,13 +244,13 @@
     justify-self: center;
   }
 
-  .worker-profile__photo-actions > :is(button, label.p-button) {
+  .worker-profile__photo-actions > button {
     flex: 1 1 12rem;
   }
 }
 
 @media (max-width: 30rem) {
-  .worker-profile__photo-actions > :is(button, label.p-button) {
+  .worker-profile__photo-actions > button {
     inline-size: 100%;
   }
 

@@ -97,6 +97,28 @@ describe('WorkersPageComponent', () => {
     expect(component.workers).toEqual([listItem]);
   });
 
+  it('searches by name or worker number inside an open profile and switches directly to the selected worker', fakeAsync(() => {
+    const secondItem = { ...listItem, id: '22222222-2222-2222-2222-222222222222', localName: 'عامل ثانٍ', employeeCode: 'EMP-2' };
+    const secondProfile = { ...structuredClone(profile), id: secondItem.id, local: { ...profile.local, displayName: secondItem.localName }, source: { ...profile.source, employeeCode: 'EMP-2' } };
+    facade.loadWorkers.and.callFake(query => of(query.search ? { ...page, items: [listItem, secondItem], totalCount: 2 } : page));
+    facade.loadProfile.and.callFake(workerId => of(workerId === secondItem.id ? secondProfile : profile));
+    const component = createComponent();
+    component.ngOnInit();
+    component.openProfile(listItem);
+    facade.loadWorkers.calls.reset();
+
+    component.onProfileSearch('EMP-2');
+    tick(250);
+
+    expect(facade.loadWorkers).toHaveBeenCalledWith({ page: 1, pageSize: 6, search: 'EMP-2', localEmploymentStatus: '' });
+    expect(component.profileSearchResults).toEqual([secondItem]);
+
+    component.openProfile(secondItem);
+    expect(facade.loadProfile).toHaveBeenCalledWith(secondItem.id, jasmine.any(Object));
+    expect(component.selectedProfile).toEqual(secondProfile);
+    expect(component.profileSearch).toBe('');
+  }));
+
   it('cancels an older profile request before a newer worker can be replaced by its response', () => {
     const firstResponse = new Subject<WorkerManagementProfile>();
     const secondResponse = new Subject<WorkerManagementProfile>();

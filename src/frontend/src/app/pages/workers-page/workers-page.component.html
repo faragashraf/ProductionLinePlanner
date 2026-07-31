@@ -214,9 +214,15 @@
       [canViewAttendance]="canViewAttendance"
       [canViewCompensation]="canViewCompensation"
       [canAssignDepartment]="canAssignDepartment"
+      [workerSearchValue]="profileSearch"
+      [workerSearchResults]="profileSearchResults"
+      [workerSearchLoading]="profileSearchLoading"
+      [workerSearchError]="profileSearchError"
       (changed)="onProfileChanged($event)"
       (departmentAssignmentRequested)="openProfileDepartmentDialog()"
       (reloadRequested)="retryProfile()"
+      (workerSearchChanged)="onProfileSearch($event)"
+      (workerSelected)="openProfile($event)"
       (closed)="closeProfile()"
     ></app-worker-profile-workspace>
   </ng-template>

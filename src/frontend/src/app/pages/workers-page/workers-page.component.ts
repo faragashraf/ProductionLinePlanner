@@ -27,6 +27,7 @@ import {
 } from './worker-management.presentation';
 
 type WorkerPageResult = { payload: WorkerManagementPage; requestId: number; error: null } | { payload: null; requestId: number; error: unknown };
+type WorkerProfileSearchResult = { payload: WorkerManagementPage; requestId: number; error: null } | { payload: null; requestId: number; error: unknown };
 
 interface PaginatorChange {
   page?: number;
@@ -42,9 +43,11 @@ export class WorkersPageComponent implements OnInit, OnDestroy {
   private readonly destroy$ = new Subject<void>();
   private readonly load$ = new Subject<WorkerManagementQuery>();
   private readonly search$ = new Subject<string>();
+  private readonly profileSearch$ = new Subject<string>();
   private readonly profileRequestCancel$ = new Subject<void>();
   private readonly storageKey = 'plp.worker-management.filters.v1';
   private loadSequence = 0;
+  private profileSearchSequence = 0;
   private stopRealtime?: () => void;
   workerActionTarget: WorkerManagementListItem | null = null;
 
@@ -72,6 +75,10 @@ export class WorkersPageComponent implements OnInit, OnDestroy {
   profileError = '';
   selectedProfile: WorkerManagementProfile | null = null;
   selectedProfileWorkerId = '';
+  profileSearch = '';
+  profileSearchResults: WorkerManagementListItem[] = [];
+  profileSearchLoading = false;
+  profileSearchError = '';
   departmentDialogVisible = false;
   departmentOptionsLoading = false;
   departmentSaving = false;
@@ -129,6 +136,38 @@ export class WorkersPageComponent implements OnInit, OnDestroy {
       distinctUntilChanged(),
       takeUntil(this.destroy$)
     ).subscribe(() => this.reload(1));
+
+    this.profileSearch$.pipe(
+      debounceTime(250),
+      switchMap(search => {
+        const normalizedSearch = search.trim();
+        const requestId = ++this.profileSearchSequence;
+        if (!normalizedSearch) {
+          this.profileSearchLoading = false;
+          this.profileSearchError = '';
+          return of({ payload: { items: [], totalCount: 0, page: 1, pageSize: 6, totalPages: 1 }, requestId, error: null } as WorkerProfileSearchResult);
+        }
+        this.profileSearchLoading = true;
+        this.profileSearchError = '';
+        return this.facade.loadWorkers({ page: 1, pageSize: 6, search: normalizedSearch, localEmploymentStatus: '' }).pipe(
+          map(payload => ({ payload, requestId, error: null }) as WorkerProfileSearchResult),
+          catchError(error => of({ payload: null, requestId, error } as WorkerProfileSearchResult)),
+          finalize(() => {
+            if (requestId === this.profileSearchSequence) this.profileSearchLoading = false;
+          })
+        );
+      }),
+      takeUntil(this.destroy$)
+    ).subscribe(result => {
+      if (result.requestId !== this.profileSearchSequence) return;
+      if (result.error || !result.payload) {
+        this.profileSearchResults = [];
+        this.profileSearchError = 'تعذر البحث عن عامل الآن. أعد المحاولة.';
+        return;
+      }
+      this.profileSearchResults = result.payload.items.filter(worker => worker.id !== this.selectedProfileWorkerId);
+      this.profileSearchError = '';
+    });
 
     this.reload(this.page);
   }
@@ -192,6 +231,11 @@ export class WorkersPageComponent implements OnInit, OnDestroy {
     this.search$.next(value.trim());
   }
 
+  onProfileSearch(value: string): void {
+    this.profileSearch = value;
+    this.profileSearch$.next(value);
+  }
+
   onEmploymentStatusChange(value: string): void {
     this.localEmploymentStatus = value as WorkerLocalEmploymentStatus | '';
     this.reload(1);
@@ -219,6 +263,7 @@ export class WorkersPageComponent implements OnInit, OnDestroy {
   openProfile(worker: WorkerManagementListItem): void {
     this.profileViewOpen = true;
     this.selectedProfileWorkerId = worker.id;
+    this.clearProfileSearch();
     this.loadSelectedProfile();
   }
 
@@ -391,6 +436,7 @@ export class WorkersPageComponent implements OnInit, OnDestroy {
     this.profileError = '';
     this.selectedProfile = null;
     this.selectedProfileWorkerId = '';
+    this.clearProfileSearch();
   }
 
   onProfileChanged(profile: WorkerManagementProfile): void {
@@ -444,6 +490,14 @@ export class WorkersPageComponent implements OnInit, OnDestroy {
       search: this.search.trim(),
       localEmploymentStatus: this.localEmploymentStatus
     };
+  }
+
+  private clearProfileSearch(): void {
+    this.profileSearchSequence++;
+    this.profileSearch = '';
+    this.profileSearchResults = [];
+    this.profileSearchLoading = false;
+    this.profileSearchError = '';
   }
 
   private applyPage(payload: WorkerManagementPage): void {
