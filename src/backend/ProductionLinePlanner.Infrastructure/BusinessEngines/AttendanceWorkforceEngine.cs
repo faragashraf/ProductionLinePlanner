@@ -62,7 +62,12 @@ public sealed class AttendanceWorkforceEngine(
                 .Skip((page - 1) * pageSize).Take(pageSize)
                 .Select(worker => new WorkerHeader(worker.Id, worker.EmployeeCode, worker.FullName, worker.LocalDepartmentName, worker.PhotoReference)).ToListAsync(cancellationToken);
             var pageRows = await ResolveRowsAsync(workers, query.ProductionDate, startUtc, attendanceDataAvailable, cancellationToken);
-            return Result<AttendanceWorkforcePageDto>.Success(new AttendanceWorkforcePageDto(query.ProductionDate, pageRows, BuildSummary(pageRows, attendanceDataAvailable) with { Scope = "current-page" }, page, pageSize, databaseTotal, Math.Max(1, (int)Math.Ceiling(databaseTotal / (double)pageSize))));
+            var pageSummary = BuildSummary(pageRows, attendanceDataAvailable) with
+            {
+                TotalWorkers = databaseTotal,
+                Scope = "current-page"
+            };
+            return Result<AttendanceWorkforcePageDto>.Success(new AttendanceWorkforcePageDto(query.ProductionDate, pageRows, pageSummary, page, pageSize, databaseTotal, Math.Max(1, (int)Math.Ceiling(databaseTotal / (double)pageSize))));
         }
 
         var candidateQuery = ApplyDatabaseCandidateFilters(workerQuery, query, startUtc, endUtc, attendanceDataAvailable);
@@ -347,7 +352,12 @@ public sealed class AttendanceWorkforceEngine(
         if (query.ProductionLineId.HasValue) rows = rows.Where(row => row.Assignments.Any(item => item.ProductionLineId == query.ProductionLineId.Value));
         if (query.MainStageId.HasValue) rows = rows.Where(row => row.Assignments.Any(item => item.MainStageId == query.MainStageId.Value));
         if (query.SubStageId.HasValue) rows = rows.Where(row => row.Assignments.Any(item => item.SubStageId == query.SubStageId.Value));
-        if (!string.IsNullOrWhiteSpace(query.AttendanceFilter) && query.AttendanceFilter != "all") rows = rows.Where(row => string.Equals(row.AttendanceStatus, query.AttendanceFilter, StringComparison.OrdinalIgnoreCase));
+        if (!string.IsNullOrWhiteSpace(query.AttendanceFilter) && query.AttendanceFilter != "all")
+        {
+            rows = string.Equals(query.AttendanceFilter, "Incomplete", StringComparison.OrdinalIgnoreCase)
+                ? rows.Where(row => row.HasSinglePunch)
+                : rows.Where(row => string.Equals(row.AttendanceStatus, query.AttendanceFilter, StringComparison.OrdinalIgnoreCase));
+        }
         if (!string.IsNullOrWhiteSpace(query.AssignmentFilter) && query.AssignmentFilter != "all") rows = query.AssignmentFilter switch
         {
             "assigned" => rows.Where(row => row.IsAssigned), "unassigned" => rows.Where(row => !row.IsAssigned), "temporary" => rows.Where(row => row.HasTemporaryAssignment), "multiple" => rows.Where(row => row.Assignments.Count > 1), _ => rows

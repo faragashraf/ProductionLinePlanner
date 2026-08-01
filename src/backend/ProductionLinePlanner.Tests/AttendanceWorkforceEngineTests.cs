@@ -81,6 +81,63 @@ public sealed class AttendanceWorkforceEngineTests
     }
 
     [Fact]
+    public async Task GetPage_filters_single_punch_workers_by_completion_state()
+    {
+        await using var db = CreateDb();
+        var incompleteWorker = new Worker(Guid.NewGuid(), "1001", "أحمد");
+        var completeWorker = new Worker(Guid.NewGuid(), "1002", "محمود");
+        db.AddRange(
+            incompleteWorker,
+            completeWorker,
+            Attendance(incompleteWorker.Id, AttendanceStatus.Present),
+            Attendance(completeWorker.Id, AttendanceStatus.Present));
+        await db.SaveChangesAsync();
+        var windows = new Dictionary<Guid, AttendancePresenceWindowDto>
+        {
+            [incompleteWorker.Id] = new(incompleteWorker.Id, AttendanceStatus.Present, DayEvidenceUtc, null, true),
+            [completeWorker.Id] = new(completeWorker.Id, AttendanceStatus.Present, DayEvidenceUtc, DayEvidenceUtc.AddHours(8), true)
+        };
+
+        var result = await CreateEngine(db, windows).GetPageAsync(new AttendanceWorkforceQuery(
+            ProductionDate,
+            AttendanceFilter: "Incomplete",
+            SortBy: "name"));
+
+        Assert.True(result.IsSuccess);
+        var row = Assert.Single(result.Value!.Items);
+        Assert.Equal(incompleteWorker.Id, row.WorkerId);
+        Assert.True(row.HasSinglePunch);
+        Assert.Equal(1, result.Value.TotalCount);
+        Assert.Equal(1, result.Value.Summary.IncompleteWorkers);
+    }
+
+    [Fact]
+    public async Task GetPage_uses_all_matching_workers_for_unfiltered_total_summary()
+    {
+        await using var db = CreateDb();
+        var workers = Enumerable.Range(1, 30)
+            .Select(index => new Worker(Guid.NewGuid(), index.ToString("D4"), $"عامل {index:D4}"))
+            .ToArray();
+        db.AddRange(workers);
+        db.AddRange(workers.Select(worker => Attendance(worker.Id, AttendanceStatus.Present)));
+        await db.SaveChangesAsync();
+        var windows = workers.ToDictionary(
+            worker => worker.Id,
+            worker => new AttendancePresenceWindowDto(worker.Id, AttendanceStatus.Present, DayEvidenceUtc, DayEvidenceUtc.AddHours(8), true));
+
+        var result = await CreateEngine(db, windows).GetPageAsync(new AttendanceWorkforceQuery(
+            ProductionDate,
+            Page: 1,
+            PageSize: 10,
+            SortBy: "name"));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(10, result.Value!.Items.Count);
+        Assert.Equal(30, result.Value.TotalCount);
+        Assert.Equal(30, result.Value.Summary.TotalWorkers);
+    }
+
+    [Fact]
     public async Task GetWorkerDetail_returns_neutral_utc_punches_without_raw_direction_codes()
     {
         await using var db = CreateDb();

@@ -245,6 +245,22 @@ public sealed class OperationalReadinessEngineTests
     }
 
     [Fact]
+    public async Task Sync_timestamps_are_returned_as_utc_after_database_kind_is_lost()
+    {
+        await using var fixture = await Fixture.CreateAsync(workerCount: 1, presentCount: 1);
+        var syncState = await fixture.Db.AttendanceSyncStates.SingleAsync();
+        var timestampWithoutKind = DateTime.SpecifyKind(fixture.AsOfUtc.AddMinutes(-1), DateTimeKind.Unspecified);
+        syncState.RecordSuccess(timestampWithoutKind);
+        await fixture.Db.SaveChangesAsync();
+
+        var snapshot = await fixture.Engine.GetSnapshotAsync(fixture.Factory.Id, fixture.AsOfUtc);
+
+        Assert.Equal(DateTimeKind.Utc, snapshot.Value!.AttendanceSync.LastAttemptAtUtc!.Value.Kind);
+        Assert.Equal(DateTimeKind.Utc, snapshot.Value.AttendanceSync.LastSuccessfulAtUtc!.Value.Kind);
+        Assert.EndsWith("Z\"", JsonSerializer.Serialize(snapshot.Value.AttendanceSync.LastSuccessfulAtUtc));
+    }
+
+    [Fact]
     public void Calculator_deduplicates_repeated_assignment_rows()
     {
         var workerId = Guid.NewGuid();

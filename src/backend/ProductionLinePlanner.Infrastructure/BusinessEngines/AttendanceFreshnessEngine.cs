@@ -60,9 +60,17 @@ public sealed class AttendanceFreshnessEngine(
         return new AttendanceSyncFreshnessDto(
             status,
             trusted,
-            state.LastAttemptAtUtc,
-            state.LastSuccessfulAtUtc,
+            AsUtc(state.LastAttemptAtUtc),
+            AsUtc(state.LastSuccessfulAtUtc),
             state.LastErrorCode,
             age);
     }
+
+    private static DateTime AsUtc(DateTime value) => value.Kind == DateTimeKind.Utc
+        ? value
+        : DateTime.SpecifyKind(value, DateTimeKind.Utc);
+
+    private static DateTime? AsUtc(DateTime? value) => value.HasValue
+        ? AsUtc(value.Value)
+        : null;
 }
