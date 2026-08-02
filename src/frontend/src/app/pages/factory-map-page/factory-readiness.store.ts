@@ -75,12 +75,12 @@ export class FactoryReadinessStore {
 
   constructor(private readonly api: OperationalReadinessApiService) {}
 
-  loadSnapshot(background = false): void {
+  loadSnapshot(background = false, forceRefresh = false): void {
     if (background && this.backgroundSnapshotLoading) return;
     if (background) this.backgroundSnapshotLoading = true;
     if (!background || !this.snapshot()) this.loading.set(true);
     this.loadError.set(null);
-    this.api.loadSnapshot().pipe(
+    this.api.loadSnapshot(undefined, forceRefresh).pipe(
       catchError(() => {
         this.loadError.set('تعذر تحميل خريطة الجاهزية الحالية.');
         return EMPTY;
@@ -209,14 +209,13 @@ export class FactoryReadinessStore {
     if (this.seenDeltaIds.size > 256) this.seenDeltaIds.delete(this.seenDeltaIds.values().next().value!);
 
     const current = this.snapshot();
-    if (!current || delta.requiresSnapshotReload || current.operationalDate !== delta.operationalDate) {
-      this.loadSnapshot(true);
-      return;
-    }
-    const trustChanged = current.attendanceSync.isTrusted !== delta.attendanceSync.isTrusted;
-    if (trustChanged) {
-      this.snapshot.set({ ...current, attendanceSync: delta.attendanceSync, calculatedAtUtc: delta.calculatedAtUtc });
-      this.loadSnapshot(true);
+    const freshnessChanged =
+      current?.attendanceSync.isTrusted !== delta.attendanceSync.isTrusted ||
+      current?.attendanceSync.status !== delta.attendanceSync.status ||
+      current?.attendanceSync.lastSuccessfulAtUtc !== delta.attendanceSync.lastSuccessfulAtUtc;
+
+    if (!current || delta.requiresSnapshotReload || current.operationalDate !== delta.operationalDate || freshnessChanged) {
+      this.loadSnapshot(true, true);
       return;
     }
 

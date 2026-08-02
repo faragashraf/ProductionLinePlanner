@@ -30,6 +30,10 @@ export class FactoryMapPageComponent implements OnInit, OnDestroy {
       screen: 'factory-readiness',
       coalesceMs: 0,
       refresh: change => {
+        if (change?.entityType === 'AttendanceSyncState' || change?.eventType === 'manufacturing.attendance-sync.changed') {
+          this.store.loadSnapshot(true, true);
+          return;
+        }
         if (change?.operationalReadiness) this.store.applyDelta(change.operationalReadiness);
         else this.store.loadSnapshot(true);
       }

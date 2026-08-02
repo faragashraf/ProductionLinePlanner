@@ -47,6 +47,21 @@ describe('FactoryMapPageComponent', () => {
     expect(store.loadSnapshot).toHaveBeenCalledWith(true);
   });
 
+  it('reloads the snapshot immediately when attendance sync freshness changes arrive', () => {
+    const component = new FactoryMapPageComponent(store, realtime);
+    component.ngOnInit();
+
+    watch?.refresh({
+      ...sampleChange(),
+      entityType: 'AttendanceSyncState',
+      eventType: 'manufacturing.attendance-sync.changed',
+      operationalReadiness: undefined
+    });
+
+    expect(store.loadSnapshot).toHaveBeenCalledWith(true, true);
+    expect(store.applyDelta).not.toHaveBeenCalled();
+  });
+
   it('surfaces realtime degradation and stops the screen watch on destroy', () => {
     const component = new FactoryMapPageComponent(store, realtime);
     component.ngOnInit();

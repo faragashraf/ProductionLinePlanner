@@ -43,4 +43,15 @@ describe('OperationalReadinessApiService', () => {
 
     expect(error?.message).toBe('غير متاح');
   });
+
+  it('forces a fresh snapshot request for freshness refresh', () => {
+    let loadedSnapshot: unknown;
+    service.loadSnapshot(undefined, true).subscribe(value => loadedSnapshot = value);
+
+    const request = http.expectOne(request => request.url === buildApiUrl('/operational-readiness') && request.params.has('_'));
+    expect(request.request.params.get('_')).toBeTruthy();
+    request.flush({ success: true, data: { factories: [] } });
+
+    expect(loadedSnapshot).toEqual(jasmine.objectContaining({ factories: [] }));
+  });
 });
