@@ -12,6 +12,7 @@ public interface IEmployeeMasterDataService
         int page = 1,
         int pageSize = 50,
         bool includePermanentAssignments = false,
+        bool? hasPhoto = null,
         CancellationToken cancellationToken = default);
 
     Task<Result<WorkerDto>> UpdateMasterIdentityAsync(

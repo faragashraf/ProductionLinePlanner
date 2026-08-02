@@ -1,5 +1,6 @@
 import { HttpClient } from '@angular/common/http';
 import { of, throwError } from 'rxjs';
+import { OverlayPanel } from 'primeng/overlaypanel';
 import { buildApiUrl } from '../../../core/config/api.config';
 import { WorkerPhotoClientCacheService } from '../../../core/services/worker-photo-client-cache.service';
 import { WorkerAvatarComponent } from './worker-avatar.component';
@@ -47,6 +48,28 @@ describe('WorkerAvatarComponent', () => {
     expect(inlineImage.safeImageUrl).toBe('');
   });
 
+  it('shows the large photo preview on hover and hides it on mouse leave', () => {
+    const component = new WorkerAvatarComponent();
+    const preview = jasmine.createSpyObj<OverlayPanel>('OverlayPanel', ['show', 'hide']);
+    const event = new MouseEvent('mouseenter');
+    component.photoReference = '/assets/worker-photos/worker-101.jpg';
+
+    component.showPhotoPreview(event, preview);
+    component.hidePhotoPreview(preview);
+
+    expect(preview.show).toHaveBeenCalledOnceWith(event);
+    expect(preview.hide).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not show a large preview for the default worker avatar', () => {
+    const component = new WorkerAvatarComponent();
+    const preview = jasmine.createSpyObj<OverlayPanel>('OverlayPanel', ['show', 'hide']);
+
+    component.showPhotoPreview(new MouseEvent('mouseenter'), preview);
+
+    expect(preview.show).not.toHaveBeenCalled();
+  });
+
   it('loads a protected worker photo through one shared authenticated cache request', () => {
     const get = jasmine.createSpy('get').and.returnValue(of(new Blob(['bmp'], { type: 'image/bmp' })));
     const cache = new WorkerPhotoClientCacheService({ get } as unknown as HttpClient);
@@ -66,6 +89,23 @@ describe('WorkerAvatarComponent', () => {
     expect(get).toHaveBeenCalledWith(buildApiUrl(reference), jasmine.objectContaining({ responseType: 'blob' }));
     expect(objectUrl).toHaveBeenCalledTimes(2);
     expect(first.safeImageUrl).toBe('blob:worker-119');
+  });
+
+  it('starts loading when a protected photo is added after the avatar view is initialized', () => {
+    const get = jasmine.createSpy('get').and.returnValue(of(new Blob(['bmp'], { type: 'image/bmp' })));
+    const cache = new WorkerPhotoClientCacheService({ get } as unknown as HttpClient);
+    const component = new WorkerAvatarComponent(cache);
+    spyOn(URL, 'createObjectURL').and.returnValue('blob:new-worker-photo');
+    component.lazy = false;
+    component.hasPhoto = false;
+    component.ngAfterViewInit();
+
+    component.hasPhoto = true;
+    component.photoReference = '/api/workers/11111111-1111-1111-1111-111111111119/photo?v=v2';
+    component.ngOnChanges({ hasPhoto: {} as any, photoReference: {} as any });
+
+    expect(get).toHaveBeenCalledTimes(1);
+    expect(component.safeImageUrl).toBe('blob:new-worker-photo');
   });
 
   it('caches a failed protected request for the current lifecycle without a retry storm', () => {

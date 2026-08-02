@@ -2136,10 +2136,11 @@ workersApi.MapGet("", async (
     string? search = null,
     bool? isActive = null,
     int page = 1,
-    int pageSize = 50) =>
+    int pageSize = 50,
+    bool? hasPhoto = null) =>
 {
     var includePermanentAssignments = await CanViewAssignmentsAsync(currentUserService, permissionService, cancellationToken);
-    var result = await employeeService.GetWorkersAsync(search, isActive, page, pageSize, includePermanentAssignments, cancellationToken);
+    var result = await employeeService.GetWorkersAsync(search, isActive, page, pageSize, includePermanentAssignments, hasPhoto, cancellationToken);
     if (result.IsFailure)
     {
         return ApiResponse.Failure(result.Error?.Code ?? "ValidationError", result.Error?.Message ?? "Validation failed.", MapFailureStatusCode(result.Error?.Code));

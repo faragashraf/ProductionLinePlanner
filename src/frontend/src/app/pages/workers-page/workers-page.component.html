@@ -45,6 +45,11 @@
           <option *ngFor="let option of employmentStatuses" [value]="option.value">{{ option.label }}</option>
         </select>
       </label>
+      <label for="workerPhotoFilter">الصورة
+        <select id="workerPhotoFilter" [value]="photoFilter" (change)="onPhotoFilterChange($any($event.target).value)">
+          <option *ngFor="let option of photoFilters" [value]="option.value">{{ option.label }}</option>
+        </select>
+      </label>
     </section>
 
     <div class="worker-management-page__results" role="status" aria-live="polite">

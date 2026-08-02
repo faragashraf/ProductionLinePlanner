@@ -243,6 +243,33 @@ async function expectPhotoWorkspaceSafe(page: Page, screenshotName: string): Pro
   await page.screenshot({ path: path.join(visualOutput, `${screenshotName}-profile.png`), fullPage: true });
 }
 
+async function expectPhotoHoverPreview(page: Page, screenshotName: string, width: number, height: number): Promise<void> {
+  const avatar = page.locator('.worker-profile__hero plp-worker-avatar .plp-worker-avatar');
+  await expect(avatar).toHaveCount(1);
+  await avatar.scrollIntoViewIfNeeded();
+  await expect(avatar.locator('img')).toBeVisible();
+  await avatar.hover();
+
+  const preview = page.locator('.plp-worker-photo-preview');
+  await expect(preview).toBeVisible();
+  await expect(preview.locator('.plp-worker-avatar__preview img')).toBeVisible();
+  const previewBox = await preview.boundingBox();
+  expect(previewBox?.x ?? -1).toBeGreaterThanOrEqual(0);
+  expect(previewBox?.y ?? -1).toBeGreaterThanOrEqual(0);
+  expect((previewBox?.x ?? 0) + (previewBox?.width ?? 0)).toBeLessThanOrEqual(width + 1);
+  expect((previewBox?.y ?? 0) + (previewBox?.height ?? 0)).toBeLessThanOrEqual(height + 1);
+  expect(previewBox?.width ?? 0).toBeGreaterThanOrEqual(190);
+  await page.screenshot({ path: path.join(visualOutput, `${screenshotName}-photo-hover-preview.png`), fullPage: true });
+
+  await page.mouse.move(0, 0);
+  await expect(preview).toBeHidden();
+  const geometry = await page.evaluate(() => ({
+    scrollWidth: document.documentElement.scrollWidth,
+    clientWidth: document.documentElement.clientWidth
+  }));
+  expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.clientWidth + 1);
+}
+
 test('uses API-backed worker data and remains RTL/overflow safe at required viewports', async ({ page }) => {
   const state: ScenarioState = { current: 'default' };
   const diagnostics = await prepareWorkspace(page, state);
@@ -294,6 +321,16 @@ test('searches and keeps the tablet photo preview lifecycle isolated until save'
   await page.getByRole('button', { name: 'حفظ الصورة' }).click();
   await expect(page.getByText('تم حفظ الصورة المحلية وتحديثها فورًا.')).toBeVisible();
   await expect(page.getByRole('img', { name: 'صورة العامل فاطمة أحمد عبد الرحمن' })).toBeVisible();
+
+  for (const [name, width, height] of [
+    ['desktop-1440x900', 1440, 900],
+    ['android-tablet-landscape-1280x800', 1280, 800],
+    ['android-tablet-portrait-800x1280', 800, 1280],
+    ['mobile-390x844', 390, 844]
+  ] as const) {
+    await page.setViewportSize({ width, height });
+    await expectPhotoHoverPreview(page, name, width, height);
+  }
 
   const geometry = await page.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth }));
   expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.clientWidth + 1);

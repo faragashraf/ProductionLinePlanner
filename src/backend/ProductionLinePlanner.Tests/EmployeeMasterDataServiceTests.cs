@@ -59,6 +59,30 @@ public sealed class EmployeeMasterDataServiceTests
     }
 
     [Fact]
+    public async Task GetWorkersAsync_filters_by_photo_presence()
+    {
+        var withPhoto = new Worker(Guid.NewGuid(), "W-101", "Worker With Photo");
+        var withPhotoReference = $"/api/workers/{withPhoto.Id:D}/photo?v=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        withPhoto.SetPhotoReference(withPhotoReference, DateTime.UtcNow);
+        var legacyPhoto = new Worker(Guid.NewGuid(), "W-102", "Worker Legacy Photo");
+        legacyPhoto.SetPhotoReference("legacy-photo.jpg", DateTime.UtcNow);
+        var withoutPhoto = new Worker(Guid.NewGuid(), "W-103", "Worker Without Photo");
+        await using var fixture = await EmployeeMasterDataFixture.CreateAsync([withPhoto, legacyPhoto, withoutPhoto]);
+
+        var withPhotoResult = await fixture.Service.GetWorkersAsync(null, null, 1, 50, false, true);
+        var withoutPhotoResult = await fixture.Service.GetWorkersAsync(null, null, 1, 50, false, false);
+
+        Assert.True(withPhotoResult.IsSuccess);
+        Assert.Single(withPhotoResult.Value!);
+        Assert.Equal(withPhoto.Id, withPhotoResult.Value!.Single().Id);
+
+        Assert.True(withoutPhotoResult.IsSuccess);
+        Assert.Equal(2, withoutPhotoResult.Value!.Length);
+        Assert.Contains(withoutPhotoResult.Value!, worker => worker.Id == legacyPhoto.Id);
+        Assert.Contains(withoutPhotoResult.Value!, worker => worker.Id == withoutPhoto.Id);
+    }
+
+    [Fact]
     public async Task Worker_directory_exposes_photo_metadata_only_for_a_managed_cached_photo_reference()
     {
         var managedWorker = new Worker(Guid.NewGuid(), "119", "Worker 119");

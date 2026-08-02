@@ -1,6 +1,7 @@
 import { CommonModule } from '@angular/common';
 import { NgModule } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { OverlayPanelModule } from 'primeng/overlaypanel';
 import { EmptyStateComponent } from './ui/empty-state/empty-state.component';
 import { ErrorStateComponent } from './ui/error-state/error-state.component';
 import { WorkerAvatarComponent } from './ui/worker-avatar/worker-avatar.component';
@@ -68,6 +69,7 @@ import { AttendanceSyncStatusComponent } from './business/attendance-sync-status
   imports: [
     CommonModule,
     FormsModule,
+    OverlayPanelModule,
     PlpProductEmptyStateComponent,
     PlpProductErrorStateComponent,
     PlpProductLoadingStateComponent,

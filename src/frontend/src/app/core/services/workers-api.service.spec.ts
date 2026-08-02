@@ -71,6 +71,16 @@ describe('WorkersApiService', () => {
     const formerRequest = http.expectOne(request => request.url.endsWith('/api/workers'));
     expect(formerRequest.request.params.get('isActive')).toBe('false');
     formerRequest.flush({ success: true, data: { items: [] } });
+
+    service.loadWorkers({ hasPhoto: true }).subscribe();
+    const photoRequest = http.expectOne(request => request.url.endsWith('/api/workers'));
+    expect(photoRequest.request.params.get('hasPhoto')).toBe('true');
+    photoRequest.flush({ success: true, data: { items: [] } });
+
+    service.loadWorkers({ hasPhoto: false }).subscribe();
+    const noPhotoRequest = http.expectOne(request => request.url.endsWith('/api/workers'));
+    expect(noPhotoRequest.request.params.get('hasPhoto')).toBe('false');
+    noPhotoRequest.flush({ success: true, data: { items: [] } });
   });
 
   it('patches one worker and maps the authoritative response for targeted UI reconciliation', () => {

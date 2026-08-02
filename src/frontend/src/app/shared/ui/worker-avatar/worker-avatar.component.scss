@@ -19,6 +19,26 @@
   object-fit: cover;
 }
 
+.plp-worker-avatar:has(> img) {
+  cursor: zoom-in;
+}
+
+.plp-worker-avatar__preview {
+  inline-size: clamp(12rem, 22vw, 18rem);
+  max-inline-size: calc(100vw - 2rem);
+  aspect-ratio: 4 / 5;
+  overflow: hidden;
+  border-radius: calc(var(--plp-radius-md) - var(--plp-space-2));
+  background: var(--plp-color-surface-subtle);
+}
+
+.plp-worker-avatar__preview img {
+  display: block;
+  inline-size: 100%;
+  block-size: 100%;
+  object-fit: cover;
+}
+
 .plp-worker-avatar__loading {
   position: absolute;
   inset: 0;

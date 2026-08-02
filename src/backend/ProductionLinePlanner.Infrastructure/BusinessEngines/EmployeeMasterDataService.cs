@@ -21,6 +21,7 @@ public sealed class EmployeeMasterDataService(
         int page = 1,
         int pageSize = 50,
         bool includePermanentAssignments = false,
+        bool? hasPhoto = null,
         CancellationToken cancellationToken = default)
     {
         if (page < 1 || pageSize < 1 || pageSize > 200)
@@ -42,6 +43,18 @@ public sealed class EmployeeMasterDataService(
         if (searchPattern is not null)
         {
             query = query.Where(x => EF.Functions.Like(x.EmployeeCode, searchPattern) || EF.Functions.Like(x.FullName, searchPattern));
+        }
+
+        if (hasPhoto.HasValue)
+        {
+            if (hasPhoto.Value)
+            {
+                query = query.Where(x => x.PhotoReference != null && EF.Functions.Like(x.PhotoReference, "/api/workers/%/photo?v=%"));
+            }
+            else
+            {
+                query = query.Where(x => x.PhotoReference == null || !EF.Functions.Like(x.PhotoReference, "/api/workers/%/photo?v=%"));
+            }
         }
 
         var totalCount = await query.CountAsync(cancellationToken);

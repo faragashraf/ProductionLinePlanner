@@ -24,6 +24,7 @@ export interface WorkersApiQuery {
   pageSize?: number;
   search?: string;
   serviceStatus?: 'all' | 'active' | 'inactive';
+  hasPhoto?: boolean;
 }
 
 export interface WorkerIdentityUpdate {
@@ -79,7 +80,9 @@ export class WorkersApiService {
     const search = (query.search ?? '').trim();
 
     return this.http
-      .get<ApiResponse<unknown>>(buildApiUrl('/api/workers'), { params: this.buildWorkersParams(page, pageSize, search, query.serviceStatus ?? 'all') })
+      .get<ApiResponse<unknown>>(buildApiUrl('/api/workers'), {
+        params: this.buildWorkersParams(page, pageSize, search, query.serviceStatus ?? 'all', query.hasPhoto)
+      })
       .pipe(
         timeout(STANDARD_API_TIMEOUT_MS),
         map((response) => {
@@ -191,11 +194,23 @@ export class WorkersApiService {
       );
   }
 
-  private buildWorkersParams(page: number, pageSize: number, search: string, serviceStatus: WorkersApiQuery['serviceStatus']): HttpParams {
+  private buildWorkersParams(
+    page: number,
+    pageSize: number,
+    search: string,
+    serviceStatus: WorkersApiQuery['serviceStatus'],
+    hasPhoto?: boolean
+  ): HttpParams {
     let params = new HttpParams().set('page', String(page)).set('pageSize', String(pageSize));
 
     if (search.length > 0) {
       params = params.set('search', search);
+    }
+
+    if (hasPhoto === true) {
+      params = params.set('hasPhoto', 'true');
+    } else if (hasPhoto === false) {
+      params = params.set('hasPhoto', 'false');
     }
 
     if (serviceStatus === 'active') {

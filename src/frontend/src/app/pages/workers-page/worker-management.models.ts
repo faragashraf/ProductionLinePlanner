@@ -4,6 +4,7 @@ export type WorkerAssignmentStatus = 'assigned' | 'unassigned' | 'multiple';
 export type WorkerLocalEmploymentStatus = 'active' | 'inactive' | 'left-employment';
 export type WorkerAssignmentKind = 'permanent';
 export type WorkerProfileDataState = 'loaded' | 'empty' | 'forbidden' | 'error';
+export type WorkerPhotoFilter = 'with-photo' | 'without-photo';
 
 export interface WorkerProfileAccess {
   assignments: boolean;
@@ -158,6 +159,7 @@ export interface WorkerManagementQuery {
   pageSize: number;
   search: string;
   localEmploymentStatus: WorkerLocalEmploymentStatus | '';
+  photoFilter?: WorkerPhotoFilter;
 }
 
 export interface WorkerManagementPage {

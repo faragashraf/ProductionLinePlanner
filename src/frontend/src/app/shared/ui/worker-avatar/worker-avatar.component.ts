@@ -1,5 +1,6 @@
-import { AfterViewInit, ChangeDetectionStrategy, ChangeDetectorRef, Component, ElementRef, Input, OnChanges, OnDestroy, Optional, SimpleChanges } from '@angular/core';
+import { AfterViewInit, ChangeDetectionStrategy, ChangeDetectorRef, Component, ElementRef, HostListener, Input, OnChanges, OnDestroy, Optional, SimpleChanges, ViewChild } from '@angular/core';
 import { Subscription } from 'rxjs';
+import { OverlayPanel } from 'primeng/overlaypanel';
 import { buildApiUrl } from '../../../core/config/api.config';
 import { WorkerPhotoClientCacheService } from '../../../core/services/worker-photo-client-cache.service';
 import { FactoryStatus, resolveFactoryStatus } from '../../models/factory-status.model';
@@ -11,6 +12,8 @@ import { FactoryStatus, resolveFactoryStatus } from '../../models/factory-status
   changeDetection: ChangeDetectionStrategy.OnPush
 })
 export class WorkerAvatarComponent implements AfterViewInit, OnChanges, OnDestroy {
+  @ViewChild('photoPreview') private photoPreview?: OverlayPanel;
+
   @Input() fullName: unknown = '';
   @Input() code: unknown = '';
   @Input() status: FactoryStatus | string = 'info';
@@ -29,6 +32,8 @@ export class WorkerAvatarComponent implements AfterViewInit, OnChanges, OnDestro
   private photoObserver?: IntersectionObserver;
   private canLoadProtectedPhoto = false;
   private photoLoading = false;
+  private viewInitialized = false;
+  private photoPreviewOpen = false;
 
   constructor(
     @Optional() private readonly photoCache?: WorkerPhotoClientCacheService,
@@ -37,23 +42,8 @@ export class WorkerAvatarComponent implements AfterViewInit, OnChanges, OnDestro
   ) {}
 
   ngAfterViewInit(): void {
-    const reference = this.currentReference;
-    if (!this.isProtectedWorkerPhotoReference(reference) || this.hasPhoto === false) return;
-
-    if (!this.lazy || !this.host || typeof IntersectionObserver === 'undefined') {
-      this.canLoadProtectedPhoto = true;
-      this.loadProtectedPhoto(reference);
-      return;
-    }
-
-    this.photoObserver = new IntersectionObserver((entries) => {
-      if (!entries.some((entry) => entry.isIntersecting)) return;
-      this.canLoadProtectedPhoto = true;
-      this.photoObserver?.disconnect();
-      this.photoObserver = undefined;
-      this.loadProtectedPhoto(this.currentReference);
-    }, { rootMargin: '160px 0px' });
-    this.photoObserver.observe(this.host.nativeElement);
+    this.viewInitialized = true;
+    this.armProtectedPhotoLoading(this.currentReference);
   }
 
   ngOnChanges(changes: SimpleChanges): void {
@@ -78,7 +68,11 @@ export class WorkerAvatarComponent implements AfterViewInit, OnChanges, OnDestro
     if (!this.host || !this.lazy) {
       this.canLoadProtectedPhoto = true;
     }
-    if (this.canLoadProtectedPhoto) this.loadProtectedPhoto(nextReference);
+    if (this.canLoadProtectedPhoto) {
+      this.loadProtectedPhoto(nextReference);
+    } else if (this.viewInitialized) {
+      this.armProtectedPhotoLoading(nextReference);
+    }
   }
 
   ngOnDestroy(): void {
@@ -113,6 +107,45 @@ export class WorkerAvatarComponent implements AfterViewInit, OnChanges, OnDestro
     this.imageFailed = true;
     this.clearProtectedImage();
     this.changeDetector?.markForCheck();
+  }
+
+  showPhotoPreview(event: Event, preview: OverlayPanel): void {
+    if (!this.safeImageUrl) return;
+    preview.show(event);
+  }
+
+  togglePhotoPreview(event: Event, preview: OverlayPanel): void {
+    if (!this.safeImageUrl) return;
+
+    if (this.photoPreviewOpen) {
+      preview.hide();
+      return;
+    }
+
+    preview.show(event);
+  }
+
+  hidePhotoPreview(preview: OverlayPanel): void {
+    preview.hide();
+  }
+
+  onPhotoPreviewShow(): void {
+    this.photoPreviewOpen = true;
+  }
+
+  onPhotoPreviewHide(): void {
+    this.photoPreviewOpen = false;
+  }
+
+  @HostListener('document:pointerdown', ['$event'])
+  onGlobalPointerDown(event: PointerEvent): void {
+    if (!this.photoPreviewOpen || !this.host?.nativeElement) return;
+
+    const target = event.target as Node | null;
+    if (!target || this.host.nativeElement.contains(target)) return;
+
+    this.photoPreview?.hide();
+    this.photoPreviewOpen = false;
   }
 
   get statusTone(): string { return `plp-worker-avatar--${resolveFactoryStatus(this.status).toneClass}`; }
@@ -162,6 +195,26 @@ export class WorkerAvatarComponent implements AfterViewInit, OnChanges, OnDestro
       this.protectedPhotoRequest = undefined;
       this.changeDetector?.markForCheck();
     });
+  }
+
+  private armProtectedPhotoLoading(reference: string): void {
+    if (!this.isProtectedWorkerPhotoReference(reference) || this.hasPhoto === false) return;
+
+    if (!this.lazy || !this.host || typeof IntersectionObserver === 'undefined') {
+      this.canLoadProtectedPhoto = true;
+      this.loadProtectedPhoto(reference);
+      return;
+    }
+
+    this.photoObserver?.disconnect();
+    this.photoObserver = new IntersectionObserver((entries) => {
+      if (!entries.some((entry) => entry.isIntersecting)) return;
+      this.canLoadProtectedPhoto = true;
+      this.photoObserver?.disconnect();
+      this.photoObserver = undefined;
+      this.loadProtectedPhoto(this.currentReference);
+    }, { rootMargin: '160px 0px' });
+    this.photoObserver.observe(this.host.nativeElement);
   }
 
   private clearProtectedImage(): void {

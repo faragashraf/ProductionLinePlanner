@@ -823,6 +823,10 @@ p-radiobutton,
   border-radius: var(--plp-radius-md);
 }
 
+.p-overlaypanel.plp-worker-photo-preview .p-overlaypanel-content {
+  padding: var(--plp-space-4);
+}
+
 .p-card {
   box-shadow: var(--plp-elevation-1);
   overflow: hidden;

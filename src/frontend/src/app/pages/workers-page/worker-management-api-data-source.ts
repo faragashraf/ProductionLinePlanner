@@ -13,6 +13,7 @@ import {
   WorkerManagementPage,
   WorkerManagementProfile,
   WorkerManagementQuery,
+  WorkerPhotoFilter,
   WorkerSourceLinkStatus,
   WorkerDepartmentOption,
   WorkerDepartmentAssignmentResult,
@@ -54,6 +55,7 @@ export class WorkerManagementApiDataSource implements WorkerManagementDataSource
       page: query.page,
       pageSize: query.pageSize,
       search: query.search,
+      hasPhoto: this.toPhotoFilterBoolean(query.photoFilter),
       serviceStatus: query.localEmploymentStatus === 'active'
         ? 'active'
         : query.localEmploymentStatus ? 'inactive' : 'all'
@@ -388,5 +390,11 @@ export class WorkerManagementApiDataSource implements WorkerManagementDataSource
 
   private localCorrelation(): string | undefined {
     return this.manufacturingRealtime?.registerLocalOperation('employees');
+  }
+
+  private toPhotoFilterBoolean(filter?: WorkerPhotoFilter): boolean | undefined {
+    if (filter === 'with-photo') return true;
+    if (filter === 'without-photo') return false;
+    return undefined;
   }
 }

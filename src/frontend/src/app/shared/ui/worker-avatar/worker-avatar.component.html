@@ -1,4 +1,12 @@
-<div class="plp-worker-avatar" [class]="avatarClasses" [attr.aria-label]="decorative ? null : imageAlt" [attr.aria-hidden]="decorative ? 'true' : null">
+<div
+  class="plp-worker-avatar"
+  [ngClass]="avatarClasses"
+  [attr.aria-label]="decorative ? null : imageAlt"
+  [attr.aria-hidden]="decorative ? 'true' : null"
+  (mouseenter)="showPhotoPreview($event, photoPreview)"
+  (mouseleave)="hidePhotoPreview(photoPreview)"
+  (click)="togglePhotoPreview($event, photoPreview)"
+>
   <img *ngIf="safeImageUrl; else defaultAvatarTpl" [src]="safeImageUrl" [alt]="imageAlt" [attr.loading]="lazy ? 'lazy' : null" (error)="onImageError()" />
   <span *ngIf="isLoadingPhoto" class="plp-worker-avatar__loading" aria-hidden="true"></span>
   <ng-template #defaultAvatarTpl>
@@ -9,3 +17,24 @@
     <span>{{ initials }}</span>
   </ng-template>
 </div>
+
+<p-overlayPanel
+  #photoPreview
+  appendTo="body"
+  styleClass="plp-worker-photo-preview"
+  [dismissable]="false"
+  [focusOnShow]="false"
+  [autoZIndex]="true"
+  [baseZIndex]="1400"
+  showTransitionOptions="120ms cubic-bezier(0.2, 0, 0, 1)"
+  hideTransitionOptions="0ms"
+  [@.disabled]="true"
+  (onShow)="onPhotoPreviewShow()"
+  (onHide)="onPhotoPreviewHide()"
+>
+  <ng-container *ngIf="safeImageUrl as previewImageUrl">
+    <div class="plp-worker-avatar__preview" aria-hidden="true">
+      <img [src]="previewImageUrl" alt="" (error)="onImageError(); photoPreview.hide()" />
+    </div>
+  </ng-container>
+</p-overlayPanel>

@@ -15,6 +15,7 @@ import {
   WorkerManagementPage,
   WorkerManagementProfile,
   WorkerManagementQuery,
+  WorkerPhotoFilter,
   WorkerSourceLinkStatus,
   WorkerDepartmentOption
 } from './worker-management.models';
@@ -57,10 +58,16 @@ export class WorkersPageComponent implements OnInit, OnDestroy {
     { value: 'active', label: 'نشط محليًا' },
     { value: 'inactive', label: 'غير نشط محليًا' }
   ];
+  readonly photoFilters = [
+    { value: '', label: 'الكل' },
+    { value: 'with-photo', label: 'بصورة' },
+    { value: 'without-photo', label: 'بدون صورة' }
+  ];
 
   workers: WorkerManagementListItem[] = [];
   search = '';
   localEmploymentStatus: WorkerLocalEmploymentStatus | '' = '';
+  photoFilter: WorkerPhotoFilter | '' = '';
   page = 1;
   pageSize = 6;
   totalRecords = 0;
@@ -212,7 +219,8 @@ export class WorkersPageComponent implements OnInit, OnDestroy {
   get activeFilterCount(): number {
     return [
       this.search.trim(),
-      this.localEmploymentStatus
+      this.localEmploymentStatus,
+      this.photoFilter
     ].filter(Boolean).length;
   }
 
@@ -241,9 +249,15 @@ export class WorkersPageComponent implements OnInit, OnDestroy {
     this.reload(1);
   }
 
+  onPhotoFilterChange(value: string): void {
+    this.photoFilter = value as WorkerPhotoFilter | '';
+    this.reload(1);
+  }
+
   resetFilters(): void {
     this.search = '';
     this.localEmploymentStatus = '';
+    this.photoFilter = '';
     localStorage.removeItem(this.storageKey);
     this.reload(1);
   }
@@ -488,7 +502,8 @@ export class WorkersPageComponent implements OnInit, OnDestroy {
       page: this.page,
       pageSize: this.pageSize,
       search: this.search.trim(),
-      localEmploymentStatus: this.localEmploymentStatus
+      localEmploymentStatus: this.localEmploymentStatus,
+      photoFilter: this.photoFilter || undefined
     };
   }
 
@@ -512,7 +527,8 @@ export class WorkersPageComponent implements OnInit, OnDestroy {
   private persistFilters(): void {
     localStorage.setItem(this.storageKey, JSON.stringify({
       search: this.search,
-      localEmploymentStatus: this.localEmploymentStatus
+      localEmploymentStatus: this.localEmploymentStatus,
+      photoFilter: this.photoFilter
     }));
   }
 
@@ -521,6 +537,7 @@ export class WorkersPageComponent implements OnInit, OnDestroy {
       const value = JSON.parse(localStorage.getItem(this.storageKey) ?? '{}') as Record<string, unknown>;
       this.search = this.stringValue(value['search']);
       this.localEmploymentStatus = this.allowedValue(value['localEmploymentStatus'], ['active', 'inactive']);
+      this.photoFilter = this.allowedValue(value['photoFilter'], ['with-photo', 'without-photo']);
     } catch {
       localStorage.removeItem(this.storageKey);
     }
