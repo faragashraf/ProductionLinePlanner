@@ -17,9 +17,12 @@ interface ApiResponse<T> {
 export class OperationalReadinessApiService {
   constructor(private readonly http: HttpClient) {}
 
-  loadSnapshot(factoryId?: string | null): Observable<OperationalReadinessSnapshot> {
+  loadSnapshot(factoryId?: string | null, forceRefresh = false): Observable<OperationalReadinessSnapshot> {
     const params = factoryId ? new HttpParams().set('factoryId', factoryId) : undefined;
-    return this.http.get<ApiResponse<OperationalReadinessSnapshot>>(buildApiUrl('/operational-readiness'), { params })
+    const cacheParams = forceRefresh
+      ? (params ? params.set('_', Date.now().toString()) : new HttpParams().set('_', Date.now().toString()))
+      : params;
+    return this.http.get<ApiResponse<OperationalReadinessSnapshot>>(buildApiUrl('/operational-readiness'), { params: cacheParams })
       .pipe(map(response => this.unwrap(response)));
   }
 

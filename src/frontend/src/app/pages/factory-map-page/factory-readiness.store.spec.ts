@@ -83,6 +83,17 @@ describe('FactoryReadinessStore', () => {
     expect(api.loadSnapshot).toHaveBeenCalledTimes(2);
   });
 
+  it('reloads a snapshot when attendance freshness status changes even if trust stays true', () => {
+    const statusChange: AttendanceSyncFreshness = { ...freshSync(), status: 'Failed', isTrusted: true, lastSuccessfulAtUtc: '2026-07-29T07:14:00Z', lastErrorCode: 'AttendanceSyncSourceError' };
+
+    store.applyDelta({
+      eventId: 'sync-status', operationalDate: '2026-07-29', calculatedAtUtc: '2026-07-29T07:15:00Z',
+      attendanceSync: statusChange, requiresSnapshotReload: false, nodes: [], workers: []
+    });
+
+    expect(api.loadSnapshot).toHaveBeenCalledTimes(2);
+  });
+
   it('reloads the open lazy path after reconnect snapshot reconciliation', () => {
     openWorkers(store);
     api.loadStages.calls.reset();
