@@ -17,7 +17,8 @@ export const DAILY_PRODUCTION_OPERATIONS_ACCESS: PermissionRequirementDescriptor
   requireAny: [
     PERMISSIONS.production.view,
     PERMISSIONS.production.record,
-    PERMISSIONS.production.approve
+    PERMISSIONS.production.approve,
+    PERMISSIONS.production.dailyDraftsApprove
   ]
 };
 

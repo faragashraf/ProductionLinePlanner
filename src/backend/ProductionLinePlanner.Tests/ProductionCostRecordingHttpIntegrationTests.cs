@@ -89,6 +89,35 @@ public sealed class ProductionCostRecordingHttpIntegrationTests
     }
 
     [Fact]
+    public async Task Accounting_permission_approves_a_saved_daily_draft_but_cannot_cancel_it()
+    {
+        await using var fixture = await ProductionHttpFixture.CreateAsync();
+        var draft = await CreateDailyDraftAsync(fixture);
+        var orderId = draft.GetProperty("productionOrderId").GetGuid();
+        var stage = draft.GetProperty("stages").EnumerateArray().Single();
+
+        var approve = await fixture.SendAsync(
+            HttpMethod.Post,
+            $"/api/production/daily-operations/{orderId}/approve",
+            DailyApprovalPayload(stage),
+            permissions: ["production.daily-drafts.approve"]);
+
+        Assert.Equal(HttpStatusCode.OK, approve.StatusCode);
+
+        var approvedStage = await DataAsync(await fixture.SendAsync(
+            HttpMethod.Get,
+            $"/api/production/records/{stage.GetProperty("id").GetGuid()}",
+            permissions: ["production.view"]));
+        var cancel = await fixture.SendAsync(HttpMethod.Post, $"/api/production/daily-operations/{orderId}/cancel-approval", new
+        {
+            reason = "غير مسموح للمحاسبة",
+            stageApprovals = new[] { new { stageProductionRecordId = approvedStage.GetProperty("id").GetGuid(), concurrencyToken = approvedStage.GetProperty("concurrencyToken").GetGuid() } }
+        }, permissions: ["production.daily-drafts.approve"]);
+
+        Assert.Equal(HttpStatusCode.Forbidden, cancel.StatusCode);
+    }
+
+    [Fact]
     public async Task Daily_approval_cancellation_reopens_the_same_draft_for_correction_without_creating_another_daily_operation()
     {
         await using var fixture = await ProductionHttpFixture.CreateAsync();
@@ -634,6 +663,7 @@ public sealed class ProductionCostRecordingHttpIntegrationTests
             builder.Services.AddAuthentication("test").AddScheme<AuthenticationSchemeOptions, HeaderAuthenticationHandler>("test", _ => { });
             builder.Services.AddAuthorization(options => options.AddPermissionPolicies());
             builder.Services.AddSingleton<IAuthorizationHandler, PermissionAuthorizationHandler>();
+            builder.Services.AddSingleton<IAuthorizationHandler, AnyPermissionAuthorizationHandler>();
             builder.Services.AddScoped<ICurrentUserService, CurrentUserService>();
             builder.Services.AddScoped<IPermissionService, HeaderPermissionService>();
             builder.Services.AddDbContext<AppDbContext>(options => options.UseSqlite(connection));

@@ -59,6 +59,19 @@ public sealed class PermissionServiceTests
     }
 
     [Fact]
+    public async Task Super_admin_is_not_locked_out_by_a_historical_direct_deny()
+    {
+        await using var fixture = await PermissionFixture.CreateAsync(role: UserRole.SuperAdmin);
+        fixture.GrantRolePermission("users.manage");
+        fixture.DenyUserPermission("users.manage");
+        await fixture.SaveAsync();
+
+        var permissions = await fixture.Service.GetEffectivePermissionsAsync(fixture.User.Id);
+
+        Assert.Contains("users.manage", permissions);
+    }
+
+    [Fact]
     public async Task Updated_direct_override_changes_a_grant_to_a_deny()
     {
         await using var fixture = await PermissionFixture.CreateAsync();
@@ -126,18 +139,18 @@ public sealed class PermissionServiceTests
         public AppRole Role { get; }
         public PermissionService Service { get; }
 
-        public static async Task<PermissionFixture> CreateAsync(bool isActive = true)
+        public static async Task<PermissionFixture> CreateAsync(bool isActive = true, UserRole role = UserRole.Planner)
         {
             var options = new DbContextOptionsBuilder<AppDbContext>()
                 .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
                 .Options;
             var db = new AppDbContext(options);
             var user = new AppUser(Guid.NewGuid(), "Test User", "test@example.com", "hash", isActive: isActive);
-            var role = new AppRole(Guid.NewGuid(), UserRole.Planner, "Planner");
-            user.AssignRole(role);
-            db.AddRange(user, role);
+            var appRole = new AppRole(Guid.NewGuid(), role, role.ToString());
+            user.AssignRole(appRole);
+            db.AddRange(user, appRole);
             await db.SaveChangesAsync();
-            return new PermissionFixture(db, user, role);
+            return new PermissionFixture(db, user, appRole);
         }
 
         public RolePermission GrantRolePermission(string name, bool isActive = true)

@@ -58,6 +58,20 @@ public sealed class PermissionSeedServiceTests
         Assert.Contains("production.approve", superAdminPermissionNames);
     }
 
+    [Fact]
+    public void Human_resources_and_accounting_have_only_their_required_capabilities()
+    {
+        Assert.Equal(
+            ["assignments.view", "attendance.sync", "attendance.view", "workers.view"],
+            PermissionSeedService.GetPermissionsForRole(UserRole.HumanResources).OrderBy(name => name));
+
+        Assert.Equal(
+            ["assignments.view", "attendance.view", "departments.view", "factory-structure.view", "models.view", "production.daily-drafts.approve", "production.view", "stages.view", "workers.view"],
+            PermissionSeedService.GetPermissionsForRole(UserRole.Accounting).OrderBy(name => name));
+        Assert.DoesNotContain("production.record", PermissionSeedService.GetPermissionsForRole(UserRole.Accounting));
+        Assert.DoesNotContain("production.approve", PermissionSeedService.GetPermissionsForRole(UserRole.Accounting));
+    }
+
     [CollectionDefinition("PermissionSeedService", DisableParallelization = true)]
     public sealed class PermissionSeedServiceCollection
     {

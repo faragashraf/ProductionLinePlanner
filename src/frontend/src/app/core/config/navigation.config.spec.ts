@@ -4,9 +4,9 @@ import { AppNavigationItem } from './navigation.config';
 import { PERMISSIONS } from './permission-identifiers';
 
 describe('navigation filtering', () => {
-  function service(permissions: string[]): PermissionService {
+  function service(permissions: string[], roles: string[] = []): PermissionService {
     const auth = {
-      currentUser$: { subscribe: (callback: (user: any) => void) => callback({ permissions }) },
+      currentUser$: { subscribe: (callback: (user: any) => void) => callback({ permissions, roles }) },
       isAuthenticated: () => true,
       getCurrentUser: () => ({ permissions })
     };
@@ -96,5 +96,28 @@ describe('navigation filtering', () => {
     expect(workers?.label).toBe('إدارة العاملين');
     expect(workers?.route).toBe('/workers');
     expect(workers?.permission).toBe(PERMISSIONS.workers.view);
+  });
+
+  it('limits Human Resources navigation to workers and attendance workforce', () => {
+    const items = service([
+      PERMISSIONS.workers.view,
+      PERMISSIONS.attendance.view,
+      PERMISSIONS.attendance.sync,
+      PERMISSIONS.assignments.view
+    ], ['Human Resources']).filterNavigation(APP_NAVIGATION_ITEMS).map(item => item.id);
+
+    expect(items).toEqual(['workers', 'attendance-workforce']);
+  });
+
+  it('limits Accounting navigation to saved-draft production approval', () => {
+    const items = service([
+      PERMISSIONS.factoryStructure.view,
+      PERMISSIONS.departments.view,
+      PERMISSIONS.models.view,
+      PERMISSIONS.production.view,
+      PERMISSIONS.production.dailyDraftsApprove
+    ], ['Accounting']).filterNavigation(APP_NAVIGATION_ITEMS).map(item => item.id);
+
+    expect(items).toEqual(['daily-production-operations']);
   });
 });

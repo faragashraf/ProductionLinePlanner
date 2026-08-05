@@ -141,4 +141,18 @@ public sealed class RoleModelTests
         Assert.Contains(roleType.GetIndexes(), index => index.IsUnique && index.Properties.Select(property => property.Name).SequenceEqual([nameof(AppRole.Name)]));
         Assert.Equal(role.Id, (await db.AppUsers.Include(x => x.Roles).SingleAsync()).Roles.Single().Id);
     }
+
+    [Fact]
+    public void Retired_database_role_values_are_loaded_as_custom_roles()
+    {
+        var options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
+            .Options;
+        using var db = new AppDbContext(options);
+        var roleProperty = db.Model.FindEntityType(typeof(AppRole))!.FindProperty(nameof(AppRole.Role))!;
+        var converter = roleProperty.GetValueConverter()!;
+
+        Assert.Null(converter.ConvertFromProvider("Hr"));
+        Assert.Equal(UserRole.Admin, converter.ConvertFromProvider("Admin"));
+    }
 }

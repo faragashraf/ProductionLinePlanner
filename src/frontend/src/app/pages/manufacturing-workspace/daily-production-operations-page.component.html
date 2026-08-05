@@ -61,10 +61,11 @@
     </div>
   </app-manufacturing-filter-card>
   <div class="daily-production-operations__context-actions">
-    <div class="daily-production-operations__attendance-action">
+    <div class="daily-production-operations__attendance-action" *ngIf="canSynchronizeAttendance; else draftReviewAccess">
       <button pButton type="button" class="p-button-outlined" [label]="attendanceSyncing ? 'جارٍ مزامنة الحضور…' : 'مزامنة حضور التاريخ'" icon="pi pi-refresh" [loading]="attendanceSyncing" [disabled]="attendanceSyncing || !productionDate" (click)="synchronizeAttendance()"></button>
       <small [class.is-confirmed]="attendanceSyncedForDate === productionDate">{{ attendanceSyncedForDate === productionDate ? 'تمت المزامنة لهذا التاريخ' : 'المزامنة اليدوية مطلوبة قبل التحميل' }}</small>
     </div>
+    <ng-template #draftReviewAccess><small>يمكنك مراجعة المسودات المحفوظة واعتمادها. مزامنة الحضور وتعديل التشغيل غير متاحين لحسابك.</small></ng-template>
     <button pButton type="button" label="تحميل تشغيل اليوم" icon="pi pi-play" [disabled]="!canLoadOperations" [loading]="operationsLoading" (click)="loadTodayOperations()"></button>
   </div>
 

@@ -6,5 +6,7 @@ public enum UserRole
     Admin,
     Planner,
     Supervisor,
-    Operator
+    Operator,
+    HumanResources,
+    Accounting
 }

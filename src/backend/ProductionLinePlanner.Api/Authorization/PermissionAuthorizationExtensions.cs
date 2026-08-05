@@ -21,6 +21,30 @@ public static class PermissionAuthorizationExtensions
         return builder.RequireAuthorization(PolicyName(permission));
     }
 
+    public static RouteHandlerBuilder RequireAnyPermission(this RouteHandlerBuilder builder, params string[] permissions)
+    {
+        var normalizedPermissions = permissions
+            .Where(permission => !string.IsNullOrWhiteSpace(permission))
+            .Select(permission => permission.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (normalizedPermissions.Length == 0)
+        {
+            throw new ArgumentException("At least one product permission is required.", nameof(permissions));
+        }
+
+        foreach (var permission in normalizedPermissions)
+        {
+            ValidateKnownPermission(permission);
+        }
+
+        return builder.RequireAuthorization(policy =>
+        {
+            policy.RequireAuthenticatedUser();
+            policy.Requirements.Add(new AnyPermissionRequirement(normalizedPermissions));
+        });
+    }
+
     public static void AddPermissionPolicies(this AuthorizationOptions options)
     {
         foreach (var permission in PermissionCatalog.All)

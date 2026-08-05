@@ -84,6 +84,8 @@ public sealed class PermissionSeedService(
                         UserRole.Planner => "Planner role.",
                         UserRole.Supervisor => "Supervisor role.",
                         UserRole.Operator => "Operator role.",
+                        UserRole.HumanResources => "Human resources role.",
+                        UserRole.Accounting => "Accounting role.",
                         _ => "System role."
                     };
 
@@ -148,57 +150,39 @@ public sealed class PermissionSeedService(
         UserRole.SuperAdmin => PermissionCatalog.All.Select(x => x.Name),
         UserRole.Admin => new[]
         {
-            "workers.view",
-            "workers.manage",
-            "attendance.view",
-            "attendance.sync",
-            "factory-structure.view",
-            "factory-structure.manage",
-            "assignments.view",
-            "assignments.manage",
-            "departments.view",
-            "departments.manage",
-            "production.view",
-            "production.record",
-            "production.approve",
-            "stages.view",
-            "stages.manage",
-            "stages.delete",
-            "models.view",
-            "models.manage",
-            "roles.view",
-            "roles.manage",
-            "users.view",
-            "permissions.assign",
-            "audit.view"
+            "workers.view", "workers.manage", "attendance.view", "attendance.sync",
+            "factory-structure.view", "factory-structure.manage", "assignments.view", "assignments.manage",
+            "departments.view", "departments.manage", "production.view", "production.record", "production.approve",
+            "stages.view", "stages.manage", "stages.delete", "models.view", "models.manage",
+            "roles.view", "roles.manage", "users.view", "permissions.assign", "audit.view"
         },
         UserRole.Planner => new[]
         {
-            "workers.view",
-            "attendance.view",
-            "factory-structure.view",
-            "assignments.view",
-            "assignments.manage",
-            "departments.view",
-            "production.view",
-            "stages.view",
-            "models.view"
+            "workers.view", "attendance.view", "factory-structure.view", "assignments.view", "assignments.manage",
+            "departments.view", "production.view", "stages.view", "models.view",
         },
         UserRole.Supervisor => new[]
         {
-            "workers.view",
-            "attendance.view",
-            "factory-structure.view",
-            "assignments.view",
-            "production.view",
-            "stages.view"
+            "workers.view", "attendance.view", "factory-structure.view", "assignments.view", "production.view", "stages.view",
         },
-        _ => new[]
+        UserRole.Operator => new[]
         {
-            "attendance.view",
-            "factory-structure.view",
-            "production.view",
-            "stages.view"
-        }
+            "attendance.view", "factory-structure.view", "production.view", "stages.view",
+        },
+        UserRole.HumanResources => new[]
+        {
+            "workers.view", "attendance.view", "attendance.sync", "assignments.view"
+        },
+        UserRole.Accounting => new[]
+        {
+            // The daily operations screen presents the saved draft together with
+            // its operational source data. These are read-only grants only;
+            // production.record remains deliberately absent so Accounting cannot
+            // recalculate, save, or change any production data.
+            "workers.view", "attendance.view", "assignments.view", "stages.view",
+            "factory-structure.view", "departments.view", "models.view", "production.view",
+            "production.daily-drafts.approve"
+        },
+        _ => []
     };
 }

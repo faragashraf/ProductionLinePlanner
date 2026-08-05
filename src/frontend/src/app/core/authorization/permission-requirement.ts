@@ -2,6 +2,8 @@ export interface PermissionRequirementDescriptor {
   permission?: string;
   requireAny?: string | string[];
   requireAll?: string | string[];
+  visibleForRoles?: readonly string[];
+  hiddenForRoles?: readonly string[];
   showWithoutChildren?: boolean;
 }
 

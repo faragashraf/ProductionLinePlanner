@@ -15,10 +15,11 @@ public sealed class IamDelegationPolicy(AppDbContext dbContext, IPermissionServi
             return DelegationDecision.Deny("SelfPromotionForbidden", "Users cannot change their own role assignments.");
 
         var actorIsSuperAdmin = await IsSuperAdminAsync(actorUserId, cancellationToken);
+        if (actorIsSuperAdmin)
+            return DelegationDecision.Permit();
+
         if (role.Role == UserRole.SuperAdmin)
-            return actorIsSuperAdmin
-                ? DelegationDecision.Permit()
-                : DelegationDecision.Deny("SuperAdminDelegationForbidden", "Only a SuperAdmin can assign SuperAdmin.");
+            return DelegationDecision.Deny("SuperAdminDelegationForbidden", "Only a SuperAdmin can assign SuperAdmin.");
 
         var permissions = await permissionService.GetEffectivePermissionsAsync(actorUserId, cancellationToken);
         if (!permissions.Contains("users.manage", StringComparer.OrdinalIgnoreCase))
@@ -38,12 +39,15 @@ public sealed class IamDelegationPolicy(AppDbContext dbContext, IPermissionServi
         if (actorUserId == targetUserId)
             return DelegationDecision.Deny("SelfPromotionForbidden", "Users cannot change their own direct permissions.");
 
+        if (await IsSuperAdminAsync(actorUserId, cancellationToken))
+            return DelegationDecision.Permit();
+
         var permissions = await permissionService.GetEffectivePermissionsAsync(actorUserId, cancellationToken);
         if (!permissions.Contains("permissions.assign", StringComparer.OrdinalIgnoreCase))
             return DelegationDecision.Deny("DelegationForbidden", "permissions.assign is required to manage direct permissions.");
 
         var isSensitive = PermissionCatalog.All.Any(entry => entry.IsCritical && string.Equals(entry.Name, permissionName, StringComparison.OrdinalIgnoreCase));
-        if (isSensitive && !await IsSuperAdminAsync(actorUserId, cancellationToken))
+        if (isSensitive)
             return DelegationDecision.Deny("SensitivePermissionDelegationForbidden", "Only a SuperAdmin can delegate sensitive permissions.");
 
         if (!isRemoval && !permissions.Contains(permissionName, StringComparer.OrdinalIgnoreCase))
@@ -54,16 +58,18 @@ public sealed class IamDelegationPolicy(AppDbContext dbContext, IPermissionServi
 
     public async Task<DelegationDecision> CanManageRolePermissionsAsync(Guid actorUserId, IEnumerable<string> permissionNames, CancellationToken cancellationToken = default)
     {
+        if (await IsSuperAdminAsync(actorUserId, cancellationToken))
+            return DelegationDecision.Permit();
+
         var permissions = await permissionService.GetEffectivePermissionsAsync(actorUserId, cancellationToken);
         if (!permissions.Contains("roles.manage", StringComparer.OrdinalIgnoreCase))
             return DelegationDecision.Deny("DelegationForbidden", "roles.manage is required to manage custom role permissions.");
 
-        var actorIsSuperAdmin = await IsSuperAdminAsync(actorUserId, cancellationToken);
         foreach (var permission in permissionNames.Distinct(StringComparer.OrdinalIgnoreCase))
         {
             if (!permissions.Contains(permission, StringComparer.OrdinalIgnoreCase))
                 return DelegationDecision.Deny("DelegationAuthorityExceeded", "The actor cannot add a permission they do not hold.");
-            if (PermissionCatalog.All.Any(entry => entry.IsCritical && string.Equals(entry.Name, permission, StringComparison.OrdinalIgnoreCase)) && !actorIsSuperAdmin)
+            if (PermissionCatalog.All.Any(entry => entry.IsCritical && string.Equals(entry.Name, permission, StringComparison.OrdinalIgnoreCase)))
                 return DelegationDecision.Deny("SensitivePermissionDelegationForbidden", "Only a SuperAdmin can add sensitive permissions to a custom role.");
         }
 

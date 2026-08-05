@@ -120,7 +120,7 @@ public static class ProductionCostRecordingEndpoints
 
             return Results.Ok(ApiResponse.Success(await service.ApproveDailyOperationAsync(productionOrderId, request, RequireUser(user), ct)));
         })
-            .RequirePermission("production.approve")
+            .RequireAnyPermission("production.approve", "production.daily-drafts.approve")
             .RequireRateLimiting(ApiRateLimitPolicies.CriticalProductionWrite)
             .WithName("ApproveDailyProductionOperation");
         dailyOperations.MapPost("/{productionOrderId:guid}/cancel-approval", async (

@@ -791,6 +791,30 @@ describe('DailyProductionOperationsPageComponent unified preview', () => {
     expect(production.saveDailyDraft).not.toHaveBeenCalled();
   });
 
+  it('lets Accounting load and approve a saved draft without syncing, editing, or cancelling', () => {
+    grantedPermissions = new Set([
+      PERMISSIONS.workers.view,
+      PERMISSIONS.attendance.view,
+      PERMISSIONS.assignments.view,
+      PERMISSIONS.stages.view,
+      PERMISSIONS.factoryStructure.view,
+      PERMISSIONS.departments.view,
+      PERMISSIONS.models.view,
+      PERMISSIONS.production.view,
+      PERMISSIONS.production.dailyDraftsApprove
+    ]);
+    component.savedDraft = {
+      ...approvedDailyDraft(),
+      stages: [{ id: 'record-1', concurrencyToken: 'draft-token', status: 'Draft' }] as any
+    };
+
+    expect(component.canLoadOperations).toBeTrue();
+    expect(component.canEditDraft).toBeFalse();
+    expect(component.canApproveDailyOperation).toBeTrue();
+    expect(component.canCancelDailyOperationApproval).toBeFalse();
+    expect(component.canSynchronizeAttendance).toBeFalse();
+  });
+
   it('allows an editor to change a draft but prevents direct edits after approval', () => {
     grantedPermissions = new Set([PERMISSIONS.production.view, PERMISSIONS.production.record]);
     const worker = component.stages[0].workers[0];

@@ -248,6 +248,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     });
 
 builder.Services.AddScoped<IAuthorizationHandler, PermissionAuthorizationHandler>();
+builder.Services.AddScoped<IAuthorizationHandler, AnyPermissionAuthorizationHandler>();
 
 builder.Services.AddAuthorization(options =>
 {
@@ -482,7 +483,7 @@ lineStaffingApi.MapGet("/workers", async (
     .WithTags("Line staffing")
     .WithName("GetActiveLineStaffingWorkers");
 
-app.MapGet("/api/error", (HttpContext context) =>
+app.MapMethods("/api/error", ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"], (HttpContext context) =>
 {
     var exception = context.Features.Get<IExceptionHandlerFeature>()?.Error;
     if (exception is null)
