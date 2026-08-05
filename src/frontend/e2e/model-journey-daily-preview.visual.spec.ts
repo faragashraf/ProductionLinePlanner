@@ -127,7 +127,34 @@ test('daily filters wrap safely and successful unified preview renders summary p
     await openSuccessfulDailyPreview(page);
     await expect(page.locator('.daily-production-operations__legacy-table')).toHaveCount(0);
     await expect(page.getByText('فلتر عرض فقط؛ لا يغيّر المسودة أو نتيجة المعاينة.')).toBeVisible();
+    await page.locator('.daily-production-operations__stage-filter .p-dropdown-trigger').click();
+    await page.getByRole('option', { name: secondStage.name, exact: true }).click();
+    await expect(page.locator('.daily-production-operations__stage-filter-panel')).toBeHidden();
+    const selectedStageRow = page.locator(`#daily-stage-row-${secondModelStage.id}`);
+    await expect(page.locator('.daily-production-operations__stage-list > button')).toHaveCount(1);
+    await expect(selectedStageRow).toHaveAttribute('aria-current', 'true');
+    await expect(selectedStageRow).toHaveClass(/is-selected/);
+    await expect(selectedStageRow).toBeInViewport();
+    await expect(page.locator('.daily-production-operations__detail-panel')).toContainText(secondStage.name);
     await page.screenshot({ path: path.join(visualOutput, `daily-${name}.png`), fullPage: true });
+    const clearStageFilter = page.locator('.daily-production-operations__stage-filter .p-dropdown-clear-icon');
+    await expect(clearStageFilter).toHaveCount(1);
+    await clearStageFilter.click();
+    await expect(page.locator('.daily-production-operations__stage-list > button')).toHaveCount(2);
+    await expect(selectedStageRow).toHaveAttribute('aria-current', 'true');
+    await expectViewportSafe(page);
+
+    await page.getByPlaceholder('ابحث باسم أو كود المرحلة').fill(stage.code);
+    await page.locator('.daily-production-operations__stage-filter .p-dropdown-trigger').click();
+    await page.getByRole('option', { name: secondStage.name, exact: true }).click();
+    await expect(page.locator('.daily-production-operations__stage-filter-panel')).toBeHidden();
+    await expect(page.locator('.daily-production-operations__stage-list > button')).toHaveCount(0);
+    await expect(page.getByText('لا توجد مراحل مطابقة لفلتر المرحلة الحالي.')).toBeVisible();
+    await page.screenshot({ path: path.join(visualOutput, `daily-empty-${name}.png`), fullPage: true });
+    await page.locator('.daily-production-operations__stage-filter .p-dropdown-clear-icon').click();
+    await expect(page.locator('.daily-production-operations__stage-list > button')).toHaveCount(1);
+    await expect(page.locator('.daily-production-operations__stage-list > button.is-selected')).toHaveCount(0);
+    await expect(page.getByText('لا توجد مراحل مطابقة لفلتر المرحلة الحالي.')).toHaveCount(0);
     await expectViewportSafe(page);
   }
 });

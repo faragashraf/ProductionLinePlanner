@@ -20,7 +20,8 @@ public interface IProductionCostRecordingService
     Task<IReadOnlyCollection<DailyProductionCostReportRowDto>> DailyReportAsync(DateOnly from, DateOnly to, Guid? orderId, Guid? modelId, Guid? workerId, CancellationToken cancellationToken);
     Task<DailyProductionOperationsDto> LoadDailyOperationsAsync(Guid factoryId, Guid productionLineId, Guid productModelId, DateOnly productionDate, CancellationToken cancellationToken);
     Task<DailyProductionPreviewDto> PreviewDailyOperationsAsync(DailyProductionOperationRequest request, Guid actorId, CancellationToken cancellationToken);
-    Task<DailyProductionDraftDto> SaveDailyDraftAsync(DailyProductionOperationRequest request, Guid actorId, CancellationToken cancellationToken);
+    Task<DailyProductionDraftDto> CreateDailyDraftAsync(DailyProductionOperationRequest request, Guid actorId, CancellationToken cancellationToken);
+    Task<DailyProductionDraftDto> UpdateDailyDraftAsync(Guid productionOrderId, DailyProductionDraftUpdateRequest request, Guid actorId, CancellationToken cancellationToken);
     Task<DailyProductionApprovalDto> ApproveDailyOperationAsync(Guid productionOrderId, DailyProductionApprovalRequest request, Guid actorId, CancellationToken cancellationToken);
-    Task<DailyProductionApprovalCancellationDto> CancelDailyOperationApprovalAsync(Guid productionOrderId, DailyProductionApprovalCancellationRequest request, Guid actorId, CancellationToken cancellationToken);
+    Task<DailyProductionDraftDto> CancelDailyOperationApprovalAsync(Guid productionOrderId, DailyProductionApprovalCancellationRequest request, Guid actorId, CancellationToken cancellationToken);
 }

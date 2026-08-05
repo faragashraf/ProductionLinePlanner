@@ -276,8 +276,8 @@ public sealed class ProductionCostRecordingServiceTests
         Assert.Equal(500m, preview.Stages.Single().StageQuantity);
         Assert.Equal(preview.TotalWorkerEntitlements, preview.Stages.Single().Workers.Sum(worker => worker.CalculatedEarning));
 
-        var saved = await fixture.Service.SaveDailyDraftAsync(request with { PreviewToken = preview.PreviewToken }, fixture.ActorId, default);
-        var retry = await fixture.Service.SaveDailyDraftAsync(request with { PreviewToken = preview.PreviewToken }, fixture.ActorId, default);
+        var saved = await fixture.Service.CreateDailyDraftAsync(request with { PreviewToken = preview.PreviewToken }, fixture.ActorId, default);
+        var retry = await fixture.Service.CreateDailyDraftAsync(request with { PreviewToken = preview.PreviewToken }, fixture.ActorId, default);
 
         Assert.False(saved.WasAlreadySaved);
         Assert.True(retry.WasAlreadySaved);
@@ -527,7 +527,7 @@ public sealed class ProductionCostRecordingServiceTests
         Assert.Equal(2, workerStageAllocations.Length);
         Assert.Equal(workerStageAllocations.Sum(allocation => allocation.CalculatedEarning), workerTotal.TotalEntitlement);
         Assert.All(preview.Stages, stage => Assert.Equal(500m, stage.StageQuantity));
-        var saved = await fixture.Service.SaveDailyDraftAsync(request with { PreviewToken = preview.PreviewToken }, fixture.ActorId, default);
+        var saved = await fixture.Service.CreateDailyDraftAsync(request with { PreviewToken = preview.PreviewToken }, fixture.ActorId, default);
         Assert.Equal(2, saved.Stages.Count);
         Assert.Equal(workerTotal.TotalEntitlement, saved.Stages.SelectMany(stage => stage.Workers).Where(worker => worker.WorkerId == fixture.WorkerA.Id).Sum(worker => worker.CalculatedEarning));
     }
@@ -580,7 +580,7 @@ public sealed class ProductionCostRecordingServiceTests
         Assert.Equal(repeatedWorkerAllocations.Sum(worker => worker.CalculatedEarning), preview.WorkerTotals.Single(total => total.WorkerId == fixture.WorkerA.Id).TotalEntitlement);
         Assert.Empty(await fixture.Db.Set<StageProductionRecord>().Where(record => record.ProductionDate == productionDate).ToArrayAsync());
 
-        var saved = await fixture.Service.SaveDailyDraftAsync(request with { PreviewToken = preview.PreviewToken }, fixture.ActorId, default);
+        var saved = await fixture.Service.CreateDailyDraftAsync(request with { PreviewToken = preview.PreviewToken }, fixture.ActorId, default);
         Assert.Equal(66, saved.Stages.Count);
         Assert.Equal(75, saved.Stages.Sum(stage => stage.Workers.Count));
         Assert.All(saved.Stages, stage => Assert.Equal(500m, stage.ProducedQuantity));

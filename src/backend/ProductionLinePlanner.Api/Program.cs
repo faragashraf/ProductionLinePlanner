@@ -360,6 +360,7 @@ if (enableHttpsRedirection)
 app.UseCors(SecurityCorsPolicy);
 app.UseAuthentication();
 app.UsePreviewRequestRoutingDiagnostics();
+app.UseDailyDraftUpdateRequestDiagnostics();
 app.UseRateLimiter();
 app.Use(async (context, next) =>
 {
@@ -483,7 +484,7 @@ lineStaffingApi.MapGet("/workers", async (
     .WithTags("Line staffing")
     .WithName("GetActiveLineStaffingWorkers");
 
-app.MapMethods("/api/error", ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"], (HttpContext context) =>
+app.MapMethods("/api/error", ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"], (HttpContext context) =>
 {
     var exception = context.Features.Get<IExceptionHandlerFeature>()?.Error;
     if (exception is null)

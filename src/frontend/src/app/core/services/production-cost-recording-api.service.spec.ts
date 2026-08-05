@@ -44,17 +44,23 @@ describe('ProductionCostRecordingApiService', () => {
     expect(result).toEqual(jasmine.objectContaining({ totalWorkerEarnings: 190 }));
   });
 
-  it('loads, previews, and saves the aggregate daily-operations contract without using the legacy single-stage route', () => {
+  it('uses POST collection for daily draft creation and PUT item for an existing aggregate', () => {
     const payload = {
       factoryId: 'factory-1', productionLineId: 'line-1', productModelId: 'model-1', productionDate: '2026-07-16',
       lineQuantity: 500, clientRequestId: 'a94f0c35-89ac-4ed4-86b3-2cda09d55aaf', previewToken: 'preview-token',
       stages: [{ productModelStageId: 'stage-1', workers: [{ workerId: 'worker-1', percentage: 100 }] }]
     };
-    let loaded = false; let previewed = false; let saved = false;
+    const updatePayload = {
+      ...payload,
+      concurrencyToken: 'order-token-1',
+      stages: [{ ...payload.stages[0], stageProductionRecordId: 'record-1', concurrencyToken: 'stage-token-1' }]
+    };
+    let loaded = false; let previewed = false; let created = false; let updated = false;
 
     service.loadDailyOperations('factory-1', 'line-1', 'model-1', '2026-07-16').subscribe(() => loaded = true);
     service.previewDailyOperations(payload).subscribe(() => previewed = true);
-    service.saveDailyDraft(payload, 'daily-operation-correlation').subscribe(() => saved = true);
+    service.createDailyDraft(payload, 'daily-operation-create-correlation').subscribe(() => created = true);
+    service.updateDailyDraft('day-1', updatePayload, 'daily-operation-update-correlation').subscribe(() => updated = true);
 
     const load = http.expectOne(request => request.method === 'GET' && request.url.includes('/api/production/daily-operations'));
     expect(load.request.method).toBe('GET');
@@ -66,15 +72,22 @@ describe('ProductionCostRecordingApiService', () => {
     expect(preview.request.body).toEqual(payload);
     preview.flush({ success: true, data: { previewToken: 'preview-token', stages: [], warnings: [] } });
 
-    const save = http.expectOne(request => request.url.endsWith('/api/production/daily-operations/drafts'));
-    expect(save.request.method).toBe('POST');
-    expect(save.request.body).toEqual(payload);
-    expect(save.request.headers.get('X-Manufacturing-Realtime-Correlation-Id')).toBe('daily-operation-correlation');
-    save.flush({ success: true, data: { productionOrderId: 'day-1', stages: [] } });
+    const create = http.expectOne(request => request.url.endsWith('/api/production/daily-operations/drafts'));
+    expect(create.request.method).toBe('POST');
+    expect(create.request.body).toEqual(payload);
+    expect(create.request.headers.get('X-Manufacturing-Realtime-Correlation-Id')).toBe('daily-operation-create-correlation');
+    create.flush({ success: true, data: { productionOrderId: 'day-1', stages: [] } });
+
+    const update = http.expectOne(request => request.url.endsWith('/api/production/daily-operations/drafts/day-1'));
+    expect(update.request.method).toBe('PUT');
+    expect(update.request.body).toEqual(updatePayload);
+    expect(update.request.headers.get('X-Manufacturing-Realtime-Correlation-Id')).toBe('daily-operation-update-correlation');
+    update.flush({ success: true, data: { productionOrderId: 'day-1', stages: [] } });
 
     expect(loaded).toBeTrue();
     expect(previewed).toBeTrue();
-    expect(saved).toBeTrue();
+    expect(created).toBeTrue();
+    expect(updated).toBeTrue();
   });
 
   it('sends a daily approval cancellation with every stage concurrency token and the realtime correlation id', () => {

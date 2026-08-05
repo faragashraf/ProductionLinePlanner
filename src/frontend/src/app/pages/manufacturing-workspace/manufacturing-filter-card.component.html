@@ -1,19 +1,43 @@
-<section class="manufacturing-filter-card" dir="rtl">
-  <h2>{{ title }}</h2>
-  <div class="manufacturing-filter-card__fields">
-    <div class="manufacturing-filter-card__leading"><ng-content select="[filter-leading]"></ng-content></div>
-    <div class="manufacturing-filter-card__structure"><ng-content select="[filter-structure]"></ng-content></div>
-    <div class="manufacturing-filter-card__extra"><ng-content select="[filter-extra]"></ng-content></div>
-    <label class="manufacturing-filter-card__status" *ngIf="statusOptions.length">
-      <span>{{ statusLabel }}</span>
-      <select [ngModel]="statusValue" (ngModelChange)="statusValueChange.emit($event)">
-        <option *ngFor="let option of statusOptions" [value]="option.value">{{ option.label }}</option>
-      </select>
-    </label>
-    <label class="manufacturing-filter-card__search" *ngIf="showSearch">
-      <span>{{ searchLabel }}</span>
-      <input pInputText type="search" [ngModel]="searchValue" (ngModelChange)="searchValueChange.emit($event)" [placeholder]="searchPlaceholder">
-    </label>
+<section class="manufacturing-filter-card" dir="rtl" [attr.aria-label]="title">
+  <header class="manufacturing-filter-card__header">
+    <div class="manufacturing-filter-card__heading">
+      <span class="manufacturing-filter-card__mark" aria-hidden="true"><i class="pi pi-sliders-h"></i></span>
+      <div>
+        <span class="manufacturing-filter-card__eyebrow">خيارات العرض</span>
+        <h2>{{ title }}</h2>
+        <p *ngIf="subtitle">{{ subtitle }}</p>
+      </div>
+    </div>
     <button pButton type="button" class="p-button-outlined p-button-sm manufacturing-filter-card__clear" icon="pi pi-filter-slash" [label]="clearLabel" [disabled]="clearDisabled" (click)="clearFilters.emit()"></button>
+  </header>
+  <div class="manufacturing-filter-card__fields">
+    <section class="manufacturing-filter-card__group manufacturing-filter-card__group--context" [attr.aria-label]="contextLabel">
+      <h3><i class="pi pi-compass" aria-hidden="true"></i><span>{{ contextLabel }}</span></h3>
+      <div class="manufacturing-filter-card__context-grid">
+        <div class="manufacturing-filter-card__leading"><ng-content select="[filter-leading]"></ng-content></div>
+        <div class="manufacturing-filter-card__structure"><ng-content select="[filter-structure]"></ng-content></div>
+        <div class="manufacturing-filter-card__extra"><ng-content select="[filter-extra]"></ng-content></div>
+      </div>
+    </section>
+
+    <section class="manufacturing-filter-card__group manufacturing-filter-card__group--results" [attr.aria-label]="resultsLabel" *ngIf="statusOptions.length || showSearch">
+      <h3><i class="pi pi-filter" aria-hidden="true"></i><span>{{ resultsLabel }}</span></h3>
+      <div class="manufacturing-filter-card__results-grid">
+        <label class="manufacturing-filter-card__status" *ngIf="statusOptions.length">
+          <span>{{ statusLabel }}</span>
+          <select [ngModel]="statusValue" (ngModelChange)="statusValueChange.emit($event)">
+            <option *ngFor="let option of statusOptions" [value]="option.value">{{ option.label }}</option>
+          </select>
+        </label>
+        <label class="manufacturing-filter-card__search" *ngIf="showSearch">
+          <span>{{ searchLabel }}</span>
+          <span class="manufacturing-filter-card__search-control">
+            <i class="pi pi-search" aria-hidden="true"></i>
+            <input pInputText type="search" [ngModel]="searchValue" (ngModelChange)="searchValueChange.emit($event)" [placeholder]="searchPlaceholder">
+          </span>
+        </label>
+      </div>
+    </section>
   </div>
+  <footer class="manufacturing-filter-card__actions"><ng-content select="[filter-actions]"></ng-content></footer>
 </section>

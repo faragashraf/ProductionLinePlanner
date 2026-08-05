@@ -7,6 +7,9 @@
 
   <app-manufacturing-filter-card
     title="فلاتر تشغيل الإنتاج اليومي"
+    subtitle="حدّد سياق التشغيل ثم استخدم فلاتر العرض للوصول إلى المرحلة المطلوبة بسرعة."
+    contextLabel="سياق تشغيل اليوم"
+    resultsLabel="تصفية المراحل"
     searchLabel="البحث في المراحل"
     searchPlaceholder="ابحث باسم أو كود المرحلة"
     [searchValue]="stageSearch"
@@ -59,15 +62,14 @@
         <small>فلتر عرض فقط؛ لا يغيّر المسودة أو نتيجة المعاينة.</small>
       </label>
     </div>
-  </app-manufacturing-filter-card>
-  <div class="daily-production-operations__context-actions">
-    <div class="daily-production-operations__attendance-action" *ngIf="canSynchronizeAttendance; else draftReviewAccess">
-      <button pButton type="button" class="p-button-outlined" [label]="attendanceSyncing ? 'جارٍ مزامنة الحضور…' : 'مزامنة حضور التاريخ'" icon="pi pi-refresh" [loading]="attendanceSyncing" [disabled]="attendanceSyncing || !productionDate" (click)="synchronizeAttendance()"></button>
-      <small [class.is-confirmed]="attendanceSyncedForDate === productionDate">{{ attendanceSyncedForDate === productionDate ? 'تمت المزامنة لهذا التاريخ' : 'المزامنة اليدوية مطلوبة قبل التحميل' }}</small>
+    <div filter-actions class="daily-production-operations__context-actions">
+      <div class="daily-production-operations__attendance-action">
+        <button pButton type="button" class="p-button-outlined" [label]="attendanceSyncing ? 'جارٍ مزامنة الحضور…' : 'مزامنة حضور التاريخ'" icon="pi pi-refresh" [loading]="attendanceSyncing" [disabled]="attendanceSyncing || !productionDate" (click)="synchronizeAttendance()"></button>
+        <small [class.is-confirmed]="attendanceSyncedForDate === productionDate"><i [class]="attendanceSyncedForDate === productionDate ? 'pi pi-check-circle' : 'pi pi-info-circle'" aria-hidden="true"></i>{{ attendanceSyncedForDate === productionDate ? 'تمت المزامنة لهذا التاريخ' : 'المزامنة اليدوية مطلوبة قبل التحميل' }}</small>
+      </div>
+      <button pButton type="button" label="تحميل تشغيل اليوم" icon="pi pi-play" [disabled]="!canLoadOperations" [loading]="operationsLoading" (click)="loadTodayOperations()"></button>
     </div>
-    <ng-template #draftReviewAccess><small>يمكنك مراجعة المسودات المحفوظة واعتمادها. مزامنة الحضور وتعديل التشغيل غير متاحين لحسابك.</small></ng-template>
-    <button pButton type="button" label="تحميل تشغيل اليوم" icon="pi pi-play" [disabled]="!canLoadOperations" [loading]="operationsLoading" (click)="loadTodayOperations()"></button>
-  </div>
+  </app-manufacturing-filter-card>
 
   <p class="daily-production-operations__message plp-inline-feedback plp-inline-feedback--error" *ngIf="error" role="alert">{{ error }}</p>
   <p class="daily-production-operations__message plp-inline-feedback plp-inline-feedback--success" *ngIf="successMessage">{{ successMessage }}</p>
@@ -114,7 +116,7 @@
     <section class="daily-production-operations__workspace plp-bounded-workspace" data-workspace-layout="stage-master-detail" data-tablet-priority="workers">
       <p-card class="daily-production-operations__stage-panel plp-workspace-detail-panel plp-bounded-workspace__panel" header="كل مراحل الموديل">
         <div class="daily-production-operations__stage-list plp-bounded-workspace__scroll-region plp-structured-list plp-structured-list--spacious plp-contained-scroll-list" aria-live="polite">
-          <button type="button" *ngFor="let stage of filteredStages; trackBy: trackById" class="daily-production-operations__stage daily-production-operations__stage--compact plp-compact-entity plp-structured-card plp-structured-card--content-sized" [class.is-selected]="stage.productModelStageId === selectedStageId" (click)="selectStage(stage.productModelStageId)">
+          <button type="button" *ngFor="let stage of filteredStages; trackBy: trackById" [id]="'daily-stage-row-' + stage.productModelStageId" class="daily-production-operations__stage daily-production-operations__stage--compact plp-compact-entity plp-structured-card plp-structured-card--content-sized" [class.is-selected]="stage.productModelStageId === selectedStageId" [attr.aria-current]="stage.productModelStageId === selectedStageId ? 'true' : null" (click)="selectStage(stage.productModelStageId)">
             <plp-responsive-entity-row [title]="stage.stageName" [code]="stage.stageCode" icon="pi pi-sitemap">
               <span plp-entity-metadata class="plp-entity-secondary-row">
                 <dl class="plp-compact-facts" aria-label="بيانات المرحلة">

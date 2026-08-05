@@ -99,10 +99,34 @@ public static class ProductionCostRecordingEndpoints
             .RequireRateLimiting(ApiRateLimitPolicies.NormalRead)
             .WithName("PreviewDailyProductionOperations");
         dailyOperations.MapPost("/drafts", async (DailyProductionOperationRequest request, IProductionCostRecordingService service, ICurrentUserService user, CancellationToken ct) =>
-            Results.Created("/api/production/daily-operations/drafts", ApiResponse.Success(await service.SaveDailyDraftAsync(request, RequireUser(user), ct))))
+            Results.Created("/api/production/daily-operations/drafts", ApiResponse.Success(await service.CreateDailyDraftAsync(request, RequireUser(user), ct))))
             .RequirePermission("production.record")
             .RequireRateLimiting(ApiRateLimitPolicies.CriticalProductionWrite)
-            .WithName("SaveDailyProductionDraft");
+            .WithName("CreateDailyProductionDraft");
+        dailyOperations.MapPut("/drafts/{productionOrderId:guid}", async (
+            Guid productionOrderId,
+            DailyProductionDraftUpdateRequest request,
+            IProductionCostRecordingService service,
+            ICurrentUserService user,
+            HttpContext context,
+            ILoggerFactory loggerFactory,
+            CancellationToken ct) =>
+        {
+            loggerFactory.CreateLogger("ProductionLinePlanner.Api.DailyDraftUpdate").LogDebug(
+                "Daily draft PUT handler entered {TraceIdentifier} {CorrelationId} {ProductionOrderId} {StageCount} {WorkerAllocationCount}",
+                context.TraceIdentifier,
+                context.Request.Headers["X-Manufacturing-Realtime-Correlation-Id"].ToString(),
+                productionOrderId,
+                request.Stages?.Count ?? 0,
+                request.Stages?.Sum(stage => stage.Workers?.Count ?? 0) ?? 0);
+            if (productionOrderId == Guid.Empty)
+                return ApiResponse.Failure("ValidationError", "معرّف تشغيل اليوم مطلوب.", StatusCodes.Status400BadRequest);
+
+            return Results.Ok(ApiResponse.Success(await service.UpdateDailyDraftAsync(productionOrderId, request, RequireUser(user), ct)));
+        })
+            .RequirePermission("production.record")
+            .RequireRateLimiting(ApiRateLimitPolicies.CriticalProductionWrite)
+            .WithName("UpdateDailyProductionDraft");
         dailyOperations.MapPost("/{productionOrderId:guid}/approve", async (
             Guid productionOrderId,
             DailyProductionApprovalRequest request,
