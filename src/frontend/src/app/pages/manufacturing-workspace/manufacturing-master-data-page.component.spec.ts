@@ -18,6 +18,7 @@ describe('ManufacturingMasterDataPageComponent department stage catalog', () => 
   let fixture: ComponentFixture<ManufacturingMasterDataPageComponent>;
   let component: ManufacturingMasterDataPageComponent;
   let api: jasmine.SpyObj<ManufacturingMasterDataApiService>;
+  let grantedPermissions: Set<string>;
 
   const factory = { id: 'factory-1', code: 'FAC', name: 'مصنع الملابس', isActive: true };
   const department = { id: 'department-1', factoryId: factory.id, code: 'CUT', nameAr: 'القص', isActive: true };
@@ -58,6 +59,7 @@ describe('ManufacturingMasterDataPageComponent department stage catalog', () => 
   };
 
   beforeEach(async () => {
+    grantedPermissions = new Set([PERMISSIONS.models.manage, PERMISSIONS.stages.manage, PERMISSIONS.stages.delete]);
     api = jasmine.createSpyObj<ManufacturingMasterDataApiService>('ManufacturingMasterDataApiService', [
       'factories', 'departments', 'allProductionLines', 'operationalStages', 'createOperationalStage', 'updateOperationalStage',
       'stageDependencies', 'deactivateOperationalStage', 'deleteOperationalStage', 'models', 'modelSearchPage',
@@ -96,7 +98,7 @@ describe('ManufacturingMasterDataPageComponent department stage catalog', () => 
       providers: [
         { provide: ManufacturingMasterDataApiService, useValue: api },
         { provide: ManufacturingRealtimeService, useValue: realtime },
-        { provide: PermissionService, useValue: { hasPermission: (permission: string) => permission === PERMISSIONS.models.manage || permission === PERMISSIONS.stages.manage || permission === PERMISSIONS.stages.delete } },
+        { provide: PermissionService, useValue: { hasPermission: (permission: string) => grantedPermissions.has(permission) } },
         { provide: ActivatedRoute, useValue: { snapshot: { routeConfig: { path: 'stages' } } } }
       ],
       schemas: [NO_ERRORS_SCHEMA]
@@ -231,5 +233,46 @@ describe('ManufacturingMasterDataPageComponent department stage catalog', () => 
     expect(text).toContain('القسم');
     expect(text).not.toContain('اختر خط الإنتاج أولًا');
     expect((fixture.nativeElement as HTMLElement).querySelector('[formControlName="productionLineId"]')).toBeNull();
+  });
+
+  it('keeps the stage catalog read-only when the user only has stages.view', () => {
+    grantedPermissions = new Set([PERMISSIONS.stages.view]);
+    component.loading = false;
+    component.operationalStages = [stage];
+    component.stageFiltersForm.setValue({ factoryId: factory.id, departmentId: department.id });
+
+    component.openStageForm();
+    component.editOperationalStage(stage);
+    component.setOperationalStageActive(stage);
+    component.openDependencyDialog(stage, 'delete');
+    fixture.detectChanges();
+
+    const host = fixture.nativeElement as HTMLElement;
+    expect(host.querySelector('plp-expandable-form')).toBeNull();
+    expect(host.querySelector('[aria-label="تعديل المرحلة"]')).toBeNull();
+    expect(host.querySelector('[aria-label="تعطيل المرحلة"]')).toBeNull();
+    expect(host.querySelector('[aria-label="حذف المرحلة"]')).toBeNull();
+    expect(api.updateOperationalStage).not.toHaveBeenCalled();
+    expect(api.stageDependencies).not.toHaveBeenCalled();
+  });
+
+  it('keeps models and their stage relationships read-only without models.manage', () => {
+    grantedPermissions = new Set([PERMISSIONS.models.view]);
+    selectDepartmentModelContext();
+    component.loading = false;
+
+    component.beginAddModelStage(stage);
+    component.editModelStage(relationship);
+    component.toggleModelStage(relationship);
+    fixture.detectChanges();
+
+    const host = fixture.nativeElement as HTMLElement;
+    expect(host.querySelector('[aria-label="إجراءات الموديل"]')).toBeNull();
+    expect(host.querySelector('[aria-label="إضافة المرحلة إلى الموديل"]')).toBeNull();
+    expect(host.querySelector('[aria-label="تعديل إعدادات الارتباط"]')).toBeNull();
+    expect(host.querySelector('[aria-label="تعطيل الارتباط بالموديل"]')).toBeNull();
+    expect(host.querySelector('[aria-label="نسخ مراحل الموديل المحددة"]')).toBeNull();
+    expect(api.addModelStage).not.toHaveBeenCalled();
+    expect(api.updateModelStage).not.toHaveBeenCalled();
   });
 });

@@ -34,6 +34,21 @@ namespace ProductionLinePlanner.Tests;
 public sealed class ProductionCostRecordingHttpIntegrationTests
 {
     [Fact]
+    public async Task Daily_operations_load_accepts_every_permission_that_can_open_the_screen_and_returns_stage_metadata()
+    {
+        await using var fixture = await ProductionHttpFixture.CreateAsync();
+        var path = $"/api/production/daily-operations?factoryId={fixture.FactoryId}&productionLineId={fixture.LineId}&productModelId={fixture.ModelId}&productionDate=2026-07-16";
+
+        foreach (var permission in new[] { "production.view", "production.record", "production.approve", "production.daily-drafts.approve" })
+        {
+            var response = await fixture.SendAsync(HttpMethod.Get, path, permissions: [permission]);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var stage = (await DataAsync(response)).GetProperty("stages").EnumerateArray().Single();
+            Assert.True(stage.TryGetProperty("standardSeconds", out _));
+        }
+    }
+
+    [Fact]
     public async Task Daily_preview_validation_failure_returns_readable_problem_details()
     {
         await using var fixture = await ProductionHttpFixture.CreateAsync();

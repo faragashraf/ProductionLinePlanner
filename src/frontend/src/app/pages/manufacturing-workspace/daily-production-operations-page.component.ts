@@ -16,7 +16,7 @@ import {
   ProductionWorkerAllocation,
   ProductionCostRecordingApiService
 } from '../../core/services/production-cost-recording-api.service';
-import { DepartmentItem, FactoryItem, ManufacturingMasterDataApiService, ModelStageItem, ProductModelItem, ProductionLineOption } from '../../core/services/manufacturing-master-data-api.service';
+import { DepartmentItem, FactoryItem, ManufacturingMasterDataApiService, ProductModelItem, ProductionLineOption } from '../../core/services/manufacturing-master-data-api.service';
 import { PermissionService } from '../../core/services/permission.service';
 import { ManufacturingRealtimeService } from '../../core/services/manufacturing-realtime.service';
 import { ManufacturingDataChanged } from '../../core/models/realtime-notification.models';
@@ -135,7 +135,6 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
   dailyStructureTreeNodes: FactoryStructureTreeNode[] = [];
   selectedDailyStructureNode: FactoryStructureTreeNode | null = null;
   productModels: ProductModelItem[] = [];
-  modelStageMetadata: ModelStageItem[] = [];
   operations: DailyProductionOperations | null = null;
   stages: EditableDailyStage[] = [];
   savedDraft: DailyProductionDraft | null = null;
@@ -479,15 +478,12 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
     this.operationsLoading = true;
     this.error = '';
     this.successMessage = '';
-    forkJoin({
-      operations: this.production.loadDailyOperations(
-        this.selectedFactoryId,
-        this.selectedProductionLineId,
-        this.selectedProductModelId,
-        this.productionDate
-      ),
-      modelStages: this.masterData.modelStages(this.selectedProductModelId, this.selectedProductionLineId)
-    })
+    this.production.loadDailyOperations(
+      this.selectedFactoryId,
+      this.selectedProductionLineId,
+      this.selectedProductModelId,
+      this.productionDate
+    )
       .pipe(finalize(() => {
         if (version === this.operationsRequestVersion) {
           this.operationsLoading = false;
@@ -495,12 +491,10 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
         }
       }), takeUntil(this.destroy$))
       .subscribe({
-        next: ({ operations, modelStages }) => {
+        next: operations => {
           if (version !== this.operationsRequestVersion) return;
           this.operations = operations;
-          this.modelStageMetadata = modelStages;
-          const metadataById = new Map(modelStages.map(stage => [stage.id, stage]));
-          this.stages = operations.stages.map(stage => this.toEditableStage(stage, metadataById.get(stage.productModelStageId)));
+          this.stages = operations.stages.map(stage => this.toEditableStage(stage));
           this.selectedStageFilterId = this.stages.some(stage => stage.productModelStageId === selectedStageFilterId)
             ? selectedStageFilterId
             : '';
@@ -1207,11 +1201,11 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
     return this.formValidation.serverMessage(error, 'تعذر مزامنة حضور تاريخ الإنتاج المحدد.');
   }
 
-  private toEditableStage(stage: DailyProductionStage, metadata?: ModelStageItem): EditableDailyStage {
+  private toEditableStage(stage: DailyProductionStage): EditableDailyStage {
     const assignedWorkers = this.uniqueWorkers(stage.workers);
     return {
       ...stage,
-      standardSeconds: metadata?.standardSeconds ?? null,
+      standardSeconds: stage.standardSeconds ?? null,
       workers: assignedWorkers.map(worker => this.toEditableWorker(worker, worker.isProductionReady))
     };
   }
@@ -1687,7 +1681,6 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
     ++this.operationsRequestVersion;
     this.operations = null;
     this.stages = [];
-    this.modelStageMetadata = [];
     this.selectedStageId = '';
     this.selectedStageFilterId = '';
     this.lineQuantity = null;

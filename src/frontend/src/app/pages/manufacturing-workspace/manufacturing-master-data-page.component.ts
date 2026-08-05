@@ -298,6 +298,8 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
     return `${factory} ← ${model} ← ${department} ← ${line}`;
   }
   get canManageModels(): boolean { return this.permissionService.hasPermission(this.permissions.models.manage); }
+  get canManageStages(): boolean { return this.permissionService.hasPermission(this.permissions.stages.manage); }
+  get canDeleteStages(): boolean { return this.permissionService.hasPermission(this.permissions.stages.delete); }
   get selectedAvailableStage(): SubStageOption | null {
     const selectedId = this.modelStageForm.getRawValue().subStageId;
     if (!selectedId) return null;
@@ -399,11 +401,13 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
   setModelStageRelationshipFilter(value: string): void { this.modelStageRelationshipFilter = value === 'linked' || value === 'unlinked' ? value : 'all'; }
   isModelStageSelected(stageId: string): boolean { return this.selectedModelStageIds.has(stageId); }
   toggleModelStageSelection(stageId: string, selected: boolean): void {
+    if (!this.canManageModels) return;
     const next = new Set(this.selectedModelStageIds);
     selected ? next.add(stageId) : next.delete(stageId);
     this.selectedModelStageIds = next;
   }
   toggleVisibleModelStageSelection(selected: boolean): void {
+    if (!this.canManageModels) return;
     const next = new Set(this.selectedModelStageIds);
     this.selectableModelStageRows.forEach(row => selected ? next.add(row.relationship!.id) : next.delete(row.relationship!.id));
     this.selectedModelStageIds = next;
@@ -489,6 +493,7 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
   }
 
   openStageForm(): void {
+    if (!this.canManageStages) return;
     this.editStageId = '';
     this.editingStageSnapshot = null;
     this.stageFormVisible = true;
@@ -498,6 +503,7 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
   }
 
   editOperationalStage(stage: SubStageOption): void {
+    if (!this.canManageStages) return;
     const hierarchy = {
       factoryId: stage.factoryId ?? '',
       departmentId: stage.departmentId
@@ -510,6 +516,7 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
   }
 
   saveOperationalStage(): void {
+    if (!this.canManageStages) return;
     if (this.stageEditForm.invalid) { this.stageEditForm.markAllAsTouched(); return; }
     const value = this.stageEditForm.getRawValue();
     const correlationId = this.localCorrelation('stages');
@@ -526,6 +533,7 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
   closeStageForm(): void { this.stageFormVisible = false; this.editStageId = ''; this.editingStageSnapshot = null; }
 
   openDependencyDialog(stage: SubStageOption, action: 'disable' | 'delete'): void {
+    if (action === 'delete' ? !this.canDeleteStages : !this.canManageStages) return;
     this.pendingStage = stage;
     this.pendingStageAction = action;
     this.stageDependencySummary = null;
@@ -534,6 +542,7 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
 
   confirmDependencyAction(): void {
     if (this.saving || !this.pendingStage || !this.pendingStageAction || !this.canConfirmDependencyAction) return;
+    if (this.pendingStageAction === 'delete' ? !this.canDeleteStages : !this.canManageStages) return;
     if (this.pendingStageAction === 'delete') {
       const deletedStageId = this.pendingStage.id;
       this.save(this.api.deleteOperationalStage(deletedStageId, this.localCorrelation('stages')), () => {
@@ -556,13 +565,15 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
   closeDependencyDialog(): void { this.dependencyDialogVisible = false; this.pendingStage = null; this.pendingStageAction = null; this.stageDependencySummary = null; }
 
   setOperationalStageActive(stage: SubStageOption): void {
+    if (!this.canManageStages) return;
     if (stage.isActive) { this.openDependencyDialog(stage, 'disable'); return; }
     this.save(this.api.updateOperationalStage(stage.id, { isActive: true }, this.localCorrelation('stages')), () => this.loadOperationalStages());
   }
 
-  saveModel(): void { if (this.modelForm.valid) { const correlationId = this.localCorrelation('models'); const value = this.modelForm.getRawValue(); this.save(this.editModelId ? this.api.updateModel(this.editModelId, { name: value.name ?? undefined, description: value.description }, correlationId) : this.api.createModel({ code: value.code!, name: value.name!, description: value.description }, correlationId), item => { const selectedNodeKey = this.selectedModelStageContextNode?.key; const expandedKeys = this.modelStageContextExpandedKeys(); this.models = this.upsert(this.models, item); if (this.selected?.id === item.id) this.selected = { ...this.selected, ...item }; this.editModelId = ''; this.modelFormVisible = false; this.modelForm.reset(); this.modelForm.controls.code.enable({ emitEvent: false }); this.rebuildModelStageContextTree(expandedKeys); this.restoreModelStageContextNode(selectedNodeKey); }); } }
-  editModel(item: ProductModelItem): void { this.editModelId = item.id; this.modelFormVisible = true; this.modelForm.reset(item); this.modelForm.controls.code.disable({ emitEvent: false }); }
+  saveModel(): void { if (this.canManageModels && this.modelForm.valid) { const correlationId = this.localCorrelation('models'); const value = this.modelForm.getRawValue(); this.save(this.editModelId ? this.api.updateModel(this.editModelId, { name: value.name ?? undefined, description: value.description }, correlationId) : this.api.createModel({ code: value.code!, name: value.name!, description: value.description }, correlationId), item => { const selectedNodeKey = this.selectedModelStageContextNode?.key; const expandedKeys = this.modelStageContextExpandedKeys(); this.models = this.upsert(this.models, item); if (this.selected?.id === item.id) this.selected = { ...this.selected, ...item }; this.editModelId = ''; this.modelFormVisible = false; this.modelForm.reset(); this.modelForm.controls.code.enable({ emitEvent: false }); this.rebuildModelStageContextTree(expandedKeys); this.restoreModelStageContextNode(selectedNodeKey); }); } }
+  editModel(item: ProductModelItem): void { if (!this.canManageModels) return; this.editModelId = item.id; this.modelFormVisible = true; this.modelForm.reset(item); this.modelForm.controls.code.disable({ emitEvent: false }); }
   openAddModelFromTree(): void {
+    if (!this.canManageModels) return;
     this.editModelId = '';
     this.modelFormVisible = true;
     this.modelForm.reset({ code: '', name: '', description: '' });
@@ -589,6 +600,7 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
     });
   }
   private runModelContextAction(action: ModelContextAction): void {
+    if (!this.canManageModels) return;
     const modelId = (this.contextModelNode?.data as ModelStageContextNodeData | undefined)?.modelId;
     const model = modelId ? this.models.find(item => item.id === modelId) : null;
     if (!model || this.modelContextMenuBusy || this.saving) return;
@@ -611,7 +623,7 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
   }
   confirmModelDeletion(): void {
     const model = this.pendingModelDeletion;
-    if (!model || this.saving) return;
+    if (!this.canManageModels || !model || this.saving) return;
     this.save(this.api.deleteModel(model.id, this.localCorrelation('models')), () => {
       const deletedWasSelected = this.selected?.id === model.id;
       this.models = this.models.filter(item => item.id !== model.id);
@@ -631,7 +643,7 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
     if (!this.availableStageCatalog.length && !this.availableStagesLoading) this.loadAvailableStageCatalog();
   }
   beginAddModelStage(stage: SubStageOption): void {
-    if (!this.selected || !stage.isActive || this.stages.some(item => item.subStageId === stage.id)) return;
+    if (!this.canManageModels || !this.selected || !stage.isActive || this.stages.some(item => item.subStageId === stage.id)) return;
     this.editModelStageId = '';
     this.modelStageFormVisible = true;
     this.modelStageForm.reset({
@@ -688,7 +700,7 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
     this.resetBulkCopyPreview();
   }
   submitBulkCopyDialog(): void {
-    if (this.bulkCopyBusy) return;
+    if (!this.canManageModels || this.bulkCopyBusy) return;
     if (this.bulkCopyStep === 'confirm') {
       this.executeBulkCopy();
       return;
@@ -782,8 +794,8 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
       error: error => this.setError(error)
     });
   }
-  saveModelStage(): void { if (!this.selected || !this.selectedModelStageProductionLineId || this.modelStageForm.invalid) return; const value = this.modelStageForm.getRawValue(); if (this.stages.some(item => item.subStageId === value.subStageId && item.id !== this.editModelStageId) || this.stages.some(item => item.stageOrder === value.stageOrder && item.id !== this.editModelStageId)) { this.error = 'لا يمكن تكرار المرحلة أو ترتيبها داخل الموديل وخط الإنتاج.'; return; } const correlationId = this.localCorrelation('models'); this.save(this.editModelStageId ? this.api.updateModelStage(this.selected.id, this.selectedModelStageProductionLineId, this.editModelStageId, value, correlationId) : this.api.addModelStage(this.selected.id, this.selectedModelStageProductionLineId, value, correlationId), item => { this.stages = this.upsert(this.stages, item, 'stageOrder'); this.rebuildAvailableStageOptions(); this.editModelStageId = ''; this.modelStageFormVisible = false; }); }
-  editModelStage(item: ModelStageItem): void { this.editModelStageId = item.id; this.modelStageFormVisible = true; this.modelStageForm.reset(item); this.rebuildAvailableStageOptions(); }
+  saveModelStage(): void { if (!this.canManageModels || !this.selected || !this.selectedModelStageProductionLineId || this.modelStageForm.invalid) return; const value = this.modelStageForm.getRawValue(); if (this.stages.some(item => item.subStageId === value.subStageId && item.id !== this.editModelStageId) || this.stages.some(item => item.stageOrder === value.stageOrder && item.id !== this.editModelStageId)) { this.error = 'لا يمكن تكرار المرحلة أو ترتيبها داخل الموديل وخط الإنتاج.'; return; } const correlationId = this.localCorrelation('models'); this.save(this.editModelStageId ? this.api.updateModelStage(this.selected.id, this.selectedModelStageProductionLineId, this.editModelStageId, value, correlationId) : this.api.addModelStage(this.selected.id, this.selectedModelStageProductionLineId, value, correlationId), item => { this.stages = this.upsert(this.stages, item, 'stageOrder'); this.rebuildAvailableStageOptions(); this.editModelStageId = ''; this.modelStageFormVisible = false; }); }
+  editModelStage(item: ModelStageItem): void { if (!this.canManageModels) return; this.editModelStageId = item.id; this.modelStageFormVisible = true; this.modelStageForm.reset(item); this.rebuildAvailableStageOptions(); }
   isModelStageSaving(id: string): boolean { return this.modelStageSavingIds.has(id); }
   modelStageRelationshipLabel(row: ModelStageAvailabilityRow): string {
     return row.relationship ? (row.relationship.isActive ? 'مرتبطة وفعالة' : 'مرتبطة ومعطلة') : 'غير مرتبطة';
@@ -793,7 +805,7 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
   }
   toggleModelStage(item: ModelStageItem): void {
     const selectedModel = this.selected;
-    if (!selectedModel || this.isModelStageSaving(item.id)) return;
+    if (!this.canManageModels || !selectedModel || this.isModelStageSaving(item.id)) return;
 
     this.error = '';
     this.modelStageSavingIds.add(item.id);
@@ -815,7 +827,7 @@ export class ManufacturingMasterDataPageComponent implements OnInit, OnDestroy {
       error: error => this.setError(error)
     });
   }
-  setModelActive(item: ProductModelItem): void { if (confirm(item.isActive ? 'تعطيل الموديل؟' : 'تفعيل الموديل؟')) this.save(this.api.setModelActivation(item.id, !item.isActive, this.localCorrelation('models')), () => this.models = this.models.map(model => model.id === item.id ? { ...model, isActive: !item.isActive } : model)); }
+  setModelActive(item: ProductModelItem): void { if (this.canManageModels && confirm(item.isActive ? 'تعطيل الموديل؟' : 'تفعيل الموديل؟')) this.save(this.api.setModelActivation(item.id, !item.isActive, this.localCorrelation('models')), () => this.models = this.models.map(model => model.id === item.id ? { ...model, isActive: !item.isActive } : model)); }
   onModelStageSearch(value: string): void { this.modelStageSearch = value; }
   clearModelStageSearch(): void { this.modelStageSearch = ''; }
   syncStageDropdownPanelWidth(): void {

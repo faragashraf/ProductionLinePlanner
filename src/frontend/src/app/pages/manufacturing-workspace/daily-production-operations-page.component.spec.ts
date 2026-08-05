@@ -123,7 +123,7 @@ describe('DailyProductionOperationsPageComponent unified preview', () => {
     watchConfig.refresh();
 
     expect(production.loadDailyOperations).toHaveBeenCalledTimes(1);
-    expect(masterData.modelStages).toHaveBeenCalledWith('model-1', 'line-1');
+    expect(masterData.modelStages).not.toHaveBeenCalled();
   });
 
   it('does not reload current operations for a different daily-production context', () => {

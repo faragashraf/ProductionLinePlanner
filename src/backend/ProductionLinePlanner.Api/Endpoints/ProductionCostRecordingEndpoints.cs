@@ -65,7 +65,11 @@ public static class ProductionCostRecordingEndpoints
             DateOnly productionDate,
             IProductionCostRecordingService service,
             CancellationToken ct) => Results.Ok(ApiResponse.Success(await service.LoadDailyOperationsAsync(factoryId, productionLineId, productModelId, productionDate, ct))))
-            .RequirePermission("production.view")
+            .RequireAnyPermission(
+                "production.view",
+                "production.record",
+                "production.approve",
+                "production.daily-drafts.approve")
             .RequireRateLimiting(ApiRateLimitPolicies.NormalRead)
             .WithName("LoadDailyProductionOperations");
         dailyOperations.MapPost("/preview", async (

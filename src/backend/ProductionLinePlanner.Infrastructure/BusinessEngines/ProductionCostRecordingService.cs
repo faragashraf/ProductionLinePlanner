@@ -671,6 +671,7 @@ public sealed class ProductionCostRecordingService(
                     subStage.Name,
                     stage.StageOrder,
                     RoundMoney(stage.PiecePrice),
+                    stage.StandardSeconds,
                     stage.CompensationMode.ToString(),
                     staffingStatus,
                     attendanceStatus,

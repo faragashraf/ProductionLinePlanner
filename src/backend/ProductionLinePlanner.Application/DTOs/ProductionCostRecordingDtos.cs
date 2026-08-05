@@ -37,6 +37,7 @@ public sealed record DailyProductionStageDto(
     string StageName,
     int StageOrder,
     decimal PiecePrice,
+    decimal? StandardSeconds,
     string CompensationMode,
     string StaffingStatus,
     string AttendanceStatus,
