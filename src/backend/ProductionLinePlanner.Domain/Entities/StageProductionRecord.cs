@@ -64,7 +64,7 @@ public class StageProductionRecord
         EnsureDraft(); ValidateQuantities(producedQuantity, acceptedQuantity, rejectedQuantity);
         ProductionDate = productionDate; ProducedQuantity = producedQuantity; AcceptedQuantity = acceptedQuantity; RejectedQuantity = rejectedQuantity; Notes = Normalize(notes); ConcurrencyToken = Guid.NewGuid();
     }
-    public IReadOnlyCollection<StageProductionWorkerAllocation> ReplaceAllocations(IEnumerable<StageProductionWorkerAllocation> allocations)
+    public WorkerAllocationReplacementResult ReplaceAllocations(IEnumerable<StageProductionWorkerAllocation> allocations)
     {
         EnsureDraft();
         var replacements = allocations.ToDictionary(x => x.WorkerId);
@@ -79,10 +79,11 @@ public class StageProductionRecord
                 removed.Add(existing);
             }
         }
-        WorkerAllocations.AddRange(replacements.Values);
+        var added = replacements.Values.ToArray();
+        WorkerAllocations.AddRange(added);
         SynchronizeTotalWorkerEarnings();
         ConcurrencyToken = Guid.NewGuid();
-        return removed;
+        return new WorkerAllocationReplacementResult(removed, added);
     }
     public void Approve(Guid actorId, DateTime atUtc)
     {
@@ -128,3 +129,7 @@ public class StageProductionRecord
     }
     private static string? Normalize(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 }
+
+public sealed record WorkerAllocationReplacementResult(
+    IReadOnlyCollection<StageProductionWorkerAllocation> Removed,
+    IReadOnlyCollection<StageProductionWorkerAllocation> Added);

@@ -281,7 +281,7 @@ public sealed class ProductionCostRecordingHttpIntegrationTests
     }
 
     [Fact]
-    public async Task Daily_draft_update_removing_one_worker_reaches_the_put_handler_and_persists_the_reduced_worker_list()
+    public async Task Daily_draft_update_can_remove_then_restore_a_worker_without_a_false_concurrency_conflict()
     {
         await using var fixture = await ProductionHttpFixture.CreateAsync();
         var created = await CreateDailyDraftAsync(fixture);
@@ -393,6 +393,58 @@ public sealed class ProductionCostRecordingHttpIntegrationTests
         Assert.True(completedLogs.Length == 1, string.Join(Environment.NewLine, fixture.LogMessages));
         Assert.Contains(fixture.LogMessages, message => message.Contains("Daily draft PUT handler entered", StringComparison.Ordinal) && message.Contains(productionOrderId.ToString(), StringComparison.OrdinalIgnoreCase));
         Assert.Contains(fixture.LogMessages, message => message.Contains("Daily draft update service entered", StringComparison.Ordinal) && message.Contains(productionOrderId.ToString(), StringComparison.OrdinalIgnoreCase));
+
+        var persistedStage = persistedDraft.GetProperty("stages").EnumerateArray().Single();
+        var restoredWorkers = new[]
+        {
+            new { workerId = fixture.WorkerAId, percentage = 50m, inputQuantity = 250m, notes = "" },
+            new { workerId = fixture.WorkerBId, percentage = 50m, inputQuantity = 250m, notes = "تمت إعادته إلى تشغيل اليوم" }
+        };
+        var restoredPreviewRequestId = Guid.NewGuid();
+        var restoredPreviewInput = new
+        {
+            factoryId = fixture.FactoryId,
+            productionLineId = fixture.LineId,
+            productModelId = fixture.ModelId,
+            productionDate = "2026-07-16",
+            lineQuantity = 500m,
+            clientRequestId = restoredPreviewRequestId,
+            notes = "إعادة العامل إلى تشغيل اليوم",
+            stages = new[] { new { productModelStageId = fixture.ModelStageId, workers = restoredWorkers } }
+        };
+        var restoredPreviewResponse = await fixture.SendAsync(HttpMethod.Post, "/api/production/daily-operations/preview", restoredPreviewInput, permissions: ["production.record", "assignments.manage"]);
+        Assert.True(restoredPreviewResponse.StatusCode == HttpStatusCode.OK, await restoredPreviewResponse.Content.ReadAsStringAsync());
+        var restoredPreviewToken = (await DataAsync(restoredPreviewResponse)).GetProperty("previewToken").GetString();
+        var restoredUpdateResponse = await fixture.SendAsync(HttpMethod.Put, putPath, new
+        {
+            restoredPreviewInput.factoryId,
+            restoredPreviewInput.productionLineId,
+            restoredPreviewInput.productModelId,
+            restoredPreviewInput.productionDate,
+            restoredPreviewInput.lineQuantity,
+            restoredPreviewInput.clientRequestId,
+            restoredPreviewInput.notes,
+            concurrencyToken = persistedDraft.GetProperty("concurrencyToken").GetGuid(),
+            previewToken = restoredPreviewToken,
+            stages = new[]
+            {
+                new
+                {
+                    stageProductionRecordId = persistedStage.GetProperty("id").GetGuid(),
+                    productModelStageId = fixture.ModelStageId,
+                    concurrencyToken = persistedStage.GetProperty("concurrencyToken").GetGuid(),
+                    workers = restoredWorkers
+                }
+            }
+        }, permissions: ["production.record", "assignments.manage"], correlationId: "daily-save-worker-restored");
+
+        Assert.True(
+            restoredUpdateResponse.StatusCode == HttpStatusCode.OK,
+            $"{await restoredUpdateResponse.Content.ReadAsStringAsync()}{Environment.NewLine}{string.Join(Environment.NewLine, fixture.LogMessages)}");
+        var restoredDraft = await DataAsync(restoredUpdateResponse);
+        var restoredPersistedWorkers = restoredDraft.GetProperty("stages").EnumerateArray().Single().GetProperty("workers").EnumerateArray().ToArray();
+        Assert.Equal(2, restoredPersistedWorkers.Length);
+        Assert.Contains(restoredPersistedWorkers, worker => worker.GetProperty("workerId").GetGuid() == fixture.WorkerBId);
     }
 
     [Fact]

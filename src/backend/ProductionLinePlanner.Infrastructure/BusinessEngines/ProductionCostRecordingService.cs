@@ -107,7 +107,7 @@ public sealed class ProductionCostRecordingService(
     {
         var record = await RecordAsync(id, ct); EnsureCurrentVersion(record, request.ConcurrencyToken); db.Entry(record).Property(x => x.ConcurrencyToken).OriginalValue = request.ConcurrencyToken; EnsureRecordableOrder(record.ProductionOrder!); var before = RecordAudit(record); var allocationsBefore = AllocationAudit(record);
         var (order, stage) = await LoadOrderAndStageAsync(record.ProductionOrderId, record.ProductModelStageId, ct);
-        record.UpdateDraft(request.ProductionDate, RoundQuantity(request.ProducedQuantity), RoundQuantity(request.AcceptedQuantity), RoundQuantity(request.RejectedQuantity), request.Notes); var allocations = await BuildAllocationsAsync(stage, order.ProductionLineId!.Value, record.AcceptedQuantity, request.Workers, actorId, ProductionDateEvidenceAtUtc(request.ProductionDate), ct); var removedAllocations = record.ReplaceAllocations(allocations); db.RemoveRange(removedAllocations);
+        record.UpdateDraft(request.ProductionDate, RoundQuantity(request.ProducedQuantity), RoundQuantity(request.AcceptedQuantity), RoundQuantity(request.RejectedQuantity), request.Notes); var allocations = await BuildAllocationsAsync(stage, order.ProductionLineId!.Value, record.AcceptedQuantity, request.Workers, actorId, ProductionDateEvidenceAtUtc(request.ProductionDate), ct); var allocationChanges = record.ReplaceAllocations(allocations); db.RemoveRange(allocationChanges.Removed); db.AddRange(allocationChanges.Added);
         await AuditAsync(actorId, AuditActionType.Update, "StageProductionRecord", id, before, RecordAudit(record), ct); await AuditAsync(actorId, AuditActionType.Update, "StageProductionWorkerAllocation", id, allocationsBefore, AllocationAudit(record), ct); try { await db.SaveChangesAsync(ct); } catch (DbUpdateConcurrencyException) { throw new ProductionConflictException("The production record changed while it was being saved. Refresh and try again."); } return await GetRecordAsync(id, ct);
     }
 
@@ -325,6 +325,7 @@ public sealed class ProductionCostRecordingService(
             : null;
 
         var order = await db.Set<ProductionOrder>()
+            .AsTracking()
             .Include(current => current.ProductModel)
             .Include(current => current.StageProductionRecords)
                 .ThenInclude(record => record.WorkerAllocations)
@@ -371,8 +372,9 @@ public sealed class ProductionCostRecordingService(
             if (record.Status == StageProductionRecordStatus.Cancelled)
                 record.ReopenDailyDraftAfterApprovalCancellation();
             record.UpdateDraft(request.ProductionDate, stagePreview.StageQuantity, stagePreview.StageQuantity, 0m, request.Notes);
-            var removedAllocations = record.ReplaceAllocations(stagePreview.Allocations);
-            db.RemoveRange(removedAllocations);
+            var allocationChanges = record.ReplaceAllocations(stagePreview.Allocations);
+            db.RemoveRange(allocationChanges.Removed);
+            db.AddRange(allocationChanges.Added);
             await AuditAsync(actorId, AuditActionType.Update, "StageProductionRecord", record.Id, recordBefore, RecordAudit(record), ct);
             await AuditAsync(actorId, AuditActionType.Update, "StageProductionWorkerAllocation", record.Id, null, AllocationAudit(record), ct);
         }
@@ -384,8 +386,13 @@ public sealed class ProductionCostRecordingService(
             if (transaction is not null)
                 await transaction.CommitAsync(ct);
         }
-        catch (DbUpdateConcurrencyException)
+        catch (DbUpdateConcurrencyException exception)
         {
+            logger?.LogWarning(
+                exception,
+                "Daily draft update concurrency conflict {ProductionOrderId} {Entries}",
+                productionOrderId,
+                string.Join(", ", exception.Entries.Select(entry => $"{entry.Metadata.ClrType.Name}:{entry.State}")));
             throw new ProductionConflictException("تغير تشغيل اليوم أثناء الحفظ. حدّث البيانات وحاول مرة أخرى.");
         }
 
