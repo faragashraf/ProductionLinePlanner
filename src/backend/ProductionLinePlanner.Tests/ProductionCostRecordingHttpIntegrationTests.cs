@@ -191,8 +191,8 @@ public sealed class ProductionCostRecordingHttpIntegrationTests
                 productModelStageId = fixture.ModelStageId,
                 workers = new[]
                 {
-                    new { workerId = fixture.WorkerAId, percentage = 50m },
-                    new { workerId = fixture.WorkerBId, percentage = 50m }
+                    new { workerId = fixture.WorkerAId, percentage = 33.3333m, inputQuantity = 200m },
+                    new { workerId = fixture.WorkerBId, percentage = 66.6667m, inputQuantity = 400m }
                 }
             }
         };
@@ -231,8 +231,14 @@ public sealed class ProductionCostRecordingHttpIntegrationTests
         var correctedDraft = await DataAsync(updated);
         Assert.Equal(orderId, correctedDraft.GetProperty("productionOrderId").GetGuid());
         Assert.Equal(600m, correctedDraft.GetProperty("lineQuantity").GetDecimal());
-        Assert.Equal("Draft", correctedDraft.GetProperty("stages").EnumerateArray().Single().GetProperty("status").GetString());
-        Assert.Equal("تصحيح كمية تشغيل اليوم", correctedDraft.GetProperty("stages").EnumerateArray().Single().GetProperty("approvalCancellationReason").GetString());
+        var correctedStage = correctedDraft.GetProperty("stages").EnumerateArray().Single();
+        Assert.Equal("Draft", correctedStage.GetProperty("status").GetString());
+        Assert.Equal("تصحيح كمية تشغيل اليوم", correctedStage.GetProperty("approvalCancellationReason").GetString());
+        var correctedWorkers = correctedStage.GetProperty("workers").EnumerateArray()
+            .OrderBy(worker => worker.GetProperty("workerId").GetGuid())
+            .ToArray();
+        Assert.Equal([200m, 400m], correctedWorkers.Select(worker => worker.GetProperty("inputQuantity").GetDecimal()).Order().ToArray());
+        Assert.Equal([200m, 400m], correctedWorkers.Select(worker => worker.GetProperty("equivalentQuantity").GetDecimal()).Order().ToArray());
 
         var duplicateCreate = await fixture.SendAsync(HttpMethod.Post, "/api/production/daily-operations/drafts", new
         {

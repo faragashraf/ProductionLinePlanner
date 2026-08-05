@@ -463,7 +463,7 @@ public sealed class ProductionCostRecordingServiceTests
     }
 
     [Fact]
-    public async Task Daily_operations_intersect_sequential_assignment_windows_with_actual_presence_and_allocate_by_minutes()
+    public async Task Daily_operations_intersect_sequential_assignment_windows_with_actual_presence_and_allocate_equally_by_default()
     {
         await using var fixture = await Fixture.CreateAsync("SharedPercentage", 1m, 17m);
         var first = new Worker(Guid.NewGuid(), "T1", "Morning worker");
@@ -489,7 +489,7 @@ public sealed class ProductionCostRecordingServiceTests
         var ready = stage.Workers.Where(worker => worker.IsProductionReady).OrderBy(worker => worker.WorkerCode).ToArray();
 
         Assert.Equal([300, 180], ready.Select(worker => worker.WorkerMinutes).ToArray());
-        Assert.Equal([62.5m, 37.5m], ready.Select(worker => worker.SuggestedPercentage!.Value).ToArray());
+        Assert.Equal([50m, 50m], ready.Select(worker => worker.SuggestedPercentage!.Value).ToArray());
         var request = new DailyProductionOperationRequest(
             fixture.Factory.Id, fixture.Line.Id, fixture.Model.Id, fixture.Today, 500m, Guid.NewGuid(), null, null,
             [new DailyProductionStageRequest(stage.ProductModelStageId, ready.Select(worker => new WorkerAllocationRequest(worker.WorkerId, worker.SuggestedPercentage, null, null)).ToArray())]);
@@ -497,7 +497,7 @@ public sealed class ProductionCostRecordingServiceTests
 
         Assert.Equal(500m, preview.Stages.Single().StageQuantity);
         Assert.Equal(500m, preview.Stages.Single().Workers.Sum(worker => worker.EquivalentQuantity));
-        Assert.Equal([312.5m, 187.5m], preview.Stages.Single().Workers.OrderBy(worker => worker.WorkerCode).Select(worker => worker.EquivalentQuantity).ToArray());
+        Assert.Equal([250m, 250m], preview.Stages.Single().Workers.OrderBy(worker => worker.WorkerCode).Select(worker => worker.EquivalentQuantity).ToArray());
     }
 
     [Fact]

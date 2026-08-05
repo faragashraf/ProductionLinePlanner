@@ -31,7 +31,7 @@ public class StageProductionWorkerAllocation
     public decimal CalculatedEarning { get; private set; }
     public string? Notes { get; private set; }
     public string? ManualOverrideReason { get; private set; }
-    /// <summary>Raw workbook allocation quantity. It is never treated as stage or line production.</summary>
+    /// <summary>Raw supplied worker-allocation quantity. It is never treated as stage or line production.</summary>
     public decimal? InputQuantity { get; private set; }
     public void SetCalculatedAmounts(decimal equivalentQuantity, decimal calculatedEarning) { EquivalentQuantity = equivalentQuantity; CalculatedEarning = calculatedEarning; }
     public void SetManualOverrideReason(string reason)

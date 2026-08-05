@@ -591,20 +591,50 @@ public sealed class ProductionCostRecordingService(
                     ? assigned.Contribution
                     : ContributionFromDto(activeWorkers[worker.WorkerId]));
 
-            IReadOnlyDictionary<Guid, WorkerQuantityShare> minuteShares = stage.Entity.CompensationMode == CompensationMode.SharedPercentage
-                ? TimeAwareProductionAllocation.AllocateByMinutes(
+            var isSharedPercentage = stage.Entity.CompensationMode == CompensationMode.SharedPercentage;
+            var suppliedQuantityCount = stageRequest.Workers.Count(worker => worker.InputQuantity.HasValue);
+            if (isSharedPercentage && suppliedQuantityCount > 0 && suppliedQuantityCount != stageRequest.Workers.Count)
+                throw new ProductionConflictException("يجب إرسال كمية كل عامل في المرحلة أو ترك جميع الكميات للاحتساب التلقائي.");
+            var useSubmittedQuantities = isSharedPercentage && suppliedQuantityCount == stageRequest.Workers.Count;
+
+            IReadOnlyDictionary<Guid, WorkerQuantityShare> defaultShares = isSharedPercentage && !useSubmittedQuantities
+                ? TimeAwareProductionAllocation.AllocateEqually(
                     RoundQuantity(request.LineQuantity),
                     participantContributions.Values).ToDictionary(share => share.WorkerId)
                 : new Dictionary<Guid, WorkerQuantityShare>();
-            var authoritativeWorkers = stageRequest.Workers.Select(worker => stage.Entity.CompensationMode == CompensationMode.SharedPercentage
-                ? worker with { Percentage = minuteShares[worker.WorkerId].Percentage, FixedAmount = null }
+            var authoritativeWorkers = stageRequest.Workers.Select(worker => isSharedPercentage
+                ? useSubmittedQuantities
+                    ? worker with { FixedAmount = null, InputQuantity = RoundQuantity(worker.InputQuantity!.Value) }
+                    : worker with { Percentage = defaultShares[worker.WorkerId].Percentage, FixedAmount = null }
                 : worker).ToArray();
             ValidateAllocationInputs(stage.Entity.CompensationMode, authoritativeWorkers);
 
-            var calculatedAmounts = stage.Entity.CompensationMode == CompensationMode.SharedPercentage
-                ? minuteShares.ToDictionary(
-                    pair => pair.Key,
-                    pair => new CalculatedAllocation(pair.Key, pair.Value.Quantity, RoundMoney(pair.Value.Quantity * stage.Entity.PiecePrice)))
+            if (useSubmittedQuantities)
+            {
+                if (authoritativeWorkers.Any(worker => worker.InputQuantity <= 0) ||
+                    RoundQuantity(authoritativeWorkers.Sum(worker => worker.InputQuantity!.Value)) != RoundQuantity(request.LineQuantity))
+                {
+                    throw new ProductionConflictException("يجب أن تكون كمية كل عامل أكبر من صفر وأن يساوي مجموع كميات العمال كمية المرحلة.");
+                }
+
+                if (authoritativeWorkers.Any(worker =>
+                        Math.Abs(RoundQuantity(request.LineQuantity * worker.Percentage!.Value / 100m) - worker.InputQuantity!.Value) > 0.001m))
+                {
+                    throw new ProductionConflictException("كميات العمال لا تتطابق مع نسب التوزيع المرسلة للمرحلة.");
+                }
+            }
+
+            var calculatedAmounts = isSharedPercentage
+                ? useSubmittedQuantities
+                    ? authoritativeWorkers.ToDictionary(
+                        worker => worker.WorkerId,
+                        worker => new CalculatedAllocation(
+                            worker.WorkerId,
+                            worker.InputQuantity!.Value,
+                            RoundMoney(worker.InputQuantity.Value * stage.Entity.PiecePrice)))
+                    : defaultShares.ToDictionary(
+                        pair => pair.Key,
+                        pair => new CalculatedAllocation(pair.Key, pair.Value.Quantity, RoundMoney(pair.Value.Quantity * stage.Entity.PiecePrice)))
                 : CalculateAllocationAmounts(
                     stage.Entity.CompensationMode,
                     RoundQuantity(request.LineQuantity),
@@ -1001,7 +1031,7 @@ public sealed class ProductionCostRecordingService(
     {
         if (mode != CompensationMode.SharedPercentage || workers.Count == 0)
             return new Dictionary<Guid, decimal>();
-        return TimeAwareProductionAllocation.AllocateByMinutes(100m, workers.Select(worker => worker.Contribution))
+        return TimeAwareProductionAllocation.AllocateEqually(100m, workers.Select(worker => worker.Contribution))
             .ToDictionary(item => item.WorkerId, item => item.Percentage);
     }
 

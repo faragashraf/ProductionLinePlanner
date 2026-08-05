@@ -590,21 +590,10 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
     const participants = stage.workers
       .filter(worker => worker.includedInProduction !== false && worker.isProductionReady && worker.workerMinutes > 0)
       .sort((left, right) => left.workerId.localeCompare(right.workerId));
-    const totalMinutes = participants.reduce((total, worker) => total + worker.workerMinutes, 0);
     const percentageUnits = 1_000_000;
-    const shares = participants.map(worker => {
-      const exactUnits = totalMinutes > 0 ? worker.workerMinutes * percentageUnits / totalMinutes : 0;
-      const units = Math.floor(exactUnits);
-      return { worker, units, remainder: exactUnits - units };
-    });
-    let remainingUnits = percentageUnits - shares.reduce((total, share) => total + share.units, 0);
-    shares
-      .sort((left, right) => right.remainder - left.remainder || left.worker.workerId.localeCompare(right.worker.workerId))
-      .forEach(share => {
-        if (remainingUnits <= 0) return;
-        share.units++;
-        remainingUnits--;
-      });
+    const equalUnits = participants.length ? Math.floor(percentageUnits / participants.length) : 0;
+    const remainingUnits = percentageUnits - equalUnits * participants.length;
+    const shares = participants.map((worker, index) => ({ worker, units: equalUnits + (index < remainingUnits ? 1 : 0) }));
 
     stage.workers.forEach(worker => worker.percentage = null);
     shares.forEach(share => share.worker.percentage = share.units / 10_000);
@@ -1317,7 +1306,7 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
       fixedAmount: stage.compensationMode === 'FixedAmount' ? worker.fixedAmount : null,
       notes: worker.notes.trim() || null,
       manualOverrideReason: this.workerNeedsOverride(stage, worker) ? worker.manualOverrideReason.trim() || null : null,
-      inputQuantity: null
+      inputQuantity: stage.compensationMode === 'SharedPercentage' ? worker.quantity : null
     }));
     return { productModelStageId: stage.productModelStageId, workers };
   }

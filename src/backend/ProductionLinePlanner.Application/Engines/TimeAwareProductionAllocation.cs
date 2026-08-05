@@ -78,6 +78,23 @@ public static class TimeAwareProductionAllocation
             quantities[contribution.WorkerId])).ToArray();
     }
 
+    public static IReadOnlyCollection<WorkerQuantityShare> AllocateEqually(
+        decimal stageQuantity,
+        IEnumerable<WorkerContributionResult> contributions)
+    {
+        var eligible = contributions
+            .Where(contribution => contribution.IsProductionReady)
+            .OrderBy(contribution => contribution.WorkerId)
+            .ToArray();
+        if (eligible.Length == 0)
+            return [];
+
+        var originalMinutes = eligible.ToDictionary(contribution => contribution.WorkerId, contribution => contribution.WorkerMinutes);
+        return AllocateByMinutes(stageQuantity, eligible.Select(contribution => contribution with { WorkerMinutes = 1 }))
+            .Select(share => share with { WorkerMinutes = originalMinutes[share.WorkerId] })
+            .ToArray();
+    }
+
     private static Dictionary<Guid, decimal> AllocateUnits(
         decimal total,
         decimal step,

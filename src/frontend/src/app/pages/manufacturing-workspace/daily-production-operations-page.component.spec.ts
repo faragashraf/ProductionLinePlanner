@@ -409,7 +409,7 @@ describe('DailyProductionOperationsPageComponent unified preview', () => {
     expect(request.stages[0].workers.map((worker: any) => worker.workerId)).toEqual(['worker-1', 'worker-override']);
   });
 
-  it('recomputes shared percentages from ready worker minutes after a daily participant change', () => {
+  it('recomputes shared percentages equally after a daily participant change regardless of worker minutes', () => {
     const stage = component.stages[0];
     stage.workers = [
       { ...stage.workers[0], workerId: 'worker-a', workerMinutes: 300 },
@@ -419,7 +419,7 @@ describe('DailyProductionOperationsPageComponent unified preview', () => {
 
     component.applyEqualDistribution(stage, false);
 
-    expect(stage.workers.map(worker => worker.percentage)).toEqual([62.5, 37.5]);
+    expect(stage.workers.map(worker => worker.percentage)).toEqual([50, 50]);
     expect(stage.workers.reduce((total, worker) => total + component.calculatedWorkerQuantity(stage, worker), 0)).toBe(500);
   });
 
@@ -434,6 +434,23 @@ describe('DailyProductionOperationsPageComponent unified preview', () => {
     component.updateWorkerQuantity(stage, worker, 200);
     expect(worker.quantity).toBe(200);
     expect(worker.percentage).toBe(40);
+  });
+
+  it('sends the entered worker quantities with the shared-allocation preview request', () => {
+    const stage = component.stages[0];
+    stage.workers = [
+      { ...stage.workers[0], workerId: 'worker-a', percentage: 40, quantity: 200 },
+      { ...stage.workers[0], workerId: 'worker-b', workerCode: 'W2', workerName: 'عامل 2', percentage: 60, quantity: 300 }
+    ];
+    production.previewDailyOperations.and.returnValue(of(preview));
+
+    component.calculatePreview();
+
+    const request = production.previewDailyOperations.calls.mostRecent().args[0];
+    expect(request.stages[0].workers).toEqual([
+      jasmine.objectContaining({ workerId: 'worker-a', percentage: 40, inputQuantity: 200 }),
+      jasmine.objectContaining({ workerId: 'worker-b', percentage: 60, inputQuantity: 300 })
+    ]);
   });
 
   it('reconciles rounding when entered worker quantities equal the stage quantity', () => {
