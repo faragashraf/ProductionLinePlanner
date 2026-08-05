@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Security.Claims;
+using System.Collections.Concurrent;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using Microsoft.AspNetCore.Authentication;
@@ -15,6 +16,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using ProductionLinePlanner.Api.Authorization;
+using ProductionLinePlanner.Api.Diagnostics;
 using ProductionLinePlanner.Api.Endpoints;
 using ProductionLinePlanner.Api.Security;
 using ProductionLinePlanner.Application.Abstractions;
@@ -95,11 +97,70 @@ public sealed class ProductionCostRecordingHttpIntegrationTests
         var draft = await CreateDailyDraftAsync(fixture);
         var orderId = draft.GetProperty("productionOrderId").GetGuid();
         var draftStage = draft.GetProperty("stages").EnumerateArray().Single();
-        var approvePath = $"/api/production/daily-operations/{orderId}/approve";
-        Assert.Equal(HttpStatusCode.OK, (await fixture.SendAsync(HttpMethod.Post, approvePath, DailyApprovalPayload(draftStage), permissions: ["production.approve"])).StatusCode);
 
-        var approvedRecord = await fixture.SendAsync(HttpMethod.Get, $"/api/production/records/{draftStage.GetProperty("id").GetGuid()}", permissions: ["production.view"]);
-        var approvedStage = await DataAsync(approvedRecord);
+        var firstUpdateRequestId = Guid.NewGuid();
+        var firstUpdateStages = new[]
+        {
+            new
+            {
+                productModelStageId = fixture.ModelStageId,
+                workers = new[]
+                {
+                    new { workerId = fixture.WorkerAId, percentage = 60m },
+                    new { workerId = fixture.WorkerBId, percentage = 40m }
+                }
+            }
+        };
+        var firstPreviewInput = new
+        {
+            factoryId = fixture.FactoryId,
+            productionLineId = fixture.LineId,
+            productModelId = fixture.ModelId,
+            productionDate = "2026-07-16",
+            lineQuantity = 550m,
+            clientRequestId = firstUpdateRequestId,
+            stages = firstUpdateStages
+        };
+        var firstPreview = await fixture.SendAsync(HttpMethod.Post, "/api/production/daily-operations/preview", firstPreviewInput, permissions: ["production.record"]);
+        var firstPreviewToken = (await DataAsync(firstPreview)).GetProperty("previewToken").GetString();
+        var firstUpdate = await fixture.SendAsync(HttpMethod.Put, $"/api/production/daily-operations/drafts/{orderId}", new
+        {
+            firstPreviewInput.factoryId,
+            firstPreviewInput.productionLineId,
+            firstPreviewInput.productModelId,
+            firstPreviewInput.productionDate,
+            firstPreviewInput.lineQuantity,
+            firstPreviewInput.clientRequestId,
+            concurrencyToken = draft.GetProperty("concurrencyToken").GetGuid(),
+            previewToken = firstPreviewToken,
+            stages = firstUpdateStages.Select(stage => new
+            {
+                stageProductionRecordId = draftStage.GetProperty("id").GetGuid(),
+                stage.productModelStageId,
+                concurrencyToken = draftStage.GetProperty("concurrencyToken").GetGuid(),
+                stage.workers
+            })
+        }, permissions: ["production.record"]);
+
+        Assert.Equal(HttpStatusCode.OK, firstUpdate.StatusCode);
+        var updatedBeforeApproval = await DataAsync(firstUpdate);
+        Assert.Equal(orderId, updatedBeforeApproval.GetProperty("productionOrderId").GetGuid());
+        Assert.Equal(550m, updatedBeforeApproval.GetProperty("lineQuantity").GetDecimal());
+        Assert.NotEqual(draft.GetProperty("concurrencyToken").GetGuid(), updatedBeforeApproval.GetProperty("concurrencyToken").GetGuid());
+        var updatedStage = updatedBeforeApproval.GetProperty("stages").EnumerateArray().Single();
+        Assert.NotEqual(draftStage.GetProperty("concurrencyToken").GetGuid(), updatedStage.GetProperty("concurrencyToken").GetGuid());
+
+        var approvePath = $"/api/production/daily-operations/{orderId}/approve";
+        Assert.Equal(HttpStatusCode.OK, (await fixture.SendAsync(HttpMethod.Post, approvePath, DailyApprovalPayload(updatedStage), permissions: ["production.approve"])).StatusCode);
+
+        var approvedOperationsResponse = await fixture.SendAsync(
+            HttpMethod.Get,
+            $"/api/production/daily-operations?factoryId={fixture.FactoryId}&productionLineId={fixture.LineId}&productModelId={fixture.ModelId}&productionDate=2026-07-16",
+            permissions: ["production.view"]);
+        var approvedDraft = (await DataAsync(approvedOperationsResponse)).GetProperty("existingDraft");
+        Assert.Equal(orderId, approvedDraft.GetProperty("productionOrderId").GetGuid());
+        Assert.Equal("Completed", approvedDraft.GetProperty("orderStatus").GetString());
+        var approvedStage = approvedDraft.GetProperty("stages").EnumerateArray().Single();
         var cancelPath = $"/api/production/daily-operations/{orderId}/cancel-approval";
         var cancellation = await fixture.SendAsync(HttpMethod.Post, cancelPath, new
         {
@@ -111,15 +172,16 @@ public sealed class ProductionCostRecordingHttpIntegrationTests
         var cancelled = await DataAsync(cancellation);
         Assert.Equal(orderId, cancelled.GetProperty("productionOrderId").GetGuid());
         Assert.Equal("Draft", cancelled.GetProperty("orderStatus").GetString());
-        Assert.Equal(1, cancelled.GetProperty("cancelledStageCount").GetInt32());
+        Assert.NotEqual(approvedDraft.GetProperty("concurrencyToken").GetGuid(), cancelled.GetProperty("concurrencyToken").GetGuid());
+        var cancelledStage = cancelled.GetProperty("stages").EnumerateArray().Single();
+        Assert.Equal(approvedStage.GetProperty("id").GetGuid(), cancelledStage.GetProperty("id").GetGuid());
+        Assert.Equal("Cancelled", cancelledStage.GetProperty("status").GetString());
+        Assert.NotEqual(approvedStage.GetProperty("concurrencyToken").GetGuid(), cancelledStage.GetProperty("concurrencyToken").GetGuid());
         Assert.Equal(HttpStatusCode.Conflict, (await fixture.SendAsync(HttpMethod.Post, cancelPath, new
         {
             reason = "إلغاء مكرر",
             stageApprovals = new[] { new { stageProductionRecordId = approvedStage.GetProperty("id").GetGuid(), concurrencyToken = approvedStage.GetProperty("concurrencyToken").GetGuid() } }
         }, permissions: ["production.approve"])).StatusCode);
-
-        var cancelledRecord = await fixture.SendAsync(HttpMethod.Get, $"/api/production/records/{approvedStage.GetProperty("id").GetGuid()}", permissions: ["production.view"]);
-        Assert.Equal("Cancelled", (await DataAsync(cancelledRecord)).GetProperty("status").GetString());
 
         var updateRequestId = Guid.NewGuid();
         var stageInputs = new[]
@@ -146,7 +208,33 @@ public sealed class ProductionCostRecordingHttpIntegrationTests
         };
         var preview = await fixture.SendAsync(HttpMethod.Post, "/api/production/daily-operations/preview", previewInput, permissions: ["production.record"]);
         var previewToken = (await DataAsync(preview)).GetProperty("previewToken").GetString();
-        var updated = await fixture.SendAsync(HttpMethod.Post, "/api/production/daily-operations/drafts", new
+        var updated = await fixture.SendAsync(HttpMethod.Put, $"/api/production/daily-operations/drafts/{orderId}", new
+        {
+            previewInput.factoryId,
+            previewInput.productionLineId,
+            previewInput.productModelId,
+            previewInput.productionDate,
+            previewInput.lineQuantity,
+            previewInput.clientRequestId,
+            concurrencyToken = cancelled.GetProperty("concurrencyToken").GetGuid(),
+            previewToken,
+            stages = stageInputs.Select(stage => new
+            {
+                stageProductionRecordId = cancelledStage.GetProperty("id").GetGuid(),
+                stage.productModelStageId,
+                concurrencyToken = cancelledStage.GetProperty("concurrencyToken").GetGuid(),
+                stage.workers
+            })
+        }, permissions: ["production.record"]);
+
+        Assert.Equal(HttpStatusCode.OK, updated.StatusCode);
+        var correctedDraft = await DataAsync(updated);
+        Assert.Equal(orderId, correctedDraft.GetProperty("productionOrderId").GetGuid());
+        Assert.Equal(600m, correctedDraft.GetProperty("lineQuantity").GetDecimal());
+        Assert.Equal("Draft", correctedDraft.GetProperty("stages").EnumerateArray().Single().GetProperty("status").GetString());
+        Assert.Equal("تصحيح كمية تشغيل اليوم", correctedDraft.GetProperty("stages").EnumerateArray().Single().GetProperty("approvalCancellationReason").GetString());
+
+        var duplicateCreate = await fixture.SendAsync(HttpMethod.Post, "/api/production/daily-operations/drafts", new
         {
             previewInput.factoryId,
             previewInput.productionLineId,
@@ -157,13 +245,160 @@ public sealed class ProductionCostRecordingHttpIntegrationTests
             previewToken,
             previewInput.stages
         }, permissions: ["production.record"]);
+        Assert.Equal(HttpStatusCode.Conflict, duplicateCreate.StatusCode);
 
-        Assert.Equal(HttpStatusCode.Created, updated.StatusCode);
-        var correctedDraft = await DataAsync(updated);
-        Assert.Equal(orderId, correctedDraft.GetProperty("productionOrderId").GetGuid());
-        Assert.Equal(600m, correctedDraft.GetProperty("lineQuantity").GetDecimal());
-        Assert.Equal("Draft", correctedDraft.GetProperty("stages").EnumerateArray().Single().GetProperty("status").GetString());
-        Assert.Equal("تصحيح كمية تشغيل اليوم", correctedDraft.GetProperty("stages").EnumerateArray().Single().GetProperty("approvalCancellationReason").GetString());
+        var counts = await fixture.CountDailyOperationsAsync();
+        Assert.Equal(1, counts.Orders);
+        Assert.Equal(1, counts.StageRecords);
+    }
+
+    [Fact]
+    public async Task Daily_draft_routes_use_post_for_collection_creation_and_put_for_item_updates()
+    {
+        await using var fixture = await ProductionHttpFixture.CreateAsync();
+        var draft = await CreateDailyDraftAsync(fixture);
+        var orderId = draft.GetProperty("productionOrderId").GetGuid();
+
+        var postToItem = await fixture.SendAsync(
+            HttpMethod.Post,
+            $"/api/production/daily-operations/drafts/{orderId}",
+            new { },
+            permissions: ["production.record"]);
+        var putToCollection = await fixture.SendAsync(
+            HttpMethod.Put,
+            "/api/production/daily-operations/drafts",
+            new { },
+            permissions: ["production.record"]);
+
+        Assert.Equal(HttpStatusCode.MethodNotAllowed, postToItem.StatusCode);
+        Assert.Equal(HttpStatusCode.MethodNotAllowed, putToCollection.StatusCode);
+    }
+
+    [Fact]
+    public async Task Daily_draft_update_removing_one_worker_reaches_the_put_handler_and_persists_the_reduced_worker_list()
+    {
+        await using var fixture = await ProductionHttpFixture.CreateAsync();
+        var created = await CreateDailyDraftAsync(fixture);
+        var productionOrderId = created.GetProperty("productionOrderId").GetGuid();
+        var putPath = $"/api/production/daily-operations/drafts/{productionOrderId}";
+
+        var unchangedWorkers = new[]
+        {
+            new { workerId = fixture.WorkerAId, percentage = 50m, notes = "ملاحظة محدثة" },
+            new { workerId = fixture.WorkerBId, percentage = 50m, notes = "" }
+        };
+        var unchangedPreviewRequestId = Guid.NewGuid();
+        var unchangedPreviewInput = new
+        {
+            factoryId = fixture.FactoryId,
+            productionLineId = fixture.LineId,
+            productModelId = fixture.ModelId,
+            productionDate = "2026-07-16",
+            lineQuantity = 500m,
+            clientRequestId = unchangedPreviewRequestId,
+            notes = "تحديث ملاحظات فقط",
+            stages = new[] { new { productModelStageId = fixture.ModelStageId, workers = unchangedWorkers } }
+        };
+        var unchangedPreviewResponse = await fixture.SendAsync(HttpMethod.Post, "/api/production/daily-operations/preview", unchangedPreviewInput, permissions: ["production.record"]);
+        Assert.Equal(HttpStatusCode.OK, unchangedPreviewResponse.StatusCode);
+        var unchangedPreviewToken = (await DataAsync(unchangedPreviewResponse)).GetProperty("previewToken").GetString();
+        var createdStage = created.GetProperty("stages").EnumerateArray().Single();
+        var unchangedUpdateResponse = await fixture.SendAsync(HttpMethod.Put, putPath, new
+        {
+            unchangedPreviewInput.factoryId,
+            unchangedPreviewInput.productionLineId,
+            unchangedPreviewInput.productModelId,
+            unchangedPreviewInput.productionDate,
+            unchangedPreviewInput.lineQuantity,
+            unchangedPreviewInput.clientRequestId,
+            unchangedPreviewInput.notes,
+            concurrencyToken = created.GetProperty("concurrencyToken").GetGuid(),
+            previewToken = unchangedPreviewToken,
+            stages = new[]
+            {
+                new
+                {
+                    stageProductionRecordId = createdStage.GetProperty("id").GetGuid(),
+                    productModelStageId = fixture.ModelStageId,
+                    concurrencyToken = createdStage.GetProperty("concurrencyToken").GetGuid(),
+                    workers = unchangedWorkers
+                }
+            }
+        }, permissions: ["production.record"], correlationId: "daily-save-workers-unchanged");
+        Assert.Equal(HttpStatusCode.OK, unchangedUpdateResponse.StatusCode);
+
+        var latestDraft = await fixture.LoadDailyDraftAsync();
+        Assert.Equal(productionOrderId, latestDraft.GetProperty("productionOrderId").GetGuid());
+        var latestStage = latestDraft.GetProperty("stages").EnumerateArray().Single();
+        Assert.Equal(2, latestStage.GetProperty("workers").GetArrayLength());
+
+        var reducedWorkers = new[]
+        {
+            new { workerId = fixture.WorkerAId, percentage = 100m, notes = "العامل الوحيد في تشغيل اليوم" }
+        };
+        var reducedPreviewRequestId = Guid.NewGuid();
+        var reducedPreviewInput = new
+        {
+            factoryId = fixture.FactoryId,
+            productionLineId = fixture.LineId,
+            productModelId = fixture.ModelId,
+            productionDate = "2026-07-16",
+            lineQuantity = 500m,
+            clientRequestId = reducedPreviewRequestId,
+            notes = "استبعاد عامل واحد",
+            stages = new[] { new { productModelStageId = fixture.ModelStageId, workers = reducedWorkers } }
+        };
+        var reducedPreviewResponse = await fixture.SendAsync(HttpMethod.Post, "/api/production/daily-operations/preview", reducedPreviewInput, permissions: ["production.record", "assignments.manage"]);
+        Assert.True(reducedPreviewResponse.StatusCode == HttpStatusCode.OK, await reducedPreviewResponse.Content.ReadAsStringAsync());
+        var reducedPreviewToken = (await DataAsync(reducedPreviewResponse)).GetProperty("previewToken").GetString();
+        var reducedUpdateResponse = await fixture.SendAsync(HttpMethod.Put, putPath, new
+        {
+            reducedPreviewInput.factoryId,
+            reducedPreviewInput.productionLineId,
+            reducedPreviewInput.productModelId,
+            reducedPreviewInput.productionDate,
+            reducedPreviewInput.lineQuantity,
+            reducedPreviewInput.clientRequestId,
+            reducedPreviewInput.notes,
+            concurrencyToken = latestDraft.GetProperty("concurrencyToken").GetGuid(),
+            previewToken = reducedPreviewToken,
+            stages = new[]
+            {
+                new
+                {
+                    stageProductionRecordId = latestStage.GetProperty("id").GetGuid(),
+                    productModelStageId = fixture.ModelStageId,
+                    concurrencyToken = latestStage.GetProperty("concurrencyToken").GetGuid(),
+                    workers = reducedWorkers
+                }
+            }
+        }, permissions: ["production.record", "assignments.manage"], correlationId: "daily-save-worker-removed");
+
+        Assert.NotEqual(HttpStatusCode.MethodNotAllowed, reducedUpdateResponse.StatusCode);
+        Assert.True(reducedUpdateResponse.StatusCode == HttpStatusCode.OK, await reducedUpdateResponse.Content.ReadAsStringAsync());
+        var persistedDraft = await fixture.LoadDailyDraftAsync();
+        var persistedWorkers = persistedDraft.GetProperty("stages").EnumerateArray().Single().GetProperty("workers").EnumerateArray().ToArray();
+        Assert.Single(persistedWorkers);
+        Assert.Equal(fixture.WorkerAId, persistedWorkers[0].GetProperty("workerId").GetGuid());
+        Assert.DoesNotContain(persistedWorkers, worker => worker.GetProperty("workerId").GetGuid() == fixture.WorkerBId);
+        var startedLogs = fixture.LogMessages.Where(message => message.Contains("Daily draft PUT started", StringComparison.Ordinal) && message.Contains("daily-save-worker-removed", StringComparison.Ordinal)).ToArray();
+        var completedLogs = fixture.LogMessages.Where(message => message.Contains("Daily draft PUT completed", StringComparison.Ordinal) && message.Contains("daily-save-worker-removed", StringComparison.Ordinal) && message.Contains("200", StringComparison.Ordinal)).ToArray();
+        Assert.True(startedLogs.Length == 1, string.Join(Environment.NewLine, fixture.LogMessages));
+        Assert.True(completedLogs.Length == 1, string.Join(Environment.NewLine, fixture.LogMessages));
+        Assert.Contains(fixture.LogMessages, message => message.Contains("Daily draft PUT handler entered", StringComparison.Ordinal) && message.Contains(productionOrderId.ToString(), StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(fixture.LogMessages, message => message.Contains("Daily draft update service entered", StringComparison.Ordinal) && message.Contains(productionOrderId.ToString(), StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task Api_exception_handler_does_not_rewrite_a_put_failure_as_405_allow_get()
+    {
+        await using var fixture = await ProductionHttpFixture.CreateAsync();
+
+        var response = await fixture.SendAsync(HttpMethod.Put, "/api/test/throw", new { });
+
+        Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
+        Assert.NotEqual(HttpStatusCode.MethodNotAllowed, response.StatusCode);
+        Assert.False(response.Headers.TryGetValues("Allow", out _));
     }
 
     [Fact]
@@ -621,15 +856,22 @@ public sealed class ProductionCostRecordingHttpIntegrationTests
         private readonly WebApplication _app;
         private readonly HttpClient _client;
         private readonly Guid _userId;
-        private ProductionHttpFixture(SqliteConnection connection, WebApplication app, HttpClient client, Guid userId, Guid factoryId, Guid modelId, Guid lineId, Guid modelStageId, Guid workerAId, Guid workerBId)
-        { _connection = connection; _app = app; _client = client; _userId = userId; FactoryId = factoryId; ModelId = modelId; LineId = lineId; ModelStageId = modelStageId; WorkerAId = workerAId; WorkerBId = workerBId; }
+        private readonly TestLogProvider _logs;
+        private ProductionHttpFixture(SqliteConnection connection, WebApplication app, HttpClient client, Guid userId, Guid factoryId, Guid modelId, Guid lineId, Guid modelStageId, Guid workerAId, Guid workerBId, TestLogProvider logs)
+        { _connection = connection; _app = app; _client = client; _userId = userId; FactoryId = factoryId; ModelId = modelId; LineId = lineId; ModelStageId = modelStageId; WorkerAId = workerAId; WorkerBId = workerBId; _logs = logs; }
         public Guid FactoryId { get; } public Guid ModelId { get; } public Guid LineId { get; } public Guid ModelStageId { get; } public Guid WorkerAId { get; } public Guid WorkerBId { get; }
+        public IReadOnlyCollection<string> LogMessages => _logs.Messages;
 
         public static async Task<ProductionHttpFixture> CreateAsync(decimal piecePrice = .50m, Error? readinessError = null)
         {
             var connection = new SqliteConnection("Data Source=:memory:"); connection.CreateCollation("SQL_Latin1_General_CP1_CI_AS", (left, right) => string.Compare(left, right, StringComparison.OrdinalIgnoreCase)); await connection.OpenAsync();
             var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "IntegrationTest" });
             builder.WebHost.UseTestServer();
+            var logs = new TestLogProvider();
+            builder.Logging.ClearProviders();
+            builder.Logging.SetMinimumLevel(LogLevel.Debug);
+            builder.Logging.AddFilter((_, level) => level >= LogLevel.Debug);
+            builder.Logging.AddProvider(logs);
             builder.Services.AddHttpContextAccessor();
             builder.Services.AddAuthentication("test").AddScheme<AuthenticationSchemeOptions, HeaderAuthenticationHandler>("test", _ => { });
             builder.Services.AddAuthorization(options => options.AddPermissionPolicies());
@@ -654,15 +896,23 @@ public sealed class ProductionCostRecordingHttpIntegrationTests
             }
             builder.Services.AddScoped<IImportNormalizationService, ImportNormalizationService>();
             builder.Services.AddScoped<IRealDataIntakeService, RealDataIntakeService>();
-            var app = builder.Build(); app.UseExceptionHandler(error => error.Run(context =>
+            var app = builder.Build();
+            app.UseExceptionHandler("/api/error");
+            app.UseAuthentication();
+            app.UseDailyDraftUpdateRequestDiagnostics();
+            app.UseAuthorization();
+            app.MapMethods("/api/error", ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"], (HttpContext context) =>
             {
                 var exception = context.Features.Get<IExceptionHandlerFeature>()?.Error;
                 var status = exception is ProductionConflictException or DbUpdateConcurrencyException ? StatusCodes.Status409Conflict : StatusCodes.Status500InternalServerError;
                 return Results.Problem(
                     title: status == StatusCodes.Status409Conflict ? "Conflict" : "Internal Server Error",
                     detail: exception?.Message ?? "An unexpected error occurred.",
-                    statusCode: status).ExecuteAsync(context);
-            })); app.UseAuthentication(); app.UseAuthorization(); app.MapProductionCostRecordingEndpoints(); ProductionLinePlanner.Api.Endpoints.ProductionQuantitiesReportEndpoints.MapProductionQuantitiesReportEndpoints(app); ProductionLinePlanner.Api.Endpoints.ProductionFinancialReportEndpoints.MapProductionFinancialReportEndpoints(app); await app.StartAsync();
+                    statusCode: status);
+            });
+            Func<HttpContext, Task<IResult>> throwHandler = _ => Task.FromException<IResult>(new InvalidOperationException("Integration exception-handler probe."));
+            app.MapPut("/api/test/throw", throwHandler);
+            app.MapProductionCostRecordingEndpoints(); ProductionLinePlanner.Api.Endpoints.ProductionQuantitiesReportEndpoints.MapProductionQuantitiesReportEndpoints(app); ProductionLinePlanner.Api.Endpoints.ProductionFinancialReportEndpoints.MapProductionFinancialReportEndpoints(app); await app.StartAsync();
             var userId = Guid.NewGuid(); Guid factoryId; Guid modelId; Guid lineId; Guid modelStageId; Guid workerAId; Guid workerBId;
             await using (var scope = app.Services.CreateAsyncScope())
             {
@@ -674,15 +924,36 @@ public sealed class ProductionCostRecordingHttpIntegrationTests
                 db.AddRange(new WorkerDefaultAssignment(Guid.NewGuid(), workerA.Id, sub.Id, userId, DateTime.UtcNow.AddMinutes(-1), "Integration assignment", productionLineId: line.Id), new WorkerDefaultAssignment(Guid.NewGuid(), workerB.Id, sub.Id, userId, DateTime.UtcNow.AddMinutes(-1), "Integration assignment", productionLineId: line.Id));
                 await db.SaveChangesAsync(); factoryId = factory.Id; modelId = model.Id; lineId = line.Id; modelStageId = stage.Id; workerAId = workerA.Id; workerBId = workerB.Id;
             }
-            return new ProductionHttpFixture(connection, app, app.GetTestClient(), userId, factoryId, modelId, lineId, modelStageId, workerAId, workerBId);
+            return new ProductionHttpFixture(connection, app, app.GetTestClient(), userId, factoryId, modelId, lineId, modelStageId, workerAId, workerBId, logs);
         }
 
         public object DraftPayload(Guid orderId, decimal quantity = 500m) => new { productionOrderId = orderId, productModelStageId = ModelStageId, productionDate = "2026-07-13", producedQuantity = quantity, acceptedQuantity = quantity, rejectedQuantity = 0m, clientRequestId = Guid.NewGuid(), workers = new[] { new { workerId = WorkerAId, percentage = 50m }, new { workerId = WorkerBId, percentage = 50m } } };
         public object SingleWorkerDraftPayload(Guid orderId) => new { productionOrderId = orderId, productModelStageId = ModelStageId, productionDate = "2026-07-13", producedQuantity = 500m, acceptedQuantity = 500m, rejectedQuantity = 0m, clientRequestId = Guid.NewGuid(), workers = new[] { new { workerId = WorkerAId, percentage = 100m } } };
         public object UpdatePayload(Guid concurrencyToken) => new { productionDate = "2026-07-13", producedQuantity = 500m, acceptedQuantity = 500m, rejectedQuantity = 0m, concurrencyToken, workers = new[] { new { workerId = WorkerAId, percentage = 50m }, new { workerId = WorkerBId, percentage = 50m } } };
-        public async Task<HttpResponseMessage> SendAsync(HttpMethod method, string path, object? body = null, IReadOnlyCollection<string>? permissions = null)
+        public async Task<(int Orders, int StageRecords)> CountDailyOperationsAsync()
         {
-            var request = new HttpRequestMessage(method, path); if (body is not null) request.Content = JsonContent.Create(body); if (permissions is not null) { request.Headers.Add("X-Test-User", _userId.ToString()); request.Headers.Add("X-Test-Permissions", string.Join(',', permissions)); } return await _client.SendAsync(request);
+            await using var scope = _app.Services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var operationIds = await db.Set<ProductionOrder>()
+                .Where(order => order.ProductionDate == new DateOnly(2026, 7, 16) && order.ProductionLineId == LineId && order.ProductModelId == ModelId)
+                .Select(order => order.Id)
+                .ToArrayAsync();
+            return (
+                operationIds.Length,
+                await db.Set<StageProductionRecord>().CountAsync(record => operationIds.Contains(record.ProductionOrderId)));
+        }
+        public async Task<JsonElement> LoadDailyDraftAsync()
+        {
+            var response = await SendAsync(
+                HttpMethod.Get,
+                $"/api/production/daily-operations?factoryId={FactoryId}&productionLineId={LineId}&productModelId={ModelId}&productionDate=2026-07-16",
+                permissions: ["production.view"]);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            return (await DataAsync(response)).GetProperty("existingDraft").Clone();
+        }
+        public async Task<HttpResponseMessage> SendAsync(HttpMethod method, string path, object? body = null, IReadOnlyCollection<string>? permissions = null, string? correlationId = null)
+        {
+            var request = new HttpRequestMessage(method, path); if (body is not null) request.Content = JsonContent.Create(body); if (permissions is not null) { request.Headers.Add("X-Test-User", _userId.ToString()); request.Headers.Add("X-Test-Permissions", string.Join(',', permissions)); } if (!string.IsNullOrWhiteSpace(correlationId)) request.Headers.Add("X-Manufacturing-Realtime-Correlation-Id", correlationId); return await _client.SendAsync(request);
         }
         public async ValueTask DisposeAsync() { await _app.DisposeAsync(); await _connection.DisposeAsync(); }
     }
@@ -691,6 +962,34 @@ public sealed class ProductionCostRecordingHttpIntegrationTests
     {
         public Task<IReadOnlyCollection<string>> GetEffectivePermissionsAsync(Guid userId, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyCollection<string>>((accessor.HttpContext?.Request.Headers["X-Test-Permissions"].ToString() ?? string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
         public Task<PermissionCatalogItemDto[]> GetCatalogAsync(CancellationToken cancellationToken = default) => Task.FromResult(Array.Empty<PermissionCatalogItemDto>());
+    }
+
+    private sealed class TestLogProvider : ILoggerProvider
+    {
+        private readonly ConcurrentQueue<string> _messages = new();
+        public IReadOnlyCollection<string> Messages => _messages.ToArray();
+        public ILogger CreateLogger(string categoryName) => new TestLogger(categoryName, _messages);
+        public void Dispose() { }
+
+        private sealed class TestLogger(string categoryName, ConcurrentQueue<string> messages) : ILogger
+        {
+            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+            public bool IsEnabled(LogLevel logLevel) => logLevel >= LogLevel.Debug;
+            public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+            {
+                if (!IsEnabled(logLevel))
+                {
+                    return;
+                }
+
+                var message = formatter(state, exception);
+                if (message.StartsWith("Daily draft PUT", StringComparison.Ordinal) ||
+                    message.StartsWith("Daily draft update service entered", StringComparison.Ordinal))
+                {
+                    messages.Enqueue($"{categoryName}: {message}");
+                }
+            }
+        }
     }
 
     private sealed class PresentAttendanceEngine : IAttendanceEngine

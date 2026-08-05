@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using ProductionLinePlanner.Application.Abstractions;
 using ProductionLinePlanner.Application.Common;
 using ProductionLinePlanner.Application.DTOs;
@@ -21,7 +22,8 @@ public sealed class ProductionCostRecordingService(
     IAssignmentEngine assignmentEngine,
     IAttendanceEngine attendanceEngine,
     IPermissionService permissionService,
-    ICairoTimeZoneProvider cairoTimeZoneProvider) : IProductionCostRecordingService
+    ICairoTimeZoneProvider cairoTimeZoneProvider,
+    ILogger<ProductionCostRecordingService>? logger = null) : IProductionCostRecordingService
 {
     private const int QuantityScale = 3;
     private const int MoneyScale = 4;
@@ -194,7 +196,7 @@ public sealed class ProductionCostRecordingService(
         return preview.ToDto();
     }
 
-    public async Task<DailyProductionDraftDto> SaveDailyDraftAsync(
+    public async Task<DailyProductionDraftDto> CreateDailyDraftAsync(
         DailyProductionOperationRequest request,
         Guid actorId,
         CancellationToken ct)
@@ -233,39 +235,7 @@ public sealed class ProductionCostRecordingService(
                 if (string.Equals(existingDay.SourceReference, sourceReference, StringComparison.Ordinal))
                     return ToDailyDraftDto(existingDay, wasAlreadySaved: true);
 
-                if (!IsDailyOperation(existingDay) || existingDay.Status != ProductionOrderStatus.Draft)
-                    throw new ProductionConflictException("توجد بالفعل عملية تشغيل معتمدة أو غير قابلة للتصحيح لهذا الخط والموديل في تاريخ الإنتاج المحدد.");
-
-                var existingRecordsByStage = existingDay.StageProductionRecords.ToDictionary(record => record.ProductModelStageId);
-                var previewStageIds = preview.Stages.Select(stage => stage.Stage.Entity.Id).ToHashSet();
-                if (existingRecordsByStage.Count != previewStageIds.Count || !previewStageIds.SetEquals(existingRecordsByStage.Keys))
-                    throw new ProductionConflictException("تغيرت مراحل الموديل منذ حفظ المسودة. لا يمكن استبدال المسودة الحالية بصمت؛ أعد إنشاء السياق بعد مراجعة التشغيل.");
-
-                if (existingDay.StageProductionRecords.Any(record => record.Status is not (StageProductionRecordStatus.Draft or StageProductionRecordStatus.Cancelled)))
-                    throw new ProductionConflictException("تحتوي مسودة تشغيل اليوم على مراحل غير قابلة للتصحيح. حدّث البيانات وحاول مرة أخرى.");
-
-                var updatedAtUtc = DateTime.UtcNow;
-                var orderBefore = DailyDraftAudit(existingDay);
-                existingDay.UpdateDraft(request.ProductionDate, RoundQuantity(request.LineQuantity), request.Notes, actorId, updatedAtUtc);
-                existingDay.MarkDailyOperation(sourceReference, updatedAtUtc);
-
-                foreach (var stagePreview in preview.Stages)
-                {
-                    var record = existingRecordsByStage[stagePreview.Stage.Entity.Id];
-                    var recordBefore = RecordAudit(record);
-                    if (record.Status == StageProductionRecordStatus.Cancelled)
-                        record.ReopenDailyDraftAfterApprovalCancellation();
-                    record.UpdateDraft(request.ProductionDate, stagePreview.StageQuantity, stagePreview.StageQuantity, 0m, request.Notes);
-                    record.ReplaceAllocations(stagePreview.Allocations);
-                    await AuditAsync(actorId, AuditActionType.Update, "StageProductionRecord", record.Id, recordBefore, RecordAudit(record), ct);
-                    await AuditAsync(actorId, AuditActionType.Update, "StageProductionWorkerAllocation", record.Id, null, AllocationAudit(record), ct);
-                }
-
-                await AuditAsync(actorId, AuditActionType.Update, "ProductionOrder", existingDay.Id, orderBefore, DailyDraftAudit(existingDay), ct);
-                await db.SaveChangesAsync(ct);
-                if (transaction is not null)
-                    await transaction.CommitAsync(ct);
-                return ToDailyDraftDto(existingDay, wasAlreadySaved: false);
+                throw new ProductionConflictException("يوجد تشغيل يومي بالفعل لهذا التاريخ والخط والموديل. حدّث التشغيل الموجود باستخدام معرّفه بدل إنشاء مسودة جديدة.");
             }
 
             var now = DateTime.UtcNow;
@@ -308,6 +278,118 @@ public sealed class ProductionCostRecordingService(
 
             throw new ProductionConflictException("تعذر حفظ مسودة تشغيل اليوم بسبب تعارض متزامن. حدّث البيانات وحاول مرة أخرى.");
         }
+    }
+
+    public async Task<DailyProductionDraftDto> UpdateDailyDraftAsync(
+        Guid productionOrderId,
+        DailyProductionDraftUpdateRequest request,
+        Guid actorId,
+        CancellationToken ct)
+    {
+        logger?.LogDebug(
+            "Daily draft update service entered {ProductionOrderId} {StageCount} {WorkerAllocationCount}",
+            productionOrderId,
+            request.Stages?.Count ?? 0,
+            request.Stages?.Sum(stage => stage.Workers?.Count ?? 0) ?? 0);
+        if (productionOrderId == Guid.Empty)
+            throw new ArgumentException("معرّف تشغيل اليوم مطلوب.", nameof(productionOrderId));
+        if (request.ConcurrencyToken == Guid.Empty)
+            throw new ProductionConflictException("رمز تزامن تشغيل اليوم مطلوب للتحديث.");
+        if (request.Stages is null || request.Stages.Count == 0 ||
+            request.Stages.Any(stage => stage.StageProductionRecordId == Guid.Empty || stage.ProductModelStageId == Guid.Empty || stage.ConcurrencyToken == Guid.Empty) ||
+            request.Stages.Select(stage => stage.StageProductionRecordId).Distinct().Count() != request.Stages.Count ||
+            request.Stages.Select(stage => stage.ProductModelStageId).Distinct().Count() != request.Stages.Count)
+        {
+            throw new ProductionConflictException("معرّف ورمز تزامن كل مرحلة محفوظة مطلوبان لتحديث تشغيل اليوم.");
+        }
+
+        var operationRequest = new DailyProductionOperationRequest(
+            request.FactoryId,
+            request.ProductionLineId,
+            request.ProductModelId,
+            request.ProductionDate,
+            request.LineQuantity,
+            request.ClientRequestId,
+            request.Notes,
+            request.PreviewToken,
+            request.Stages.Select(stage => new DailyProductionStageRequest(stage.ProductModelStageId, stage.Workers)).ToArray());
+        var preview = await BuildDailyPreviewAsync(operationRequest, actorId, ct);
+        if (string.IsNullOrWhiteSpace(request.PreviewToken) ||
+            !string.Equals(request.PreviewToken, preview.PreviewToken, StringComparison.Ordinal))
+        {
+            throw new ProductionConflictException("تم تغيير بيانات تشغيل اليوم أو لم تعد المعاينة الحالية صالحة. أعد حساب المعاينة قبل الحفظ.");
+        }
+
+        await using var transaction = db.Database.IsRelational()
+            ? await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct)
+            : null;
+
+        var order = await db.Set<ProductionOrder>()
+            .Include(current => current.ProductModel)
+            .Include(current => current.StageProductionRecords)
+                .ThenInclude(record => record.WorkerAllocations)
+                    .ThenInclude(allocation => allocation.Worker)
+            .SingleOrDefaultAsync(current => current.Id == productionOrderId, ct)
+            ?? throw new KeyNotFoundException("لم يتم العثور على تشغيل اليوم المطلوب.");
+
+        if (!IsDailyOperation(order))
+            throw new ProductionConflictException("هذا الأمر ليس تشغيلًا يوميًا قابلًا للتحديث.");
+        if (order.Status != ProductionOrderStatus.Draft)
+            throw new ProductionConflictException("لم يعد تشغيل اليوم في حالة مسودة قابلة للتحديث.");
+        if (order.ProductionDate != request.ProductionDate || order.ProductionLineId != request.ProductionLineId || order.ProductModelId != request.ProductModelId)
+            throw new ProductionConflictException("لا تطابق بيانات التحديث تشغيل اليوم المحدد في المسار.");
+        if (order.ConcurrencyToken != request.ConcurrencyToken)
+            throw new ProductionConflictException("تغير تشغيل اليوم منذ آخر تحميل. حدّث البيانات وحاول مرة أخرى.");
+
+        var recordsByStage = order.StageProductionRecords.ToDictionary(record => record.ProductModelStageId);
+        var updatesByStage = request.Stages.ToDictionary(stage => stage.ProductModelStageId);
+        var previewStageIds = preview.Stages.Select(stage => stage.Stage.Entity.Id).ToHashSet();
+        if (recordsByStage.Count != updatesByStage.Count || !previewStageIds.SetEquals(recordsByStage.Keys) || !previewStageIds.SetEquals(updatesByStage.Keys))
+            throw new ProductionConflictException("تغيرت مراحل الموديل أو المسودة منذ آخر تحميل. حدّث البيانات وحاول مرة أخرى.");
+
+        foreach (var (productModelStageId, record) in recordsByStage)
+        {
+            var update = updatesByStage[productModelStageId];
+            if (record.Id != update.StageProductionRecordId || record.ConcurrencyToken != update.ConcurrencyToken)
+                throw new ProductionConflictException("تغيرت إحدى مراحل تشغيل اليوم منذ آخر تحميل. حدّث البيانات وحاول مرة أخرى.");
+            if (record.Status is not (StageProductionRecordStatus.Draft or StageProductionRecordStatus.Cancelled))
+                throw new ProductionConflictException("تحتوي مسودة تشغيل اليوم على مرحلة غير قابلة للتصحيح.");
+        }
+
+        db.Entry(order).Property(current => current.ConcurrencyToken).OriginalValue = request.ConcurrencyToken;
+        foreach (var (productModelStageId, record) in recordsByStage)
+            db.Entry(record).Property(current => current.ConcurrencyToken).OriginalValue = updatesByStage[productModelStageId].ConcurrencyToken;
+
+        var updatedAtUtc = DateTime.UtcNow;
+        var orderBefore = DailyDraftAudit(order);
+        order.UpdateDraft(request.ProductionDate, RoundQuantity(request.LineQuantity), request.Notes, actorId, updatedAtUtc);
+
+        foreach (var stagePreview in preview.Stages)
+        {
+            var record = recordsByStage[stagePreview.Stage.Entity.Id];
+            var recordBefore = RecordAudit(record);
+            if (record.Status == StageProductionRecordStatus.Cancelled)
+                record.ReopenDailyDraftAfterApprovalCancellation();
+            record.UpdateDraft(request.ProductionDate, stagePreview.StageQuantity, stagePreview.StageQuantity, 0m, request.Notes);
+            var removedAllocations = record.ReplaceAllocations(stagePreview.Allocations);
+            db.RemoveRange(removedAllocations);
+            await AuditAsync(actorId, AuditActionType.Update, "StageProductionRecord", record.Id, recordBefore, RecordAudit(record), ct);
+            await AuditAsync(actorId, AuditActionType.Update, "StageProductionWorkerAllocation", record.Id, null, AllocationAudit(record), ct);
+        }
+
+        await AuditAsync(actorId, AuditActionType.Update, "ProductionOrder", order.Id, orderBefore, DailyDraftAudit(order), ct);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+            if (transaction is not null)
+                await transaction.CommitAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            throw new ProductionConflictException("تغير تشغيل اليوم أثناء الحفظ. حدّث البيانات وحاول مرة أخرى.");
+        }
+
+        return ToDailyDraftDto(order, wasAlreadySaved: false);
     }
 
     public async Task<DailyProductionApprovalDto> ApproveDailyOperationAsync(
@@ -387,7 +469,7 @@ public sealed class ProductionCostRecordingService(
         return new DailyProductionApprovalDto(order.Id, order.Status.ToString(), order.ApprovedAtUtc!.Value, records.Length);
     }
 
-    public async Task<DailyProductionApprovalCancellationDto> CancelDailyOperationApprovalAsync(
+    public async Task<DailyProductionDraftDto> CancelDailyOperationApprovalAsync(
         Guid productionOrderId,
         DailyProductionApprovalCancellationRequest request,
         Guid actorId,
@@ -443,7 +525,7 @@ public sealed class ProductionCostRecordingService(
             throw new ProductionConflictException("تغيرت حالة تشغيل اليوم أثناء إلغاء الاعتماد. حدّث البيانات وحاول مرة أخرى.");
         }
 
-        return new DailyProductionApprovalCancellationDto(order.Id, order.Status.ToString(), now, records.Length);
+        return ToDailyDraftDto(order, wasAlreadySaved: false);
     }
 
     private async Task<DailyPreview> BuildDailyPreviewAsync(
@@ -878,6 +960,8 @@ public sealed class ProductionCostRecordingService(
     private static DailyProductionDraftDto ToDailyDraftDto(ProductionOrder order, bool wasAlreadySaved) => new(
         order.Id,
         order.OrderNumber,
+        order.Status.ToString(),
+        order.ConcurrencyToken,
         order.ProductionDate,
         order.RecordedAtUtc,
         order.PlannedQuantity,

@@ -5,6 +5,7 @@ import { PERMISSIONS } from '../../core/config/permission-identifiers';
 import { AttendanceApiService, AttendanceSyncResult } from '../../core/services/attendance-api.service';
 import {
   DailyProductionDraft,
+  DailyProductionDraftUpdateInput,
   DailyProductionOperations,
   DailyProductionPreview,
   DailyProductionStage,
@@ -506,11 +507,7 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
           this.hasUnsavedChanges = false;
           this.clearRemoteUpdateNotice();
           if (operations.existingDraft) {
-            this.applyExistingDraft(operations.existingDraft);
-            this.previewSource = 'persisted';
-            this.preview = this.previewFromDraft(operations.existingDraft);
-            this.previewRevision = this.revision;
-            this.previewStatus = 'success';
+            this.applyPersistedDraftState(operations.existingDraft);
             this.successMessage = feedback?.kind === 'success'
               ? feedback.message
               : 'تم تحميل مسودة اليوم المحفوظة فوق لقطة التسكين الحالية دون إعادة بنائها أو الكتابة فوقها.';
@@ -532,11 +529,33 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
   }
 
   selectDailyStageFilter(stageId: string | null | undefined): void {
-    const normalizedStageId = stageId ?? '';
-    this.selectedStageFilterId = this.stages.some(stage => stage.productModelStageId === normalizedStageId)
-      ? normalizedStageId
-      : '';
-    if (this.selectedStageFilterId) this.selectStage(this.selectedStageFilterId);
+    const normalizedStageId = stageId?.trim() ?? '';
+    this.selectedStageFilterId = normalizedStageId;
+
+    if (!normalizedStageId) {
+      if (this.selectedStageId && !this.filteredStages.some(stage => stage.productModelStageId === this.selectedStageId)) {
+        this.selectedStageId = '';
+        this.expandedStageRows = {};
+      }
+      if (this.error === 'لا توجد مراحل مطابقة لفلتر المرحلة الحالي.') this.error = '';
+      return;
+    }
+
+    const firstVisibleStage = this.filteredStages[0];
+    if (!firstVisibleStage) {
+      this.selectedStageId = '';
+      this.expandedStageRows = {};
+      this.error = 'لا توجد مراحل مطابقة لفلتر المرحلة الحالي.';
+      return;
+    }
+
+    this.error = '';
+    this.selectedStageId = firstVisibleStage.productModelStageId;
+    const expandableRow = this.stageAllocationRows.find(row => row.stageId === firstVisibleStage.productModelStageId);
+    this.expandedStageRows = expandableRow?.workers.length
+      ? { [firstVisibleStage.productModelStageId]: true }
+      : {};
+    this.scrollToSelectedStage(firstVisibleStage.productModelStageId);
   }
 
   addReplacementWorker(): void {
@@ -891,11 +910,25 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
     this.saving = true;
     this.error = '';
     const correlationId = this.manufacturingRealtime?.registerLocalOperation('daily-production-operations');
-    this.production.saveDailyDraft(this.operationRequest(this.preview.previewToken), correlationId)
+    const existingDraft = this.currentDailyDraft;
+    if (existingDraft?.productionOrderId && !this.hasDraftUpdateConcurrencyData(existingDraft)) {
+      this.saving = false;
+      this.error = 'بيانات تزامن المسودة غير مكتملة. أعد تحميل تشغيل اليوم قبل الحفظ.';
+      return;
+    }
+
+    const saveRequest = existingDraft?.productionOrderId
+      ? this.production.updateDailyDraft(
+          existingDraft.productionOrderId,
+          this.dailyDraftUpdateRequest(existingDraft, this.preview.previewToken),
+          correlationId
+        )
+      : this.production.createDailyDraft(this.operationRequest(this.preview.previewToken), correlationId);
+    saveRequest
       .pipe(finalize(() => this.saving = false), takeUntil(this.destroy$))
       .subscribe({
         next: draft => {
-          this.savedDraft = draft;
+          this.applyPersistedDraftState(draft);
           this.hasUnsavedChanges = false;
           this.successMessage = draft.wasAlreadySaved
             ? 'هذه المسودة حُفظت مسبقًا بنفس طلب الحفظ؛ تم عرض النتيجة المحفوظة دون تكرار المراحل.'
@@ -980,13 +1013,12 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
     this.production.cancelDailyOperationApproval(draft.productionOrderId, stageApprovals, reason, correlationId)
       .pipe(finalize(() => this.cancelling = false), takeUntil(this.destroy$))
       .subscribe({
-        next: () => {
+        next: draft => {
           this.dailyApprovalCancellationDialogVisible = false;
           this.dailyApprovalCancellationReason = '';
-          this.loadTodayOperations({
-            kind: 'success',
-            message: 'تم إلغاء اعتماد تشغيل اليوم. يمكنك الآن تصحيح المسودة ثم اعتمادها من جديد.'
-          });
+          this.applyPersistedDraftState(draft);
+          this.hasUnsavedChanges = false;
+          this.successMessage = 'تم إلغاء اعتماد تشغيل اليوم. يمكنك الآن تصحيح المسودة ثم اعتمادها من جديد.';
         },
         error: error => {
           if (error?.status === 409) {
@@ -1259,6 +1291,23 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
     };
   }
 
+  private dailyDraftUpdateRequest(draft: DailyProductionDraft, previewToken: string): DailyProductionDraftUpdateInput {
+    const request = this.operationRequest(previewToken);
+    const recordsByStage = new Map(draft.stages.map(record => [record.productModelStageId, record]));
+    return {
+      ...request,
+      concurrencyToken: draft.concurrencyToken,
+      stages: request.stages.map(stage => {
+        const record = recordsByStage.get(stage.productModelStageId)!;
+        return {
+          ...stage,
+          stageProductionRecordId: record.id,
+          concurrencyToken: record.concurrencyToken
+        };
+      })
+    };
+  }
+
   private stageInput(stage: EditableDailyStage): DailyProductionStageInput {
     const workers: DailyProductionWorkerInput[] = stage.workers
       .filter(worker => worker.includedInProduction !== false && worker.isProductionReady)
@@ -1304,6 +1353,15 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
     this.savedDraft = draft;
   }
 
+  private applyPersistedDraftState(draft: DailyProductionDraft): void {
+    if (this.operations) this.operations = { ...this.operations, existingDraft: draft };
+    this.applyExistingDraft(draft);
+    this.previewSource = 'persisted';
+    this.preview = this.previewFromDraft(draft);
+    this.previewRevision = this.revision;
+    this.previewStatus = 'success';
+  }
+
   private previewFromDraft(draft: DailyProductionDraft): DailyProductionPreview {
     const workerTotals = new Map<string, { workerId: string; workerCode: string; workerName: string; totalEntitlement: number }>();
     const stages = draft.stages.map(stage => {
@@ -1346,6 +1404,15 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
   private get hasApprovalConcurrencyData(): boolean {
     const draft = this.currentDailyDraft;
     return !!draft && draft.stages.length > 0 && draft.stages.every(stage => !!stage.id && !!stage.concurrencyToken);
+  }
+
+  private hasDraftUpdateConcurrencyData(draft: DailyProductionDraft): boolean {
+    if (!draft.concurrencyToken || draft.stages.length !== this.stages.length) return false;
+    const recordsByStage = new Map(draft.stages.map(record => [record.productModelStageId, record]));
+    return this.stages.every(stage => {
+      const record = recordsByStage.get(stage.productModelStageId);
+      return !!record?.id && !!record.concurrencyToken;
+    });
   }
 
   private allocationParticipants(stage: EditableDailyStage): EditableDailyWorker[] {
@@ -1570,6 +1637,16 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
       month: 'long',
       year: 'numeric'
     }).format(new Date(`${value}T12:00:00+03:00`));
+  }
+
+  private scrollToSelectedStage(stageId: string): void {
+    setTimeout(() => {
+      document.getElementById(`daily-stage-row-${stageId}`)?.scrollIntoView({
+        behavior: 'auto',
+        block: 'nearest',
+        inline: 'nearest'
+      });
+    }, 200);
   }
 
   private toExcelDate(value: string | null | undefined): Date | null {

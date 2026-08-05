@@ -98,6 +98,8 @@ public sealed record DailyProductionWorkerTotalDto(
 public sealed record DailyProductionDraftDto(
     Guid ProductionOrderId,
     string OrderNumber,
+    string OrderStatus,
+    Guid ConcurrencyToken,
     DateOnly ProductionDate,
     DateTime RecordedAtUtc,
     decimal LineQuantity,
@@ -109,9 +111,3 @@ public sealed record DailyProductionApprovalDto(
     string OrderStatus,
     DateTime ApprovedAtUtc,
     int ApprovedStageCount);
-
-public sealed record DailyProductionApprovalCancellationDto(
-    Guid ProductionOrderId,
-    string OrderStatus,
-    DateTime CancelledAtUtc,
-    int CancelledStageCount);

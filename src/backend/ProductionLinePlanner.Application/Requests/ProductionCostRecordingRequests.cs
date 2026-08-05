@@ -26,6 +26,12 @@ public sealed record DailyProductionStageRequest(
     Guid ProductModelStageId,
     IReadOnlyCollection<WorkerAllocationRequest> Workers);
 
+public sealed record DailyProductionStageDraftUpdateRequest(
+    Guid StageProductionRecordId,
+    Guid ProductModelStageId,
+    Guid ConcurrencyToken,
+    IReadOnlyCollection<WorkerAllocationRequest> Workers);
+
 public sealed record DailyProductionOperationRequest(
     Guid FactoryId,
     Guid ProductionLineId,
@@ -36,3 +42,15 @@ public sealed record DailyProductionOperationRequest(
     string? Notes,
     string? PreviewToken,
     IReadOnlyCollection<DailyProductionStageRequest> Stages);
+
+public sealed record DailyProductionDraftUpdateRequest(
+    Guid FactoryId,
+    Guid ProductionLineId,
+    Guid ProductModelId,
+    DateOnly ProductionDate,
+    decimal LineQuantity,
+    Guid ClientRequestId,
+    Guid ConcurrencyToken,
+    string? Notes,
+    string? PreviewToken,
+    IReadOnlyCollection<DailyProductionStageDraftUpdateRequest> Stages);
