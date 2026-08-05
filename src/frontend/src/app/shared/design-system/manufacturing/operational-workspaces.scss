@@ -47,6 +47,31 @@
   flex-wrap: wrap;
 }
 
+/* Shared filter-card chrome lives here to keep page component bundles lean. */
+.manufacturing-filter-card__header { align-items:center;background:linear-gradient(135deg,color-mix(in srgb,var(--plp-color-primary-soft) 72%,white),var(--plp-color-surface) 76%);border-block-end:var(--plp-border-muted);display:flex;gap:var(--plp-space-16);justify-content:space-between;padding:var(--plp-space-16) var(--plp-space-20) }
+.manufacturing-filter-card__heading { align-items:center;display:flex;gap:var(--plp-space-12);min-inline-size:0 }
+.manufacturing-filter-card__heading>div { display:grid;gap:var(--plp-space-2);min-inline-size:0 }
+.manufacturing-filter-card__mark { align-items:center;background:var(--plp-color-primary);border-radius:var(--plp-radius-md);box-shadow:0 6px 16px rgb(37 99 235 / 22%);color:var(--plp-color-text-inverse);display:inline-flex;flex:0 0 2.75rem;font-size:1.1rem;inline-size:2.75rem;justify-content:center;min-block-size:2.75rem }
+.manufacturing-filter-card__eyebrow { color:var(--plp-color-primary-active);font-size:.7rem;font-weight:var(--plp-font-weight-bold);letter-spacing:.02em }
+.manufacturing-filter-card__heading h2 { color:var(--plp-color-text);font-size:1.05rem;margin:0 }
+.manufacturing-filter-card__heading p { color:var(--plp-color-text-soft);font-size:var(--plp-type-caption);margin:0 }
+.manufacturing-filter-card__clear { background:rgb(255 255 255 / 72%);min-block-size:var(--plp-touch-target-min);white-space:nowrap }
+.manufacturing-filter-card [filter-extra]>label { color:var(--plp-color-text);font-size:var(--plp-type-caption);font-weight:var(--plp-font-weight-semibold);line-height:1.25 }
+.manufacturing-filter-card :is([filter-leading],.structure-selector__label) { line-height:1.25 }
+.manufacturing-filter-card :is([filter-leading] input,[filter-extra] input,[filter-extra] select) { background:var(--plp-color-surface);block-size:3.25rem;border:var(--plp-border-default);border-radius:var(--plp-radius-sm);box-sizing:border-box;color:var(--plp-color-text);inline-size:100%;min-block-size:3.25rem;min-inline-size:0;padding:var(--plp-space-8) var(--plp-space-12) }
+.manufacturing-filter-card :is([filter-leading] input,[filter-extra] input,[filter-extra] select):focus-visible { border-color:var(--plp-color-primary);box-shadow:0 0 0 3px var(--plp-color-focus-ring);outline:0 }
+.manufacturing-filter-card :is(.structure-selector__trigger,[filter-extra] .p-dropdown) { min-block-size:3.25rem }
+
+.daily-production-operations__context-actions { margin-block-start:0;width:100% }
+.daily-production-operations__attendance-action small { align-items:center;background:var(--plp-color-warning-soft);border-radius:999px;color:var(--plp-color-warning-strong);display:inline-flex;font-size:.72rem;font-weight:var(--plp-font-weight-semibold);gap:var(--plp-space-4);min-block-size:2rem;padding:var(--plp-space-4) var(--plp-space-8) }
+.daily-production-operations__attendance-action small.is-confirmed { background:var(--plp-color-success-soft);color:var(--plp-color-success-strong) }
+.daily-production-operations__context-actions>.p-button { min-block-size:var(--plp-touch-target-min);min-inline-size:12rem }
+
+@media (min-width: 1440px) {
+  .plp-app-shell__content:has(.daily-production-operations) { --plp-content-width-max:102rem }
+  .daily-production-operations__workspace { grid-template-columns:minmax(21rem,.8fr) minmax(0,1.7fr) }
+}
+
 .model-journey { display: grid; gap: .75rem; min-inline-size: 0; }
 .model-journey__line { background: #fff; border: 1px solid #e4e7ec; border-radius: .65rem; min-inline-size: 0; overflow: hidden; }
 .model-journey__line-header { align-items: center; background: #f8fafc; display: grid; gap: .55rem; grid-template-columns: auto minmax(0, 1fr) auto auto; padding: .65rem .75rem; }
@@ -79,6 +104,7 @@
 .daily-production-operations__excel-export { white-space: nowrap; }
 
 @media (min-width: 600px) and (max-width: 1023px) {
+  .manufacturing-filter-card__header { padding-inline:var(--plp-space-16) }
   .production-page__hierarchy,
   .production-page__move-hierarchy,
   .production-page__intake-form {
@@ -87,6 +113,10 @@
 }
 
 @media (max-width: 599px) {
+  .manufacturing-filter-card__header { align-items:stretch;flex-direction:column;padding:var(--plp-space-12) }
+  .manufacturing-filter-card__clear { inline-size:100%;justify-content:center }
+  .daily-production-operations__attendance-action,.daily-production-operations__attendance-action>.p-button,.daily-production-operations__attendance-action small,.daily-production-operations__context-actions>.p-button { inline-size:100% }
+  .daily-production-operations__attendance-action small { justify-content:center }
   .production-page__grid,
   .production-page__hierarchy,
   .production-page__assignment-form,

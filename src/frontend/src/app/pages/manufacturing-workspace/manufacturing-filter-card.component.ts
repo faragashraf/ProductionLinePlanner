@@ -9,6 +9,9 @@ export interface ManufacturingFilterOption { label: string; value: string; }
 })
 export class ManufacturingFilterCardComponent {
   @Input() title = 'الفلاتر';
+  @Input() subtitle = '';
+  @Input() contextLabel = 'سياق العمل';
+  @Input() resultsLabel = 'تصفية النتائج';
   @Input() searchLabel = 'البحث';
   @Input() searchPlaceholder = 'ابحث';
   @Input() searchValue = '';

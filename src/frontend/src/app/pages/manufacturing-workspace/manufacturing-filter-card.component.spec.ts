@@ -19,6 +19,7 @@ describe('ManufacturingFilterCardComponent', () => {
 
   it('renders typed title, status, search, and disabled clear state', () => {
     component.title = 'فلاتر الموديلات';
+    component.subtitle = 'اختر السياق ثم صفِّ النتائج';
     component.searchLabel = 'البحث بالاسم';
     component.searchPlaceholder = 'ابحث هنا';
     component.statusOptions = [{ label: 'الكل', value: 'all' }, { label: 'نشط', value: 'active' }];
@@ -26,6 +27,9 @@ describe('ManufacturingFilterCardComponent', () => {
     fixture.detectChanges();
 
     expect(fixture.nativeElement.querySelector('h2').textContent).toContain('فلاتر الموديلات');
+    expect(fixture.nativeElement.querySelector('.manufacturing-filter-card__heading p').textContent).toContain('اختر السياق');
+    expect(fixture.nativeElement.querySelectorAll('.manufacturing-filter-card__group')).toHaveSize(2);
+    expect(fixture.nativeElement.querySelector('.manufacturing-filter-card__search-control .pi-search')).not.toBeNull();
     expect(fixture.nativeElement.querySelector('input').placeholder).toBe('ابحث هنا');
     expect(fixture.nativeElement.querySelectorAll('select option')).toHaveSize(2);
     expect(fixture.nativeElement.querySelector('.manufacturing-filter-card__clear').disabled).toBeTrue();

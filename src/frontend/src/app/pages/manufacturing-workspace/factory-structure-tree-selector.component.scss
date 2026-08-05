@@ -19,7 +19,7 @@
 .structure-selector__panel app-factory-structure-tree-view { min-block-size: 0; overflow-y: auto; }
 .structure-selector__empty { color: var(--plp-color-text-subtle); margin: 0; padding: var(--plp-space-16); text-align: center; }
 @media (max-width: 599px) {
-  .structure-selector__panel { inline-size: calc(100vw - 1.25rem); }
+  .structure-selector__panel { inline-size: calc(100vw - 2rem); }
   .structure-selector__trigger { gap: var(--plp-space-4); grid-template-columns: 1.8rem minmax(0, 1fr) 1.25rem; padding-inline: .5rem; }
   .structure-selector__icon { min-block-size: 1.8rem; }
 }
