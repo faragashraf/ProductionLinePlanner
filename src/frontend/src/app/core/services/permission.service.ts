@@ -25,6 +25,7 @@ export class PermissionService {
   private readonly hasHydratedSubject = new BehaviorSubject<boolean>(false);
   private hydrationRequest: Observable<string[]> | null = null;
   private hydrationEpoch = 0;
+  private currentRoles: string[] = [];
 
   readonly permissions$ = this.permissionsSubject.asObservable();
   readonly hydrationState$ = this.hydrationStateSubject.asObservable();
@@ -44,6 +45,7 @@ export class PermissionService {
       }
 
       const permissions = user.permissions ?? [];
+      this.currentRoles = this.normalizeRoles(user.roles ?? []);
       const normalizedPermissions = this.normalizePermissions(permissions);
       this.permissionsSubject.next(normalizedPermissions);
       this.permissionsSignal.set(normalizedPermissions);
@@ -114,6 +116,10 @@ export class PermissionService {
     return true;
   }
 
+  hasRole(role: string): boolean {
+    return this.currentRoles.includes(role.trim().toLowerCase());
+  }
+
   ensureHydrated(): Observable<string[]> {
     if (this.hasHydratedSubject.value) {
       return of(this.permissionsSubject.value);
@@ -164,6 +170,7 @@ export class PermissionService {
 
   clear(): void {
     this.hydrationEpoch += 1;
+    this.currentRoles = [];
     this.permissionsSubject.next([]);
     this.permissionsSignal.set([]);
     this.hydrationStateSubject.next('idle');
@@ -181,7 +188,7 @@ export class PermissionService {
         const hasChildren = Array.isArray(item.children) && item.children.length > 0;
         const filteredChildren = this.filterNavigation(item.children ?? []);
         const hasPermittedChildren = filteredChildren.length > 0;
-        const parentHasPermission = this.hasAccess(item);
+        const parentHasPermission = this.hasAccess(item) && this.hasNavigationRoleAccess(item);
 
         if (!parentHasPermission) {
           return undefined;
@@ -209,5 +216,21 @@ export class PermissionService {
           .map(permission => permission.toLowerCase())
       )
     ).sort((left, right) => left.localeCompare(right));
+  }
+
+  private normalizeRoles(roles: string[]): string[] {
+    return Array.from(new Set(roles.map(role => role.trim().toLowerCase()).filter(Boolean)));
+  }
+
+  private hasNavigationRoleAccess(item: PermissionRequirementDescriptor): boolean {
+    // SuperAdmin remains an unconditional recovery path even if it is assigned
+    // alongside a restricted operational role.
+    if (this.hasRole('SuperAdmin')) return true;
+
+    const visibleForRoles = this.normalizeRoles(item.visibleForRoles ? [...item.visibleForRoles] : []);
+    if (visibleForRoles.length > 0 && !visibleForRoles.some(role => this.currentRoles.includes(role))) return false;
+
+    const hiddenForRoles = this.normalizeRoles(item.hiddenForRoles ? [...item.hiddenForRoles] : []);
+    return !hiddenForRoles.some(role => this.currentRoles.includes(role));
   }
 }

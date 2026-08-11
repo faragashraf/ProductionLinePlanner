@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using ProductionLinePlanner.Domain.Entities;
 using ProductionLinePlanner.Domain.Enums;
 
@@ -14,7 +15,12 @@ public sealed class AppRoleConfiguration : IEntityTypeConfiguration<AppRole>
 
         builder.Property(x => x.Id).ValueGeneratedNever();
         builder.Property(x => x.Role)
-            .HasConversion<string>()
+            // Legacy databases may contain a retired catalog value (for example
+            // "Hr"). Treat it as a custom role rather than failing every query
+            // that includes the user's roles.
+            .HasConversion(new ValueConverter<UserRole?, string?>(
+                role => role.HasValue ? role.Value.ToString() : null,
+                value => ParseKnownSystemRole(value)))
             .HasMaxLength(60)
             .IsRequired(false);
         builder.Property(x => x.Name).IsRequired().HasMaxLength(100);
@@ -31,4 +37,7 @@ public sealed class AppRoleConfiguration : IEntityTypeConfiguration<AppRole>
             .HasForeignKey(x => x.AppRoleId)
             .OnDelete(DeleteBehavior.Restrict);
     }
+
+    private static UserRole? ParseKnownSystemRole(string? value) =>
+        Enum.TryParse<UserRole>(value, ignoreCase: true, out var role) ? role : null;
 }

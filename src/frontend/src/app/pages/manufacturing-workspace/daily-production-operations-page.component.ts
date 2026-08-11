@@ -241,7 +241,12 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
   get canView(): boolean {
     return this.permissionsService.hasPermission(this.permissions.production.view) ||
       this.permissionsService.hasPermission(this.permissions.production.record) ||
-      this.permissionsService.hasPermission(this.permissions.production.approve);
+      this.permissionsService.hasPermission(this.permissions.production.approve) ||
+      this.permissionsService.hasPermission(this.permissions.production.dailyDraftsApprove);
+  }
+
+  get canSynchronizeAttendance(): boolean {
+    return this.permissionsService.hasPermission(this.permissions.attendance.sync);
   }
 
   get isApproved(): boolean {
@@ -278,7 +283,7 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
       this.selectedFactoryId &&
       this.selectedProductionLineId &&
       this.selectedProductModelId &&
-      this.attendanceSyncedForDate === this.productionDate &&
+      (this.attendanceSyncedForDate === this.productionDate || !this.canSynchronizeAttendance) &&
       !this.operationsLoading
     );
   }
@@ -346,7 +351,8 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
 
   get canApproveDailyOperation(): boolean {
     const draft = this.currentDailyDraft;
-    return this.permissionsService.hasPermission(this.permissions.production.approve) &&
+    return (this.permissionsService.hasPermission(this.permissions.production.approve) ||
+      this.permissionsService.hasPermission(this.permissions.production.dailyDraftsApprove)) &&
       !!draft &&
       draft.stages.length > 0 &&
       draft.stages.every(stage => stage.status === 'Draft') &&

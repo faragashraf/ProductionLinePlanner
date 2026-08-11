@@ -23,6 +23,14 @@ public sealed class PermissionService(AppDbContext dbContext) : IPermissionServi
             return [];
         }
 
+        // A SuperAdmin is the platform recovery role. Historical direct deny rows
+        // must not be able to lock it out of the administration area.
+        var userIsSuperAdmin = await dbContext.AppUsers
+            .AsNoTracking()
+            .Where(x => x.Id == userId && x.IsActive)
+            .SelectMany(x => x.Roles)
+            .AnyAsync(role => role.IsActive && role.Role == UserRole.SuperAdmin, cancellationToken);
+
         var activeRoleIds = await dbContext.AppUsers
             .AsNoTracking()
             .Where(x => x.Id == userId)
@@ -62,7 +70,10 @@ public sealed class PermissionService(AppDbContext dbContext) : IPermissionServi
                 continue;
             }
 
-            permissions.Remove(overrideEntry.Name);
+            if (!userIsSuperAdmin)
+            {
+                permissions.Remove(overrideEntry.Name);
+            }
         }
 
         return permissions

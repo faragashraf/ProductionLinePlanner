@@ -82,7 +82,7 @@ describe('ManufacturingWorkspaceRoutingModule', () => {
     ]);
   });
 
-  it('routes daily production with the existing view, record, or approve access contract', () => {
+  it('routes daily production with the view, record, or saved-draft approval access contract', () => {
     const route = childRoutes.find(item => item.path === 'daily-production-operations');
 
     expect(route?.component).toBe(DailyProductionOperationsPageComponent);
@@ -91,7 +91,8 @@ describe('ManufacturingWorkspaceRoutingModule', () => {
     expect(route?.data?.['requireAny']).toEqual([
       PERMISSIONS.production.view,
       PERMISSIONS.production.record,
-      PERMISSIONS.production.approve
+      PERMISSIONS.production.approve,
+      PERMISSIONS.production.dailyDraftsApprove
     ]);
   });
 

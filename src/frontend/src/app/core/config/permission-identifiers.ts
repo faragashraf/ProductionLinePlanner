@@ -40,7 +40,8 @@ export const PERMISSIONS = {
   production: {
     view: 'production.view',
     record: 'production.record',
-    approve: 'production.approve'
+    approve: 'production.approve',
+    dailyDraftsApprove: 'production.daily-drafts.approve'
   },
   reports: {
     productionView: 'reports.production.view',
