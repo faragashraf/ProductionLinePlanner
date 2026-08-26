@@ -299,6 +299,219 @@ public sealed class ProductionCostRecordingServiceTests
     }
 
     [Fact]
+    public async Task Daily_draft_can_be_approved_cancelled_saved_and_approved_again_with_each_authoritative_token()
+    {
+        await using var fixture = await Fixture.CreateAsync("SharedPercentage", 0.50m, 17m, useRealAudit: true);
+        var productionDate = fixture.Today.AddDays(2);
+        var (request, created) = await CreateDailyDraftAsync(fixture, productionDate);
+        var createdStage = Assert.Single(created.Stages);
+
+        var firstApproval = await fixture.Service.ApproveDailyOperationAsync(
+            created.ProductionOrderId,
+            ApprovalRequest(created),
+            fixture.ActorId,
+            default);
+        Assert.Equal("Completed", firstApproval.OrderStatus);
+
+        var approved = (await fixture.Service.LoadDailyOperationsAsync(
+            fixture.Factory.Id, fixture.Line.Id, fixture.Model.Id, productionDate, default)).ExistingDraft;
+        Assert.NotNull(approved);
+        var approvedStage = Assert.Single(approved.Stages);
+        Assert.Equal("Approved", approvedStage.Status);
+        Assert.NotEqual(created.ConcurrencyToken, approved.ConcurrencyToken);
+        Assert.NotEqual(createdStage.ConcurrencyToken, approvedStage.ConcurrencyToken);
+
+        var cancelled = await fixture.Service.CancelDailyOperationApprovalAsync(
+            approved.ProductionOrderId,
+            new DailyProductionApprovalCancellationRequest("تصحيح تشغيل اليوم", ApprovalRequest(approved).StageApprovals),
+            fixture.ActorId,
+            default);
+        var cancelledStage = Assert.Single(cancelled.Stages);
+        Assert.Equal("Draft", cancelled.OrderStatus);
+        Assert.Equal("Cancelled", cancelledStage.Status);
+        Assert.NotEqual(approved.ConcurrencyToken, cancelled.ConcurrencyToken);
+        Assert.NotEqual(approvedStage.ConcurrencyToken, cancelledStage.ConcurrencyToken);
+
+        var updatePreview = await fixture.Service.PreviewDailyOperationsAsync(request, fixture.ActorId, default);
+        var saved = await fixture.Service.UpdateDailyDraftAsync(
+            cancelled.ProductionOrderId,
+            UpdateRequest(request, cancelled, updatePreview.PreviewToken),
+            fixture.ActorId,
+            default);
+        var savedStage = Assert.Single(saved.Stages);
+        Assert.Equal("Draft", saved.OrderStatus);
+        Assert.Equal("Draft", savedStage.Status);
+        Assert.NotEqual(cancelled.ConcurrencyToken, saved.ConcurrencyToken);
+        Assert.NotEqual(cancelledStage.ConcurrencyToken, savedStage.ConcurrencyToken);
+
+        var secondApproval = await fixture.Service.ApproveDailyOperationAsync(
+            saved.ProductionOrderId,
+            ApprovalRequest(saved),
+            fixture.ActorId,
+            default);
+        Assert.Equal("Completed", secondApproval.OrderStatus);
+        var reapproved = (await fixture.Service.LoadDailyOperationsAsync(
+            fixture.Factory.Id, fixture.Line.Id, fixture.Model.Id, productionDate, default)).ExistingDraft;
+        Assert.NotNull(reapproved);
+        Assert.All(reapproved.Stages, stage => Assert.Equal("Approved", stage.Status));
+    }
+
+    [Fact]
+    public async Task Saving_a_cancelled_daily_draft_reopens_every_stage_to_draft()
+    {
+        await using var fixture = await Fixture.CreateAsync("SharedPercentage", 0.50m, 17m);
+        var productionDate = fixture.Today.AddDays(2);
+        var (request, created) = await CreateDailyDraftAsync(fixture, productionDate);
+        await fixture.Service.ApproveDailyOperationAsync(created.ProductionOrderId, ApprovalRequest(created), fixture.ActorId, default);
+        var approved = (await fixture.Service.LoadDailyOperationsAsync(
+            fixture.Factory.Id, fixture.Line.Id, fixture.Model.Id, productionDate, default)).ExistingDraft;
+        Assert.NotNull(approved);
+        var cancelled = await fixture.Service.CancelDailyOperationApprovalAsync(
+            approved.ProductionOrderId,
+            new DailyProductionApprovalCancellationRequest("إعادة فتح للتصحيح", ApprovalRequest(approved).StageApprovals),
+            fixture.ActorId,
+            default);
+        Assert.All(cancelled.Stages, stage => Assert.Equal("Cancelled", stage.Status));
+
+        var preview = await fixture.Service.PreviewDailyOperationsAsync(request, fixture.ActorId, default);
+        var reopened = await fixture.Service.UpdateDailyDraftAsync(
+            cancelled.ProductionOrderId,
+            UpdateRequest(request, cancelled, preview.PreviewToken),
+            fixture.ActorId,
+            default);
+
+        Assert.All(reopened.Stages, stage => Assert.Equal("Draft", stage.Status));
+        Assert.All(reopened.Stages, stage => Assert.NotEqual(cancelled.Stages.Single(old => old.Id == stage.Id).ConcurrencyToken, stage.ConcurrencyToken));
+    }
+
+    [Fact]
+    public async Task Cancelled_daily_records_cannot_be_approved_without_an_intervening_save()
+    {
+        await using var fixture = await Fixture.CreateAsync("SharedPercentage", 0.50m, 17m);
+        var productionDate = fixture.Today.AddDays(2);
+        var (_, created) = await CreateDailyDraftAsync(fixture, productionDate);
+        await fixture.Service.ApproveDailyOperationAsync(created.ProductionOrderId, ApprovalRequest(created), fixture.ActorId, default);
+        var approved = (await fixture.Service.LoadDailyOperationsAsync(
+            fixture.Factory.Id, fixture.Line.Id, fixture.Model.Id, productionDate, default)).ExistingDraft;
+        Assert.NotNull(approved);
+        var cancelled = await fixture.Service.CancelDailyOperationApprovalAsync(
+            approved.ProductionOrderId,
+            new DailyProductionApprovalCancellationRequest("اختبار منع الاعتماد المباشر", ApprovalRequest(approved).StageApprovals),
+            fixture.ActorId,
+            default);
+
+        await Assert.ThrowsAsync<ProductionConflictException>(() => fixture.Service.ApproveDailyOperationAsync(
+            cancelled.ProductionOrderId,
+            ApprovalRequest(cancelled),
+            fixture.ActorId,
+            default));
+
+        var persisted = (await fixture.Service.LoadDailyOperationsAsync(
+            fixture.Factory.Id, fixture.Line.Id, fixture.Model.Id, productionDate, default)).ExistingDraft;
+        Assert.NotNull(persisted);
+        Assert.Equal("Draft", persisted.OrderStatus);
+        Assert.All(persisted.Stages, stage => Assert.Equal("Cancelled", stage.Status));
+    }
+
+    [Fact]
+    public async Task Daily_draft_update_rejects_stale_order_and_stage_tokens_without_mutation()
+    {
+        await using var fixture = await Fixture.CreateAsync("SharedPercentage", 0.50m, 17m);
+        var productionDate = fixture.Today.AddDays(2);
+        var (request, created) = await CreateDailyDraftAsync(fixture, productionDate);
+        var preview = await fixture.Service.PreviewDailyOperationsAsync(request, fixture.ActorId, default);
+        var validUpdate = UpdateRequest(request, created, preview.PreviewToken);
+
+        await Assert.ThrowsAsync<ProductionConflictException>(() => fixture.Service.UpdateDailyDraftAsync(
+            created.ProductionOrderId,
+            validUpdate with { ConcurrencyToken = Guid.NewGuid() },
+            fixture.ActorId,
+            default));
+        var staleStageUpdate = validUpdate with
+        {
+            Stages = validUpdate.Stages.Select(stage => stage with { ConcurrencyToken = Guid.NewGuid() }).ToArray()
+        };
+        await Assert.ThrowsAsync<ProductionConflictException>(() => fixture.Service.UpdateDailyDraftAsync(
+            created.ProductionOrderId,
+            staleStageUpdate,
+            fixture.ActorId,
+            default));
+
+        var persisted = (await fixture.Service.LoadDailyOperationsAsync(
+            fixture.Factory.Id, fixture.Line.Id, fixture.Model.Id, productionDate, default)).ExistingDraft;
+        Assert.NotNull(persisted);
+        Assert.Equal(created.ConcurrencyToken, persisted.ConcurrencyToken);
+        Assert.Equal(created.Stages.Select(stage => stage.ConcurrencyToken), persisted.Stages.Select(stage => stage.ConcurrencyToken));
+    }
+
+    [Fact]
+    public async Task Daily_draft_update_rejects_missing_or_mismatched_stage_records_without_positional_pairing()
+    {
+        await using var fixture = await Fixture.CreateAsync("SharedPercentage", 0.50m, 17m);
+        var productionDate = fixture.Today.AddDays(2);
+        var (request, created) = await CreateDailyDraftAsync(fixture, productionDate);
+        var preview = await fixture.Service.PreviewDailyOperationsAsync(request, fixture.ActorId, default);
+        var validUpdate = UpdateRequest(request, created, preview.PreviewToken);
+        var mismatched = validUpdate with
+        {
+            Stages = validUpdate.Stages.Select(stage => stage with { StageProductionRecordId = Guid.NewGuid() }).ToArray()
+        };
+
+        await Assert.ThrowsAsync<ProductionConflictException>(() => fixture.Service.UpdateDailyDraftAsync(
+            created.ProductionOrderId,
+            mismatched,
+            fixture.ActorId,
+            default));
+        await Assert.ThrowsAsync<ProductionConflictException>(() => fixture.Service.UpdateDailyDraftAsync(
+            created.ProductionOrderId,
+            validUpdate with { Stages = [] },
+            fixture.ActorId,
+            default));
+
+        var persistedRecord = Assert.Single(await fixture.Db.Set<StageProductionRecord>()
+            .Where(record => record.ProductionOrderId == created.ProductionOrderId)
+            .ToArrayAsync());
+        Assert.Equal(Assert.Single(created.Stages).Id, persistedRecord.Id);
+        Assert.Equal(StageProductionRecordStatus.Draft, persistedRecord.Status);
+    }
+
+    [Fact]
+    public async Task Daily_draft_configuration_drift_is_blocked_without_changing_historical_records()
+    {
+        await using var fixture = await Fixture.CreateAsync("SharedPercentage", 0.50m, 17m);
+        var productionDate = fixture.Today.AddDays(2);
+        var (request, created) = await CreateDailyDraftAsync(fixture, productionDate);
+        var historicalStage = Assert.Single(created.Stages);
+        var addedSubStage = new SubStage(Guid.NewGuid(), fixture.MainStage.Id, "New active stage", "NEW", 2, 2);
+        var addedModelStage = new ProductModelStage(
+            Guid.NewGuid(), fixture.Model.Id, fixture.Line.Id, addedSubStage.Id, 2, 0.75m, 20m, CompensationMode.SharedPercentage);
+        fixture.Db.AddRange(addedSubStage, addedModelStage);
+        await fixture.Db.SaveChangesAsync();
+
+        var conflict = await Assert.ThrowsAsync<ProductionConflictException>(() => fixture.Service.UpdateDailyDraftAsync(
+            created.ProductionOrderId,
+            UpdateRequest(request, created, "stale-preview-token"),
+            fixture.ActorId,
+            default));
+
+        Assert.Contains("تعارض تكوين مراحل الموديل", conflict.Message);
+        Assert.DoesNotContain("أعد تحميل", conflict.Message);
+        var loaded = await fixture.Service.LoadDailyOperationsAsync(
+            fixture.Factory.Id, fixture.Line.Id, fixture.Model.Id, productionDate, default);
+        Assert.Equal(2, loaded.Stages.Count);
+        var persisted = loaded.ExistingDraft;
+        Assert.NotNull(persisted);
+        var persistedStage = Assert.Single(persisted.Stages);
+        Assert.Equal(historicalStage.Id, persistedStage.Id);
+        Assert.Equal(historicalStage.ProductModelStageId, persistedStage.ProductModelStageId);
+        Assert.Equal(historicalStage.ConcurrencyToken, persistedStage.ConcurrencyToken);
+        Assert.Equal("Draft", persistedStage.Status);
+        Assert.Single(await fixture.Db.Set<StageProductionRecord>()
+            .Where(record => record.ProductionOrderId == created.ProductionOrderId)
+            .ToArrayAsync());
+    }
+
+    [Fact]
     public async Task Daily_operations_keep_no_source_check_in_distinct_from_explicit_absence()
     {
         await using var fixture = await Fixture.CreateAsync("SharedPercentage", 0.50m, 17m);
@@ -792,6 +1005,70 @@ public sealed class ProductionCostRecordingServiceTests
         await fixture.Service.CancelProductionApprovalAsync(draft.Id, approved.ConcurrencyToken, "تصحيح اعتماد الإنتاج", fixture.ActorId, default);
         var cancelledOrder = await fixture.Service.TransitionOrderAsync(fixture.Order.Id, ProductionOrderStatus.Cancelled, fixture.ActorId, default);
         Assert.Equal("Cancelled", cancelledOrder.Status);
+    }
+
+    private static async Task<(DailyProductionOperationRequest Request, DailyProductionDraftDto Draft)> CreateDailyDraftAsync(
+        Fixture fixture,
+        DateOnly productionDate)
+    {
+        var operations = await fixture.Service.LoadDailyOperationsAsync(
+            fixture.Factory.Id,
+            fixture.Line.Id,
+            fixture.Model.Id,
+            productionDate,
+            default);
+        var request = new DailyProductionOperationRequest(
+            fixture.Factory.Id,
+            fixture.Line.Id,
+            fixture.Model.Id,
+            productionDate,
+            500m,
+            Guid.NewGuid(),
+            "daily lifecycle test",
+            null,
+            operations.Stages.Select(stage => new DailyProductionStageRequest(
+                stage.ProductModelStageId,
+                stage.Workers
+                    .Where(worker => worker.IsProductionReady)
+                    .Select(worker => new WorkerAllocationRequest(worker.WorkerId, worker.SuggestedPercentage, null, null))
+                    .ToArray()))
+                .ToArray());
+        var preview = await fixture.Service.PreviewDailyOperationsAsync(request, fixture.ActorId, default);
+        var draft = await fixture.Service.CreateDailyDraftAsync(
+            request with { PreviewToken = preview.PreviewToken },
+            fixture.ActorId,
+            default);
+        return (request, draft);
+    }
+
+    private static DailyProductionApprovalRequest ApprovalRequest(DailyProductionDraftDto draft) => new(
+        draft.Stages.Select(stage => new DailyStageApprovalRequest(stage.Id, stage.ConcurrencyToken)).ToArray());
+
+    private static DailyProductionDraftUpdateRequest UpdateRequest(
+        DailyProductionOperationRequest request,
+        DailyProductionDraftDto draft,
+        string previewToken)
+    {
+        var persistedByStage = draft.Stages.ToDictionary(stage => stage.ProductModelStageId);
+        return new DailyProductionDraftUpdateRequest(
+            request.FactoryId,
+            request.ProductionLineId,
+            request.ProductModelId,
+            request.ProductionDate,
+            request.LineQuantity,
+            request.ClientRequestId,
+            draft.ConcurrencyToken,
+            request.Notes,
+            previewToken,
+            request.Stages.Select(stage =>
+            {
+                var persisted = persistedByStage[stage.ProductModelStageId];
+                return new DailyProductionStageDraftUpdateRequest(
+                    persisted.Id,
+                    stage.ProductModelStageId,
+                    persisted.ConcurrencyToken,
+                    stage.Workers);
+            }).ToArray());
     }
 
     private sealed class Fixture : IAsyncDisposable

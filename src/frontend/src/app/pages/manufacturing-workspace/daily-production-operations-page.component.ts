@@ -31,6 +31,12 @@ import { ExcelExportError, ExcelExportService, ExcelWorkbookDefinition } from '.
 type StageFilter = 'all' | 'ready' | 'absent' | 'no-check-in' | 'no-staffing' | 'cost-review';
 type UnifiedPreviewStatus = 'idle' | 'calculating' | 'success' | 'error' | 'stale';
 type UnifiedPreviewSource = 'calculated' | 'persisted';
+type DraftUpdateConcurrencyIssue =
+  | 'missing-order-token'
+  | 'missing-stage-id'
+  | 'missing-stage-token'
+  | 'stage-count-mismatch'
+  | 'stage-identity-mismatch';
 type EditableDailyStage = Omit<DailyProductionStage, 'workers'> & {
   standardSeconds: number | null;
   workers: EditableDailyWorker[];
@@ -352,12 +358,9 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
   get canApproveDailyOperation(): boolean {
     const draft = this.currentDailyDraft;
     if (!draft || !draft.stages.length) return false;
-    const stagesAllowReapproval = draft.stages.every(stage =>
-      stage.status === 'Draft' || stage.status === 'Cancelled'
-    );
     return (this.permissionsService.hasPermission(this.permissions.production.approve) ||
       this.permissionsService.hasPermission(this.permissions.production.dailyDraftsApprove)) &&
-      stagesAllowReapproval &&
+      draft.stages.every(stage => stage.status === 'Draft') &&
       !this.operationsLoading &&
       !this.saving &&
       !this.approving &&
@@ -904,16 +907,18 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
     this.validationMessages = validation;
     if (validation.length) return;
 
-    this.saving = true;
-    this.error = '';
-    const correlationId = this.manufacturingRealtime?.registerLocalOperation('daily-production-operations');
     const existingDraft = this.currentDailyDraft;
-    if (existingDraft?.productionOrderId && !this.hasDraftUpdateConcurrencyData(existingDraft)) {
-      this.saving = false;
-      this.error = 'بيانات تزامن المسودة غير مكتملة. أعد تحميل تشغيل اليوم قبل الحفظ.';
+    const concurrencyIssue = existingDraft?.productionOrderId
+      ? this.draftUpdateConcurrencyIssue(existingDraft)
+      : null;
+    if (concurrencyIssue) {
+      this.error = this.draftUpdateConcurrencyMessage(concurrencyIssue);
       return;
     }
 
+    this.saving = true;
+    this.error = '';
+    const correlationId = this.manufacturingRealtime?.registerLocalOperation('daily-production-operations');
     const saveRequest = existingDraft?.productionOrderId
       ? this.production.updateDailyDraft(
           existingDraft.productionOrderId,
@@ -1347,10 +1352,10 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
     });
     this.lineQuantity = draft.lineQuantity;
     this.stages.forEach(stage => this.synchronizeStageQuantities(stage));
-    this.savedDraft = draft;
   }
 
   private applyPersistedDraftState(draft: DailyProductionDraft): void {
+    this.savedDraft = draft;
     if (this.operations) this.operations = { ...this.operations, existingDraft: draft };
     this.applyExistingDraft(draft);
     this.previewSource = 'persisted';
@@ -1403,13 +1408,40 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
     return !!draft && draft.stages.length > 0 && draft.stages.every(stage => !!stage.id && !!stage.concurrencyToken);
   }
 
-  private hasDraftUpdateConcurrencyData(draft: DailyProductionDraft): boolean {
-    if (!draft.concurrencyToken || draft.stages.length !== this.stages.length) return false;
-    const recordsByStage = new Map(draft.stages.map(record => [record.productModelStageId, record]));
-    return this.stages.every(stage => {
-      const record = recordsByStage.get(stage.productModelStageId);
-      return !!record?.id && !!record.concurrencyToken;
-    });
+  private draftUpdateConcurrencyIssue(draft: DailyProductionDraft): DraftUpdateConcurrencyIssue | null {
+    if (!draft.concurrencyToken) return 'missing-order-token';
+    if (draft.stages.some(stage => !stage.id)) return 'missing-stage-id';
+    if (draft.stages.some(stage => !stage.concurrencyToken)) return 'missing-stage-token';
+    if (draft.stages.length !== this.stages.length) return 'stage-count-mismatch';
+
+    const persistedStageIds = draft.stages.map(stage => stage.productModelStageId);
+    const currentStageIds = this.stages.map(stage => stage.productModelStageId);
+    const persistedStageIdSet = new Set(persistedStageIds);
+    const currentStageIdSet = new Set(currentStageIds);
+    if (persistedStageIdSet.size !== persistedStageIds.length ||
+        currentStageIdSet.size !== currentStageIds.length ||
+        persistedStageIds.some(stageId => !currentStageIdSet.has(stageId)) ||
+        currentStageIds.some(stageId => !persistedStageIdSet.has(stageId))) {
+      return 'stage-identity-mismatch';
+    }
+
+    return null;
+  }
+
+  private draftUpdateConcurrencyMessage(issue: DraftUpdateConcurrencyIssue): string {
+    if (issue === 'missing-order-token') {
+      return 'رمز تزامن أمر الإنتاج مفقود. أعد تحميل تشغيل اليوم للحصول على أحدث نسخة قبل الحفظ.';
+    }
+    if (issue === 'missing-stage-id') {
+      return 'معرّف سجل مرحلة محفوظة مفقود. أعد تحميل تشغيل اليوم للحصول على بيانات المرحلة قبل الحفظ.';
+    }
+    if (issue === 'missing-stage-token') {
+      return 'رمز تزامن إحدى المراحل المحفوظة مفقود. أعد تحميل تشغيل اليوم للحصول على أحدث نسخة قبل الحفظ.';
+    }
+    if (issue === 'stage-count-mismatch') {
+      return 'تعارض تكوين مراحل الموديل الحالية مع المسودة المحفوظة: عدد المراحل مختلف. لا يمكن متابعة التعديل بأمان؛ راجع إعدادات مراحل الموديل.';
+    }
+    return 'تعارض تكوين مراحل الموديل الحالية مع هوية مراحل المسودة المحفوظة. لا يمكن متابعة التعديل بأمان؛ راجع إعدادات مراحل الموديل.';
   }
 
   private allocationParticipants(stage: EditableDailyStage): EditableDailyWorker[] {

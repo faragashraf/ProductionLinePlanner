@@ -25,6 +25,9 @@ public sealed class ProductionCostRecordingService(
     ICairoTimeZoneProvider cairoTimeZoneProvider,
     ILogger<ProductionCostRecordingService>? logger = null) : IProductionCostRecordingService
 {
+    private const string DailyDraftStageConfigurationConflict =
+        "تعارض تكوين مراحل الموديل الحالية مع مراحل المسودة المحفوظة. لا يمكن تعديل المسودة بأمان؛ راجع إعدادات مراحل الموديل.";
+
     private const int QuantityScale = 3;
     private const int MoneyScale = 4;
     private const string ManualParticipantOverridePermission = "assignments.manage";
@@ -313,7 +316,11 @@ public sealed class ProductionCostRecordingService(
             request.Notes,
             request.PreviewToken,
             request.Stages.Select(stage => new DailyProductionStageRequest(stage.ProductModelStageId, stage.Workers)).ToArray());
-        var preview = await BuildDailyPreviewAsync(operationRequest, actorId, ct);
+        var preview = await BuildDailyPreviewAsync(
+            operationRequest,
+            actorId,
+            ct,
+            DailyDraftStageConfigurationConflict);
         if (string.IsNullOrWhiteSpace(request.PreviewToken) ||
             !string.Equals(request.PreviewToken, preview.PreviewToken, StringComparison.Ordinal))
         {
@@ -346,7 +353,7 @@ public sealed class ProductionCostRecordingService(
         var updatesByStage = request.Stages.ToDictionary(stage => stage.ProductModelStageId);
         var previewStageIds = preview.Stages.Select(stage => stage.Stage.Entity.Id).ToHashSet();
         if (recordsByStage.Count != updatesByStage.Count || !previewStageIds.SetEquals(recordsByStage.Keys) || !previewStageIds.SetEquals(updatesByStage.Keys))
-            throw new ProductionConflictException("تغيرت مراحل الموديل أو المسودة منذ آخر تحميل. حدّث البيانات وحاول مرة أخرى.");
+            throw new ProductionConflictException(DailyDraftStageConfigurationConflict);
 
         foreach (var (productModelStageId, record) in recordsByStage)
         {
@@ -538,7 +545,8 @@ public sealed class ProductionCostRecordingService(
     private async Task<DailyPreview> BuildDailyPreviewAsync(
         DailyProductionOperationRequest request,
         Guid actorId,
-        CancellationToken ct)
+        CancellationToken ct,
+        string? stageConfigurationConflictMessage = null)
     {
         if (request.LineQuantity <= 0)
             throw new ProductionConflictException("كمية تشغيل الخط يجب أن تكون أكبر من صفر.");
@@ -548,8 +556,9 @@ public sealed class ProductionCostRecordingService(
             request.ProductionLineId,
             request.ProductModelId,
             request.ProductionDate,
-            ct);
-        ValidateDailyStages(request, context);
+            ct,
+            stageConfigurationConflictMessage);
+        ValidateDailyStages(request, context, stageConfigurationConflictMessage);
 
         var requestByStage = request.Stages.ToDictionary(stage => stage.ProductModelStageId);
         // LoadDailyContextAsync has already resolved the authoritative active-worker,
@@ -685,7 +694,8 @@ public sealed class ProductionCostRecordingService(
         Guid productionLineId,
         Guid productModelId,
         DateOnly productionDate,
-        CancellationToken ct)
+        CancellationToken ct,
+        string? missingStagesMessage = null)
     {
         if (factoryId == Guid.Empty || productionLineId == Guid.Empty || productModelId == Guid.Empty)
             throw new ProductionConflictException("اختر المصنع وخط الإنتاج والموديل قبل تحميل تشغيل اليوم.");
@@ -717,7 +727,7 @@ public sealed class ProductionCostRecordingService(
             .OrderBy(stage => stage.StageOrder)
             .ToArrayAsync(ct);
         if (stages.Length == 0)
-            throw new ProductionConflictException("لا توجد مراحل موديل نشطة مرتبطة بقسم خط الإنتاج المحدد.");
+            throw new ProductionConflictException(missingStagesMessage ?? "لا توجد مراحل موديل نشطة مرتبطة بقسم خط الإنتاج المحدد.");
 
         var workers = await db.Set<Worker>().AsNoTracking()
             .Where(worker => worker.IsActive && worker.EmploymentStatus == EmploymentStatus.Active)
@@ -936,17 +946,20 @@ public sealed class ProductionCostRecordingService(
         windows[key] = replacements;
     }
 
-    private static void ValidateDailyStages(DailyProductionOperationRequest request, DailyContext context)
+    private static void ValidateDailyStages(
+        DailyProductionOperationRequest request,
+        DailyContext context,
+        string? stageConfigurationConflictMessage = null)
     {
         if (request.Stages is null || request.Stages.Count != context.Stages.Count)
-            throw new ProductionConflictException("يجب أن تتضمن معاينة تشغيل اليوم كل مراحل الموديل المحمّلة.");
+            throw new ProductionConflictException(stageConfigurationConflictMessage ?? "يجب أن تتضمن معاينة تشغيل اليوم كل مراحل الموديل المحمّلة.");
         if (request.Stages.Any(stage => stage.ProductModelStageId == Guid.Empty) ||
             request.Stages.Select(stage => stage.ProductModelStageId).Distinct().Count() != request.Stages.Count)
             throw new ProductionConflictException("توجد مرحلة مكررة أو غير صالحة في تشغيل اليوم.");
 
         var expected = context.Stages.Select(stage => stage.Entity.Id).ToHashSet();
         if (request.Stages.Any(stage => !expected.Contains(stage.ProductModelStageId)))
-            throw new ProductionConflictException("تغيرت مراحل الموديل أو لا تتطابق مع خط الإنتاج. أعد تحميل تشغيل اليوم.");
+            throw new ProductionConflictException(stageConfigurationConflictMessage ?? "تغيرت مراحل الموديل أو لا تتطابق مع خط الإنتاج. أعد تحميل تشغيل اليوم.");
     }
 
     private static StageProductionRecord CreateDailySnapshotRecord(
