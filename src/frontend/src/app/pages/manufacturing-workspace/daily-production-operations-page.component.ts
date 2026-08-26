@@ -351,11 +351,13 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
 
   get canApproveDailyOperation(): boolean {
     const draft = this.currentDailyDraft;
+    if (!draft || !draft.stages.length) return false;
+    const stagesAllowReapproval = draft.stages.every(stage =>
+      stage.status === 'Draft' || stage.status === 'Cancelled'
+    );
     return (this.permissionsService.hasPermission(this.permissions.production.approve) ||
       this.permissionsService.hasPermission(this.permissions.production.dailyDraftsApprove)) &&
-      !!draft &&
-      draft.stages.length > 0 &&
-      draft.stages.every(stage => stage.status === 'Draft') &&
+      stagesAllowReapproval &&
       !this.operationsLoading &&
       !this.saving &&
       !this.approving &&
