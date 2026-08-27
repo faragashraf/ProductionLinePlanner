@@ -705,9 +705,10 @@ describe('DailyProductionOperationsPageComponent unified preview', () => {
     };
     const filteredRow = { scrollIntoView: jasmine.createSpy('scrollIntoView') } as any;
     const getStageRow = spyOn(document, 'getElementById').and.returnValue(filteredRow);
+    spyOn(window, 'matchMedia').and.returnValue({ matches: false } as MediaQueryList);
 
     component.selectDailyStageFilter('stage-2');
-    tick(200);
+    tick(32);
 
     expect(component.filteredStages.map(stage => stage.productModelStageId)).toEqual(['stage-2']);
     expect(component.selectedStageId).toBe('stage-2');
@@ -715,8 +716,90 @@ describe('DailyProductionOperationsPageComponent unified preview', () => {
     expect(component.expandedStageRows).toEqual({ 'stage-2': true });
     expect(component.expandedStageRows['stage-1']).toBeUndefined();
     expect(getStageRow).toHaveBeenCalledWith('daily-stage-row-stage-2');
-    expect(filteredRow.scrollIntoView).toHaveBeenCalledWith({ behavior: 'auto', block: 'nearest', inline: 'nearest' });
+    expect(filteredRow.scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
   }));
+
+  it('filters directly between preview blockers by ProductModelStageId and keeps the preview authoritative', () => {
+    const firstStage = component.stages[0];
+    const secondStage = {
+      ...firstStage,
+      productModelStageId: 'stage-2',
+      stageCode: 'S2',
+      stageName: 'مرحلة 2',
+      stageOrder: 2,
+      workers: [{ ...firstStage.workers[0], workerId: 'worker-2', workerCode: 'W2', workerName: 'عامل 2' }]
+    };
+    component.stages = [firstStage, secondStage];
+    const previewWithBlockers: DailyProductionPreview = {
+      ...preview,
+      stages: [
+        { ...preview.stages[0], warnings: ['عائق المرحلة الأولى'] },
+        { ...preview.stages[0], productModelStageId: 'stage-2', stageCode: 'S2', stageName: 'مرحلة 2', warnings: ['عائق المرحلة الثانية'] }
+      ],
+      warnings: ['عائق المرحلة الأولى', 'عائق المرحلة الثانية']
+    };
+    component.preview = previewWithBlockers;
+    const stagesSnapshot = component.stages;
+    const previewSnapshot = component.preview;
+    const [firstBlocker, secondBlocker] = component.previewBlockers;
+
+    component.filterStageFromPreviewBlocker(firstBlocker.productModelStageId);
+    expect(component.selectedStageFilterId).toBe('stage-1');
+    expect(component.filteredStages.map(stage => stage.productModelStageId)).toEqual(['stage-1']);
+
+    component.filterStageFromPreviewBlocker(secondBlocker.productModelStageId);
+    expect(component.selectedStageFilterId).toBe('stage-2');
+    expect(component.filteredStages.map(stage => stage.productModelStageId)).toEqual(['stage-2']);
+    expect(component.stages).toBe(stagesSnapshot);
+    expect(component.preview).toBe(previewSnapshot);
+  });
+
+  it('shows all stages explicitly after a blocker filter without mutating stage data', () => {
+    const firstStage = component.stages[0];
+    const secondStage = { ...firstStage, productModelStageId: 'stage-2', stageCode: 'S2', stageName: 'مرحلة 2', stageOrder: 2, workers: [] };
+    component.stages = [firstStage, secondStage];
+    component.filterStageFromPreviewBlocker('stage-2');
+
+    component.showAllDailyStages();
+
+    expect(component.selectedStageFilterId).toBe('');
+    expect(component.filteredStages).toEqual([firstStage, secondStage]);
+  });
+
+  it('keeps global preview warnings non-filtering', () => {
+    component.preview = { ...preview, warnings: ['تحذير عام لا يرتبط بمرحلة'] };
+    const globalBlocker = component.previewBlockers.find(blocker => !blocker.productModelStageId)!;
+
+    component.filterStageFromPreviewBlocker(globalBlocker.productModelStageId);
+
+    expect(globalBlocker.message).toBe('تحذير عام لا يرتبط بمرحلة');
+    expect(component.selectedStageFilterId).toBe('');
+    expect(component.filteredStages).toEqual(component.stages);
+  });
+
+  it('clears a stale blocker stage filter when a new preview no longer contains that stage', () => {
+    const firstStage = component.stages[0];
+    component.stages = [firstStage, { ...firstStage, productModelStageId: 'stage-2', stageCode: 'S2', stageName: 'مرحلة 2', workers: [] }];
+    component.filterStageFromPreviewBlocker('stage-2');
+
+    component.preview = preview;
+
+    expect(component.selectedStageFilterId).toBe('');
+    expect(component.filteredStages).toEqual(component.stages);
+  });
+
+  it('does not leak a blocker stage filter into a different model or production date', () => {
+    component.filterStageFromPreviewBlocker('stage-1');
+
+    component.selectProductModel('model-2');
+
+    expect(component.selectedStageFilterId).toBe('');
+    expect(component.operations).toBeNull();
+
+    component.selectedStageFilterId = 'old-stage';
+    component.changeProductionDate('2026-07-17');
+    expect(component.selectedStageFilterId).toBe('');
+  });
 
   it('clears the previous selection and expansion safely when a stage filter has no visible results', () => {
     component.selectedStageId = 'stage-1';
@@ -1418,6 +1501,76 @@ describe('DailyProductionOperationsPageComponent visual hierarchy', () => {
     expect(missingPresenceCell.querySelector('.plp-contribution-time-range')?.textContent?.replace(/\s+/g, '')).toBe('07:33→—');
     expect(missingPresenceCell.textContent).toContain('0 دقيقة');
     expect(missingPresenceCell.textContent).toContain('إضافة يومية');
+  });
+
+  it('renders stage blockers as accessible buttons that switch the visible stage and exposes an explicit clear action', () => {
+    const production = jasmine.createSpyObj('ProductionCostRecordingApiService', ['previewDailyOperations', 'loadDailyOperations', 'createDailyDraft', 'updateDailyDraft']);
+    const masterData = jasmine.createSpyObj('ManufacturingMasterDataApiService', ['factories', 'departments', 'allProductionLines', 'models']);
+    const attendance = jasmine.createSpyObj('AttendanceApiService', ['syncForProductionDate']);
+    masterData.factories.and.returnValue(of([]));
+    masterData.departments.and.returnValue(of([]));
+    masterData.allProductionLines.and.returnValue(of([]));
+    TestBed.configureTestingModule({
+      imports: [ManufacturingWorkspaceModule, HttpClientTestingModule, NoopAnimationsModule],
+      providers: [
+        { provide: ProductionCostRecordingApiService, useValue: production },
+        { provide: ManufacturingMasterDataApiService, useValue: masterData },
+        { provide: AttendanceApiService, useValue: attendance },
+        { provide: PermissionService, useValue: { hasPermission: () => true } },
+        { provide: FormSubmissionValidationService, useValue: { serverMessage: (_: unknown, fallback: string) => fallback } }
+      ]
+    });
+    const fixture = TestBed.createComponent(DailyProductionOperationsPageComponent);
+    const component = fixture.componentInstance;
+    const stage = {
+      productModelStageId: 'stage-a', subStageId: 'sub-a', mainStageName: 'التجميع', stageCode: 'ST-A', stageName: 'مرحلة أ',
+      stageOrder: 1, piecePrice: .5, standardSeconds: 30, compensationMode: 'SharedPercentage', staffingStatus: 'Staffed', attendanceStatus: 'Ready',
+      hasAbsentWorkers: false, hasNoSourceCheckInWorkers: false, isFinancialReviewPending: false, isReady: true, workers: []
+    } as any;
+    component.operations = {
+      factoryId: 'factory-1', factoryName: 'مصنع', productionLineId: 'line-1', productionLineName: 'خط',
+      productModelId: 'model-1', productModelCode: 'M1', productModelName: 'موديل', productionDate: '2026-07-17',
+      staffingContextVersion: 'context', totalStages: 2, readyStages: 2, stagesWithAbsentWorkers: 0,
+      stagesWithNoSourceCheckIn: 0, stagesWithoutStaffing: 0, stagesRequiringCostReview: 0, activeWorkers: [], stages: []
+    };
+    component.stages = [stage, { ...stage, productModelStageId: 'stage-b', subStageId: 'sub-b', stageCode: 'ST-B', stageName: 'مرحلة ب', stageOrder: 2 }];
+    component.selectedStageId = 'stage-a';
+    component.preview = {
+      productionDate: '2026-07-17', lineQuantity: 500, previewToken: 'preview-token', totalWorkerEntitlements: 0,
+      stages: [
+        { productModelStageId: 'stage-a', stageCode: 'ST-A', stageName: 'مرحلة أ', stageQuantity: 500, stageCost: 0, compensationMode: 'SharedPercentage', warnings: ['عائق أ'], workers: [] },
+        { productModelStageId: 'stage-b', stageCode: 'ST-B', stageName: 'مرحلة ب', stageQuantity: 500, stageCost: 0, compensationMode: 'SharedPercentage', warnings: ['عائق ب'], workers: [] }
+      ],
+      workerTotals: [],
+      warnings: ['عائق أ', 'عائق ب', 'تحذير عام']
+    };
+    fixture.detectChanges();
+
+    const blockerButtons = fixture.nativeElement.querySelectorAll('button.daily-production-operations__preview-blocker') as NodeListOf<HTMLButtonElement>;
+    expect(blockerButtons).toHaveSize(2);
+    expect(blockerButtons[0].type).toBe('button');
+    expect(blockerButtons[0].getAttribute('aria-label')).toContain('مرحلة أ');
+    expect(fixture.nativeElement.querySelectorAll('.daily-production-operations__preview-blocker--global')).toHaveSize(1);
+
+    blockerButtons[0].click();
+    fixture.detectChanges();
+    expect(component.selectedStageFilterId).toBe('stage-a');
+    expect(fixture.nativeElement.querySelectorAll('.daily-production-operations__stage')).toHaveSize(1);
+    expect(fixture.nativeElement.querySelector('#daily-stage-row-stage-a')).not.toBeNull();
+
+    blockerButtons[1].click();
+    fixture.detectChanges();
+    expect(component.selectedStageFilterId).toBe('stage-b');
+    expect(fixture.nativeElement.querySelectorAll('.daily-production-operations__stage')).toHaveSize(1);
+    expect(fixture.nativeElement.querySelector('#daily-stage-row-stage-b')).not.toBeNull();
+    expect(fixture.nativeElement.querySelectorAll('button.daily-production-operations__preview-blocker')).toHaveSize(2);
+
+    const showAllButton = fixture.nativeElement.querySelector('.daily-production-operations__active-stage-filter button') as HTMLButtonElement;
+    expect(showAllButton.textContent).toContain('عرض كل المراحل');
+    showAllButton.click();
+    fixture.detectChanges();
+    expect(component.selectedStageFilterId).toBe('');
+    expect(fixture.nativeElement.querySelectorAll('.daily-production-operations__stage')).toHaveSize(2);
   });
 
   it('expands both projection tables with touch and keyboard accessible controls', () => {

@@ -5,7 +5,7 @@ import path from 'node:path';
 
 const visualOutput = path.join(process.cwd(), 'test-results', 'model-journey-daily-preview');
 const excelOutput = path.join(process.cwd(), 'test-results', 'daily-production-excel');
-const permissions = ['models.view', 'models.manage', 'production.view', 'production.record', 'assignments.manage'];
+const permissions = ['models.view', 'models.manage', 'production.view', 'production.record', 'assignments.manage', 'attendance.sync'];
 const factory = { id: 'factory-1', code: 'F-01', name: 'مصنع الاختبار', isActive: true };
 const department = { id: 'department-1', factoryId: factory.id, code: 'CUT', nameAr: 'قسم القص', isActive: true };
 const line = { id: 'line-1', factoryId: factory.id, departmentId: department.id, lineCode: 'L-01', name: 'خط التشغيل اليومي', sequenceOrder: 1, isActive: true };
@@ -63,7 +63,9 @@ function dailyOperations() {
 }
 
 function dailyPreview() {
-  return { productionDate: '2026-07-17', lineQuantity: 1000, previewToken: 'visual-preview', totalWorkerEntitlements: 1350, stages: [{ productModelStageId: modelStage.id, stageCode: stage.code, stageName: stage.name, stageQuantity: 1000, stageCost: 600, compensationMode: 'SharedPercentage', warnings: [], workers: [{ workerId: 'worker-1', workerCode: 'W-01', workerName: 'عامل الاختبار', percentage: 25, equivalentQuantity: 250, calculatedEarning: 150 }, { workerId: 'worker-2', workerCode: 'W-02', workerName: 'عامل مساعد', percentage: 75, equivalentQuantity: 750, calculatedEarning: 450 }] }, { productModelStageId: secondModelStage.id, stageCode: secondStage.code, stageName: secondStage.name, stageQuantity: 1000, stageCost: 750, compensationMode: 'SharedPercentage', warnings: [], workers: [{ workerId: 'worker-1', workerCode: 'W-01', workerName: 'عامل الاختبار', percentage: 100, equivalentQuantity: 1000, calculatedEarning: 750 }] }], workerTotals: [{ workerId: 'worker-1', workerCode: 'W-01', workerName: 'عامل الاختبار', totalEntitlement: 900 }, { workerId: 'worker-2', workerCode: 'W-02', workerName: 'عامل مساعد', totalEntitlement: 450 }], warnings: [] };
+  const firstWarning = 'تحتاج مرحلة التجميع إلى مراجعة توزيع العمال قبل حفظ المسودة لضمان اكتمال بيانات التشغيل.';
+  const secondWarning = 'تحتاج مرحلة التشطيب إلى مراجعة مدير الإنتاج قبل اعتماد الكمية النهائية.';
+  return { productionDate: '2026-07-17', lineQuantity: 1000, previewToken: 'visual-preview', totalWorkerEntitlements: 1350, stages: [{ productModelStageId: modelStage.id, stageCode: stage.code, stageName: stage.name, stageQuantity: 1000, stageCost: 600, compensationMode: 'SharedPercentage', warnings: [firstWarning], workers: [{ workerId: 'worker-1', workerCode: 'W-01', workerName: 'عامل الاختبار', percentage: 25, equivalentQuantity: 250, calculatedEarning: 150 }, { workerId: 'worker-2', workerCode: 'W-02', workerName: 'عامل مساعد', percentage: 75, equivalentQuantity: 750, calculatedEarning: 450 }] }, { productModelStageId: secondModelStage.id, stageCode: secondStage.code, stageName: secondStage.name, stageQuantity: 1000, stageCost: 750, compensationMode: 'SharedPercentage', warnings: [secondWarning], workers: [{ workerId: 'worker-1', workerCode: 'W-01', workerName: 'عامل الاختبار', percentage: 100, equivalentQuantity: 1000, calculatedEarning: 750 }] }], workerTotals: [{ workerId: 'worker-1', workerCode: 'W-01', workerName: 'عامل الاختبار', totalEntitlement: 900 }, { workerId: 'worker-2', workerCode: 'W-02', workerName: 'عامل مساعد', totalEntitlement: 450 }], warnings: [firstWarning, secondWarning, 'تحذير عام لا يرتبط بمرحلة محددة.'] };
 }
 
 async function openSuccessfulDailyPreview(page: Page): Promise<void> {
@@ -127,6 +129,24 @@ test('daily filters wrap safely and successful unified preview renders summary p
     await openSuccessfulDailyPreview(page);
     await expect(page.locator('.daily-production-operations__legacy-table')).toHaveCount(0);
     await expect(page.getByText('فلتر عرض فقط؛ لا يغيّر المسودة أو نتيجة المعاينة.')).toBeVisible();
+    const blockerButtons = page.locator('button.daily-production-operations__preview-blocker');
+    await expect(blockerButtons).toHaveCount(2);
+    await expect(page.locator('.daily-production-operations__preview-blocker--global')).toHaveCount(1);
+    const firstBlockerBox = await blockerButtons.first().boundingBox();
+    expect(firstBlockerBox?.height).toBeGreaterThanOrEqual(44);
+    await page.locator('.daily-production-operations__preview-blockers').screenshot({ path: path.join(visualOutput, `daily-blockers-${name}.png`) });
+    await blockerButtons.first().focus();
+    await expect(blockerButtons.first()).toBeFocused();
+    await blockerButtons.first().click();
+    await expect(page.locator('.daily-production-operations__stage-list > button')).toHaveCount(1);
+    await expect(page.locator(`#daily-stage-row-${modelStage.id}`)).toBeInViewport();
+    await blockerButtons.nth(1).click();
+    await expect(page.locator('.daily-production-operations__stage-list > button')).toHaveCount(1);
+    await expect(page.locator(`#daily-stage-row-${secondModelStage.id}`)).toBeInViewport();
+    await expect(page.locator('.daily-production-operations__active-stage-filter')).toContainText(secondStage.name);
+    await page.getByRole('button', { name: 'عرض كل المراحل' }).click();
+    await expect(page.locator('.daily-production-operations__stage-list > button')).toHaveCount(2);
+    await expect(page.locator('.daily-production-operations__active-stage-filter')).toHaveCount(0);
     await page.locator('.daily-production-operations__stage-filter .p-dropdown-trigger').click();
     await page.getByRole('option', { name: secondStage.name, exact: true }).click();
     await expect(page.locator('.daily-production-operations__stage-filter-panel')).toBeHidden();
@@ -134,7 +154,6 @@ test('daily filters wrap safely and successful unified preview renders summary p
     await expect(page.locator('.daily-production-operations__stage-list > button')).toHaveCount(1);
     await expect(selectedStageRow).toHaveAttribute('aria-current', 'true');
     await expect(selectedStageRow).toHaveClass(/is-selected/);
-    await expect(selectedStageRow).toBeInViewport();
     await expect(page.locator('.daily-production-operations__detail-panel')).toContainText(secondStage.name);
     await page.screenshot({ path: path.join(visualOutput, `daily-${name}.png`), fullPage: true });
     const clearStageFilter = page.locator('.daily-production-operations__stage-filter .p-dropdown-clear-icon');

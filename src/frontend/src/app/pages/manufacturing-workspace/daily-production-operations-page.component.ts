@@ -63,6 +63,13 @@ interface StageWorkerProjection {
   isCalculated: boolean;
 }
 
+interface DailyPreviewBlocker {
+  message: string;
+  productModelStageId: string | null;
+  stageCode: string | null;
+  stageName: string | null;
+}
+
 interface StageAllocationProjection {
   stageId: string;
   stageCode: string;
@@ -152,6 +159,7 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
 
   private previewValue: DailyProductionPreview | null = null;
   private previewSource: UnifiedPreviewSource | null = null;
+  private previewBlockersValue: DailyPreviewBlocker[] = [];
 
   get preview(): DailyProductionPreview | null {
     return this.previewValue;
@@ -159,6 +167,8 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
 
   set preview(value: DailyProductionPreview | null) {
     this.previewValue = value;
+    this.previewBlockersValue = this.buildPreviewBlockers(value);
+    this.reconcileStageFilterWithPreview(value);
     this.rebuildAllocationProjection();
   }
 
@@ -300,6 +310,15 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
 
   get selectedStage(): EditableDailyStage | null {
     return this.stages.find(stage => stage.productModelStageId === this.selectedStageId) ?? null;
+  }
+
+  get activeStageFilter(): EditableDailyStage | null {
+    if (!this.selectedStageFilterId) return null;
+    return this.stages.find(stage => stage.productModelStageId === this.selectedStageFilterId) ?? null;
+  }
+
+  get previewBlockers(): DailyPreviewBlocker[] {
+    return this.previewBlockersValue;
   }
 
   get filteredStages(): EditableDailyStage[] {
@@ -564,6 +583,25 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
       ? { [firstVisibleStage.productModelStageId]: true }
       : {};
     this.scrollToSelectedStage(firstVisibleStage.productModelStageId);
+  }
+
+  filterStageFromPreviewBlocker(stageId: string | null): void {
+    if (!stageId || !this.stages.some(stage => stage.productModelStageId === stageId)) return;
+    this.stageSearch = '';
+    this.stageFilter = 'all';
+    this.selectDailyStageFilter(stageId);
+  }
+
+  showAllDailyStages(): void {
+    this.selectedStageFilterId = '';
+    this.stageSearch = '';
+    this.stageFilter = 'all';
+    if (this.error === 'لا توجد مراحل مطابقة لفلتر المرحلة الحالي.') this.error = '';
+  }
+
+  previewBlockerAriaLabel(blocker: DailyPreviewBlocker): string {
+    if (!blocker.productModelStageId || !blocker.stageName) return blocker.message;
+    return `عرض المرحلة ${blocker.stageName} المرتبطة بالعائق: ${blocker.message}`;
   }
 
   addReplacementWorker(): void {
@@ -1637,13 +1675,44 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
   }
 
   private scrollToSelectedStage(stageId: string): void {
-    setTimeout(() => {
-      document.getElementById(`daily-stage-row-${stageId}`)?.scrollIntoView({
-        behavior: 'auto',
-        block: 'nearest',
-        inline: 'nearest'
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+        document.getElementById(`daily-stage-row-${stageId}`)?.scrollIntoView({
+          behavior: reducedMotion ? 'auto' : 'smooth',
+          block: 'nearest',
+          inline: 'nearest'
+        });
       });
-    }, 200);
+    });
+  }
+
+  private reconcileStageFilterWithPreview(preview: DailyProductionPreview | null): void {
+    if (!preview || !this.selectedStageFilterId) return;
+    if (preview.stages.some(stage => stage.productModelStageId === this.selectedStageFilterId)) return;
+    this.selectDailyStageFilter(null);
+  }
+
+  private buildPreviewBlockers(preview: DailyProductionPreview | null): DailyPreviewBlocker[] {
+    if (!preview) return [];
+    const stageBlockers = preview.stages.flatMap(stage => stage.warnings.map(message => ({
+      message,
+      productModelStageId: stage.productModelStageId,
+      stageCode: stage.stageCode,
+      stageName: stage.stageName
+    })));
+    // The current API's top-level warnings aggregate stage warnings. Text is used only to suppress
+    // that duplicate display; stage association always comes from the parent stage identity above.
+    const stageWarningMessages = new Set(stageBlockers.map(blocker => blocker.message));
+    const globalBlockers = preview.warnings
+      .filter(message => !stageWarningMessages.has(message))
+      .map(message => ({
+        message,
+        productModelStageId: null,
+        stageCode: null,
+        stageName: null
+      }));
+    return [...stageBlockers, ...globalBlockers];
   }
 
   private toExcelDate(value: string | null | undefined): Date | null {
