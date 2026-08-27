@@ -94,6 +94,15 @@ async function expectViewportSafe(page: Page): Promise<void> {
   expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.clientWidth + 1);
 }
 
+async function expectSelectedStageAtComfortableOffset(page: Page, productModelStageId: string): Promise<void> {
+  const stageRow = page.locator(`[data-stage-id="${productModelStageId}"]`);
+  await expect(stageRow).toHaveClass(/is-selected/);
+  await expect(stageRow).toHaveAttribute('aria-current', 'true');
+  const stageTop = async () => stageRow.evaluate(element => Math.round(element.getBoundingClientRect().top));
+  await expect.poll(stageTop).toBeGreaterThanOrEqual(80);
+  await expect.poll(stageTop).toBeLessThanOrEqual(140);
+}
+
 test('line-scoped model journey search stays inside the assignment table', async ({ page }) => {
   await preparePage(page);
   for (const [name, width, height] of [['desktop', 1440, 900], ['tablet-landscape', 1280, 800], ['tablet-portrait', 800, 1280], ['mobile', 390, 844]] as const) {
@@ -137,15 +146,20 @@ test('daily filters wrap safely and successful unified preview renders summary p
     await page.locator('.daily-production-operations__preview-blockers').screenshot({ path: path.join(visualOutput, `daily-blockers-${name}.png`) });
     await blockerButtons.first().focus();
     await expect(blockerButtons.first()).toBeFocused();
+    const contentScroller = page.locator('.plp-app-shell__main');
+    const horizontalScrollBefore = await contentScroller.evaluate(element => element.scrollLeft);
     await blockerButtons.first().click();
     await expect(page.locator('.daily-production-operations__stage-list > button')).toHaveCount(1);
-    await expect(page.locator(`#daily-stage-row-${modelStage.id}`)).toBeInViewport();
+    await expectSelectedStageAtComfortableOffset(page, modelStage.id);
+    expect(await contentScroller.evaluate(element => element.scrollLeft)).toBe(horizontalScrollBefore);
     await blockerButtons.nth(1).click();
     await expect(page.locator('.daily-production-operations__stage-list > button')).toHaveCount(1);
-    await expect(page.locator(`#daily-stage-row-${secondModelStage.id}`)).toBeInViewport();
+    await expectSelectedStageAtComfortableOffset(page, secondModelStage.id);
     await expect(page.locator('.daily-production-operations__active-stage-filter')).toContainText(secondStage.name);
+    await page.screenshot({ path: path.join(visualOutput, `daily-selected-stage-${name}.png`) });
     await page.getByRole('button', { name: 'عرض كل المراحل' }).click();
     await expect(page.locator('.daily-production-operations__stage-list > button')).toHaveCount(2);
+    await expect(page.locator('.daily-production-operations__stage-list > button.is-selected')).toHaveCount(0);
     await expect(page.locator('.daily-production-operations__active-stage-filter')).toHaveCount(0);
     await page.locator('.daily-production-operations__stage-filter .p-dropdown-trigger').click();
     await page.getByRole('option', { name: secondStage.name, exact: true }).click();

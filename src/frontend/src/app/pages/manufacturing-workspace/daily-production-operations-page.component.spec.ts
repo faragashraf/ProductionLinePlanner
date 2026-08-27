@@ -703,9 +703,20 @@ describe('DailyProductionOperationsPageComponent unified preview', () => {
         { ...preview.stages[0], productModelStageId: 'stage-2', stageCode: 'S2', stageName: 'مرحلة المشكلة' }
       ]
     };
-    const filteredRow = { scrollIntoView: jasmine.createSpy('scrollIntoView') } as any;
+    const scrollContainer = {
+      scrollTop: 240,
+      scrollTo: jasmine.createSpy('scrollTo'),
+      getBoundingClientRect: () => ({ top: 64 })
+    } as any;
+    const filteredRow = {
+      closest: (selector: string) => selector === '.plp-app-shell__main' ? scrollContainer : null,
+      getBoundingClientRect: () => ({ top: 420 })
+    } as any;
     const getStageRow = spyOn(document, 'getElementById').and.returnValue(filteredRow);
     spyOn(window, 'matchMedia').and.returnValue({ matches: false } as MediaQueryList);
+    spyOn(window, 'getComputedStyle').and.returnValue({
+      getPropertyValue: (token: string) => token === '--plp-space-32' ? '32px' : ''
+    } as unknown as CSSStyleDeclaration);
 
     component.selectDailyStageFilter('stage-2');
     tick(32);
@@ -716,10 +727,10 @@ describe('DailyProductionOperationsPageComponent unified preview', () => {
     expect(component.expandedStageRows).toEqual({ 'stage-2': true });
     expect(component.expandedStageRows['stage-1']).toBeUndefined();
     expect(getStageRow).toHaveBeenCalledWith('daily-stage-row-stage-2');
-    expect(filteredRow.scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+    expect(scrollContainer.scrollTo).toHaveBeenCalledWith({ top: 564, behavior: 'smooth' });
   }));
 
-  it('filters directly between preview blockers by ProductModelStageId and keeps the preview authoritative', () => {
+  it('filters, selects, and scrolls directly between preview blockers by ProductModelStageId', fakeAsync(() => {
     const firstStage = component.stages[0];
     const secondStage = {
       ...firstStage,
@@ -742,17 +753,37 @@ describe('DailyProductionOperationsPageComponent unified preview', () => {
     const stagesSnapshot = component.stages;
     const previewSnapshot = component.preview;
     const [firstBlocker, secondBlocker] = component.previewBlockers;
+    const scrollContainer = {
+      scrollTop: 0,
+      scrollTo: jasmine.createSpy('scrollTo'),
+      getBoundingClientRect: () => ({ top: 64 })
+    } as any;
+    const stageElements: Record<string, any> = {
+      'daily-stage-row-stage-1': { closest: () => scrollContainer, getBoundingClientRect: () => ({ top: 360 }) },
+      'daily-stage-row-stage-2': { closest: () => scrollContainer, getBoundingClientRect: () => ({ top: 420 }) }
+    };
+    const getStageRow = spyOn(document, 'getElementById').and.callFake(id => stageElements[id] ?? null);
+    spyOn(window, 'matchMedia').and.returnValue({ matches: true } as MediaQueryList);
+    spyOn(window, 'getComputedStyle').and.returnValue({ getPropertyValue: () => '32px' } as unknown as CSSStyleDeclaration);
 
     component.filterStageFromPreviewBlocker(firstBlocker.productModelStageId);
+    tick(32);
     expect(component.selectedStageFilterId).toBe('stage-1');
+    expect(component.selectedStageId).toBe('stage-1');
     expect(component.filteredStages.map(stage => stage.productModelStageId)).toEqual(['stage-1']);
+    expect(getStageRow).toHaveBeenCalledWith('daily-stage-row-stage-1');
+    expect(scrollContainer.scrollTo).toHaveBeenCalledWith({ top: 264, behavior: 'auto' });
 
     component.filterStageFromPreviewBlocker(secondBlocker.productModelStageId);
+    tick(32);
     expect(component.selectedStageFilterId).toBe('stage-2');
+    expect(component.selectedStageId).toBe('stage-2');
     expect(component.filteredStages.map(stage => stage.productModelStageId)).toEqual(['stage-2']);
+    expect(getStageRow).toHaveBeenCalledWith('daily-stage-row-stage-2');
+    expect(scrollContainer.scrollTo).toHaveBeenCalledWith({ top: 324, behavior: 'auto' });
     expect(component.stages).toBe(stagesSnapshot);
     expect(component.preview).toBe(previewSnapshot);
-  });
+  }));
 
   it('shows all stages explicitly after a blocker filter without mutating stage data', () => {
     const firstStage = component.stages[0];
@@ -763,6 +794,7 @@ describe('DailyProductionOperationsPageComponent unified preview', () => {
     component.showAllDailyStages();
 
     expect(component.selectedStageFilterId).toBe('');
+    expect(component.selectedStageId).toBe('');
     expect(component.filteredStages).toEqual([firstStage, secondStage]);
   });
 
@@ -777,29 +809,39 @@ describe('DailyProductionOperationsPageComponent unified preview', () => {
     expect(component.filteredStages).toEqual(component.stages);
   });
 
-  it('clears a stale blocker stage filter when a new preview no longer contains that stage', () => {
+  it('clears stale blocker filter, selection, and scheduled scroll when a new preview no longer contains that stage', fakeAsync(() => {
     const firstStage = component.stages[0];
     component.stages = [firstStage, { ...firstStage, productModelStageId: 'stage-2', stageCode: 'S2', stageName: 'مرحلة 2', workers: [] }];
+    const getStageRow = spyOn(document, 'getElementById');
     component.filterStageFromPreviewBlocker('stage-2');
 
     component.preview = preview;
+    tick(32);
 
     expect(component.selectedStageFilterId).toBe('');
+    expect(component.selectedStageId).toBe('');
     expect(component.filteredStages).toEqual(component.stages);
-  });
+    expect(getStageRow).not.toHaveBeenCalled();
+  }));
 
-  it('does not leak a blocker stage filter into a different model or production date', () => {
+  it('does not leak blocker filter, selection, or scheduled scroll into a different context', fakeAsync(() => {
+    const getStageRow = spyOn(document, 'getElementById');
     component.filterStageFromPreviewBlocker('stage-1');
 
     component.selectProductModel('model-2');
+    tick(32);
 
     expect(component.selectedStageFilterId).toBe('');
+    expect(component.selectedStageId).toBe('');
     expect(component.operations).toBeNull();
+    expect(getStageRow).not.toHaveBeenCalled();
 
     component.selectedStageFilterId = 'old-stage';
+    component.selectedStageId = 'old-stage';
     component.changeProductionDate('2026-07-17');
     expect(component.selectedStageFilterId).toBe('');
-  });
+    expect(component.selectedStageId).toBe('');
+  }));
 
   it('clears the previous selection and expansion safely when a stage filter has no visible results', () => {
     component.selectedStageId = 'stage-1';
@@ -1555,8 +1597,12 @@ describe('DailyProductionOperationsPageComponent visual hierarchy', () => {
     blockerButtons[0].click();
     fixture.detectChanges();
     expect(component.selectedStageFilterId).toBe('stage-a');
+    expect(component.selectedStageId).toBe('stage-a');
     expect(fixture.nativeElement.querySelectorAll('.daily-production-operations__stage')).toHaveSize(1);
-    expect(fixture.nativeElement.querySelector('#daily-stage-row-stage-a')).not.toBeNull();
+    const firstStageRow = fixture.nativeElement.querySelector('#daily-stage-row-stage-a') as HTMLButtonElement;
+    expect(firstStageRow.getAttribute('data-stage-id')).toBe('stage-a');
+    expect(firstStageRow.getAttribute('aria-current')).toBe('true');
+    expect(firstStageRow.classList).toContain('is-selected');
 
     blockerButtons[1].click();
     fixture.detectChanges();
@@ -1570,6 +1616,7 @@ describe('DailyProductionOperationsPageComponent visual hierarchy', () => {
     showAllButton.click();
     fixture.detectChanges();
     expect(component.selectedStageFilterId).toBe('');
+    expect(component.selectedStageId).toBe('');
     expect(fixture.nativeElement.querySelectorAll('.daily-production-operations__stage')).toHaveSize(2);
   });
 
