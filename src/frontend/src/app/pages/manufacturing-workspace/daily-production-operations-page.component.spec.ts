@@ -784,30 +784,76 @@ describe('DailyProductionOperationsPageComponent unified preview', () => {
     expect(production.updateDailyDraft).not.toHaveBeenCalled();
   });
 
-  it('blocks configuration drift without pairing persisted records to current stages by array position', () => {
-    const persistedStage = dailyDraftStage('Draft', 'stage-token');
+  it('edits the persisted stage set during configuration drift and maps records by stage id', () => {
+    const persistedA = dailyDraftStage('Draft', 'token-a');
+    const persistedB = {
+      ...dailyDraftStage('Draft', 'token-b'),
+      id: 'record-b',
+      productModelStageId: 'stage-b',
+      stageCode: 'SB',
+      stageName: 'مرحلة تاريخية ب'
+    };
+    const draft = {
+      ...approvedDailyDraft(),
+      orderStatus: 'Draft',
+      concurrencyToken: 'order-token',
+      stages: [persistedA, persistedB]
+    };
+    const currentA = { ...component.stages[0] } as any;
+    const currentD = {
+      ...currentA,
+      productModelStageId: 'stage-d',
+      subStageId: 'sub-stage-d',
+      stageCode: 'SD',
+      stageName: 'مرحلة جديدة د',
+      stageOrder: 2
+    };
+    production.loadDailyOperations.and.returnValue(of({
+      ...component.operations!,
+      totalStages: 2,
+      stages: [currentA, currentD],
+      existingDraft: draft
+    }));
+    masterData.modelStages.and.returnValue(of([]));
+    component.attendanceSyncedForDate = component.productionDate;
+    production.updateDailyDraft.and.returnValue(of(draft));
+
+    component.loadTodayOperations();
+    component.saveDailyDraft();
+
+    expect(component.stages.map(stage => stage.productModelStageId)).toEqual(['stage-1', 'stage-b']);
+    expect(component.draftConfigurationWarning).toContain('لن يضيف أو يحذف مراحل تلقائيًا');
+    const update = production.updateDailyDraft.calls.mostRecent().args[1];
+    expect(update.stages.map((stage: any) => [stage.productModelStageId, stage.stageProductionRecordId])).toEqual([
+      ['stage-1', 'record-1'],
+      ['stage-b', 'record-b']
+    ]);
+    expect(update.stages.some((stage: any) => stage.productModelStageId === 'stage-d')).toBeFalse();
+  });
+
+  it('keeps a no-ready-worker issue visible while allowing an existing Draft save without Preview', () => {
+    const persisted = dailyDraftStage('Draft', 'stage-token');
     component.operations!.existingDraft = {
       ...approvedDailyDraft(),
       orderStatus: 'Draft',
       concurrencyToken: 'order-token',
-      stages: [{ ...persistedStage, productModelStageId: 'historical-stage' }]
+      stages: [persisted]
     };
-    prepareCurrentPreview();
+    component.stages[0].workers = [{
+      ...component.stages[0].workers[0],
+      isProductionReady: false,
+      includedInProduction: false
+    }];
+    component.preview = null;
+    component.previewStatus = 'stale';
+    production.updateDailyDraft.and.returnValue(of(component.operations!.existingDraft));
 
     component.saveDailyDraft();
 
-    expect(component.error).toContain('هوية مراحل المسودة المحفوظة');
-    expect(component.error).not.toContain('أعد تحميل');
-    expect(production.updateDailyDraft).not.toHaveBeenCalled();
-
-    component.operations!.existingDraft = {
-      ...component.operations!.existingDraft,
-      stages: [persistedStage, { ...persistedStage, id: 'record-2', productModelStageId: 'stage-2' }]
-    };
-    component.saveDailyDraft();
-    expect(component.error).toContain('عدد المراحل مختلف');
-    expect(component.error).not.toContain('أعد تحميل');
-    expect(production.updateDailyDraft).not.toHaveBeenCalled();
+    expect(component.validationIssues.some(issue => issue.message.includes('لا يوجد عامل جاهز'))).toBeTrue();
+    expect(component.validationIssues.every(issue => !issue.blocksDraftSave)).toBeTrue();
+    expect(production.previewDailyOperations).not.toHaveBeenCalled();
+    expect(production.updateDailyDraft).toHaveBeenCalled();
   });
 
   it('sends exactly one correlated PUT after a worker is excluded from an existing daily draft', () => {

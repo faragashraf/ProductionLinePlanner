@@ -35,13 +35,13 @@ type DraftUpdateConcurrencyIssue =
   | 'missing-order-token'
   | 'missing-stage-id'
   | 'missing-stage-token'
-  | 'stage-count-mismatch'
   | 'stage-identity-mismatch';
 type EditableDailyStage = Omit<DailyProductionStage, 'workers'> & {
   standardSeconds: number | null;
   workers: EditableDailyWorker[];
 };
 type EditableDailyWorker = DailyProductionWorker & {
+  isPersistedAllocation: boolean;
   includedInProduction: boolean;
   percentage: number | null;
   quantity: number | null;
@@ -74,6 +74,7 @@ interface DailyOperationIssue {
   productModelStageId: string | null;
   stageCode: string | null;
   stageName: string | null;
+  blocksDraftSave: boolean;
 }
 
 interface StageAllocationProjection {
@@ -383,10 +384,28 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
     return (this.permissionsService.hasPermission(this.permissions.production.approve) ||
       this.permissionsService.hasPermission(this.permissions.production.dailyDraftsApprove)) &&
       draft.stages.every(stage => stage.status === 'Draft') &&
+      !this.validateOperation().length &&
       !this.operationsLoading &&
       !this.saving &&
       !this.approving &&
       !this.cancelling;
+  }
+
+  get draftConfigurationWarning(): string {
+    const draft = this.currentDailyDraft;
+    if (!draft || !this.operations) return '';
+    const persisted = draft.stages.map(stage => stage.productModelStageId);
+    const current = this.operations.stages.map(stage => stage.productModelStageId);
+    const currentSet = new Set(current);
+    if (new Set(persisted).size === persisted.length &&
+        new Set(current).size === current.length &&
+        persisted.length === current.length &&
+        persisted.every(stageId => currentSet.has(stageId))) return '';
+    return 'تم تغيير تكوين مراحل الموديل بعد إنشاء هذه المسودة. سيحفظ النظام مراحل المسودة الأصلية ولن يضيف أو يحذف مراحل تلقائيًا.';
+  }
+
+  get draftSaveBlocked(): boolean {
+    return this.validateOperation().some(issue => issue.blocksDraftSave);
   }
 
   get canCancelDailyOperationApproval(): boolean {
@@ -528,7 +547,7 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
           this.operations = operations;
           this.modelStageMetadata = modelStages;
           const metadataById = new Map(modelStages.map(stage => [stage.id, stage]));
-          this.stages = operations.stages.map(stage => this.toEditableStage(stage, metadataById.get(stage.productModelStageId)));
+          this.stages = this.editableStagesForOperations(operations, metadataById);
           this.selectedStageFilterId = this.stages.some(stage => stage.productModelStageId === selectedStageFilterId)
             ? selectedStageFilterId
             : '';
@@ -947,13 +966,13 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
   }
 
   saveDailyDraft(): void {
-    if (!this.canEditDraft || !this.isPreviewCurrent || !this.preview || this.saving) {
-      this.error = 'احسب معاينة حديثة أولًا؛ أي تغيير في المرحلة أو الكمية يجعل الحفظ غير صالح.';
-      return;
-    }
+    if (!this.canEditDraft || this.saving) return;
     const validation = this.validateOperation();
     this.validationIssues = validation;
-    if (validation.length) return;
+    if (validation.some(issue => issue.blocksDraftSave)) {
+      this.error = 'تعذر حفظ المسودة لعدم اكتمال بيانات الحفظ الأساسية. راجع المتطلبات العامة أدناه.';
+      return;
+    }
 
     const existingDraft = this.currentDailyDraft;
     const concurrencyIssue = existingDraft?.productionOrderId
@@ -967,13 +986,14 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
     this.saving = true;
     this.error = '';
     const correlationId = this.manufacturingRealtime?.registerLocalOperation('daily-production-operations');
+    const previewToken = this.isPreviewCurrent && this.preview ? this.preview.previewToken : null;
     const saveRequest = existingDraft?.productionOrderId
       ? this.production.updateDailyDraft(
           existingDraft.productionOrderId,
-          this.dailyDraftUpdateRequest(existingDraft, this.preview.previewToken),
+          this.dailyDraftUpdateRequest(existingDraft, previewToken),
           correlationId
         )
-      : this.production.createDailyDraft(this.operationRequest(this.preview.previewToken), correlationId);
+      : this.production.createDailyDraft(this.operationRequest(previewToken), correlationId);
     saveRequest
       .pipe(finalize(() => this.saving = false), takeUntil(this.destroy$))
       .subscribe({
@@ -982,7 +1002,7 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
           this.hasUnsavedChanges = false;
           this.successMessage = draft.wasAlreadySaved
             ? 'هذه المسودة حُفظت مسبقًا بنفس طلب الحفظ؛ تم عرض النتيجة المحفوظة دون تكرار المراحل.'
-            : 'تم حفظ مسودة تشغيل اليوم كاملة في معاملة واحدة؛ بقي تاريخ الإنتاج منفصلًا عن وقت التسجيل.';
+            : 'تم حفظ مسودة تشغيل اليوم بأمان. ستبقى التحذيرات التشغيلية ظاهرة إلى أن تُستكمل متطلبات الاعتماد.';
         },
         error: error => this.error = this.formValidation.serverMessage(error, 'تعذر حفظ مسودة تشغيل اليوم.')
       });
@@ -1292,9 +1312,57 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
     };
   }
 
-  private toEditableWorker(worker: DailyProductionWorker, includedInProduction = worker.isProductionReady): EditableDailyWorker {
+  private editableStagesForOperations(
+    operations: DailyProductionOperations,
+    metadataById: Map<string, ModelStageItem>): EditableDailyStage[] {
+    const draft = operations.existingDraft;
+    if (!draft) {
+      return operations.stages.map(stage => this.toEditableStage(stage, metadataById.get(stage.productModelStageId)));
+    }
+
+    const currentById = new Map(operations.stages.map(stage => [stage.productModelStageId, stage]));
+    return draft.stages.map((record, index) => {
+      const current = currentById.get(record.productModelStageId);
+      const historicalStage: DailyProductionStage = current
+        ? {
+            ...current,
+            mainStageName: record.mainStageName,
+            stageCode: record.stageCode,
+            stageName: record.stageName,
+            piecePrice: record.piecePrice,
+            compensationMode: record.compensationMode
+          }
+        : {
+            productModelStageId: record.productModelStageId,
+            subStageId: '',
+            mainStageName: record.mainStageName,
+            stageCode: record.stageCode,
+            stageName: record.stageName,
+            stageOrder: index + 1,
+            piecePrice: record.piecePrice,
+            compensationMode: record.compensationMode,
+            staffingStatus: 'NoStaffing',
+            attendanceStatus: 'ConfigurationUnavailable',
+            hasAbsentWorkers: false,
+            hasNoSourceCheckInWorkers: false,
+            isFinancialReviewPending: true,
+            isReady: false,
+            workers: []
+          };
+      return {
+        ...this.toEditableStage(historicalStage),
+        standardSeconds: record.standardSeconds ?? null
+      };
+    });
+  }
+
+  private toEditableWorker(
+    worker: DailyProductionWorker,
+    includedInProduction = worker.isProductionReady,
+    isPersistedAllocation = false): EditableDailyWorker {
     return {
       ...worker,
+      isPersistedAllocation,
       includedInProduction,
       percentage: worker.suggestedPercentage ?? null,
       quantity: null,
@@ -1306,24 +1374,27 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
 
   private validateOperation(): DailyOperationIssue[] {
     const issues: DailyOperationIssue[] = [];
-    const addGlobalIssue = (message: string) => issues.push({
+    const addGlobalIssue = (message: string, blocksDraftSave = false) => issues.push({
       message,
       productModelStageId: null,
       stageCode: null,
-      stageName: null
+      stageName: null,
+      blocksDraftSave
     });
     const addStageIssue = (stage: EditableDailyStage, message: string) => issues.push({
       message,
       productModelStageId: stage.productModelStageId,
       stageCode: stage.stageCode,
-      stageName: stage.stageName
+      stageName: stage.stageName,
+      blocksDraftSave: false
     });
-    if (!this.operations) addGlobalIssue('حمّل تشغيل اليوم بعد مزامنة الحضور أولًا.');
-    if (!this.lineQuantity || this.lineQuantity <= 0) addGlobalIssue('أدخل كمية تشغيل الخط مرة واحدة بقيمة أكبر من صفر.');
+    if (!this.operations) addGlobalIssue('حمّل تشغيل اليوم بعد مزامنة الحضور أولًا.', true);
+    if (!this.lineQuantity || this.lineQuantity <= 0) addGlobalIssue('أدخل كمية تشغيل الخط مرة واحدة بقيمة أكبر من صفر.', true);
 
     this.stages.forEach(stage => {
-      const participants = stage.workers.filter(worker => worker.includedInProduction !== false && worker.isProductionReady);
-      if (!participants.length) addStageIssue(stage, 'لا يوجد عامل جاهز محتسب في تشغيل هذه المرحلة.');
+      const participants = this.allocationParticipants(stage);
+      const readyParticipants = participants.filter(worker => worker.isProductionReady);
+      if (!readyParticipants.length) addStageIssue(stage, 'لا يوجد عامل جاهز محتسب في تشغيل هذه المرحلة. يمكن حفظ المسودة، ويجب استكمال الجاهزية قبل الاعتماد.');
       if (stage.compensationMode === 'SharedPercentage' && participants.length) {
         const allocationError = this.stageAllocationError(stage);
         if (allocationError) addStageIssue(stage, `${allocationError}.`);
@@ -1353,7 +1424,7 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
     };
   }
 
-  private dailyDraftUpdateRequest(draft: DailyProductionDraft, previewToken: string): DailyProductionDraftUpdateInput {
+  private dailyDraftUpdateRequest(draft: DailyProductionDraft, previewToken: string | null): DailyProductionDraftUpdateInput {
     const request = this.operationRequest(previewToken);
     const recordsByStage = new Map(draft.stages.map(record => [record.productModelStageId, record]));
     return {
@@ -1372,7 +1443,7 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
 
   private stageInput(stage: EditableDailyStage): DailyProductionStageInput {
     const workers: DailyProductionWorkerInput[] = stage.workers
-      .filter(worker => worker.includedInProduction !== false && worker.isProductionReady)
+      .filter(worker => worker.includedInProduction !== false && (worker.isProductionReady || worker.isPersistedAllocation))
       .map(worker => ({
       workerId: worker.workerId,
       percentage: stage.compensationMode === 'SharedPercentage' ? worker.percentage : null,
@@ -1395,12 +1466,32 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
         let worker = workersById.get(allocation.workerId);
         if (!worker) {
           const active = activeWorkers.get(allocation.workerId);
-          if (!active) continue;
-          worker = this.toEditableWorker({ ...active, isAssignedWorker: false, isDailyOverride: true }, true);
+          worker = active
+            ? this.toEditableWorker({ ...active, isAssignedWorker: false, isDailyOverride: true }, true, true)
+            : this.toEditableWorker({
+                workerId: allocation.workerId,
+                workerCode: allocation.workerCode,
+                workerName: allocation.workerName,
+                isOnActiveService: false,
+                effectiveAssignmentType: null,
+                attendanceStatus: 'AttendanceUnavailable',
+                hasSourceCheckIn: false,
+                isPresent: false,
+                requiresAuthorizedOverride: true,
+                suggestedPercentage: null,
+                contributionStartsAtUtc: null,
+                contributionEndsAtUtc: null,
+                workerMinutes: 0,
+                isProductionReady: false,
+                exclusionReason: 'بيانات التكوين الحالية غير متاحة؛ تم الاحتفاظ بلقطة العامل المحفوظة.',
+                isAssignedWorker: false,
+                isDailyOverride: true
+              }, true, true);
           stage.workers.push(worker);
           workersById.set(worker.workerId, worker);
         }
         worker.includedInProduction = true;
+        worker.isPersistedAllocation = true;
         worker.isDailyOverride = worker.isAssignedWorker === false || worker.isDailyOverride === true;
         worker.percentage = allocation.percentage ?? null;
         worker.quantity = allocation.inputQuantity ?? null;
@@ -1472,14 +1563,14 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
     if (!draft.concurrencyToken) return 'missing-order-token';
     if (draft.stages.some(stage => !stage.id)) return 'missing-stage-id';
     if (draft.stages.some(stage => !stage.concurrencyToken)) return 'missing-stage-token';
-    if (draft.stages.length !== this.stages.length) return 'stage-count-mismatch';
-
     const persistedStageIds = draft.stages.map(stage => stage.productModelStageId);
     const currentStageIds = this.stages.map(stage => stage.productModelStageId);
     const persistedStageIdSet = new Set(persistedStageIds);
     const currentStageIdSet = new Set(currentStageIds);
-    if (persistedStageIdSet.size !== persistedStageIds.length ||
+    if (persistedStageIds.some(stageId => !stageId) ||
+        persistedStageIdSet.size !== persistedStageIds.length ||
         currentStageIdSet.size !== currentStageIds.length ||
+        persistedStageIds.length !== currentStageIds.length ||
         persistedStageIds.some(stageId => !currentStageIdSet.has(stageId)) ||
         currentStageIds.some(stageId => !persistedStageIdSet.has(stageId))) {
       return 'stage-identity-mismatch';
@@ -1498,14 +1589,11 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
     if (issue === 'missing-stage-token') {
       return 'رمز تزامن إحدى المراحل المحفوظة مفقود. أعد تحميل تشغيل اليوم للحصول على أحدث نسخة قبل الحفظ.';
     }
-    if (issue === 'stage-count-mismatch') {
-      return 'تعارض تكوين مراحل الموديل الحالية مع المسودة المحفوظة: عدد المراحل مختلف. لا يمكن متابعة التعديل بأمان؛ راجع إعدادات مراحل الموديل.';
-    }
-    return 'تعارض تكوين مراحل الموديل الحالية مع هوية مراحل المسودة المحفوظة. لا يمكن متابعة التعديل بأمان؛ راجع إعدادات مراحل الموديل.';
+    return 'بيانات التحرير لا تطابق هويات مراحل المسودة المحفوظة. أعد تحميل المسودة قبل الحفظ.';
   }
 
   private allocationParticipants(stage: EditableDailyStage): EditableDailyWorker[] {
-    return stage.workers.filter(worker => worker.includedInProduction !== false && worker.isProductionReady);
+    return stage.workers.filter(worker => worker.includedInProduction !== false && (worker.isProductionReady || worker.isPersistedAllocation));
   }
 
   private synchronizeStageQuantities(stage: EditableDailyStage): void {
@@ -1798,7 +1886,8 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
       message,
       productModelStageId: stage.productModelStageId,
       stageCode: stage.stageCode,
-      stageName: stage.stageName
+      stageName: stage.stageName,
+      blocksDraftSave: false
     })));
     // The current API's top-level warnings aggregate stage warnings. Text is used only to suppress
     // that duplicate display; stage association always comes from the parent stage identity above.
@@ -1809,7 +1898,8 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
         message,
         productModelStageId: null,
         stageCode: null,
-        stageName: null
+        stageName: null,
+        blocksDraftSave: false
       }));
     return [...stageBlockers, ...globalBlockers];
   }

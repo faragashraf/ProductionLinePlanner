@@ -476,39 +476,167 @@ public sealed class ProductionCostRecordingServiceTests
     }
 
     [Fact]
-    public async Task Daily_draft_configuration_drift_is_blocked_without_changing_historical_records()
+    public async Task Daily_draft_save_preserves_original_stage_set_when_a_model_stage_is_added_later()
+    {
+        await using var fixture = await Fixture.CreateAsync("SharedPercentage", 0.50m, 17m);
+        var productionDate = fixture.Today.AddDays(2);
+        var stageB = await AddDailyStageAsync(fixture, "B", 2);
+        var stageC = await AddDailyStageAsync(fixture, "C", 3);
+        var (request, created) = await CreateDailyDraftAsync(fixture, productionDate);
+        var originalByStage = created.Stages.ToDictionary(stage => stage.ProductModelStageId);
+        var stageD = await AddDailyStageAsync(fixture, "D", 4);
+
+        var saved = await fixture.Service.UpdateDailyDraftAsync(
+            created.ProductionOrderId,
+            UpdateRequest(request with { LineQuantity = 450m }, created, null),
+            fixture.ActorId,
+            default);
+
+        Assert.Equal(3, saved.Stages.Count);
+        Assert.Equal(
+            new[] { fixture.Stage.Id, stageB.Id, stageC.Id }.Order(),
+            saved.Stages.Select(stage => stage.ProductModelStageId).Order());
+        Assert.DoesNotContain(saved.Stages, stage => stage.ProductModelStageId == stageD.Id);
+        Assert.All(saved.Stages, stage =>
+        {
+            Assert.Equal(originalByStage[stage.ProductModelStageId].Id, stage.Id);
+            Assert.NotEqual(Guid.Empty, stage.ConcurrencyToken);
+        });
+        var loaded = await fixture.Service.LoadDailyOperationsAsync(
+            fixture.Factory.Id, fixture.Line.Id, fixture.Model.Id, productionDate, default);
+        Assert.Equal(4, loaded.Stages.Count);
+        Assert.Equal(3, loaded.ExistingDraft!.Stages.Count);
+        Assert.Equal(3, await fixture.Db.Set<StageProductionRecord>()
+            .CountAsync(record => record.ProductionOrderId == created.ProductionOrderId));
+    }
+
+    [Fact]
+    public async Task Daily_draft_save_preserves_a_historical_stage_after_current_configuration_deactivation()
+    {
+        await using var fixture = await Fixture.CreateAsync("SharedPercentage", 0.50m, 17m);
+        var productionDate = fixture.Today.AddDays(2);
+        var stageB = await AddDailyStageAsync(fixture, "B", 2);
+        var stageC = await AddDailyStageAsync(fixture, "C", 3);
+        var (request, created) = await CreateDailyDraftAsync(fixture, productionDate);
+        var historicalB = created.Stages.Single(stage => stage.ProductModelStageId == stageB.Id);
+        fixture.Stage.Deactivate();
+        stageB.Deactivate();
+        stageC.Deactivate();
+        await fixture.Db.SaveChangesAsync();
+
+        var driftedLoad = await fixture.Service.LoadDailyOperationsAsync(
+            fixture.Factory.Id, fixture.Line.Id, fixture.Model.Id, productionDate, default);
+        Assert.Empty(driftedLoad.Stages);
+        Assert.Equal(3, driftedLoad.ExistingDraft!.Stages.Count);
+
+        var saved = await fixture.Service.UpdateDailyDraftAsync(
+            created.ProductionOrderId,
+            UpdateRequest(request, created, null),
+            fixture.ActorId,
+            default);
+
+        var savedB = saved.Stages.Single(stage => stage.ProductModelStageId == stageB.Id);
+        Assert.Equal(historicalB.Id, savedB.Id);
+        Assert.Equal(historicalB.StageCode, savedB.StageCode);
+        Assert.Equal(3, saved.Stages.Count);
+        Assert.Equal(3, await fixture.Db.StageProductionRecords.CountAsync(record => record.ProductionOrderId == created.ProductionOrderId));
+    }
+
+    [Fact]
+    public async Task Operationally_incomplete_daily_draft_can_be_saved_but_cannot_be_approved()
     {
         await using var fixture = await Fixture.CreateAsync("SharedPercentage", 0.50m, 17m);
         var productionDate = fixture.Today.AddDays(2);
         var (request, created) = await CreateDailyDraftAsync(fixture, productionDate);
-        var historicalStage = Assert.Single(created.Stages);
-        var addedSubStage = new SubStage(Guid.NewGuid(), fixture.MainStage.Id, "New active stage", "NEW", 2, 2);
-        var addedModelStage = new ProductModelStage(
-            Guid.NewGuid(), fixture.Model.Id, fixture.Line.Id, addedSubStage.Id, 2, 0.75m, 20m, CompensationMode.SharedPercentage);
-        fixture.Db.AddRange(addedSubStage, addedModelStage);
-        await fixture.Db.SaveChangesAsync();
+        var incompleteUpdate = UpdateRequest(request, created, null) with
+        {
+            Stages = created.Stages.Select(stage => new DailyProductionStageDraftUpdateRequest(
+                stage.Id,
+                stage.ProductModelStageId,
+                stage.ConcurrencyToken,
+                [])).ToArray()
+        };
 
-        var conflict = await Assert.ThrowsAsync<ProductionConflictException>(() => fixture.Service.UpdateDailyDraftAsync(
+        var saved = await fixture.Service.UpdateDailyDraftAsync(
             created.ProductionOrderId,
-            UpdateRequest(request, created, "stale-preview-token"),
+            incompleteUpdate,
+            fixture.ActorId,
+            default);
+
+        Assert.Empty(Assert.Single(saved.Stages).Workers);
+        var conflict = await Assert.ThrowsAsync<ProductionConflictException>(() => fixture.Service.ApproveDailyOperationAsync(
+            saved.ProductionOrderId,
+            ApprovalRequest(saved),
+            fixture.ActorId,
+            default));
+        Assert.Contains("بلا عامل مشارك", conflict.Message);
+        Assert.All((await fixture.Service.LoadDailyOperationsAsync(
+            fixture.Factory.Id, fixture.Line.Id, fixture.Model.Id, productionDate, default)).ExistingDraft!.Stages,
+            stage => Assert.Equal("Draft", stage.Status));
+    }
+
+    [Fact]
+    public async Task Attendance_source_failure_is_a_non_blocking_draft_warning()
+    {
+        await using var fixture = await Fixture.CreateAsync("SharedPercentage", 0.50m, 17m);
+        var productionDate = fixture.Today.AddDays(2);
+        var service = fixture.CreateService(new RecordingAuditEngine(), new FailingDailyAttendanceEngine());
+        var operations = await service.LoadDailyOperationsAsync(
+            fixture.Factory.Id, fixture.Line.Id, fixture.Model.Id, productionDate, default);
+        var stage = Assert.Single(operations.Stages);
+        Assert.Equal("AttendanceUnavailable", stage.AttendanceStatus);
+        Assert.All(stage.Workers, worker => Assert.False(worker.IsProductionReady));
+        var request = new DailyProductionOperationRequest(
+            fixture.Factory.Id,
+            fixture.Line.Id,
+            fixture.Model.Id,
+            productionDate,
+            500m,
+            Guid.NewGuid(),
+            "attendance unavailable draft",
+            null,
+            [new DailyProductionStageRequest(stage.ProductModelStageId, [])]);
+
+        var saved = await service.CreateDailyDraftAsync(request, fixture.ActorId, default);
+
+        Assert.Empty(Assert.Single(saved.Stages).Workers);
+        await Assert.ThrowsAsync<ProductionConflictException>(() => service.ApproveDailyOperationAsync(
+            saved.ProductionOrderId,
+            ApprovalRequest(saved),
+            fixture.ActorId,
+            default));
+    }
+
+    [Fact]
+    public async Task Daily_draft_update_rejects_a_stage_record_and_token_mapped_to_another_persisted_stage()
+    {
+        await using var fixture = await Fixture.CreateAsync("SharedPercentage", 0.50m, 17m);
+        var productionDate = fixture.Today.AddDays(2);
+        await AddDailyStageAsync(fixture, "B", 2);
+        var (request, created) = await CreateDailyDraftAsync(fixture, productionDate);
+        var valid = UpdateRequest(request, created, null);
+        var first = valid.Stages.First();
+        var second = valid.Stages.Last();
+        var tampered = valid with
+        {
+            Stages = valid.Stages.Select(stage => stage.ProductModelStageId == first.ProductModelStageId
+                ? stage with
+                {
+                    StageProductionRecordId = second.StageProductionRecordId,
+                    ConcurrencyToken = second.ConcurrencyToken
+                }
+                : stage).ToArray()
+        };
+
+        await Assert.ThrowsAsync<ProductionConflictException>(() => fixture.Service.UpdateDailyDraftAsync(
+            created.ProductionOrderId,
+            tampered,
             fixture.ActorId,
             default));
 
-        Assert.Contains("تعارض تكوين مراحل الموديل", conflict.Message);
-        Assert.DoesNotContain("أعد تحميل", conflict.Message);
-        var loaded = await fixture.Service.LoadDailyOperationsAsync(
-            fixture.Factory.Id, fixture.Line.Id, fixture.Model.Id, productionDate, default);
-        Assert.Equal(2, loaded.Stages.Count);
-        var persisted = loaded.ExistingDraft;
-        Assert.NotNull(persisted);
-        var persistedStage = Assert.Single(persisted.Stages);
-        Assert.Equal(historicalStage.Id, persistedStage.Id);
-        Assert.Equal(historicalStage.ProductModelStageId, persistedStage.ProductModelStageId);
-        Assert.Equal(historicalStage.ConcurrencyToken, persistedStage.ConcurrencyToken);
-        Assert.Equal("Draft", persistedStage.Status);
-        Assert.Single(await fixture.Db.Set<StageProductionRecord>()
-            .Where(record => record.ProductionOrderId == created.ProductionOrderId)
-            .ToArrayAsync());
+        var persisted = (await fixture.Service.LoadDailyOperationsAsync(
+            fixture.Factory.Id, fixture.Line.Id, fixture.Model.Id, productionDate, default)).ExistingDraft!;
+        Assert.Equal(created.Stages.Select(stage => stage.Id).Order(), persisted.Stages.Select(stage => stage.Id).Order());
     }
 
     [Fact]
@@ -1047,7 +1175,7 @@ public sealed class ProductionCostRecordingServiceTests
     private static DailyProductionDraftUpdateRequest UpdateRequest(
         DailyProductionOperationRequest request,
         DailyProductionDraftDto draft,
-        string previewToken)
+        string? previewToken)
     {
         var persistedByStage = draft.Stages.ToDictionary(stage => stage.ProductModelStageId);
         return new DailyProductionDraftUpdateRequest(
@@ -1069,6 +1197,21 @@ public sealed class ProductionCostRecordingServiceTests
                     persisted.ConcurrencyToken,
                     stage.Workers);
             }).ToArray());
+    }
+
+    private static async Task<ProductModelStage> AddDailyStageAsync(Fixture fixture, string code, int order)
+    {
+        var subStage = new SubStage(Guid.NewGuid(), fixture.MainStage.Id, $"Stage {code}", code, order, order);
+        var modelStage = new ProductModelStage(
+            Guid.NewGuid(), fixture.Model.Id, fixture.Line.Id, subStage.Id, order, 0.50m, 17m, CompensationMode.SharedPercentage);
+        fixture.Db.AddRange(
+            subStage,
+            modelStage,
+            new WorkerDefaultAssignment(
+                Guid.NewGuid(), fixture.WorkerA.Id, subStage.Id, fixture.ActorId, DateTime.UtcNow.AddMinutes(-1),
+                "Daily stage regression", productionLineId: fixture.Line.Id));
+        await fixture.Db.SaveChangesAsync();
+        return modelStage;
     }
 
     private sealed class Fixture : IAsyncDisposable
@@ -1177,6 +1320,16 @@ public sealed class ProductionCostRecordingServiceTests
                     workerId => workerId,
                     workerId => new AttendancePresenceWindowDto(workerId, AttendanceStatus.Present, firstIn, null, true))));
         }
+    }
+
+    private sealed class FailingDailyAttendanceEngine : PresentAttendanceEngine
+    {
+        public override Task<Result<Dictionary<Guid, AttendancePresenceWindowDto>>> GetPresenceWindowsByWorkerAsync(
+            IEnumerable<Guid> workerIds,
+            DateOnly productionDate,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(Result<Dictionary<Guid, AttendancePresenceWindowDto>>.Failure(
+                new Error("AttendanceUnavailable", "Synthetic attendance source failure.")));
     }
 
     private sealed class WindowAttendanceEngine(IReadOnlyDictionary<Guid, AttendancePresenceWindowDto> windows) : PresentAttendanceEngine

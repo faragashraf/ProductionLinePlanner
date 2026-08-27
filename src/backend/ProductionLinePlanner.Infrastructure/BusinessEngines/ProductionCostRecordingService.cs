@@ -25,9 +25,6 @@ public sealed class ProductionCostRecordingService(
     ICairoTimeZoneProvider cairoTimeZoneProvider,
     ILogger<ProductionCostRecordingService>? logger = null) : IProductionCostRecordingService
 {
-    private const string DailyDraftStageConfigurationConflict =
-        "تعارض تكوين مراحل الموديل الحالية مع مراحل المسودة المحفوظة. لا يمكن تعديل المسودة بأمان؛ راجع إعدادات مراحل الموديل.";
-
     private const int QuantityScale = 3;
     private const int MoneyScale = 4;
     private const string ManualParticipantOverridePermission = "assignments.manage";
@@ -212,12 +209,7 @@ public sealed class ProductionCostRecordingService(
         if (idempotentExisting is not null)
             return ToDailyDraftDto(idempotentExisting, wasAlreadySaved: true);
 
-        var preview = await BuildDailyPreviewAsync(request, actorId, ct);
-        if (string.IsNullOrWhiteSpace(request.PreviewToken) ||
-            !string.Equals(request.PreviewToken, preview.PreviewToken, StringComparison.Ordinal))
-        {
-            throw new ProductionConflictException("تم تغيير بيانات تشغيل اليوم أو لم تعد المعاينة الحالية صالحة. أعد حساب المعاينة قبل الحفظ.");
-        }
+        var draftPlan = await BuildDailyDraftSavePlanAsync(request, actorId, ct);
 
         await using var transaction = db.Database.IsRelational()
             ? await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct)
@@ -256,9 +248,9 @@ public sealed class ProductionCostRecordingService(
             db.Add(order);
             await AuditAsync(actorId, AuditActionType.Create, "ProductionOrder", order.Id, null, OrderAudit(order), ct);
 
-            foreach (var stagePreview in preview.Stages)
+            foreach (var stagePreview in draftPlan.Stages)
             {
-                var record = CreateDailySnapshotRecord(order, preview.Context, stagePreview, request, actorId, now);
+                var record = CreateDailySnapshotRecord(order, draftPlan.Context, stagePreview, request, actorId, now);
                 record.ProductionOrder = order;
                 record.ReplaceAllocations(stagePreview.Allocations);
                 db.Add(record);
@@ -306,26 +298,8 @@ public sealed class ProductionCostRecordingService(
             throw new ProductionConflictException("معرّف ورمز تزامن كل مرحلة محفوظة مطلوبان لتحديث تشغيل اليوم.");
         }
 
-        var operationRequest = new DailyProductionOperationRequest(
-            request.FactoryId,
-            request.ProductionLineId,
-            request.ProductModelId,
-            request.ProductionDate,
-            request.LineQuantity,
-            request.ClientRequestId,
-            request.Notes,
-            request.PreviewToken,
-            request.Stages.Select(stage => new DailyProductionStageRequest(stage.ProductModelStageId, stage.Workers)).ToArray());
-        var preview = await BuildDailyPreviewAsync(
-            operationRequest,
-            actorId,
-            ct,
-            DailyDraftStageConfigurationConflict);
-        if (string.IsNullOrWhiteSpace(request.PreviewToken) ||
-            !string.Equals(request.PreviewToken, preview.PreviewToken, StringComparison.Ordinal))
-        {
-            throw new ProductionConflictException("تم تغيير بيانات تشغيل اليوم أو لم تعد المعاينة الحالية صالحة. أعد حساب المعاينة قبل الحفظ.");
-        }
+        if (request.LineQuantity <= 0)
+            throw new ProductionConflictException("كمية تشغيل الخط يجب أن تكون أكبر من صفر.");
 
         await using var transaction = db.Database.IsRelational()
             ? await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct)
@@ -334,6 +308,7 @@ public sealed class ProductionCostRecordingService(
         var order = await db.Set<ProductionOrder>()
             .AsTracking()
             .Include(current => current.ProductModel)
+            .Include(current => current.ProductionLine)
             .Include(current => current.StageProductionRecords)
                 .ThenInclude(record => record.WorkerAllocations)
                     .ThenInclude(allocation => allocation.Worker)
@@ -344,16 +319,24 @@ public sealed class ProductionCostRecordingService(
             throw new ProductionConflictException("هذا الأمر ليس تشغيلًا يوميًا قابلًا للتحديث.");
         if (order.Status != ProductionOrderStatus.Draft)
             throw new ProductionConflictException("لم يعد تشغيل اليوم في حالة مسودة قابلة للتحديث.");
-        if (order.ProductionDate != request.ProductionDate || order.ProductionLineId != request.ProductionLineId || order.ProductModelId != request.ProductModelId)
+        if (order.ProductionDate != request.ProductionDate ||
+            order.ProductionLineId != request.ProductionLineId ||
+            order.ProductModelId != request.ProductModelId ||
+            order.ProductionLine?.FactoryId != request.FactoryId)
             throw new ProductionConflictException("لا تطابق بيانات التحديث تشغيل اليوم المحدد في المسار.");
         if (order.ConcurrencyToken != request.ConcurrencyToken)
             throw new ProductionConflictException("تغير تشغيل اليوم منذ آخر تحميل. حدّث البيانات وحاول مرة أخرى.");
 
+        if (order.StageProductionRecords.Select(record => record.ProductModelStageId).Distinct().Count() != order.StageProductionRecords.Count ||
+            order.StageProductionRecords.Select(record => record.Id).Distinct().Count() != order.StageProductionRecords.Count)
+        {
+            throw new ProductionConflictException("تحتوي المسودة المحفوظة على هويات مراحل مكررة ولا يمكن تحديثها بأمان.");
+        }
+
         var recordsByStage = order.StageProductionRecords.ToDictionary(record => record.ProductModelStageId);
         var updatesByStage = request.Stages.ToDictionary(stage => stage.ProductModelStageId);
-        var previewStageIds = preview.Stages.Select(stage => stage.Stage.Entity.Id).ToHashSet();
-        if (recordsByStage.Count != updatesByStage.Count || !previewStageIds.SetEquals(recordsByStage.Keys) || !previewStageIds.SetEquals(updatesByStage.Keys))
-            throw new ProductionConflictException(DailyDraftStageConfigurationConflict);
+        if (recordsByStage.Count != updatesByStage.Count || !recordsByStage.Keys.ToHashSet().SetEquals(updatesByStage.Keys))
+            throw new ProductionConflictException("يجب أن يطابق التحديث هويات مراحل المسودة المحفوظة دون إضافة أو حذف أو استبدال.");
 
         foreach (var (productModelStageId, record) in recordsByStage)
         {
@@ -372,14 +355,21 @@ public sealed class ProductionCostRecordingService(
         var orderBefore = DailyDraftAudit(order);
         order.UpdateDraft(request.ProductionDate, RoundQuantity(request.LineQuantity), request.Notes, actorId, updatedAtUtc);
 
-        foreach (var stagePreview in preview.Stages)
+        foreach (var (productModelStageId, record) in recordsByStage)
         {
-            var record = recordsByStage[stagePreview.Stage.Entity.Id];
+            var update = updatesByStage[productModelStageId];
+            var allocations = await BuildPermissiveDailyDraftAllocationsAsync(
+                record.SnapshotCompensationMode,
+                record.SnapshotPiecePrice,
+                request.LineQuantity,
+                update.Workers,
+                record.WorkerAllocations,
+                ct);
             var recordBefore = RecordAudit(record);
             if (record.Status == StageProductionRecordStatus.Cancelled)
                 record.ReopenDailyDraftAfterApprovalCancellation();
-            record.UpdateDraft(request.ProductionDate, stagePreview.StageQuantity, stagePreview.StageQuantity, 0m, request.Notes);
-            var allocationChanges = record.ReplaceAllocations(stagePreview.Allocations);
+            record.UpdateDraft(request.ProductionDate, RoundQuantity(request.LineQuantity), RoundQuantity(request.LineQuantity), 0m, request.Notes);
+            var allocationChanges = record.ReplaceAllocations(allocations);
             db.RemoveRange(allocationChanges.Removed);
             db.AddRange(allocationChanges.Added);
             await AuditAsync(actorId, AuditActionType.Update, "StageProductionRecord", record.Id, recordBefore, RecordAudit(record), ct);
@@ -455,6 +445,7 @@ public sealed class ProductionCostRecordingService(
 
             db.Entry(record).Property(current => current.ConcurrencyToken).OriginalValue = suppliedTokens[record.Id];
             EnsurePersistedFinancialConsistency(record);
+            EnsureDailyApprovalBusinessConsistency(record);
         }
 
         var now = DateTime.UtcNow;
@@ -689,6 +680,187 @@ public sealed class ProductionCostRecordingService(
             stagePreviews);
     }
 
+    private async Task<DailyPreview> BuildDailyDraftPlanAsync(
+        DailyProductionOperationRequest request,
+        CancellationToken ct)
+    {
+        if (request.LineQuantity <= 0)
+            throw new ProductionConflictException("كمية تشغيل الخط يجب أن تكون أكبر من صفر.");
+
+        var context = await LoadDailyContextAsync(
+            request.FactoryId,
+            request.ProductionLineId,
+            request.ProductModelId,
+            request.ProductionDate,
+            ct);
+        ValidateDailyStages(request, context);
+
+        var requestsByStage = request.Stages.ToDictionary(stage => stage.ProductModelStageId);
+        var stagePlans = new List<DailyStagePreview>(context.Stages.Count);
+        foreach (var stage in context.Stages)
+        {
+            var stageRequest = requestsByStage[stage.Entity.Id];
+            var allocations = await BuildPermissiveDailyDraftAllocationsAsync(
+                stage.Entity.CompensationMode,
+                stage.Entity.PiecePrice,
+                request.LineQuantity,
+                stageRequest.Workers,
+                persistedAllocations: null,
+                ct);
+            var warnings = StageWarnings(stage.Dto)
+                .Concat(DailyDraftAllocationWarnings(stage.Entity.CompensationMode, stageRequest.Workers))
+                .Distinct()
+                .ToArray();
+            stagePlans.Add(new DailyStagePreview(
+                stage,
+                allocations,
+                RoundQuantity(request.LineQuantity),
+                RoundMoney(allocations.Sum(allocation => allocation.CalculatedEarning)),
+                warnings));
+        }
+
+        return new DailyPreview(
+            context,
+            RoundQuantity(request.LineQuantity),
+            PreviewToken(context.ContextVersion, request),
+            stagePlans);
+    }
+
+    private async Task<DailyPreview> BuildDailyDraftSavePlanAsync(
+        DailyProductionOperationRequest request,
+        Guid actorId,
+        CancellationToken ct)
+    {
+        if (!string.IsNullOrWhiteSpace(request.PreviewToken))
+        {
+            try
+            {
+                var preview = await BuildDailyPreviewAsync(request, actorId, ct);
+                if (string.Equals(request.PreviewToken, preview.PreviewToken, StringComparison.Ordinal))
+                    return preview;
+            }
+            catch (ProductionConflictException)
+            {
+                // Operational preview validation remains strict. Draft persistence
+                // deliberately falls through to its permissive plan instead.
+            }
+        }
+
+        return await BuildDailyDraftPlanAsync(request, ct);
+    }
+
+    private async Task<IReadOnlyCollection<StageProductionWorkerAllocation>> BuildPermissiveDailyDraftAllocationsAsync(
+        CompensationMode compensationMode,
+        decimal piecePrice,
+        decimal lineQuantity,
+        IReadOnlyCollection<WorkerAllocationRequest> workers,
+        IReadOnlyCollection<StageProductionWorkerAllocation>? persistedAllocations,
+        CancellationToken ct)
+    {
+        if (workers is null)
+            throw new ProductionConflictException("قائمة عمال المرحلة مطلوبة ولو كانت فارغة في المسودة.");
+        if (workers.Any(worker => worker.WorkerId == Guid.Empty) ||
+            workers.Select(worker => worker.WorkerId).Distinct().Count() != workers.Count)
+        {
+            throw new ProductionConflictException("توجد هوية عامل مكررة أو غير صالحة في مرحلة المسودة.");
+        }
+        if (workers.Any(worker => worker.Percentage < 0 || worker.FixedAmount < 0 || worker.InputQuantity < 0))
+            throw new ProductionConflictException("لا يمكن حفظ قيم توزيع سالبة في مسودة تشغيل اليوم.");
+
+        var workerIds = workers.Select(worker => worker.WorkerId).ToArray();
+        var currentWorkers = await db.Set<Worker>()
+            .AsNoTracking()
+            .Where(worker => workerIds.Contains(worker.Id))
+            .Select(worker => new { worker.Id, worker.EmployeeCode, worker.FullName, worker.IsActive, worker.EmploymentStatus })
+            .ToDictionaryAsync(worker => worker.Id, ct);
+        var persistedByWorker = (persistedAllocations ?? [])
+            .ToDictionary(allocation => allocation.WorkerId);
+        var sharedQuantities = new Dictionary<Guid, decimal>();
+        if (compensationMode == CompensationMode.SharedPercentage)
+        {
+            foreach (var worker in workers)
+            {
+                sharedQuantities[worker.WorkerId] = worker.InputQuantity.HasValue
+                    ? RoundQuantity(worker.InputQuantity.Value)
+                    : worker.Percentage.HasValue
+                        ? RoundQuantity(lineQuantity * worker.Percentage.Value / 100m)
+                        : 0m;
+            }
+
+            if (workers.Count > 0 &&
+                workers.All(worker => !worker.InputQuantity.HasValue && worker.Percentage > 0) &&
+                workers.Sum(worker => worker.Percentage ?? 0m) == 100m)
+            {
+                var lastWorkerId = workers.Last().WorkerId;
+                sharedQuantities[lastWorkerId] = RoundQuantity(
+                    sharedQuantities[lastWorkerId] + RoundQuantity(lineQuantity) - sharedQuantities.Values.Sum());
+            }
+        }
+
+        var allocations = new List<StageProductionWorkerAllocation>(workers.Count);
+        foreach (var worker in workers)
+        {
+            string workerCode;
+            string workerName;
+            if (currentWorkers.TryGetValue(worker.WorkerId, out var current) &&
+                current.IsActive && current.EmploymentStatus == EmploymentStatus.Active)
+            {
+                workerCode = current.EmployeeCode;
+                workerName = current.FullName;
+            }
+            else if (persistedByWorker.TryGetValue(worker.WorkerId, out var persisted))
+            {
+                workerCode = persisted.SnapshotWorkerCode;
+                workerName = persisted.SnapshotWorkerName;
+            }
+            else
+            {
+                throw new ProductionConflictException("هوية أحد العمال غير صالحة لهذه المسودة ولا يمكن حفظها بأمان.");
+            }
+
+            var equivalentQuantity = compensationMode == CompensationMode.SharedPercentage
+                ? sharedQuantities[worker.WorkerId]
+                : 0m;
+            var calculatedEarning = compensationMode switch
+            {
+                CompensationMode.SharedPercentage => RoundMoney(equivalentQuantity * piecePrice),
+                CompensationMode.FixedAmount => RoundMoney(worker.FixedAmount ?? 0m),
+                _ => RoundMoney(lineQuantity * piecePrice)
+            };
+            var allocation = new StageProductionWorkerAllocation(
+                Guid.NewGuid(),
+                worker.WorkerId,
+                workerCode,
+                workerName,
+                worker.Percentage,
+                worker.FixedAmount,
+                worker.Notes,
+                worker.ManualOverrideReason,
+                worker.InputQuantity);
+            allocation.SetCalculatedAmounts(equivalentQuantity, calculatedEarning);
+            allocations.Add(allocation);
+        }
+
+        return allocations;
+    }
+
+    private static IReadOnlyCollection<string> DailyDraftAllocationWarnings(
+        CompensationMode compensationMode,
+        IReadOnlyCollection<WorkerAllocationRequest> workers)
+    {
+        var warnings = new List<string>();
+        if (workers.Count == 0)
+            warnings.Add("لا يوجد عامل جاهز محتسب في تشغيل هذه المرحلة. يمكن حفظ المسودة، لكن يلزم استكمالها قبل الاعتماد.");
+        if (compensationMode == CompensationMode.SharedPercentage &&
+            (workers.Any(worker => !worker.Percentage.HasValue || worker.Percentage <= 0) || workers.Sum(worker => worker.Percentage ?? 0m) != 100m))
+        {
+            warnings.Add("توزيع نسب العمال غير مكتمل. يمكن حفظ المسودة، لكن يلزم ضبط المجموع إلى 100٪ قبل الاعتماد.");
+        }
+        if (compensationMode == CompensationMode.FixedAmount && workers.Any(worker => !worker.FixedAmount.HasValue))
+            warnings.Add("توجد قيمة ثابتة غير مكتملة. يمكن حفظ المسودة، لكن يلزم استكمالها قبل الاعتماد.");
+        return warnings;
+    }
+
     private async Task<DailyContext> LoadDailyContextAsync(
         Guid factoryId,
         Guid productionLineId,
@@ -726,7 +898,19 @@ public sealed class ProductionCostRecordingService(
                             && stage.SubStage.DepartmentId == line.DepartmentId.Value)
             .OrderBy(stage => stage.StageOrder)
             .ToArrayAsync(ct);
-        if (stages.Length == 0)
+        var existingOrder = await db.Set<ProductionOrder>()
+            .AsNoTracking()
+            .Include(order => order.ProductModel)
+            .Include(order => order.StageProductionRecords)
+                .ThenInclude(record => record.WorkerAllocations)
+                    .ThenInclude(allocation => allocation.Worker)
+            .Where(order => order.ProductionDate == productionDate
+                && order.ProductionLineId == productionLineId
+                && order.ProductModelId == productModelId
+                && order.StageProductionRecords.Any())
+            .OrderByDescending(order => order.RecordedAtUtc)
+            .FirstOrDefaultAsync(ct);
+        if (stages.Length == 0 && existingOrder is null)
             throw new ProductionConflictException(missingStagesMessage ?? "لا توجد مراحل موديل نشطة مرتبطة بقسم خط الإنتاج المحدد.");
 
         var workers = await db.Set<Worker>().AsNoTracking()
@@ -737,8 +921,10 @@ public sealed class ProductionCostRecordingService(
         var workerIds = workers.Select(worker => worker.Id).ToArray();
         var assignmentWindows = await LoadAssignmentWindowsAsync(productionLineId, workerIds, productionDate, ct);
         var attendance = await attendanceEngine.GetPresenceWindowsByWorkerAsync(workerIds, productionDate, ct);
-        if (attendance.IsFailure)
-            throw new ProductionConflictException("تعذر قراءة نافذة حضور العمال لتاريخ الإنتاج المحدد. نفّذ مزامنة الحضور ثم أعد المحاولة.");
+        var attendanceUnavailable = attendance.IsFailure;
+        var attendanceByWorker = attendance.IsSuccess
+            ? attendance.Value!
+            : new Dictionary<Guid, AttendancePresenceWindowDto>();
 
         var workersById = workers.ToDictionary(worker => worker.Id);
         var staffingCandidates = assignmentWindows.SelectMany(pair => pair.Value.Select(window =>
@@ -753,7 +939,7 @@ public sealed class ProductionCostRecordingService(
                 window.AssignmentId,
                 [new UtcTimeWindow(window.StartUtc, window.EndUtc)]);
         })).ToArray();
-        var staffingSnapshot = DailyStageStaffingBuilder.Build(staffingCandidates, attendance.Value!);
+        var staffingSnapshot = DailyStageStaffingBuilder.Build(staffingCandidates, attendanceByWorker);
 
         var stageContexts = stages.Select(stage =>
         {
@@ -765,7 +951,7 @@ public sealed class ProductionCostRecordingService(
                     worker.WorkerName,
                     stage.SubStageId,
                     worker.AssignmentType,
-                    worker.Attendance is null ? "NoSourceCheckIn" : AttendanceLabel(worker.Attendance.Status),
+                    attendanceUnavailable ? "AttendanceUnavailable" : worker.Attendance is null ? "NoSourceCheckIn" : AttendanceLabel(worker.Attendance.Status),
                     worker.Attendance?.HasSourceCheckIn == true,
                     worker.Attendance?.Status is AttendanceStatus.Present or AttendanceStatus.Late,
                     worker.AssignmentId,
@@ -779,13 +965,14 @@ public sealed class ProductionCostRecordingService(
             var suggestedPercentages = SuggestedSharedPercentages(stage.CompensationMode, stageWorkers);
             var workerDtos = stageWorkers.Select(worker => worker.ToDto(suggestedPercentages.GetValueOrDefault(worker.WorkerId))).ToArray();
             var hasAbsent = workerDtos.Any(worker => worker.AttendanceStatus == "Absent");
-            var hasNoCheckIn = workerDtos.Any(worker => worker.AttendanceStatus == "NoSourceCheckIn");
+            var hasNoCheckIn = !attendanceUnavailable && workerDtos.Any(worker => worker.AttendanceStatus == "NoSourceCheckIn");
             var staffed = workerDtos.Length > 0;
             var ready = staffed && workerDtos.Any(worker => worker.IsProductionReady);
             var staffingStatus = staffed ? "Staffed" : "NoStaffing";
             var attendanceStatus = !staffed
                 ? "NoStaffing"
-                : hasAbsent ? "AbsentWorker"
+                : attendanceUnavailable ? "AttendanceUnavailable"
+                    : hasAbsent ? "AbsentWorker"
                     : hasNoCheckIn ? "NoSourceCheckIn"
                         : ready ? "Ready" : "AttendanceUnavailable";
             var subStage = stage.SubStage!;
@@ -817,14 +1004,14 @@ public sealed class ProductionCostRecordingService(
             .ThenBy(worker => worker.Id)
             .Select(worker =>
             {
-                attendance.Value!.TryGetValue(worker.Id, out var presence);
+                attendanceByWorker.TryGetValue(worker.Id, out var presence);
                 var contribution = TimeAwareProductionAllocation.CalculateContribution(
                     worker.Id,
                     [new UtcTimeWindow(dayStartUtc, dayEndUtc)],
                     presence);
                 return new DailyProductionWorkerDto(
                     worker.Id, worker.Code, worker.Name, true, null,
-                    presence is null ? "NoSourceCheckIn" : AttendanceLabel(presence.Status),
+                    attendanceUnavailable ? "AttendanceUnavailable" : presence is null ? "NoSourceCheckIn" : AttendanceLabel(presence.Status),
                     presence?.HasSourceCheckIn == true,
                     presence?.Status is AttendanceStatus.Present or AttendanceStatus.Late,
                     false, null,
@@ -837,18 +1024,6 @@ public sealed class ProductionCostRecordingService(
                     IsDailyOverride: false);
             })
             .ToArray();
-        var existingOrder = await db.Set<ProductionOrder>()
-            .AsNoTracking()
-            .Include(order => order.ProductModel)
-            .Include(order => order.StageProductionRecords)
-                .ThenInclude(record => record.WorkerAllocations)
-                    .ThenInclude(allocation => allocation.Worker)
-            .Where(order => order.ProductionDate == productionDate
-                && order.ProductionLineId == productionLineId
-                && order.ProductModelId == productModelId
-                && order.StageProductionRecords.Any())
-            .OrderByDescending(order => order.RecordedAtUtc)
-            .FirstOrDefaultAsync(ct);
         var existingDraft = existingOrder is null ? null : ToDailyDraftDto(existingOrder, wasAlreadySaved: true);
         var version = StaffingContextVersion(factory, line, product, productionDate, stageContexts, stageContexts.SelectMany(stage => stage.Workers).ToArray());
         return new DailyContext(factory, line, product, productionDate, version, stageContexts, allWorkers, existingDraft);
@@ -1025,6 +1200,7 @@ public sealed class ProductionCostRecordingService(
     {
         var warnings = new List<string>();
         if (stage.StaffingStatus == "NoStaffing") warnings.Add("لا يوجد عامل فعّال مسكّن لهذه المرحلة في تاريخ الإنتاج.");
+        if (stage.AttendanceStatus == "AttendanceUnavailable") warnings.Add("تعذر قراءة مصدر الحضور لهذه المرحلة. يمكن حفظ المسودة، لكن يجب مراجعة الحضور قبل الاعتماد.");
         if (stage.HasAbsentWorkers) warnings.Add("يوجد عامل مسكّن بحالة غياب في تاريخ الإنتاج.");
         if (stage.HasNoSourceCheckInWorkers) warnings.Add("يوجد عامل مسكّن بلا تسجيل حضور من المصدر في تاريخ الإنتاج.");
         if (stage.IsFinancialReviewPending) warnings.Add("توزيع النسب لهذه المرحلة يحتاج مراجعة مدير قبل الاحتساب.");
@@ -1302,6 +1478,65 @@ public sealed class ProductionCostRecordingService(
         catch (InvalidOperationException)
         {
             throw new ProductionConflictException("لا يمكن اعتماد السجل لأن إجمالي المستحقات لا يطابق مجموع مستحقات العمال المحفوظة. أعد حساب المعاينة واحفظ المسودة من جديد.");
+        }
+    }
+    private static void EnsureDailyApprovalBusinessConsistency(StageProductionRecord record)
+    {
+        if (record.ProducedQuantity <= 0 || record.AcceptedQuantity != record.ProducedQuantity || record.RejectedQuantity != 0)
+            throw new ProductionConflictException("لا يمكن اعتماد مرحلة بكمية تشغيل غير مكتملة أو غير متسقة.");
+        if (record.WorkerAllocations.Count == 0)
+            throw new ProductionConflictException("لا يمكن اعتماد مرحلة بلا عامل مشارك محفوظ. استكمل المسودة أولًا.");
+
+        var workers = record.WorkerAllocations;
+        switch (record.SnapshotCompensationMode)
+        {
+            case CompensationMode.SharedPercentage:
+                if (workers.Any(worker => !worker.Percentage.HasValue || worker.Percentage <= 0 || worker.FixedAmount.HasValue) ||
+                    workers.Sum(worker => worker.Percentage ?? 0m) != 100m)
+                {
+                    throw new ProductionConflictException("لا يمكن اعتماد مرحلة قبل اكتمال توزيع نسب العمال إلى 100٪.");
+                }
+
+                var hasInputQuantities = workers.Any(worker => worker.InputQuantity.HasValue);
+                if (hasInputQuantities &&
+                    (workers.Any(worker => !worker.InputQuantity.HasValue || worker.InputQuantity <= 0) ||
+                     RoundQuantity(workers.Sum(worker => worker.InputQuantity ?? 0m)) != RoundQuantity(record.ProducedQuantity)))
+                {
+                    throw new ProductionConflictException("لا يمكن اعتماد مرحلة قبل اكتمال كميات العمال ومطابقتها لكمية المرحلة.");
+                }
+
+                if (RoundQuantity(workers.Sum(worker => worker.EquivalentQuantity)) != RoundQuantity(record.ProducedQuantity))
+                    throw new ProductionConflictException("لا يمكن اعتماد المرحلة قبل موازنة كميات العمال مع كمية المرحلة.");
+
+                foreach (var worker in workers)
+                {
+                    var expectedQuantity = hasInputQuantities
+                        ? RoundQuantity(worker.InputQuantity!.Value)
+                        : RoundQuantity(record.ProducedQuantity * worker.Percentage!.Value / 100m);
+                    if (Math.Abs(worker.EquivalentQuantity - expectedQuantity) > 0.001m ||
+                        worker.CalculatedEarning != RoundMoney(worker.EquivalentQuantity * record.SnapshotPiecePrice))
+                    {
+                        throw new ProductionConflictException("لا يمكن اعتماد المرحلة لأن توزيع الكميات أو المستحقات يحتاج إعادة حساب.");
+                    }
+                }
+                break;
+
+            case CompensationMode.FixedAmount:
+                if (workers.Any(worker => worker.Percentage.HasValue || !worker.FixedAmount.HasValue || worker.FixedAmount < 0 ||
+                                          worker.EquivalentQuantity != 0m || worker.CalculatedEarning != RoundMoney(worker.FixedAmount ?? 0m)))
+                {
+                    throw new ProductionConflictException("لا يمكن اعتماد المرحلة قبل استكمال القيم الثابتة الصحيحة لكل عامل.");
+                }
+                break;
+
+            default:
+                if (workers.Any(worker => worker.Percentage.HasValue || worker.FixedAmount.HasValue ||
+                                          worker.EquivalentQuantity != 0m ||
+                                          worker.CalculatedEarning != RoundMoney(record.ProducedQuantity * record.SnapshotPiecePrice)))
+                {
+                    throw new ProductionConflictException("لا يمكن اعتماد المرحلة لأن مستحقات المعدل الكامل تحتاج إعادة حساب.");
+                }
+                break;
         }
     }
     private static void EnsureProductionApprovalCanBeCancelled(StageProductionRecord record, string reason)

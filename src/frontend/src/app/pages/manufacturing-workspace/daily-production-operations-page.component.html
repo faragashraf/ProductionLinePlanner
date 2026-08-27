@@ -104,6 +104,10 @@
       <p class="daily-production-operations__warning plp-inline-feedback plp-inline-feedback--warning" *ngIf="hasExistingDraft && !isDailyOperationApproved">
         توجد مسودة محفوظة لهذا اليوم وتم تحميل عمالها وتوزيعها. يمكنك مراجعتها ثم حفظ تصحيح صريح لها دون إنشاء مسودة ثانية.
       </p>
+      <p class="daily-production-operations__warning plp-inline-feedback plp-inline-feedback--warning" *ngIf="draftConfigurationWarning" role="status">
+        <i class="pi pi-exclamation-triangle" aria-hidden="true"></i>
+        {{ draftConfigurationWarning }}
+      </p>
       <p class="daily-production-operations__approved plp-inline-feedback plp-inline-feedback--success" *ngIf="isDailyOperationApproved">
         <plp-status-badge status="ready" label="معتمد" [compact]="true"></plp-status-badge>
         تم اعتماد تشغيل اليوم وثُبتت بياناته. العرض للقراءة فقط.
@@ -245,15 +249,18 @@
           <input pInputText [(ngModel)]="notes" maxlength="1000" (ngModelChange)="stageChanged()" [disabled]="!canEditDraft" placeholder="اختياري">
         </label>
         <div class="daily-production-operations__final-actions plp-sticky-action-bar plp-action-group">
-          <span>{{ operations.totalStages }} مرحلة · {{ totalEnteredWorkers }} صف عامل. لا يضاعف أي صف كمية الخط أو المرحلة.</span>
+          <span>{{ stages.length }} مرحلة · {{ totalEnteredWorkers }} صف عامل. لا يضاعف أي صف كمية الخط أو المرحلة.</span>
           <button pButton type="button" class="p-button-outlined" label="حساب معاينة موحّدة" icon="pi pi-calculator" [loading]="previewing" [disabled]="!canEditDraft || previewing" (click)="calculatePreview()"></button>
-          <button *ngIf="!isApproved" pButton type="button" [label]="hasExistingDraft ? 'حفظ تغييرات مسودة اليوم' : 'حفظ مسودة اليوم'" icon="pi pi-save" [loading]="saving" [disabled]="!canEditDraft || !isPreviewCurrent" (click)="saveDailyDraft()"></button>
+          <button *ngIf="!isApproved" pButton type="button" [label]="hasExistingDraft ? 'حفظ تغييرات مسودة اليوم' : 'حفظ مسودة اليوم'" icon="pi pi-save" [loading]="saving" [disabled]="!canEditDraft || draftSaveBlocked" (click)="saveDailyDraft()"></button>
           <button *ngIf="canExportExcel" pButton type="button" class="p-button-outlined daily-production-operations__excel-export" label="تصدير Excel" icon="pi pi-download" [loading]="exportingExcel" [disabled]="exportingExcel" (click)="exportDailyProductionExcel()"></button>
           <button *ngIf="canApproveDailyOperation" pButton type="button" class="p-button-success" label="اعتماد تشغيل اليوم" icon="pi pi-check" [loading]="approving" [disabled]="saving || previewing || approving || cancelling" (click)="approveDailyOperation()"></button>
           <button *ngIf="canCancelDailyOperationApproval" pButton type="button" class="p-button-warning" label="إلغاء اعتماد تشغيل اليوم" icon="pi pi-undo" [loading]="cancelling" [disabled]="cancelling" (click)="openDailyApprovalCancellationDialog()"></button>
         </div>
       </div>
-      <ul class="daily-production-operations__validation daily-production-operations__preview-blocker-list plp-inline-feedback plp-inline-feedback--error" *ngIf="validationIssues.length" role="alert">
+      <div class="daily-production-operations__warning plp-inline-feedback plp-inline-feedback--warning" *ngIf="validationIssues.length">
+        <strong>{{ draftSaveBlocked ? 'متطلبات أساسية تمنع الحفظ' : 'متطلبات يجب استكمالها قبل الاعتماد — حفظ المسودة متاح' }}</strong>
+      </div>
+      <ul class="daily-production-operations__validation daily-production-operations__preview-blocker-list plp-inline-feedback plp-inline-feedback--warning" *ngIf="validationIssues.length" role="status">
         <li *ngFor="let issue of validationIssues">
           <button
             *ngIf="issue.productModelStageId; else globalValidationIssue"
