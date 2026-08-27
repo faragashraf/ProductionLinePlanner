@@ -519,27 +519,96 @@ public sealed class ProductionCostRecordingServiceTests
         var stageC = await AddDailyStageAsync(fixture, "C", 3);
         var (request, created) = await CreateDailyDraftAsync(fixture, productionDate);
         var historicalB = created.Stages.Single(stage => stage.ProductModelStageId == stageB.Id);
-        fixture.Stage.Deactivate();
         stageB.Deactivate();
         stageC.Deactivate();
         await fixture.Db.SaveChangesAsync();
 
         var driftedLoad = await fixture.Service.LoadDailyOperationsAsync(
             fixture.Factory.Id, fixture.Line.Id, fixture.Model.Id, productionDate, default);
-        Assert.Empty(driftedLoad.Stages);
+        Assert.Equal([fixture.Stage.Id], driftedLoad.Stages.Select(stage => stage.ProductModelStageId));
         Assert.Equal(3, driftedLoad.ExistingDraft!.Stages.Count);
+
+        var activePreviewRequest = request with
+        {
+            LineQuantity = 620m,
+            Stages = request.Stages.Where(stage => stage.ProductModelStageId == fixture.Stage.Id).ToArray()
+        };
+        var preview = await fixture.Service.PreviewDailyOperationsAsync(activePreviewRequest, fixture.ActorId, default);
+        Assert.Equal([fixture.Stage.Id], preview.Stages.Select(stage => stage.ProductModelStageId));
 
         var saved = await fixture.Service.UpdateDailyDraftAsync(
             created.ProductionOrderId,
-            UpdateRequest(request, created, null),
+            UpdateRequest(request with { LineQuantity = 620m }, created, null),
             fixture.ActorId,
             default);
 
+        var savedA = saved.Stages.Single(stage => stage.ProductModelStageId == fixture.Stage.Id);
         var savedB = saved.Stages.Single(stage => stage.ProductModelStageId == stageB.Id);
+        Assert.Equal(620m, savedA.ProducedQuantity);
         Assert.Equal(historicalB.Id, savedB.Id);
+        Assert.Equal(historicalB.ConcurrencyToken, savedB.ConcurrencyToken);
         Assert.Equal(historicalB.StageCode, savedB.StageCode);
+        Assert.Equal(historicalB.ProducedQuantity, savedB.ProducedQuantity);
+        Assert.Equal(historicalB.TotalWorkerEarnings, savedB.TotalWorkerEarnings);
+        Assert.Equal(
+            historicalB.Workers.Select(worker => (worker.WorkerId, worker.Percentage, worker.InputQuantity, worker.EquivalentQuantity, worker.CalculatedEarning)),
+            savedB.Workers.Select(worker => (worker.WorkerId, worker.Percentage, worker.InputQuantity, worker.EquivalentQuantity, worker.CalculatedEarning)));
         Assert.Equal(3, saved.Stages.Count);
         Assert.Equal(3, await fixture.Db.StageProductionRecords.CountAsync(record => record.ProductionOrderId == created.ProductionOrderId));
+
+        var approved = await fixture.Service.ApproveDailyOperationAsync(
+            saved.ProductionOrderId,
+            ApprovalRequest(saved),
+            fixture.ActorId,
+            default);
+        Assert.Equal(3, approved.ApprovedStageCount);
+        Assert.All((await fixture.Service.LoadDailyOperationsAsync(
+            fixture.Factory.Id, fixture.Line.Id, fixture.Model.Id, productionDate, default)).ExistingDraft!.Stages,
+            stage => Assert.Equal("Approved", stage.Status));
+    }
+
+    [Fact]
+    public async Task Daily_draft_update_keeps_a_disabled_historical_stage_concurrency_protected()
+    {
+        await using var fixture = await Fixture.CreateAsync("SharedPercentage", 0.50m, 17m);
+        var productionDate = fixture.Today.AddDays(2);
+        var stageB = await AddDailyStageAsync(fixture, "B", 2);
+        var (request, created) = await CreateDailyDraftAsync(fixture, productionDate);
+        stageB.Deactivate();
+        await fixture.Db.SaveChangesAsync();
+        var valid = UpdateRequest(request, created, null);
+        var historicalB = valid.Stages.Single(stage => stage.ProductModelStageId == stageB.Id);
+        var tampered = valid with
+        {
+            Stages = valid.Stages.Select(stage => stage.ProductModelStageId == stageB.Id
+                ? stage with { ConcurrencyToken = Guid.NewGuid() }
+                : stage).ToArray()
+        };
+
+        await Assert.ThrowsAsync<ProductionConflictException>(() => fixture.Service.UpdateDailyDraftAsync(
+            created.ProductionOrderId,
+            tampered,
+            fixture.ActorId,
+            default));
+
+        var activeStage = valid.Stages.Single(stage => stage.ProductModelStageId == fixture.Stage.Id);
+        var wrongRecordIdentity = valid with
+        {
+            Stages = valid.Stages.Select(stage => stage.ProductModelStageId == stageB.Id
+                ? stage with { StageProductionRecordId = activeStage.StageProductionRecordId }
+                : stage).ToArray()
+        };
+        await Assert.ThrowsAsync<ProductionConflictException>(() => fixture.Service.UpdateDailyDraftAsync(
+            created.ProductionOrderId,
+            wrongRecordIdentity,
+            fixture.ActorId,
+            default));
+
+        var persisted = (await fixture.Service.LoadDailyOperationsAsync(
+            fixture.Factory.Id, fixture.Line.Id, fixture.Model.Id, productionDate, default)).ExistingDraft!;
+        var persistedB = persisted.Stages.Single(stage => stage.ProductModelStageId == stageB.Id);
+        Assert.Equal(historicalB.StageProductionRecordId, persistedB.Id);
+        Assert.Equal(historicalB.ConcurrencyToken, persistedB.ConcurrencyToken);
     }
 
     [Fact]

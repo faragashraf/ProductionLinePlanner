@@ -36,7 +36,11 @@ test.beforeAll(async () => {
   await mkdir(excelOutput, { recursive: true });
 });
 
-async function preparePage(page: Page, options: { validationBlockers?: boolean } = {}): Promise<void> {
+async function preparePage(page: Page, options: {
+  validationBlockers?: boolean;
+  historicalDraft?: boolean;
+  onDraftUpdate?: (payload: any) => void;
+} = {}): Promise<void> {
   await page.addInitScript(({ storedPermissions }) => {
     localStorage.setItem('plp.accessToken', 'visual-token');
     localStorage.setItem('plp.currentUser', JSON.stringify({ id: 'visual-user', fullName: 'مراجع الواجهة', roles: ['Administrator'], permissions: storedPermissions }));
@@ -55,12 +59,21 @@ async function preparePage(page: Page, options: { validationBlockers?: boolean }
     else if (pathname.endsWith('/api/factories')) data = { items: [factory] };
     else if (pathname.endsWith('/api/departments')) data = { items: [department] };
     else if (pathname.endsWith('/api/production-lines')) data = { items: [line] };
-    else if (pathname.endsWith(`/api/product-models/${model.id}/production-lines/${line.id}/stages`)) data = options.validationBlockers ? validationModelStages : [modelStage, secondModelStage];
+    else if (pathname.endsWith(`/api/product-models/${model.id}/production-lines/${line.id}/stages`)) data = options.validationBlockers
+      ? validationModelStages
+      : options.historicalDraft ? [modelStage] : [modelStage, secondModelStage];
     else if (pathname.endsWith('/api/product-models')) data = { items: [model], totalCount: 1, pageNumber: 1, pageSize: 10 };
     else if (pathname.endsWith('/api/stages')) data = { items: [stage], totalCount: 1, pageNumber: 1, pageSize: 200 };
     else if (pathname.includes('/api/attendance/sync/production-date/')) data = { sourceUsersCount: 1, sourceCheckInsCount: 1, matchedWorkersCount: 1, unmatchedSourceUsersCount: 0, workersWithoutAttendanceCount: 0, insertedRecords: 1, updatedRecords: 0, skippedRecords: 0 };
     else if (pathname.endsWith('/api/production/daily-operations/preview')) data = dailyPreview();
-    else if (pathname.endsWith('/api/production/daily-operations')) data = options.validationBlockers ? validationDailyOperations() : dailyOperations();
+    else if (pathname.endsWith('/api/production/daily-operations/drafts/historical-order')) {
+      const payload = route.request().postDataJSON();
+      options.onDraftUpdate?.(payload);
+      data = historicalDraft();
+    }
+    else if (pathname.endsWith('/api/production/daily-operations')) data = options.validationBlockers
+      ? validationDailyOperations()
+      : options.historicalDraft ? historicalDraftDailyOperations() : dailyOperations();
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data, error: null }) });
   });
 }
@@ -128,6 +141,107 @@ function validationDailyOperations() {
   };
 }
 
+function historicalDraft() {
+  const savedWorker = (workerId: string, workerCode: string, workerName: string) => ({
+    workerId,
+    workerCode,
+    workerName,
+    percentage: 100,
+    inputQuantity: 1000,
+    equivalentQuantity: 1000,
+    calculatedEarning: 600
+  });
+  const savedStage = (id: string, productModelStageId: string, stageCode: string, stageName: string, worker: any) => ({
+    id,
+    productionOrderId: 'historical-order',
+    productModelStageId,
+    productionDate: '2026-07-17',
+    producedQuantity: 1000,
+    acceptedQuantity: 1000,
+    rejectedQuantity: 0,
+    status: 'Draft',
+    stageCode,
+    stageName,
+    productModelCode: model.code,
+    productModelName: model.name,
+    factoryCode: factory.code,
+    factoryName: factory.name,
+    productionLineCode: line.lineCode,
+    productionLineName: line.name,
+    mainStageName: 'التشغيل',
+    piecePrice: .6,
+    standardSeconds: 30,
+    compensationMode: 'SharedPercentage',
+    totalWorkerEarnings: 600,
+    concurrencyToken: `token-${id}`,
+    workers: [worker]
+  });
+  return {
+    productionOrderId: 'historical-order',
+    orderNumber: 'DLY-HISTORICAL',
+    orderStatus: 'Draft',
+    concurrencyToken: 'historical-order-token',
+    productionDate: '2026-07-17',
+    recordedAtUtc: '2026-07-17T13:00:00Z',
+    lineQuantity: 1000,
+    wasAlreadySaved: false,
+    stages: [
+      savedStage('record-active', modelStage.id, stage.code, stage.name, savedWorker('worker-active', 'W-ACTIVE', 'عامل المرحلة النشطة')),
+      savedStage('record-003', 'historical-stage-003', 'STG003', 'مرحلة تاريخية 003', savedWorker('worker-003', 'W003', 'عامل تاريخي 003')),
+      savedStage('record-060', 'historical-stage-060', 'STG060', 'مرحلة تاريخية 060', savedWorker('worker-060', 'W060', 'عامل تاريخي 060'))
+    ]
+  };
+}
+
+function historicalDraftDailyOperations() {
+  const activeWorker = {
+    ...dailyWorker(),
+    workerId: 'worker-active',
+    workerCode: 'W-ACTIVE',
+    workerName: 'عامل المرحلة النشطة',
+    suggestedPercentage: 100,
+    isAssignedWorker: false,
+    isDailyOverride: true
+  };
+  const activeStage = {
+    productModelStageId: modelStage.id,
+    subStageId: stage.id,
+    mainStageName: 'التشغيل',
+    stageCode: stage.code,
+    stageName: stage.name,
+    stageOrder: 1,
+    piecePrice: .6,
+    compensationMode: 'SharedPercentage',
+    staffingStatus: 'Staffed',
+    attendanceStatus: 'Ready',
+    hasAbsentWorkers: false,
+    hasNoSourceCheckInWorkers: false,
+    isFinancialReviewPending: false,
+    isReady: true,
+    workers: [activeWorker]
+  };
+  return {
+    factoryId: factory.id,
+    factoryName: factory.name,
+    productionLineId: line.id,
+    productionLineName: line.name,
+    productModelId: model.id,
+    productModelCode: model.code,
+    productModelName: model.name,
+    productionDate: '2026-07-17',
+    staffingContextVersion: 'historical-v1',
+    totalStages: 1,
+    readyStages: 1,
+    stagesWithAbsentWorkers: 0,
+    stagesWithNoSourceCheckIn: 0,
+    stagesWithoutStaffing: 0,
+    stagesRequiringCostReview: 0,
+    activeWorkers: [activeWorker],
+    stages: [activeStage],
+    existingDraft: historicalDraft()
+  };
+}
+
 function dailyPreview() {
   const firstWarning = 'تحتاج مرحلة التجميع إلى مراجعة توزيع العمال قبل حفظ المسودة لضمان اكتمال بيانات التشغيل.';
   const secondWarning = 'تحتاج مرحلة التشطيب إلى مراجعة مدير الإنتاج قبل اعتماد الكمية النهائية.';
@@ -143,7 +257,7 @@ async function openDailyOperations(page: Page): Promise<void> {
     has: page.locator('.factory-structure-node--line[data-selectable="true"]')
   });
   await expect(lineNode).toBeVisible();
-  await lineNode.evaluate(element => (element as HTMLElement).click());
+  await lineNode.locator('.factory-structure-node__content strong').evaluate(element => (element as HTMLElement).click());
   await expect(page.locator('.structure-selector__trigger')).toContainText(line.name);
   await page.getByLabel('الموديل').selectOption(model.id);
   await page.getByRole('button', { name: 'مزامنة حضور التاريخ' }).click();
@@ -243,6 +357,40 @@ test('stage-aware validation blockers remain visible and navigate through many i
     await expect(page.locator('.daily-production-operations__stage-list > button')).toHaveCount(validationStageDefinitions.length);
     await expect(page.locator('.daily-production-operations__stage-list > button.is-selected')).toHaveCount(0);
     await expect(validationButtons).toHaveCount(validationStageDefinitions.length);
+    await expectViewportSafe(page);
+  }
+});
+
+test('inactive persisted STG003 and STG060 stay visible and saveable without operational blockers', async ({ page }) => {
+  let updatePayload: any;
+  await preparePage(page, { historicalDraft: true, onDraftUpdate: payload => { updatePayload = payload; } });
+  for (const [name, width, height] of [['desktop', 1440, 900], ['tablet-landscape', 1280, 800], ['tablet-portrait', 800, 1280], ['mobile', 390, 844]] as const) {
+    updatePayload = undefined;
+    await page.setViewportSize({ width, height });
+    await openDailyOperations(page);
+    await page.getByRole('button', { name: 'حساب معاينة موحّدة' }).click();
+
+    const issues = page.locator('button.daily-production-operations__validation-issue');
+    await expect(issues).toHaveCount(1);
+    await expect(issues.first()).toContainText('W-ACTIVE');
+    await expect(issues.first()).not.toContainText('STG003');
+    await expect(issues.first()).not.toContainText('STG060');
+    await expect(page.getByText('سبب التجاوز مطلوب للعامل W003.')).toHaveCount(0);
+    await expect(page.getByText('سبب التجاوز مطلوب للعامل W060.')).toHaveCount(0);
+
+    await page.locator('[data-stage-id="historical-stage-003"]').click();
+    await expect(page.locator('.daily-production-operations__detail-panel')).toContainText('مرحلة محفوظة غير نشطة');
+    await expect(page.locator('.daily-production-operations__detail-panel')).toContainText('ستظل بياناتها التاريخية محفوظة للقراءة فقط');
+    await expect(page.locator('.daily-production-operations__detail-panel input:enabled')).toHaveCount(0);
+    await page.screenshot({ path: path.join(visualOutput, `daily-historical-inactive-${name}.png`), fullPage: true });
+
+    await page.getByRole('button', { name: 'حفظ تغييرات مسودة اليوم' }).click();
+    await expect.poll(() => updatePayload?.stages?.length ?? 0).toBe(3);
+    expect(updatePayload.stages.map((item: any) => [item.productModelStageId, item.stageProductionRecordId])).toEqual([
+      [modelStage.id, 'record-active'],
+      ['historical-stage-003', 'record-003'],
+      ['historical-stage-060', 'record-060']
+    ]);
     await expectViewportSafe(page);
   }
 });

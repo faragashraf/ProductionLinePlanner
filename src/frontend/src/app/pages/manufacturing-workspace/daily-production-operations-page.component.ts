@@ -38,6 +38,9 @@ type DraftUpdateConcurrencyIssue =
   | 'stage-identity-mismatch';
 type EditableDailyStage = Omit<DailyProductionStage, 'workers'> & {
   standardSeconds: number | null;
+  isOperationallyActive: boolean;
+  persistedStageQuantity: number | null;
+  persistedStageCost: number | null;
   workers: EditableDailyWorker[];
 };
 type EditableDailyWorker = DailyProductionWorker & {
@@ -348,7 +351,7 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
 
   get availableReplacementWorkers(): DailyProductionWorker[] {
     const stage = this.selectedStage;
-    if (!stage || !this.operations) return [];
+    if (!stage || !this.operations || !this.isOperationallyActiveStage(stage)) return [];
     const existing = new Set(stage.workers.map(worker => worker.workerId));
     return this.operations.activeWorkers
       .filter(worker => worker.isProductionReady && !existing.has(worker.workerId))
@@ -639,7 +642,7 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
   addReplacementWorker(): void {
     const stage = this.selectedStage;
     const worker = this.availableReplacementWorkers.find(candidate => candidate.workerId === this.replacementWorkerId);
-    if (!stage || !worker || !this.canOverrideParticipants) return;
+    if (!stage || !worker || !this.canEditStage(stage) || !this.canOverrideParticipants) return;
     stage.workers = [...stage.workers, this.toEditableWorker({ ...worker, isAssignedWorker: false, isDailyOverride: true }, true)];
     if (stage.compensationMode === 'SharedPercentage') this.applyEqualDistribution(stage, false);
     this.replacementWorkerId = '';
@@ -647,7 +650,7 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
   }
 
   removeWorker(stage: EditableDailyStage, workerId: string): void {
-    if (!this.canOverrideParticipants) return;
+    if (!this.canEditStage(stage) || !this.canOverrideParticipants) return;
     const worker = stage.workers.find(candidate => candidate.workerId === workerId);
     if (!worker) return;
     if (worker.isAssignedWorker !== false && !worker.isDailyOverride) worker.includedInProduction = false;
@@ -657,14 +660,14 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
   }
 
   restoreWorker(stage: EditableDailyStage, worker: EditableDailyWorker): void {
-    if (!this.canOverrideParticipants || !worker.isProductionReady) return;
+    if (!this.canEditStage(stage) || !this.canOverrideParticipants || !worker.isProductionReady) return;
     worker.includedInProduction = true;
     if (stage.compensationMode === 'SharedPercentage') this.applyEqualDistribution(stage, false);
     this.stageChanged();
   }
 
   applyEqualDistribution(stage: EditableDailyStage, markChanged = true): void {
-    if (!this.canEditDraft || stage.compensationMode !== 'SharedPercentage') return;
+    if (!this.canEditStage(stage) || stage.compensationMode !== 'SharedPercentage') return;
     const participants = stage.workers
       .filter(worker => worker.includedInProduction !== false && worker.isProductionReady && worker.workerMinutes > 0)
       .sort((left, right) => left.workerId.localeCompare(right.workerId));
@@ -680,7 +683,7 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
   }
 
   updateWorkerPercentage(stage: EditableDailyStage, worker: EditableDailyWorker, value: number | null): void {
-    if (!this.canEditDraft) return;
+    if (!this.canEditStage(stage)) return;
     worker.percentage = this.numericValue(value);
     worker.quantity = this.isValidLineQuantity() && worker.percentage !== null
       ? this.roundQuantity(this.lineQuantity! * worker.percentage / 100)
@@ -690,7 +693,7 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
   }
 
   updateWorkerQuantity(stage: EditableDailyStage, worker: EditableDailyWorker, value: number | null): void {
-    if (!this.canEditDraft) return;
+    if (!this.canEditStage(stage)) return;
     worker.quantity = this.numericValue(value);
     worker.percentage = this.isValidLineQuantity() && worker.quantity !== null
       ? this.roundPercentage(worker.quantity / this.lineQuantity! * 100)
@@ -709,7 +712,7 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
 
   lineQuantityChanged(): void {
     if (!this.canEditDraft) return;
-    this.stages.forEach(stage => this.synchronizeStageQuantities(stage));
+    this.stages.filter(stage => this.isOperationallyActiveStage(stage)).forEach(stage => this.synchronizeStageQuantities(stage));
     this.stageChanged();
   }
 
@@ -1106,7 +1109,17 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
   }
 
   workerNeedsOverride(stage: EditableDailyStage, worker: EditableDailyWorker): boolean {
-    return worker.includedInProduction && (worker.isDailyOverride === true || worker.isAssignedWorker === false || !worker.isProductionReady);
+    return this.isOperationallyActiveStage(stage) &&
+      worker.includedInProduction &&
+      (worker.isDailyOverride === true || worker.isAssignedWorker === false || !worker.isProductionReady);
+  }
+
+  canEditStage(stage: EditableDailyStage): boolean {
+    return this.canEditDraft && this.isOperationallyActiveStage(stage);
+  }
+
+  isStageOperationallyActive(stage: EditableDailyStage): boolean {
+    return this.isOperationallyActiveStage(stage);
   }
 
   stagePreview(stageId: string) {
@@ -1114,6 +1127,7 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
   }
 
   stageStatusLabel(stage: EditableDailyStage): string {
+    if (!this.isOperationallyActiveStage(stage)) return 'مرحلة محفوظة غير نشطة';
     if (stage.staffingStatus === 'NoStaffing') return 'دون تسكين';
     if (stage.hasAbsentWorkers) return 'عامل غائب';
     if (stage.hasNoSourceCheckInWorkers) return 'دون بصمة';
@@ -1121,16 +1135,19 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
   }
 
   stageStatusTone(stage: EditableDailyStage): string {
+    if (!this.isOperationallyActiveStage(stage)) return 'info';
     if (stage.staffingStatus === 'NoStaffing' || stage.hasAbsentWorkers) return 'critical';
     if (stage.hasNoSourceCheckInWorkers || !stage.isReady) return 'warning';
     return 'ready';
   }
 
   stageCostStatusLabel(stage: EditableDailyStage): string {
+    if (!this.isOperationallyActiveStage(stage)) return 'تكلفة تاريخية محفوظة';
     return stage.isFinancialReviewPending ? 'تحتاج مراجعة تكلفة' : 'تكلفة جاهزة';
   }
 
   stageCostStatusTone(stage: EditableDailyStage): string {
+    if (!this.isOperationallyActiveStage(stage)) return 'info';
     return stage.isFinancialReviewPending ? 'warning' : 'ready';
   }
 
@@ -1209,20 +1226,28 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
   }
 
   stageSummaryCost(stage: EditableDailyStage): number | null {
+    if (!this.isOperationallyActiveStage(stage)) return stage.persistedStageCost;
     return this.stagePreview(stage.productModelStageId)?.stageCost ?? null;
   }
 
+  stageDisplayQuantity(stage: EditableDailyStage): number | null {
+    return this.isOperationallyActiveStage(stage) ? this.lineQuantity : stage.persistedStageQuantity;
+  }
+
   stageAllocationStatusLabel(stage: EditableDailyStage): string {
+    if (!this.isOperationallyActiveStage(stage)) return 'محفوظ تاريخيًا';
     if (stage.compensationMode !== 'SharedPercentage') return this.stageStatusLabel(stage);
     if (!this.isValidLineQuantity()) return 'أدخل كمية الخط';
     return this.stageAllocationError(stage) || 'التوزيع متوازن';
   }
 
   stageAllocationStatusTone(stage: EditableDailyStage): string {
+    if (!this.isOperationallyActiveStage(stage)) return 'info';
     return this.stageAllocationStatusLabel(stage) === 'التوزيع متوازن' ? 'ready' : 'warning';
   }
 
   workerAllocationError(stage: EditableDailyStage, worker: EditableDailyWorker): string {
+    if (!this.isOperationallyActiveStage(stage)) return '';
     if (stage.compensationMode !== 'SharedPercentage' || worker.includedInProduction === false || !worker.isProductionReady) return '';
     if (worker.percentage === null || worker.percentage <= 0 || worker.percentage > 100) return 'النسبة يجب أن تكون أكبر من 0 ولا تتجاوز 100٪.';
     if (worker.quantity === null || worker.quantity <= 0) return 'أدخل كمية صحيحة للعامل.';
@@ -1231,6 +1256,7 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
   }
 
   stageAllocationError(stage: EditableDailyStage): string {
+    if (!this.isOperationallyActiveStage(stage)) return '';
     if (stage.compensationMode !== 'SharedPercentage' || !this.isValidLineQuantity()) return '';
     const participants = this.allocationParticipants(stage);
     if (participants.some(worker => this.workerAllocationError(stage, worker))) return 'راجع قيم العمال';
@@ -1308,6 +1334,9 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
     return {
       ...stage,
       standardSeconds: metadata?.standardSeconds ?? null,
+      isOperationallyActive: true,
+      persistedStageQuantity: null,
+      persistedStageCost: null,
       workers: assignedWorkers.map(worker => this.toEditableWorker(worker, worker.isProductionReady))
     };
   }
@@ -1351,7 +1380,10 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
           };
       return {
         ...this.toEditableStage(historicalStage),
-        standardSeconds: record.standardSeconds ?? null
+        standardSeconds: record.standardSeconds ?? null,
+        isOperationallyActive: !!current,
+        persistedStageQuantity: record.producedQuantity,
+        persistedStageCost: record.totalWorkerEarnings
       };
     });
   }
@@ -1391,7 +1423,7 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
     if (!this.operations) addGlobalIssue('حمّل تشغيل اليوم بعد مزامنة الحضور أولًا.', true);
     if (!this.lineQuantity || this.lineQuantity <= 0) addGlobalIssue('أدخل كمية تشغيل الخط مرة واحدة بقيمة أكبر من صفر.', true);
 
-    this.stages.forEach(stage => {
+    this.stages.filter(stage => this.isOperationallyActiveStage(stage)).forEach(stage => {
       const participants = this.allocationParticipants(stage);
       const readyParticipants = participants.filter(worker => worker.isProductionReady);
       if (!readyParticipants.length) addStageIssue(stage, 'لا يوجد عامل جاهز محتسب في تشغيل هذه المرحلة. يمكن حفظ المسودة، ويجب استكمال الجاهزية قبل الاعتماد.');
@@ -1420,24 +1452,43 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
       clientRequestId: this.clientRequestId,
       notes: this.notes.trim() || null,
       previewToken,
-      stages: this.stages.map(stage => this.stageInput(stage))
+      stages: this.stages
+        .filter(stage => this.isOperationallyActiveStage(stage))
+        .map(stage => this.stageInput(stage))
     };
   }
 
   private dailyDraftUpdateRequest(draft: DailyProductionDraft, previewToken: string | null): DailyProductionDraftUpdateInput {
     const request = this.operationRequest(previewToken);
-    const recordsByStage = new Map(draft.stages.map(record => [record.productModelStageId, record]));
+    const stagesById = new Map(this.stages.map(stage => [stage.productModelStageId, stage]));
     return {
       ...request,
       concurrencyToken: draft.concurrencyToken,
-      stages: request.stages.map(stage => {
-        const record = recordsByStage.get(stage.productModelStageId)!;
+      stages: draft.stages.map(record => {
+        const editorStage = stagesById.get(record.productModelStageId);
+        const stage = editorStage && this.isOperationallyActiveStage(editorStage)
+          ? this.stageInput(editorStage)
+          : this.persistedStageInput(record);
         return {
           ...stage,
           stageProductionRecordId: record.id,
           concurrencyToken: record.concurrencyToken
         };
       })
+    };
+  }
+
+  private persistedStageInput(record: DailyProductionDraft['stages'][number]): DailyProductionStageInput {
+    return {
+      productModelStageId: record.productModelStageId,
+      workers: record.workers.map(worker => ({
+        workerId: worker.workerId,
+        percentage: worker.percentage ?? null,
+        fixedAmount: worker.fixedAmount ?? null,
+        notes: worker.notes?.trim() || null,
+        manualOverrideReason: worker.manualOverrideReason?.trim() || null,
+        inputQuantity: worker.inputQuantity ?? null
+      }))
     };
   }
 
@@ -1502,7 +1553,7 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
       stage.workers = this.uniqueWorkers(stage.workers);
     });
     this.lineQuantity = draft.lineQuantity;
-    this.stages.forEach(stage => this.synchronizeStageQuantities(stage));
+    this.stages.filter(stage => this.isOperationallyActiveStage(stage)).forEach(stage => this.synchronizeStageQuantities(stage));
   }
 
   private applyPersistedDraftState(draft: DailyProductionDraft): void {
@@ -1594,6 +1645,10 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
 
   private allocationParticipants(stage: EditableDailyStage): EditableDailyWorker[] {
     return stage.workers.filter(worker => worker.includedInProduction !== false && (worker.isProductionReady || worker.isPersistedAllocation));
+  }
+
+  private isOperationallyActiveStage(stage: EditableDailyStage): boolean {
+    return stage.isOperationallyActive !== false;
   }
 
   private synchronizeStageQuantities(stage: EditableDailyStage): void {

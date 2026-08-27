@@ -338,6 +338,13 @@ public sealed class ProductionCostRecordingService(
         if (recordsByStage.Count != updatesByStage.Count || !recordsByStage.Keys.ToHashSet().SetEquals(updatesByStage.Keys))
             throw new ProductionConflictException("يجب أن يطابق التحديث هويات مراحل المسودة المحفوظة دون إضافة أو حذف أو استبدال.");
 
+        var currentActiveStageIds = order.ProductionLine?.DepartmentId is Guid departmentId
+            ? (await CurrentActiveDailyStagesQuery(order.ProductModelId, order.ProductionLineId!.Value, departmentId)
+                .AsNoTracking()
+                .Select(stage => stage.Id)
+                .ToArrayAsync(ct)).ToHashSet()
+            : [];
+
         foreach (var (productModelStageId, record) in recordsByStage)
         {
             var update = updatesByStage[productModelStageId];
@@ -349,7 +356,17 @@ public sealed class ProductionCostRecordingService(
 
         db.Entry(order).Property(current => current.ConcurrencyToken).OriginalValue = request.ConcurrencyToken;
         foreach (var (productModelStageId, record) in recordsByStage)
-            db.Entry(record).Property(current => current.ConcurrencyToken).OriginalValue = updatesByStage[productModelStageId].ConcurrencyToken;
+        {
+            var token = db.Entry(record).Property(current => current.ConcurrencyToken);
+            token.OriginalValue = updatesByStage[productModelStageId].ConcurrencyToken;
+            if (!currentActiveStageIds.Contains(productModelStageId))
+            {
+                // Historical records remain in the atomic update contract. Marking
+                // the token as a no-op update makes EF include its original value in
+                // the optimistic-concurrency check without recalculating the record.
+                token.IsModified = true;
+            }
+        }
 
         var updatedAtUtc = DateTime.UtcNow;
         var orderBefore = DailyDraftAudit(order);
@@ -358,6 +375,17 @@ public sealed class ProductionCostRecordingService(
         foreach (var (productModelStageId, record) in recordsByStage)
         {
             var update = updatesByStage[productModelStageId];
+            if (!currentActiveStageIds.Contains(productModelStageId))
+            {
+                if (record.Status == StageProductionRecordStatus.Cancelled)
+                {
+                    var historicalRecordBefore = RecordAudit(record);
+                    record.ReopenDailyDraftAfterApprovalCancellation();
+                    await AuditAsync(actorId, AuditActionType.Update, "StageProductionRecord", record.Id, historicalRecordBefore, RecordAudit(record), ct);
+                }
+                continue;
+            }
+
             var allocations = await BuildPermissiveDailyDraftAllocationsAsync(
                 record.SnapshotCompensationMode,
                 record.SnapshotPiecePrice,
@@ -884,18 +912,10 @@ public sealed class ProductionCostRecordingService(
             .SingleOrDefaultAsync(candidate => candidate.Id == productModelId && candidate.IsActive, ct)
             ?? throw new ProductionConflictException("الموديل المحدد غير نشط أو غير متاح.");
 
-        var stages = await db.Set<ProductModelStage>()
+        var stages = await CurrentActiveDailyStagesQuery(productModelId, productionLineId, line.DepartmentId.Value)
             .AsNoTracking()
             .Include(stage => stage.SubStage)
                 .ThenInclude(subStage => subStage!.MainStage)
-            .Where(stage => stage.ProductModelId == productModelId
-                            && stage.ProductionLineId == productionLineId
-                            && stage.IsActive
-                            && stage.SubStage != null
-                            && stage.SubStage.IsActive
-                            && stage.SubStage.MainStage != null
-                            && stage.SubStage.MainStage.IsActive
-                            && stage.SubStage.DepartmentId == line.DepartmentId.Value)
             .OrderBy(stage => stage.StageOrder)
             .ToArrayAsync(ct);
         var existingOrder = await db.Set<ProductionOrder>()
@@ -1028,6 +1048,20 @@ public sealed class ProductionCostRecordingService(
         var version = StaffingContextVersion(factory, line, product, productionDate, stageContexts, stageContexts.SelectMany(stage => stage.Workers).ToArray());
         return new DailyContext(factory, line, product, productionDate, version, stageContexts, allWorkers, existingDraft);
     }
+
+    private IQueryable<ProductModelStage> CurrentActiveDailyStagesQuery(
+        Guid productModelId,
+        Guid productionLineId,
+        Guid departmentId) =>
+        db.Set<ProductModelStage>()
+            .Where(stage => stage.ProductModelId == productModelId
+                            && stage.ProductionLineId == productionLineId
+                            && stage.IsActive
+                            && stage.SubStage != null
+                            && stage.SubStage.IsActive
+                            && stage.SubStage.MainStage != null
+                            && stage.SubStage.MainStage.IsActive
+                            && stage.SubStage.DepartmentId == departmentId);
 
     private async Task<Dictionary<(Guid WorkerId, Guid SubStageId), List<AssignmentWindow>>> LoadAssignmentWindowsAsync(
         Guid productionLineId,

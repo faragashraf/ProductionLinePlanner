@@ -163,17 +163,18 @@
                 <div><dt>العمال</dt><dd>{{ stage.workers.length }}</dd></div>
               </dl>
               <span plp-entity-status class="daily-production-operations__stage-badges plp-action-group">
-                <plp-status-badge [status]="stage.staffingStatus === 'NoStaffing' ? 'critical' : 'ready'" [label]="staffingStatusLabel(stage.staffingStatus)" [compact]="true"></plp-status-badge>
+                <plp-status-badge *ngIf="isStageOperationallyActive(stage)" [status]="stage.staffingStatus === 'NoStaffing' ? 'critical' : 'ready'" [label]="staffingStatusLabel(stage.staffingStatus)" [compact]="true"></plp-status-badge>
                 <plp-status-badge [status]="stageStatusTone(stage)" [label]="stageStatusLabel(stage)" [compact]="true"></plp-status-badge>
-                <plp-status-badge *ngIf="stage.isFinancialReviewPending" status="warning" label="مراجعة تكلفة" [compact]="true"></plp-status-badge>
+                <plp-status-badge *ngIf="isStageOperationallyActive(stage) && stage.isFinancialReviewPending" status="warning" label="مراجعة تكلفة" [compact]="true"></plp-status-badge>
               </span>
             </plp-responsive-entity-row>
           </div>
 
           <div class="daily-production-operations__stage-warnings plp-workspace-alert-stack">
-            <p class="daily-production-operations__warning plp-inline-feedback plp-inline-feedback--warning" *ngIf="stage.staffingStatus === 'NoStaffing'">لا يوجد عامل فعّال لهذه المرحلة في تاريخ الإنتاج. راجع التسكين الدائم قبل الاحتساب.</p>
-            <p class="daily-production-operations__warning plp-inline-feedback plp-inline-feedback--warning" *ngIf="stage.hasAbsentWorkers">يوجد عامل غائب في هذا التاريخ؛ الحضور لا يغيّر حالة العمل أو التسكين، والتجاوز يتطلب سببًا وصلاحية.</p>
-            <p class="daily-production-operations__warning plp-inline-feedback plp-inline-feedback--warning" *ngIf="stage.hasNoSourceCheckInWorkers">لا يوجد تسجيل بصمة مصدر لبعض العمال؛ هذه ليست حالة غياب تلقائية.</p>
+            <p class="daily-production-operations__warning plp-inline-feedback plp-inline-feedback--info" *ngIf="!isStageOperationallyActive(stage)">مرحلة محفوظة من المسودة ولم تعد نشطة في تكوين الموديل الحالي. ستظل بياناتها التاريخية محفوظة للقراءة فقط.</p>
+            <p class="daily-production-operations__warning plp-inline-feedback plp-inline-feedback--warning" *ngIf="isStageOperationallyActive(stage) && stage.staffingStatus === 'NoStaffing'">لا يوجد عامل فعّال لهذه المرحلة في تاريخ الإنتاج. راجع التسكين الدائم قبل الاحتساب.</p>
+            <p class="daily-production-operations__warning plp-inline-feedback plp-inline-feedback--warning" *ngIf="isStageOperationallyActive(stage) && stage.hasAbsentWorkers">يوجد عامل غائب في هذا التاريخ؛ الحضور لا يغيّر حالة العمل أو التسكين، والتجاوز يتطلب سببًا وصلاحية.</p>
+            <p class="daily-production-operations__warning plp-inline-feedback plp-inline-feedback--warning" *ngIf="isStageOperationallyActive(stage) && stage.hasNoSourceCheckInWorkers">لا يوجد تسجيل بصمة مصدر لبعض العمال؛ هذه ليست حالة غياب تلقائية.</p>
           </div>
 
           <div class="daily-production-operations__worker-list plp-workspace-scroll-region--stable plp-bounded-workspace__scroll-region plp-structured-list plp-contained-scroll-list">
@@ -186,26 +187,26 @@
                   <plp-product-metadata-item label="إلى" [value]="contributionTime(worker.contributionEndsAtUtc)" icon="pi pi-clock"></plp-product-metadata-item>
                   <plp-product-metadata-item label="الدقائق" [value]="worker.workerMinutes" icon="pi pi-stopwatch"></plp-product-metadata-item>
                 </plp-product-metadata-row>
-                <plp-status-badge plp-entity-status class="daily-production-operations__staffing-badge" [status]="dailyStaffingTone(worker)" [label]="dailyStaffingLabel(worker)" [compact]="true"></plp-status-badge>
+                <plp-status-badge plp-entity-status class="daily-production-operations__staffing-badge" [status]="isStageOperationallyActive(stage) ? dailyStaffingTone(worker) : 'info'" [label]="isStageOperationallyActive(stage) ? dailyStaffingLabel(worker) : 'عامل محفوظ تاريخيًا'" [compact]="true"></plp-status-badge>
                 <div plp-entity-value class="daily-production-operations__allocation-editor plp-editable-allocation" *ngIf="stage.compensationMode === 'SharedPercentage' && worker.includedInProduction && worker.isProductionReady">
                   <label><span>النسبة</span>
-                    <span class="daily-production-operations__input-suffix plp-editable-allocation__suffix"><input type="number" min="0.0001" max="100" step="0.0001" [ngModel]="worker.percentage" (ngModelChange)="updateWorkerPercentage(stage, worker, $event)" [disabled]="!canEditDraft" [attr.aria-label]="'نسبة ' + worker.workerName"><span>٪</span></span>
+                    <span class="daily-production-operations__input-suffix plp-editable-allocation__suffix"><input type="number" min="0.0001" max="100" step="0.0001" [ngModel]="worker.percentage" (ngModelChange)="updateWorkerPercentage(stage, worker, $event)" [disabled]="!canEditStage(stage)" [attr.aria-label]="'نسبة ' + worker.workerName"><span>٪</span></span>
                   </label>
                   <span class="daily-production-operations__allocation-link plp-editable-allocation__link" aria-hidden="true"><i class="pi pi-arrows-h"></i></span>
                   <label><span>العدد</span>
-                    <input type="number" min="0.001" [max]="lineQuantity || null" step="0.001" [ngModel]="worker.quantity" (ngModelChange)="updateWorkerQuantity(stage, worker, $event)" [disabled]="!canEditDraft || !lineQuantity" [attr.aria-label]="'كمية ' + worker.workerName">
+                    <input type="number" min="0.001" [max]="lineQuantity || null" step="0.001" [ngModel]="worker.quantity" (ngModelChange)="updateWorkerQuantity(stage, worker, $event)" [disabled]="!canEditStage(stage) || !lineQuantity" [attr.aria-label]="'كمية ' + worker.workerName">
                   </label>
                   <small class="daily-production-operations__allocation-error plp-editable-allocation__error" *ngIf="workerAllocationError(stage, worker) as allocationError">{{ allocationError }}</small>
                 </div>
                 <label plp-entity-value *ngIf="stage.compensationMode === 'FixedAmount' && worker.includedInProduction && worker.isProductionReady">قيمة ثابتة
-                  <input type="number" min="0" step="0.0001" [(ngModel)]="worker.fixedAmount" (ngModelChange)="stageChanged()" [disabled]="!canEditDraft">
+                  <input type="number" min="0" step="0.0001" [(ngModel)]="worker.fixedAmount" (ngModelChange)="stageChanged()" [disabled]="!canEditStage(stage)">
                 </label>
                 <span plp-entity-actions>
                   <label *ngIf="workerNeedsOverride(stage, worker)">سبب التجاوز المعتمد
-                    <input pInputText [(ngModel)]="worker.manualOverrideReason" maxlength="500" [disabled]="!canOverrideParticipants" placeholder="الغياب أو التعديل يحتاج سببًا واضحًا" (ngModelChange)="stageChanged()">
+                    <input pInputText [(ngModel)]="worker.manualOverrideReason" maxlength="500" [disabled]="!canEditStage(stage) || !canOverrideParticipants" placeholder="الغياب أو التعديل يحتاج سببًا واضحًا" (ngModelChange)="stageChanged()">
                   </label>
-                  <button *ngIf="worker.includedInProduction && worker.isProductionReady" pButton type="button" class="p-button-text p-button-danger" label="استبعاد من اليوم" icon="pi pi-times" [disabled]="!canOverrideParticipants" (click)="removeWorker(stage, worker.workerId)"></button>
-                  <button *ngIf="!worker.includedInProduction && worker.isProductionReady" pButton type="button" class="p-button-text" label="إعادة إلى تشغيل اليوم" icon="pi pi-replay" [disabled]="!canOverrideParticipants" (click)="restoreWorker(stage, worker)"></button>
+                  <button *ngIf="worker.includedInProduction && worker.isProductionReady" pButton type="button" class="p-button-text p-button-danger" label="استبعاد من اليوم" icon="pi pi-times" [disabled]="!canEditStage(stage) || !canOverrideParticipants" (click)="removeWorker(stage, worker.workerId)"></button>
+                  <button *ngIf="!worker.includedInProduction && worker.isProductionReady" pButton type="button" class="p-button-text" label="إعادة إلى تشغيل اليوم" icon="pi pi-replay" [disabled]="!canEditStage(stage) || !canOverrideParticipants" (click)="restoreWorker(stage, worker)"></button>
                 </span>
               </plp-responsive-entity-row>
             </article>
@@ -214,7 +215,7 @@
 
           <footer class="daily-production-operations__stage-footer plp-sticky-action-bar plp-workspace-stable-footer" data-stable-footer="true">
           <div class="daily-production-operations__stage-summary plp-workspace-summary-grid" aria-label="ملخص المرحلة">
-            <div data-summary="quantity"><small>كمية المرحلة</small><strong>{{ (lineQuantity | number:'1.0-3') || '—' }}</strong></div>
+            <div data-summary="quantity"><small>كمية المرحلة</small><strong>{{ (stageDisplayQuantity(stage) | number:'1.0-3') || '—' }}</strong></div>
             <div data-summary="workers"><small>العمال</small><strong>{{ stageIncludedWorkerCount(stage) }}</strong></div>
             <div data-summary="cost"><small>التكلفة</small><strong>{{ stageSummaryCost(stage) === null ? '—' : (stageSummaryCost(stage) | number:'1.2-4') }}</strong></div>
             <div data-summary="status"><small>الحالة</small><plp-status-badge [status]="stageAllocationStatusTone(stage)" [label]="stageAllocationStatusLabel(stage)" [compact]="true"></plp-status-badge></div>
@@ -228,10 +229,10 @@
           </div>
           <div class="daily-production-operations__allocation-totals plp-workspace-inline-totals" *ngIf="stage.compensationMode === 'SharedPercentage'">
             <span>النسب: <strong>{{ stageAllocationPercentage(stage) | number:'1.0-4' }}٪</strong></span>
-            <span>الكميات: <strong>{{ stageAllocationQuantity(stage) | number:'1.0-3' }} / {{ (lineQuantity | number:'1.0-3') || '—' }}</strong></span>
+            <span>الكميات: <strong>{{ stageAllocationQuantity(stage) | number:'1.0-3' }} / {{ (stageDisplayQuantity(stage) | number:'1.0-3') || '—' }}</strong></span>
           </div>
           <div class="daily-production-operations__stage-actions plp-action-group">
-            <button pButton type="button" class="p-button-outlined" label="استعادة توزيع دقائق العمل" icon="pi pi-percentage" *ngIf="stage.compensationMode === 'SharedPercentage'" [disabled]="!canEditDraft || !stage.workers.length" (click)="applyEqualDistribution(stage)"></button>
+            <button pButton type="button" class="p-button-outlined" label="استعادة توزيع دقائق العمل" icon="pi pi-percentage" *ngIf="stage.compensationMode === 'SharedPercentage'" [disabled]="!canEditStage(stage) || !stage.workers.length" (click)="applyEqualDistribution(stage)"></button>
           </div>
           </footer>
           </div>

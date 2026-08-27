@@ -847,6 +847,13 @@ plp-product-metadata-item {
   color: var(--plp-color-success);
 }
 
+.plp-inline-feedback--info {
+  background: var(--plp-color-info-soft);
+  border-inline-start: 3px solid var(--plp-color-info);
+  color: var(--plp-color-info-strong);
+  margin-block-start: var(--plp-space-12);
+}
+
 .plp-inline-feedback--warning {
   background: var(--plp-color-warning-soft);
   border-inline-start: 3px solid var(--plp-color-warning);

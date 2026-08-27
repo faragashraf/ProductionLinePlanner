@@ -816,19 +816,82 @@ describe('DailyProductionOperationsPageComponent unified preview', () => {
     }));
     masterData.modelStages.and.returnValue(of([]));
     component.attendanceSyncedForDate = component.productionDate;
+    production.previewDailyOperations.and.returnValue(of(preview));
     production.updateDailyDraft.and.returnValue(of(draft));
 
     component.loadTodayOperations();
+    component.calculatePreview();
     component.saveDailyDraft();
 
     expect(component.stages.map(stage => stage.productModelStageId)).toEqual(['stage-1', 'stage-b']);
+    expect(component.stages.map(stage => stage.isOperationallyActive)).toEqual([true, false]);
+    expect(component.stageStatusLabel(component.stages[1])).toBe('مرحلة محفوظة غير نشطة');
+    expect(component.canEditStage(component.stages[1])).toBeFalse();
     expect(component.draftConfigurationWarning).toContain('لن يضيف أو يحذف مراحل تلقائيًا');
+    expect(production.previewDailyOperations).toHaveBeenCalledWith(jasmine.objectContaining({
+      stages: [jasmine.objectContaining({ productModelStageId: 'stage-1' })]
+    }));
     const update = production.updateDailyDraft.calls.mostRecent().args[1];
     expect(update.stages.map((stage: any) => [stage.productModelStageId, stage.stageProductionRecordId])).toEqual([
       ['stage-1', 'record-1'],
       ['stage-b', 'record-b']
     ]);
     expect(update.stages.some((stage: any) => stage.productModelStageId === 'stage-d')).toBeFalse();
+  });
+
+  it('excludes two inactive historical stages from operational blockers while active stages still validate', () => {
+    const activeRecord = dailyDraftStage('Draft', 'token-a');
+    const historicalRecord = (id: string, stageId: string, stageCode: string, workerCode: string) => ({
+      ...dailyDraftStage('Draft', `token-${id}`),
+      id,
+      productModelStageId: stageId,
+      stageCode,
+      stageName: `مرحلة تاريخية ${stageCode}`,
+      workers: [{
+        ...preview.stages[0].workers[0],
+        workerId: `worker-${id}`,
+        workerCode,
+        workerName: `عامل ${stageCode}`,
+        manualOverrideReason: undefined
+      }]
+    });
+    const historical003 = historicalRecord('record-003', 'stage-003', 'STG003', 'W003');
+    const historical060 = historicalRecord('record-060', 'stage-060', 'STG060', 'W060');
+    const draft = {
+      ...approvedDailyDraft(),
+      orderStatus: 'Draft',
+      concurrencyToken: 'order-token',
+      stages: [activeRecord, historical003, historical060]
+    };
+    const currentA = { ...component.stages[0] } as any;
+    production.loadDailyOperations.and.returnValue(of({
+      ...component.operations!,
+      totalStages: 1,
+      stages: [currentA],
+      existingDraft: draft
+    }));
+    masterData.modelStages.and.returnValue(of([]));
+    component.attendanceSyncedForDate = component.productionDate;
+    production.updateDailyDraft.and.returnValue(of(draft));
+
+    component.loadTodayOperations();
+    const activeStage = component.stages[0];
+    activeStage.workers[0].isAssignedWorker = false;
+    activeStage.workers[0].isDailyOverride = true;
+    activeStage.workers[0].manualOverrideReason = '';
+    component.saveDailyDraft();
+
+    expect(component.validationIssues.some(issue => issue.productModelStageId === 'stage-1' && issue.message.includes('سبب التجاوز'))).toBeTrue();
+    expect(component.validationIssues.some(issue => issue.productModelStageId === 'stage-003')).toBeFalse();
+    expect(component.validationIssues.some(issue => issue.productModelStageId === 'stage-060')).toBeFalse();
+    expect(component.validationIssues.map(issue => issue.message).join(' ')).not.toContain('W003');
+    expect(component.validationIssues.map(issue => issue.message).join(' ')).not.toContain('W060');
+    expect(component.stages.filter(stage => !stage.isOperationallyActive).map(stage => stage.stageCode)).toEqual(['STG003', 'STG060']);
+    expect(component.stages.filter(stage => !stage.isOperationallyActive).every(stage => !component.canEditStage(stage))).toBeTrue();
+    expect(production.updateDailyDraft).toHaveBeenCalled();
+    expect(production.updateDailyDraft.calls.mostRecent().args[1].stages.map((stage: any) => stage.productModelStageId)).toEqual([
+      'stage-1', 'stage-003', 'stage-060'
+    ]);
   });
 
   it('keeps a no-ready-worker issue visible while allowing an existing Draft save without Preview', () => {
