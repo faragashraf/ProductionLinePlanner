@@ -578,6 +578,74 @@ describe('DailyProductionOperationsPageComponent unified preview', () => {
     expect(component.savedDraft?.productionOrderId).toBe('order-1');
   });
 
+  it('classifies a missing production-order concurrency token before an update request is built', () => {
+    component.operations!.existingDraft = {
+      ...approvedDailyDraft(),
+      orderStatus: 'Draft',
+      concurrencyToken: '',
+      stages: [dailyDraftStage('Draft', 'stage-token')]
+    };
+    prepareCurrentPreview();
+
+    component.saveDailyDraft();
+
+    expect(component.error).toContain('رمز تزامن أمر الإنتاج مفقود');
+    expect(component.error).toContain('أعد تحميل');
+    expect(production.updateDailyDraft).not.toHaveBeenCalled();
+  });
+
+  it('classifies missing persisted stage identity and concurrency tokens separately', () => {
+    const validDraft = {
+      ...approvedDailyDraft(),
+      orderStatus: 'Draft',
+      concurrencyToken: 'order-token',
+      stages: [dailyDraftStage('Draft', 'stage-token')]
+    };
+    component.operations!.existingDraft = {
+      ...validDraft,
+      stages: [{ ...validDraft.stages[0], id: '' }]
+    };
+    prepareCurrentPreview();
+
+    component.saveDailyDraft();
+    expect(component.error).toContain('معرّف سجل مرحلة محفوظة مفقود');
+    expect(production.updateDailyDraft).not.toHaveBeenCalled();
+
+    component.operations!.existingDraft = {
+      ...validDraft,
+      stages: [{ ...validDraft.stages[0], concurrencyToken: '' }]
+    };
+    component.saveDailyDraft();
+    expect(component.error).toContain('رمز تزامن إحدى المراحل المحفوظة مفقود');
+    expect(production.updateDailyDraft).not.toHaveBeenCalled();
+  });
+
+  it('blocks configuration drift without pairing persisted records to current stages by array position', () => {
+    const persistedStage = dailyDraftStage('Draft', 'stage-token');
+    component.operations!.existingDraft = {
+      ...approvedDailyDraft(),
+      orderStatus: 'Draft',
+      concurrencyToken: 'order-token',
+      stages: [{ ...persistedStage, productModelStageId: 'historical-stage' }]
+    };
+    prepareCurrentPreview();
+
+    component.saveDailyDraft();
+
+    expect(component.error).toContain('هوية مراحل المسودة المحفوظة');
+    expect(component.error).not.toContain('أعد تحميل');
+    expect(production.updateDailyDraft).not.toHaveBeenCalled();
+
+    component.operations!.existingDraft = {
+      ...component.operations!.existingDraft,
+      stages: [persistedStage, { ...persistedStage, id: 'record-2', productModelStageId: 'stage-2' }]
+    };
+    component.saveDailyDraft();
+    expect(component.error).toContain('عدد المراحل مختلف');
+    expect(component.error).not.toContain('أعد تحميل');
+    expect(production.updateDailyDraft).not.toHaveBeenCalled();
+  });
+
   it('sends exactly one correlated PUT after a worker is excluded from an existing daily draft', () => {
     const stage = component.stages[0];
     stage.workers[0].percentage = 50;
@@ -1048,6 +1116,8 @@ describe('DailyProductionOperationsPageComponent unified preview', () => {
     );
     expect(component.savedDraft?.productionOrderId).toBe('order-1');
     expect(component.savedDraft?.concurrencyToken).toBe('cancelled-order-token');
+    expect(component.operations?.existingDraft).toBe(cancelledDraft);
+    expect(component.canApproveDailyOperation).toBeFalse();
     expect(production.loadDailyOperations).not.toHaveBeenCalled();
 
     component.preview = preview;
@@ -1069,7 +1139,29 @@ describe('DailyProductionOperationsPageComponent unified preview', () => {
     );
     expect(production.createDailyDraft).not.toHaveBeenCalled();
     expect(component.savedDraft?.concurrencyToken).toBe('resaved-order-token');
+    expect(component.savedDraft?.stages[0].status).toBe('Draft');
+    expect(component.operations?.existingDraft).toBe(component.savedDraft);
+    expect(component.canApproveDailyOperation).toBeTrue();
   });
+
+  it('never exposes direct approval for cancelled persisted stages', () => {
+    component.savedDraft = {
+      ...approvedDailyDraft(),
+      orderStatus: 'Draft',
+      concurrencyToken: 'cancelled-order-token',
+      stages: [dailyDraftStage('Cancelled', 'cancelled-stage-token')]
+    };
+
+    expect(component.canEditDraft).toBeTrue();
+    expect(component.canApproveDailyOperation).toBeFalse();
+  });
+
+  function prepareCurrentPreview(): void {
+    component.preview = preview;
+    (component as any).previewRevision = (component as any).revision;
+    (component as any).previewSource = 'calculated';
+    component.previewStatus = 'success';
+  }
 
   function approvedDailyDraft() {
     return {
