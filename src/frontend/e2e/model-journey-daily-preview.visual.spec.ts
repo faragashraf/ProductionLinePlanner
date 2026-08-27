@@ -39,6 +39,7 @@ test.beforeAll(async () => {
 async function preparePage(page: Page, options: {
   validationBlockers?: boolean;
   historicalDraft?: boolean;
+  onPreview?: (payload: any) => void;
   onDraftUpdate?: (payload: any) => void;
 } = {}): Promise<void> {
   await page.addInitScript(({ storedPermissions }) => {
@@ -65,7 +66,10 @@ async function preparePage(page: Page, options: {
     else if (pathname.endsWith('/api/product-models')) data = { items: [model], totalCount: 1, pageNumber: 1, pageSize: 10 };
     else if (pathname.endsWith('/api/stages')) data = { items: [stage], totalCount: 1, pageNumber: 1, pageSize: 200 };
     else if (pathname.includes('/api/attendance/sync/production-date/')) data = { sourceUsersCount: 1, sourceCheckInsCount: 1, matchedWorkersCount: 1, unmatchedSourceUsersCount: 0, workersWithoutAttendanceCount: 0, insertedRecords: 1, updatedRecords: 0, skippedRecords: 0 };
-    else if (pathname.endsWith('/api/production/daily-operations/preview')) data = dailyPreview();
+    else if (pathname.endsWith('/api/production/daily-operations/preview')) {
+      options.onPreview?.(route.request().postDataJSON());
+      data = options.historicalDraft ? historicalDraftPreview() : dailyPreview();
+    }
     else if (pathname.endsWith('/api/production/daily-operations/drafts/historical-order')) {
       const payload = route.request().postDataJSON();
       options.onDraftUpdate?.(payload);
@@ -248,6 +252,17 @@ function dailyPreview() {
   return { productionDate: '2026-07-17', lineQuantity: 1000, previewToken: 'visual-preview', totalWorkerEntitlements: 1350, stages: [{ productModelStageId: modelStage.id, stageCode: stage.code, stageName: stage.name, stageQuantity: 1000, stageCost: 600, compensationMode: 'SharedPercentage', warnings: [firstWarning], workers: [{ workerId: 'worker-1', workerCode: 'W-01', workerName: 'عامل الاختبار', percentage: 25, equivalentQuantity: 250, calculatedEarning: 150 }, { workerId: 'worker-2', workerCode: 'W-02', workerName: 'عامل مساعد', percentage: 75, equivalentQuantity: 750, calculatedEarning: 450 }] }, { productModelStageId: secondModelStage.id, stageCode: secondStage.code, stageName: secondStage.name, stageQuantity: 1000, stageCost: 750, compensationMode: 'SharedPercentage', warnings: [secondWarning], workers: [{ workerId: 'worker-1', workerCode: 'W-01', workerName: 'عامل الاختبار', percentage: 100, equivalentQuantity: 1000, calculatedEarning: 750 }] }], workerTotals: [{ workerId: 'worker-1', workerCode: 'W-01', workerName: 'عامل الاختبار', totalEntitlement: 900 }, { workerId: 'worker-2', workerCode: 'W-02', workerName: 'عامل مساعد', totalEntitlement: 450 }], warnings: [firstWarning, secondWarning, 'تحذير عام لا يرتبط بمرحلة محددة.'] };
 }
 
+function historicalDraftPreview() {
+  const preview = dailyPreview();
+  return {
+    ...preview,
+    totalWorkerEntitlements: preview.stages[0].stageCost,
+    stages: [preview.stages[0]],
+    workerTotals: preview.workerTotals.filter(worker => worker.workerId === 'worker-1'),
+    warnings: preview.stages[0].warnings
+  };
+}
+
 async function openDailyOperations(page: Page): Promise<void> {
   await page.goto('/manufacturing/daily-production-operations');
   await page.getByLabel('تاريخ الإنتاج').fill('2026-07-17');
@@ -362,9 +377,15 @@ test('stage-aware validation blockers remain visible and navigate through many i
 });
 
 test('inactive persisted STG003 and STG060 stay visible and saveable without operational blockers', async ({ page }) => {
+  let previewPayload: any;
   let updatePayload: any;
-  await preparePage(page, { historicalDraft: true, onDraftUpdate: payload => { updatePayload = payload; } });
+  await preparePage(page, {
+    historicalDraft: true,
+    onPreview: payload => { previewPayload = payload; },
+    onDraftUpdate: payload => { updatePayload = payload; }
+  });
   for (const [name, width, height] of [['desktop', 1440, 900], ['tablet-landscape', 1280, 800], ['tablet-portrait', 800, 1280], ['mobile', 390, 844]] as const) {
+    previewPayload = undefined;
     updatePayload = undefined;
     await page.setViewportSize({ width, height });
     await openDailyOperations(page);
@@ -378,6 +399,16 @@ test('inactive persisted STG003 and STG060 stay visible and saveable without ope
     await expect(page.getByText('سبب التجاوز مطلوب للعامل W003.')).toHaveCount(0);
     await expect(page.getByText('سبب التجاوز مطلوب للعامل W060.')).toHaveCount(0);
 
+    await issues.first().click();
+    await page.getByLabel('سبب التجاوز المعتمد').fill('اعتماد تشغيل المرحلة النشطة');
+    await page.getByRole('button', { name: 'حساب معاينة موحّدة' }).click();
+    await expect(page.locator('.daily-production-operations__preview-overview')).toBeVisible();
+    await expect.poll(() => previewPayload?.stages?.length ?? 0).toBe(1);
+    expect(previewPayload.stages.map((item: any) => item.productModelStageId)).toEqual([modelStage.id]);
+    expect(previewPayload.stages.some((item: any) => item.productModelStageId === 'historical-stage-003')).toBe(false);
+    expect(previewPayload.stages.some((item: any) => item.productModelStageId === 'historical-stage-060')).toBe(false);
+
+    await page.getByRole('button', { name: 'عرض كل المراحل' }).click();
     await page.locator('[data-stage-id="historical-stage-003"]').click();
     await expect(page.locator('.daily-production-operations__detail-panel')).toContainText('مرحلة محفوظة غير نشطة');
     await expect(page.locator('.daily-production-operations__detail-panel')).toContainText('ستظل بياناتها التاريخية محفوظة للقراءة فقط');

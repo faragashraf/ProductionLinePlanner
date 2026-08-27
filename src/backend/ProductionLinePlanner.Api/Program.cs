@@ -513,7 +513,9 @@ app.MapMethods("/api/error", ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "
     {
         Status = statusCode,
         Title = title,
-        Detail = isDevelopment ? exception.Message : "An unexpected error occurred.",
+        Detail = isDevelopment || exception is ProductionConflictException
+            ? exception.Message
+            : "An unexpected error occurred.",
         Instance = context.Request.Path
     };
     problem.Extensions["traceId"] = traceId;

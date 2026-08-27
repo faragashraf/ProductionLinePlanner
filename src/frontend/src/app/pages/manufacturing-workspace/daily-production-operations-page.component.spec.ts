@@ -839,6 +839,93 @@ describe('DailyProductionOperationsPageComponent unified preview', () => {
     expect(update.stages.some((stage: any) => stage.productModelStageId === 'stage-d')).toBeFalse();
   });
 
+  it('sends only active operational stages to Preview when the editor also contains historical stage C', () => {
+    const [activeA, activeB, historicalC] = requestBoundaryStages();
+    component.stages = [activeA, activeB, historicalC];
+    production.previewDailyOperations.and.returnValue(of(preview));
+
+    component.calculatePreview();
+
+    const request = production.previewDailyOperations.calls.mostRecent().args[0];
+    expect(request.stages.map((stage: any) => stage.productModelStageId)).toEqual(['stage-1', 'stage-2']);
+    expect(request.stages.some((stage: any) => stage.productModelStageId === 'stage-3')).toBeFalse();
+  });
+
+  it('sends only active operational stages when creating a new Daily Draft', () => {
+    const [activeA, activeB, historicalC] = requestBoundaryStages();
+    component.stages = [activeA, activeB, historicalC];
+    const recordA = dailyDraftStage('Draft', 'token-a');
+    const recordB = {
+      ...dailyDraftStage('Draft', 'token-b'),
+      id: 'record-2',
+      productModelStageId: 'stage-2',
+      stageCode: 'S2',
+      stageName: 'مرحلة 2'
+    };
+    production.createDailyDraft.and.returnValue(of({
+      ...approvedDailyDraft(),
+      productionOrderId: 'created-order',
+      orderStatus: 'Draft',
+      concurrencyToken: 'created-order-token',
+      stages: [recordA, recordB]
+    }));
+
+    component.saveDailyDraft();
+
+    const request = production.createDailyDraft.calls.mostRecent().args[0];
+    expect(request.stages.map((stage: any) => stage.productModelStageId)).toEqual(['stage-1', 'stage-2']);
+    expect(request.stages.some((stage: any) => stage.productModelStageId === 'stage-3')).toBeFalse();
+  });
+
+  it('keeps historical stage C in the full persisted aggregate update contract', () => {
+    const [activeA, activeB, historicalC] = requestBoundaryStages();
+    component.stages = [activeA, activeB, historicalC];
+    const recordA = dailyDraftStage('Draft', 'token-a');
+    const recordB = {
+      ...dailyDraftStage('Draft', 'token-b'),
+      id: 'record-2',
+      productModelStageId: 'stage-2',
+      stageCode: 'S2',
+      stageName: 'مرحلة 2'
+    };
+    const recordC = {
+      ...dailyDraftStage('Draft', 'token-c'),
+      id: 'record-3',
+      productModelStageId: 'stage-3',
+      stageCode: 'S3',
+      stageName: 'مرحلة تاريخية 3',
+      workers: [{
+        ...preview.stages[0].workers[0],
+        workerId: 'worker-3',
+        workerCode: 'W3',
+        percentage: 100,
+        inputQuantity: 500
+      }]
+    };
+    const draft = {
+      ...approvedDailyDraft(),
+      orderStatus: 'Draft',
+      concurrencyToken: 'order-token',
+      stages: [recordA, recordB, recordC]
+    };
+    component.operations!.existingDraft = draft;
+    production.updateDailyDraft.and.returnValue(of(draft));
+
+    component.saveDailyDraft();
+
+    const request = production.updateDailyDraft.calls.mostRecent().args[1];
+    expect(request.stages.map((stage: any) => [stage.productModelStageId, stage.stageProductionRecordId, stage.concurrencyToken])).toEqual([
+      ['stage-1', 'record-1', 'token-a'],
+      ['stage-2', 'record-2', 'token-b'],
+      ['stage-3', 'record-3', 'token-c']
+    ]);
+    expect(request.stages[2].workers).toEqual([jasmine.objectContaining({
+      workerId: 'worker-3',
+      percentage: 100,
+      inputQuantity: 500
+    })]);
+  });
+
   it('excludes two inactive historical stages from operational blockers while active stages still validate', () => {
     const activeRecord = dailyDraftStage('Draft', 'token-a');
     const historicalRecord = (id: string, stageId: string, stageCode: string, workerCode: string) => ({
@@ -1559,6 +1646,48 @@ describe('DailyProductionOperationsPageComponent unified preview', () => {
     (component as any).previewRevision = (component as any).revision;
     (component as any).previewSource = 'calculated';
     component.previewStatus = 'success';
+  }
+
+  function requestBoundaryStages(): any[] {
+    const activeA = {
+      ...component.stages[0],
+      isOperationallyActive: true,
+      workers: component.stages[0].workers.map(worker => ({ ...worker }))
+    };
+    const activeB = {
+      ...activeA,
+      productModelStageId: 'stage-2',
+      subStageId: 'sub-stage-2',
+      stageCode: 'S2',
+      stageName: 'مرحلة 2',
+      stageOrder: 2,
+      workers: activeA.workers.map(worker => ({
+        ...worker,
+        workerId: 'worker-2',
+        workerCode: 'W2',
+        workerName: 'عامل 2'
+      }))
+    };
+    const historicalC = {
+      ...activeA,
+      productModelStageId: 'stage-3',
+      subStageId: '',
+      stageCode: 'S3',
+      stageName: 'مرحلة تاريخية 3',
+      stageOrder: 3,
+      isOperationallyActive: false,
+      persistedStageQuantity: 500,
+      persistedStageCost: 250,
+      workers: activeA.workers.map(worker => ({
+        ...worker,
+        workerId: 'worker-3',
+        workerCode: 'W3',
+        workerName: 'عامل تاريخي 3',
+        isProductionReady: false,
+        isPersistedAllocation: true
+      }))
+    };
+    return [activeA, activeB, historicalC];
   }
 
   function approvedDailyDraft() {

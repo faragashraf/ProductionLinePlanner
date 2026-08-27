@@ -1452,10 +1452,14 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
       clientRequestId: this.clientRequestId,
       notes: this.notes.trim() || null,
       previewToken,
-      stages: this.stages
-        .filter(stage => this.isOperationallyActiveStage(stage))
-        .map(stage => this.stageInput(stage))
+      stages: this.operationalStageInputs()
     };
+  }
+
+  private operationalStageInputs(): DailyProductionStageInput[] {
+    return this.stages
+      .filter(stage => this.isOperationallyActiveStage(stage))
+      .map(stage => this.stageInput(stage));
   }
 
   private dailyDraftUpdateRequest(draft: DailyProductionDraft, previewToken: string | null): DailyProductionDraftUpdateInput {

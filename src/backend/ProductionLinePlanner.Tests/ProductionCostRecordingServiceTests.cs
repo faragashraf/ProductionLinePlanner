@@ -528,6 +528,13 @@ public sealed class ProductionCostRecordingServiceTests
         Assert.Equal([fixture.Stage.Id], driftedLoad.Stages.Select(stage => stage.ProductModelStageId));
         Assert.Equal(3, driftedLoad.ExistingDraft!.Stages.Count);
 
+        var inactivePreviewConflict = await Assert.ThrowsAsync<ProductionConflictException>(() =>
+            fixture.Service.PreviewDailyOperationsAsync(
+                request with { LineQuantity = 620m },
+                fixture.ActorId,
+                default));
+        Assert.Contains("كل مراحل الموديل المحمّلة", inactivePreviewConflict.Message);
+
         var activePreviewRequest = request with
         {
             LineQuantity = 620m,
