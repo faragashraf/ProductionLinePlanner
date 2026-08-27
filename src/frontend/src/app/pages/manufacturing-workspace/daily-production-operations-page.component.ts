@@ -1408,7 +1408,8 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
     const recordsByStage = new Map(draft.stages.map(record => [record.productModelStageId, record]));
     return this.stages.every(stage => {
       const record = recordsByStage.get(stage.productModelStageId);
-      return !!record?.id && !!record.concurrencyToken;
+      if (!record?.id || !record.concurrencyToken) return false;
+      return stage.status === 'Draft' || stage.status === 'Cancelled';
     });
   }
 
