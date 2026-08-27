@@ -993,7 +993,7 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
     const saveRequest = existingDraft?.productionOrderId
       ? this.production.updateDailyDraft(
           existingDraft.productionOrderId,
-          this.dailyDraftUpdateRequest(existingDraft, previewToken),
+          this.dailyDraftUpdateRequest(existingDraft),
           correlationId
         )
       : this.production.createDailyDraft(this.operationRequest(previewToken), correlationId);
@@ -1350,42 +1350,44 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
     }
 
     const currentById = new Map(operations.stages.map(stage => [stage.productModelStageId, stage]));
-    return draft.stages.map((record, index) => {
-      const current = currentById.get(record.productModelStageId);
-      const historicalStage: DailyProductionStage = current
-        ? {
-            ...current,
-            mainStageName: record.mainStageName,
-            stageCode: record.stageCode,
-            stageName: record.stageName,
-            piecePrice: record.piecePrice,
-            compensationMode: record.compensationMode
-          }
-        : {
-            productModelStageId: record.productModelStageId,
-            subStageId: '',
-            mainStageName: record.mainStageName,
-            stageCode: record.stageCode,
-            stageName: record.stageName,
-            stageOrder: index + 1,
-            piecePrice: record.piecePrice,
-            compensationMode: record.compensationMode,
-            staffingStatus: 'NoStaffing',
-            attendanceStatus: 'ConfigurationUnavailable',
-            hasAbsentWorkers: false,
-            hasNoSourceCheckInWorkers: false,
-            isFinancialReviewPending: true,
-            isReady: false,
-            workers: []
-          };
+    const persistedById = new Map(draft.stages.map(record => [record.productModelStageId, record]));
+    const currentStages = operations.stages.map(current => {
+      const persisted = persistedById.get(current.productModelStageId);
       return {
-        ...this.toEditableStage(historicalStage),
-        standardSeconds: record.standardSeconds ?? null,
-        isOperationallyActive: !!current,
-        persistedStageQuantity: record.producedQuantity,
-        persistedStageCost: record.totalWorkerEarnings
+        ...this.toEditableStage(current, metadataById.get(current.productModelStageId)),
+        persistedStageQuantity: persisted?.producedQuantity ?? null,
+        persistedStageCost: persisted?.totalWorkerEarnings ?? null
       };
     });
+    const historicalStages = draft.stages
+      .filter(record => !currentById.has(record.productModelStageId))
+      .map((record, index) => {
+        const historicalStage: DailyProductionStage = {
+          productModelStageId: record.productModelStageId,
+          subStageId: '',
+          mainStageName: record.mainStageName,
+          stageCode: record.stageCode,
+          stageName: record.stageName,
+          stageOrder: operations.stages.length + index + 1,
+          piecePrice: record.piecePrice,
+          compensationMode: record.compensationMode,
+          staffingStatus: 'NoStaffing',
+          attendanceStatus: 'ConfigurationUnavailable',
+          hasAbsentWorkers: false,
+          hasNoSourceCheckInWorkers: false,
+          isFinancialReviewPending: true,
+          isReady: false,
+          workers: []
+        };
+        return {
+          ...this.toEditableStage(historicalStage),
+          standardSeconds: record.standardSeconds ?? null,
+          isOperationallyActive: false,
+          persistedStageQuantity: record.producedQuantity,
+          persistedStageCost: record.totalWorkerEarnings
+        };
+      });
+    return [...currentStages, ...historicalStages];
   }
 
   private toEditableWorker(
@@ -1462,8 +1464,11 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
       .map(stage => this.stageInput(stage));
   }
 
-  private dailyDraftUpdateRequest(draft: DailyProductionDraft, previewToken: string | null): DailyProductionDraftUpdateInput {
-    const request = this.operationRequest(previewToken);
+  private dailyDraftUpdateRequest(draft: DailyProductionDraft): DailyProductionDraftUpdateInput {
+    // A calculated PreviewToken represents the complete current operational stage
+    // set. Existing-draft updates deliberately preserve only their persisted
+    // aggregate identities, so that token is not transferable to this request.
+    const request = this.operationRequest(null);
     const stagesById = new Map(this.stages.map(stage => [stage.productModelStageId, stage]));
     return {
       ...request,
@@ -1515,9 +1520,10 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
     const recordsByStage = new Map(draft.stages.map(record => [record.productModelStageId, record]));
     this.stages.forEach(stage => {
       const saved = recordsByStage.get(stage.productModelStageId);
+      if (!saved) return;
       const workersById = new Map(stage.workers.map(worker => [worker.workerId, worker]));
       stage.workers.forEach(worker => worker.includedInProduction = false);
-      for (const allocation of saved?.workers ?? []) {
+      for (const allocation of saved.workers) {
         let worker = workersById.get(allocation.workerId);
         if (!worker) {
           const active = activeWorkers.get(allocation.workerId);
@@ -1625,9 +1631,7 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
     if (persistedStageIds.some(stageId => !stageId) ||
         persistedStageIdSet.size !== persistedStageIds.length ||
         currentStageIdSet.size !== currentStageIds.length ||
-        persistedStageIds.length !== currentStageIds.length ||
-        persistedStageIds.some(stageId => !currentStageIdSet.has(stageId)) ||
-        currentStageIds.some(stageId => !persistedStageIdSet.has(stageId))) {
+        persistedStageIds.some(stageId => !currentStageIdSet.has(stageId))) {
       return 'stage-identity-mismatch';
     }
 

@@ -1160,15 +1160,30 @@ public sealed class ProductionCostRecordingService(
         DailyContext context,
         string? stageConfigurationConflictMessage = null)
     {
-        if (request.Stages is null || request.Stages.Count != context.Stages.Count)
-            throw new ProductionConflictException(stageConfigurationConflictMessage ?? "يجب أن تتضمن معاينة تشغيل اليوم كل مراحل الموديل المحمّلة.");
-        if (request.Stages.Any(stage => stage.ProductModelStageId == Guid.Empty) ||
-            request.Stages.Select(stage => stage.ProductModelStageId).Distinct().Count() != request.Stages.Count)
+        var requestedStages = request.Stages ?? [];
+        var requestedIds = requestedStages.Select(stage => stage.ProductModelStageId).ToArray();
+        if (requestedIds.Any(stageId => stageId == Guid.Empty) ||
+            requestedIds.Distinct().Count() != requestedIds.Length)
             throw new ProductionConflictException("توجد مرحلة مكررة أو غير صالحة في تشغيل اليوم.");
 
-        var expected = context.Stages.Select(stage => stage.Entity.Id).ToHashSet();
-        if (request.Stages.Any(stage => !expected.Contains(stage.ProductModelStageId)))
-            throw new ProductionConflictException(stageConfigurationConflictMessage ?? "تغيرت مراحل الموديل أو لا تتطابق مع خط الإنتاج. أعد تحميل تشغيل اليوم.");
+        var expectedIds = context.Stages.Select(stage => stage.Entity.Id).ToHashSet();
+        var requestedIdSet = requestedIds.ToHashSet();
+        var missingIds = expectedIds.Except(requestedIdSet).Order().ToArray();
+        var unexpectedIds = requestedIdSet.Except(expectedIds).Order().ToArray();
+        if (requestedIds.Length != expectedIds.Count || missingIds.Length > 0 || unexpectedIds.Length > 0)
+        {
+            var message = stageConfigurationConflictMessage ?? "يجب أن تتضمن معاينة تشغيل اليوم كل مراحل الموديل المحمّلة.";
+            throw new ProductionConflictException(
+                $"{message} عدد المراحل الحالية: {expectedIds.Count}؛ عدد المراحل المرسلة: {requestedIds.Length}؛ " +
+                $"المعرّفات الناقصة: {DailyStageIdsForDiagnostic(missingIds)}؛ " +
+                $"المعرّفات غير المتوقعة: {DailyStageIdsForDiagnostic(unexpectedIds)}.");
+        }
+    }
+
+    private static string DailyStageIdsForDiagnostic(IEnumerable<Guid> stageIds)
+    {
+        var values = stageIds.Select(stageId => stageId.ToString("D", CultureInfo.InvariantCulture)).ToArray();
+        return values.Length == 0 ? "لا يوجد" : string.Join(", ", values);
     }
 
     private static StageProductionRecord CreateDailySnapshotRecord(

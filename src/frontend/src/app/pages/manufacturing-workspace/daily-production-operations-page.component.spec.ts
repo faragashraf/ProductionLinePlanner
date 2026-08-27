@@ -784,7 +784,7 @@ describe('DailyProductionOperationsPageComponent unified preview', () => {
     expect(production.updateDailyDraft).not.toHaveBeenCalled();
   });
 
-  it('edits the persisted stage set during configuration drift and maps records by stage id', () => {
+  it('adds a newly current stage to the editor and Preview without adding it to the persisted Draft update', () => {
     const persistedA = dailyDraftStage('Draft', 'token-a');
     const persistedB = {
       ...dailyDraftStage('Draft', 'token-b'),
@@ -823,20 +823,98 @@ describe('DailyProductionOperationsPageComponent unified preview', () => {
     component.calculatePreview();
     component.saveDailyDraft();
 
-    expect(component.stages.map(stage => stage.productModelStageId)).toEqual(['stage-1', 'stage-b']);
-    expect(component.stages.map(stage => stage.isOperationallyActive)).toEqual([true, false]);
-    expect(component.stageStatusLabel(component.stages[1])).toBe('مرحلة محفوظة غير نشطة');
-    expect(component.canEditStage(component.stages[1])).toBeFalse();
+    expect(component.stages.map(stage => stage.productModelStageId)).toEqual(['stage-1', 'stage-d', 'stage-b']);
+    expect(component.stages.map(stage => stage.isOperationallyActive)).toEqual([true, true, false]);
+    expect(component.stageStatusLabel(component.stages[2])).toBe('مرحلة محفوظة غير نشطة');
+    expect(component.canEditStage(component.stages[1])).toBeTrue();
+    expect(component.canEditStage(component.stages[2])).toBeFalse();
+    expect(component.stages[1].workers[0].includedInProduction).toBeTrue();
+    expect(component.stages[1].workers[0].isPersistedAllocation).toBeFalse();
     expect(component.draftConfigurationWarning).toContain('لن يضيف أو يحذف مراحل تلقائيًا');
-    expect(production.previewDailyOperations).toHaveBeenCalledWith(jasmine.objectContaining({
-      stages: [jasmine.objectContaining({ productModelStageId: 'stage-1' })]
-    }));
+    const previewRequest = production.previewDailyOperations.calls.mostRecent().args[0];
+    expect(previewRequest.stages.map((stage: any) => stage.productModelStageId)).toEqual(['stage-1', 'stage-d']);
     const update = production.updateDailyDraft.calls.mostRecent().args[1];
+    expect(update.previewToken).toBeNull();
     expect(update.stages.map((stage: any) => [stage.productModelStageId, stage.stageProductionRecordId])).toEqual([
       ['stage-1', 'record-1'],
       ['stage-b', 'record-b']
     ]);
     expect(update.stages.some((stage: any) => stage.productModelStageId === 'stage-d')).toBeFalse();
+  });
+
+  it('builds the exact A C D plus historical B union and keeps Preview and Save stage sets separate', () => {
+    const draft = loadStageUnion(
+      ['stage-a', 'stage-c', 'stage-d'],
+      ['stage-a', 'stage-b', 'stage-c']);
+    production.previewDailyOperations.and.returnValue(of(preview));
+    production.updateDailyDraft.and.returnValue(of(draft));
+
+    component.calculatePreview();
+    component.saveDailyDraft();
+
+    expect(component.stages.map(stage => stage.productModelStageId)).toEqual([
+      'stage-a', 'stage-c', 'stage-d', 'stage-b'
+    ]);
+    expect(component.stages.map(stage => stage.isOperationallyActive)).toEqual([true, true, true, false]);
+    expect(component.stages.find(stage => stage.productModelStageId === 'stage-a')).toEqual(
+      jasmine.objectContaining({ stageCode: 'CURRENT-A' }));
+    expect(component.stages.find(stage => stage.productModelStageId === 'stage-c')?.workers[0]).toEqual(
+      jasmine.objectContaining({ includedInProduction: true, isPersistedAllocation: true }));
+    expect(component.stages.find(stage => stage.productModelStageId === 'stage-d')?.workers[0]).toEqual(
+      jasmine.objectContaining({ includedInProduction: true, isPersistedAllocation: false }));
+    expect(component.stages.find(stage => stage.productModelStageId === 'stage-b')?.workers[0]).toEqual(
+      jasmine.objectContaining({ includedInProduction: true, isPersistedAllocation: true }));
+    expect(component.canEditStage(component.stages[2])).toBeTrue();
+    expect(component.canEditStage(component.stages[3])).toBeFalse();
+
+    const previewRequest = production.previewDailyOperations.calls.mostRecent().args[0];
+    expect(previewRequest.stages.map((stage: any) => stage.productModelStageId)).toEqual([
+      'stage-a', 'stage-c', 'stage-d'
+    ]);
+    const updateRequest = production.updateDailyDraft.calls.mostRecent().args[1];
+    expect(updateRequest.previewToken).toBeNull();
+    expect(updateRequest.stages.map((stage: any) => [
+      stage.productModelStageId,
+      stage.stageProductionRecordId,
+      stage.concurrencyToken
+    ])).toEqual([
+      ['stage-a', 'record-stage-a', 'token-stage-a'],
+      ['stage-b', 'record-stage-b', 'token-stage-b'],
+      ['stage-c', 'record-stage-c', 'token-stage-c']
+    ]);
+    expect(updateRequest.stages.some((stage: any) => stage.productModelStageId === 'stage-d')).toBeFalse();
+  });
+
+  it('keeps no-drift A and B behavior current, editable, and ordered by current operations', () => {
+    loadStageUnion(['stage-a', 'stage-b'], ['stage-a', 'stage-b']);
+
+    expect(component.stages.map(stage => stage.productModelStageId)).toEqual(['stage-a', 'stage-b']);
+    expect(component.stages.every(stage => stage.isOperationallyActive)).toBeTrue();
+    expect(component.stages.every(stage => component.canEditStage(stage))).toBeTrue();
+    expect(component.stages.map(stage => stage.stageCode)).toEqual(['CURRENT-A', 'CURRENT-B']);
+    expect(component.draftConfigurationWarning).toBe('');
+  });
+
+  it('builds deterministic A C E F plus historical B D union for multiple configuration changes', () => {
+    loadStageUnion(
+      ['stage-a', 'stage-c', 'stage-e', 'stage-f'],
+      ['stage-a', 'stage-b', 'stage-c', 'stage-d']);
+    production.previewDailyOperations.and.returnValue(of(preview));
+
+    component.calculatePreview();
+
+    expect(component.stages.map(stage => stage.productModelStageId)).toEqual([
+      'stage-a', 'stage-c', 'stage-e', 'stage-f', 'stage-b', 'stage-d'
+    ]);
+    expect(component.stages.filter(stage => stage.isOperationallyActive).map(stage => stage.productModelStageId)).toEqual([
+      'stage-a', 'stage-c', 'stage-e', 'stage-f'
+    ]);
+    expect(component.stages.filter(stage => !stage.isOperationallyActive).map(stage => stage.productModelStageId)).toEqual([
+      'stage-b', 'stage-d'
+    ]);
+    expect(production.previewDailyOperations.calls.mostRecent().args[0].stages.map((stage: any) => stage.productModelStageId)).toEqual([
+      'stage-a', 'stage-c', 'stage-e', 'stage-f'
+    ]);
   });
 
   it('sends only active operational stages to Preview when the editor also contains historical stage C', () => {
@@ -1646,6 +1724,83 @@ describe('DailyProductionOperationsPageComponent unified preview', () => {
     (component as any).previewRevision = (component as any).revision;
     (component as any).previewSource = 'calculated';
     component.previewStatus = 'success';
+  }
+
+  function loadStageUnion(currentStageIds: string[], persistedStageIds: string[]): any {
+    const currentStages = currentStageIds.map((stageId, index) => currentOperationStage(stageId, index + 1));
+    const draft = {
+      ...approvedDailyDraft(),
+      orderStatus: 'Draft',
+      concurrencyToken: 'union-order-token',
+      stages: persistedStageIds.map((stageId, index) => persistedDraftStage(stageId, index + 1))
+    };
+    production.loadDailyOperations.and.returnValue(of({
+      ...component.operations!,
+      totalStages: currentStages.length,
+      readyStages: currentStages.length,
+      stages: currentStages,
+      activeWorkers: currentStages.flatMap(stage => stage.workers),
+      existingDraft: draft
+    }));
+    masterData.modelStages.and.returnValue(of(currentStages.map(stage => ({
+      id: stage.productModelStageId,
+      subStageId: stage.subStageId,
+      stageOrder: stage.stageOrder,
+      piecePrice: stage.piecePrice,
+      standardSeconds: 20 + stage.stageOrder,
+      compensationMode: stage.compensationMode,
+      isRequired: true,
+      isActive: true
+    }))));
+    component.attendanceSyncedForDate = component.productionDate;
+
+    component.loadTodayOperations();
+
+    return draft;
+  }
+
+  function currentOperationStage(stageId: string, stageOrder: number): any {
+    const suffix = stageId.replace('stage-', '').toUpperCase();
+    const workerId = `worker-${stageId}`;
+    return {
+      ...component.stages[0],
+      productModelStageId: stageId,
+      subStageId: `sub-${stageId}`,
+      stageCode: `CURRENT-${suffix}`,
+      stageName: `مرحلة حالية ${suffix}`,
+      stageOrder,
+      workers: [{
+        ...component.stages[0].workers[0],
+        workerId,
+        workerCode: `W-${suffix}`,
+        workerName: `عامل ${suffix}`,
+        includedInProduction: undefined,
+        isPersistedAllocation: undefined
+      }]
+    };
+  }
+
+  function persistedDraftStage(stageId: string, stageOrder: number): any {
+    const suffix = stageId.replace('stage-', '').toUpperCase();
+    const workerId = `worker-${stageId}`;
+    return {
+      ...dailyDraftStage('Draft', `token-${stageId}`),
+      id: `record-${stageId}`,
+      productModelStageId: stageId,
+      stageCode: `HISTORICAL-${suffix}`,
+      stageName: `مرحلة تاريخية ${suffix}`,
+      workers: [{
+        ...preview.stages[0].workers[0],
+        workerId,
+        workerCode: `W-${suffix}`,
+        workerName: `عامل ${suffix}`,
+        percentage: 100,
+        inputQuantity: 500,
+        equivalentQuantity: 500,
+        calculatedEarning: 250,
+        notes: `snapshot-${stageOrder}`
+      }]
+    };
   }
 
   function requestBoundaryStages(): any[] {

@@ -511,6 +511,92 @@ public sealed class ProductionCostRecordingServiceTests
     }
 
     [Fact]
+    public async Task Daily_preview_uses_the_exact_current_stage_set_while_update_preserves_the_drifted_persisted_aggregate()
+    {
+        await using var fixture = await Fixture.CreateAsync("SharedPercentage", 0.50m, 17m);
+        var productionDate = fixture.Today.AddDays(2);
+        var stageB = await AddDailyStageAsync(fixture, "B", 2);
+        var stageC = await AddDailyStageAsync(fixture, "C", 3);
+        var (originalRequest, created) = await CreateDailyDraftAsync(fixture, productionDate);
+        var historicalB = created.Stages.Single(stage => stage.ProductModelStageId == stageB.Id);
+        stageB.Deactivate();
+        var stageD = await AddDailyStageAsync(fixture, "D", 4);
+        await fixture.Db.SaveChangesAsync();
+
+        var driftedLoad = await fixture.Service.LoadDailyOperationsAsync(
+            fixture.Factory.Id, fixture.Line.Id, fixture.Model.Id, productionDate, default);
+        Assert.Equal(
+            new[] { fixture.Stage.Id, stageC.Id, stageD.Id },
+            driftedLoad.Stages.Select(stage => stage.ProductModelStageId));
+        Assert.Equal(
+            new[] { fixture.Stage.Id, stageB.Id, stageC.Id }.Order(),
+            driftedLoad.ExistingDraft!.Stages.Select(stage => stage.ProductModelStageId).Order());
+
+        var currentRequest = originalRequest with
+        {
+            LineQuantity = 640m,
+            Stages = driftedLoad.Stages.Select(stage => new DailyProductionStageRequest(
+                stage.ProductModelStageId,
+                stage.Workers
+                    .Where(worker => worker.IsProductionReady)
+                    .Select(worker => new WorkerAllocationRequest(worker.WorkerId, worker.SuggestedPercentage, null, null))
+                    .ToArray()))
+                .ToArray()
+        };
+        var preview = await fixture.Service.PreviewDailyOperationsAsync(currentRequest, fixture.ActorId, default);
+        Assert.Equal(
+            new[] { fixture.Stage.Id, stageC.Id, stageD.Id },
+            preview.Stages.Select(stage => stage.ProductModelStageId));
+
+        var missingCurrentStage = currentRequest with
+        {
+            Stages = currentRequest.Stages.Where(stage => stage.ProductModelStageId != stageD.Id).ToArray()
+        };
+        var missingConflict = await Assert.ThrowsAsync<ProductionConflictException>(() =>
+            fixture.Service.PreviewDailyOperationsAsync(missingCurrentStage, fixture.ActorId, default));
+        Assert.Contains("عدد المراحل الحالية: 3", missingConflict.Message);
+        Assert.Contains("عدد المراحل المرسلة: 2", missingConflict.Message);
+        Assert.Contains(stageD.Id.ToString("D"), missingConflict.Message);
+        Assert.Contains("المعرّفات غير المتوقعة: لا يوجد", missingConflict.Message);
+
+        var historicalBRequest = originalRequest.Stages.Single(stage => stage.ProductModelStageId == stageB.Id);
+        var extraHistoricalStage = currentRequest with
+        {
+            Stages = currentRequest.Stages.Append(historicalBRequest).ToArray()
+        };
+        var extraConflict = await Assert.ThrowsAsync<ProductionConflictException>(() =>
+            fixture.Service.PreviewDailyOperationsAsync(extraHistoricalStage, fixture.ActorId, default));
+        Assert.Contains("عدد المراحل الحالية: 3", extraConflict.Message);
+        Assert.Contains("عدد المراحل المرسلة: 4", extraConflict.Message);
+        Assert.Contains("المعرّفات الناقصة: لا يوجد", extraConflict.Message);
+        Assert.Contains(stageB.Id.ToString("D"), extraConflict.Message);
+
+        var duplicateStage = currentRequest with
+        {
+            Stages = currentRequest.Stages.Take(2).Append(currentRequest.Stages.First()).ToArray()
+        };
+        var duplicateConflict = await Assert.ThrowsAsync<ProductionConflictException>(() =>
+            fixture.Service.PreviewDailyOperationsAsync(duplicateStage, fixture.ActorId, default));
+        Assert.Contains("مكررة أو غير صالحة", duplicateConflict.Message);
+
+        var saved = await fixture.Service.UpdateDailyDraftAsync(
+            created.ProductionOrderId,
+            UpdateRequest(originalRequest with { LineQuantity = 640m }, created, preview.PreviewToken),
+            fixture.ActorId,
+            default);
+
+        Assert.Equal(
+            new[] { fixture.Stage.Id, stageB.Id, stageC.Id }.Order(),
+            saved.Stages.Select(stage => stage.ProductModelStageId).Order());
+        Assert.DoesNotContain(saved.Stages, stage => stage.ProductModelStageId == stageD.Id);
+        var savedB = saved.Stages.Single(stage => stage.ProductModelStageId == stageB.Id);
+        Assert.Equal(historicalB.Id, savedB.Id);
+        Assert.Equal(historicalB.ConcurrencyToken, savedB.ConcurrencyToken);
+        Assert.Equal(historicalB.ProducedQuantity, savedB.ProducedQuantity);
+        Assert.Equal(historicalB.TotalWorkerEarnings, savedB.TotalWorkerEarnings);
+    }
+
+    [Fact]
     public async Task Daily_draft_save_preserves_a_historical_stage_after_current_configuration_deactivation()
     {
         await using var fixture = await Fixture.CreateAsync("SharedPercentage", 0.50m, 17m);
