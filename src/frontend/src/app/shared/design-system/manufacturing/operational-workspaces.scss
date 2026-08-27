@@ -118,6 +118,10 @@ button.daily-production-operations__preview-blocker:is(:hover,.is-active) { back
 button.daily-production-operations__preview-blocker:focus-visible { outline:var(--plp-focus-outline);outline-offset:var(--plp-focus-offset) }
 .daily-production-operations__preview-blocker--global { align-items:start;grid-template-columns:auto minmax(0,1fr) }
 .daily-production-operations__preview-blocker--global i { margin-block-start:var(--plp-space-4) }
+.daily-production-operations__validation-issue { background:var(--plp-color-danger-soft);border-color:var(--plp-color-danger);color:var(--plp-color-danger-strong) }
+.daily-production-operations__validation-issue .daily-production-operations__preview-blocker-stage i { color:var(--plp-color-danger) }
+button.daily-production-operations__validation-issue:hover { background:var(--plp-color-danger-soft);border-color:var(--plp-color-danger-strong);color:var(--plp-color-danger-strong) }
+button.daily-production-operations__validation-issue.is-active { background:var(--plp-color-danger-soft);border-color:var(--plp-color-primary);box-shadow:inset 0 0 0 1px var(--plp-color-primary);color:var(--plp-color-danger-strong) }
 
 @media (min-width: 600px) and (max-width: 1023px) {
   .manufacturing-filter-card__header { padding-inline:var(--plp-space-16) }

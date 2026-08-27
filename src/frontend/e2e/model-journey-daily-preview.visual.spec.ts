@@ -14,13 +14,29 @@ const stage = { id: 'stage-1', mainStageId: 'main-1', mainStageName: 'التشغ
 const secondStage = { ...stage, id: 'stage-2', code: 'ST-02', name: 'مرحلة التشطيب', sequenceOrder: 2 };
 const modelStage = { id: 'model-stage-1', productionLineId: line.id, subStageId: stage.id, departmentId: department.id, subStageCode: stage.code, subStageName: stage.name, stageOrder: 1, piecePrice: .6, standardSeconds: 30, compensationMode: 'SharedPercentage', isRequired: true, isActive: true };
 const secondModelStage = { ...modelStage, id: 'model-stage-2', subStageId: secondStage.id, subStageCode: secondStage.code, subStageName: secondStage.name, stageOrder: 2, piecePrice: .75 };
+const validationStageDefinitions = [
+  ['STG009', 'مرحلة تجهيز الحافة الطويلة للاختبار', '1505'],
+  ['STG011', 'مرحلة تركيب الجزء الداخلي', '1242'],
+  ['STG013', 'مرحلة ضبط المقاس النهائي', '2309'],
+  ['STG020', 'مرحلة المراجعة الدقيقة قبل التشطيب', '1710'],
+  ['STG028', 'مرحلة التشطيب والتجهيز للتسليم', '1988'],
+  ['STG031', 'مرحلة الفحص النهائي واعتماد الجودة', '2114']
+] as const;
+const validationModelStages = validationStageDefinitions.map(([code, name], index) => ({
+  ...modelStage,
+  id: `validation-model-stage-${index + 1}`,
+  subStageId: `validation-sub-stage-${index + 1}`,
+  subStageCode: code,
+  subStageName: name,
+  stageOrder: index + 1
+}));
 
 test.beforeAll(async () => {
   await mkdir(visualOutput, { recursive: true });
   await mkdir(excelOutput, { recursive: true });
 });
 
-async function preparePage(page: Page): Promise<void> {
+async function preparePage(page: Page, options: { validationBlockers?: boolean } = {}): Promise<void> {
   await page.addInitScript(({ storedPermissions }) => {
     localStorage.setItem('plp.accessToken', 'visual-token');
     localStorage.setItem('plp.currentUser', JSON.stringify({ id: 'visual-user', fullName: 'مراجع الواجهة', roles: ['Administrator'], permissions: storedPermissions }));
@@ -39,12 +55,12 @@ async function preparePage(page: Page): Promise<void> {
     else if (pathname.endsWith('/api/factories')) data = { items: [factory] };
     else if (pathname.endsWith('/api/departments')) data = { items: [department] };
     else if (pathname.endsWith('/api/production-lines')) data = { items: [line] };
-    else if (pathname.endsWith(`/api/product-models/${model.id}/production-lines/${line.id}/stages`)) data = [modelStage, secondModelStage];
+    else if (pathname.endsWith(`/api/product-models/${model.id}/production-lines/${line.id}/stages`)) data = options.validationBlockers ? validationModelStages : [modelStage, secondModelStage];
     else if (pathname.endsWith('/api/product-models')) data = { items: [model], totalCount: 1, pageNumber: 1, pageSize: 10 };
     else if (pathname.endsWith('/api/stages')) data = { items: [stage], totalCount: 1, pageNumber: 1, pageSize: 200 };
     else if (pathname.includes('/api/attendance/sync/production-date/')) data = { sourceUsersCount: 1, sourceCheckInsCount: 1, matchedWorkersCount: 1, unmatchedSourceUsersCount: 0, workersWithoutAttendanceCount: 0, insertedRecords: 1, updatedRecords: 0, skippedRecords: 0 };
     else if (pathname.endsWith('/api/production/daily-operations/preview')) data = dailyPreview();
-    else if (pathname.endsWith('/api/production/daily-operations')) data = dailyOperations();
+    else if (pathname.endsWith('/api/production/daily-operations')) data = options.validationBlockers ? validationDailyOperations() : dailyOperations();
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data, error: null }) });
   });
 }
@@ -62,13 +78,63 @@ function dailyOperations() {
   return { factoryId: factory.id, factoryName: factory.name, productionLineId: line.id, productionLineName: line.name, productModelId: model.id, productModelCode: model.code, productModelName: model.name, productionDate: '2026-07-17', staffingContextVersion: 'visual-v1', totalStages: 2, readyStages: 2, stagesWithAbsentWorkers: 0, stagesWithNoSourceCheckIn: 0, stagesWithoutStaffing: 0, stagesRequiringCostReview: 0, activeWorkers: [dailyWorker(), secondDailyWorker()], stages: [firstOperationStage, { ...firstOperationStage, productModelStageId: secondModelStage.id, subStageId: secondStage.id, stageCode: secondStage.code, stageName: secondStage.name, stageOrder: 2, piecePrice: .75, workers: [{ ...dailyWorker(), suggestedPercentage: 100 }] }] };
 }
 
+function validationDailyOperations() {
+  const stages = validationModelStages.map((validationStage, index) => {
+    const [, , workerCode] = validationStageDefinitions[index];
+    return {
+      productModelStageId: validationStage.id,
+      subStageId: validationStage.subStageId,
+      mainStageName: 'التشغيل',
+      stageCode: validationStage.subStageCode,
+      stageName: validationStage.subStageName,
+      stageOrder: validationStage.stageOrder,
+      piecePrice: .6 + index * .05,
+      compensationMode: 'SharedPercentage',
+      staffingStatus: 'Staffed',
+      attendanceStatus: 'Ready',
+      hasAbsentWorkers: false,
+      hasNoSourceCheckInWorkers: false,
+      isFinancialReviewPending: false,
+      isReady: true,
+      workers: [{
+        ...dailyWorker(),
+        workerId: `validation-worker-${index + 1}`,
+        workerCode,
+        workerName: `عامل مرحلة ${validationStage.stageOrder}`,
+        suggestedPercentage: 100,
+        isAssignedWorker: false,
+        isDailyOverride: true
+      }]
+    };
+  });
+  return {
+    factoryId: factory.id,
+    factoryName: factory.name,
+    productionLineId: line.id,
+    productionLineName: line.name,
+    productModelId: model.id,
+    productModelCode: model.code,
+    productModelName: model.name,
+    productionDate: '2026-07-17',
+    staffingContextVersion: 'validation-v1',
+    totalStages: stages.length,
+    readyStages: stages.length,
+    stagesWithAbsentWorkers: 0,
+    stagesWithNoSourceCheckIn: 0,
+    stagesWithoutStaffing: 0,
+    stagesRequiringCostReview: 0,
+    activeWorkers: stages.flatMap(stage => stage.workers),
+    stages
+  };
+}
+
 function dailyPreview() {
   const firstWarning = 'تحتاج مرحلة التجميع إلى مراجعة توزيع العمال قبل حفظ المسودة لضمان اكتمال بيانات التشغيل.';
   const secondWarning = 'تحتاج مرحلة التشطيب إلى مراجعة مدير الإنتاج قبل اعتماد الكمية النهائية.';
   return { productionDate: '2026-07-17', lineQuantity: 1000, previewToken: 'visual-preview', totalWorkerEntitlements: 1350, stages: [{ productModelStageId: modelStage.id, stageCode: stage.code, stageName: stage.name, stageQuantity: 1000, stageCost: 600, compensationMode: 'SharedPercentage', warnings: [firstWarning], workers: [{ workerId: 'worker-1', workerCode: 'W-01', workerName: 'عامل الاختبار', percentage: 25, equivalentQuantity: 250, calculatedEarning: 150 }, { workerId: 'worker-2', workerCode: 'W-02', workerName: 'عامل مساعد', percentage: 75, equivalentQuantity: 750, calculatedEarning: 450 }] }, { productModelStageId: secondModelStage.id, stageCode: secondStage.code, stageName: secondStage.name, stageQuantity: 1000, stageCost: 750, compensationMode: 'SharedPercentage', warnings: [secondWarning], workers: [{ workerId: 'worker-1', workerCode: 'W-01', workerName: 'عامل الاختبار', percentage: 100, equivalentQuantity: 1000, calculatedEarning: 750 }] }], workerTotals: [{ workerId: 'worker-1', workerCode: 'W-01', workerName: 'عامل الاختبار', totalEntitlement: 900 }, { workerId: 'worker-2', workerCode: 'W-02', workerName: 'عامل مساعد', totalEntitlement: 450 }], warnings: [firstWarning, secondWarning, 'تحذير عام لا يرتبط بمرحلة محددة.'] };
 }
 
-async function openSuccessfulDailyPreview(page: Page): Promise<void> {
+async function openDailyOperations(page: Page): Promise<void> {
   await page.goto('/manufacturing/daily-production-operations');
   await page.getByLabel('تاريخ الإنتاج').fill('2026-07-17');
   await page.locator('.structure-selector__trigger').click();
@@ -82,6 +148,10 @@ async function openSuccessfulDailyPreview(page: Page): Promise<void> {
   await page.getByLabel('الموديل').selectOption(model.id);
   await page.getByRole('button', { name: 'مزامنة حضور التاريخ' }).click();
   await page.getByRole('button', { name: 'تحميل تشغيل اليوم' }).click();
+}
+
+async function openSuccessfulDailyPreview(page: Page): Promise<void> {
+  await openDailyOperations(page);
   await page.getByLabel('كمية تشغيل الخط (تطبق مرة واحدة على كل مرحلة)').fill('1000');
   await page.getByRole('button', { name: 'حساب معاينة موحّدة' }).click();
   await expect(page.locator('.daily-production-operations__preview-overview')).toBeVisible();
@@ -127,6 +197,52 @@ test('line-scoped model journey search stays inside the assignment table', async
     await activationToggle.screenshot({ path: path.join(visualOutput, `model-stage-toggle-${name}.png`) });
     await expect(contextTree.getByRole('treeitem', { name: `${line.lineCode} — ${line.name}` })).toHaveAttribute('aria-selected', 'true');
     await page.screenshot({ path: path.join(visualOutput, `models-${name}.png`), fullPage: true });
+    await expectViewportSafe(page);
+  }
+});
+
+test('stage-aware validation blockers remain visible and navigate through many invalid stages', async ({ page }) => {
+  await preparePage(page, { validationBlockers: true });
+  for (const [name, width, height] of [['desktop', 1440, 900], ['tablet-landscape', 1280, 800], ['tablet-portrait', 800, 1280], ['mobile', 390, 844]] as const) {
+    await page.setViewportSize({ width, height });
+    await openDailyOperations(page);
+    await page.getByLabel('كمية تشغيل الخط (تطبق مرة واحدة على كل مرحلة)').fill('1000');
+    await page.getByRole('button', { name: 'حساب معاينة موحّدة' }).click();
+
+    const validationPanel = page.locator('.daily-production-operations__validation');
+    const validationButtons = validationPanel.locator('button.daily-production-operations__validation-issue');
+    await expect(validationButtons).toHaveCount(validationStageDefinitions.length);
+    await expect(validationPanel.locator('.daily-production-operations__preview-blocker--global')).toHaveCount(0);
+    await expect(page.locator('.daily-production-operations__preview-overview')).toHaveCount(0);
+    await expect(validationButtons.first()).toContainText(validationStageDefinitions[0][0]);
+    await expect(validationButtons.first()).toContainText(validationStageDefinitions[0][1]);
+    await expect(validationButtons.first()).toContainText(validationStageDefinitions[0][2]);
+    const firstButtonBox = await validationButtons.first().boundingBox();
+    expect(firstButtonBox?.height).toBeGreaterThanOrEqual(44);
+    await validationButtons.first().focus();
+    await expect(validationButtons.first()).toBeFocused();
+    await validationPanel.screenshot({ path: path.join(visualOutput, `daily-validation-blockers-${name}.png`) });
+
+    const contentScroller = page.locator('.plp-app-shell__main');
+    const horizontalScrollBefore = await contentScroller.evaluate(element => element.scrollLeft);
+    await validationButtons.first().click();
+    await expect(page.locator('.daily-production-operations__stage-list > button')).toHaveCount(1);
+    await expectSelectedStageAtComfortableOffset(page, validationModelStages[0].id);
+    await expect(validationButtons.first()).toHaveClass(/is-active/);
+    await expect(validationButtons).toHaveCount(validationStageDefinitions.length);
+
+    await validationButtons.nth(4).click();
+    await expect(page.locator('.daily-production-operations__stage-list > button')).toHaveCount(1);
+    await expectSelectedStageAtComfortableOffset(page, validationModelStages[4].id);
+    await expect(validationButtons.nth(4)).toHaveClass(/is-active/);
+    await expect(validationButtons).toHaveCount(validationStageDefinitions.length);
+    expect(await contentScroller.evaluate(element => element.scrollLeft)).toBe(horizontalScrollBefore);
+    await page.screenshot({ path: path.join(visualOutput, `daily-validation-selected-${name}.png`) });
+
+    await page.getByRole('button', { name: 'عرض كل المراحل' }).click();
+    await expect(page.locator('.daily-production-operations__stage-list > button')).toHaveCount(validationStageDefinitions.length);
+    await expect(page.locator('.daily-production-operations__stage-list > button.is-selected')).toHaveCount(0);
+    await expect(validationButtons).toHaveCount(validationStageDefinitions.length);
     await expectViewportSafe(page);
   }
 });

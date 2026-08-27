@@ -69,7 +69,7 @@ interface StageWorkerProjection {
   isCalculated: boolean;
 }
 
-interface DailyPreviewBlocker {
+interface DailyOperationIssue {
   message: string;
   productModelStageId: string | null;
   stageCode: string | null;
@@ -165,7 +165,7 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
 
   private previewValue: DailyProductionPreview | null = null;
   private previewSource: UnifiedPreviewSource | null = null;
-  private previewBlockersValue: DailyPreviewBlocker[] = [];
+  private previewBlockersValue: DailyOperationIssue[] = [];
 
   get preview(): DailyProductionPreview | null {
     return this.previewValue;
@@ -202,7 +202,7 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
   attendanceSyncedForDate = '';
   error = '';
   successMessage = '';
-  validationMessages: string[] = [];
+  validationIssues: DailyOperationIssue[] = [];
   hasPendingRemoteUpdate = false;
   remoteUpdateMessage = '';
 
@@ -326,7 +326,7 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
     return this.stages.find(stage => stage.productModelStageId === this.selectedStageFilterId) ?? null;
   }
 
-  get previewBlockers(): DailyPreviewBlocker[] {
+  get previewBlockers(): DailyOperationIssue[] {
     return this.previewBlockersValue;
   }
 
@@ -359,7 +359,7 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
   }
 
   get canExportExcel(): boolean {
-    return this.previewStatus === 'success' && !!this.preview && this.preview.stages.length > 0 && this.stageAllocationRows.length > 0 && !this.validationMessages.length;
+    return this.previewStatus === 'success' && !!this.preview && this.preview.stages.length > 0 && this.stageAllocationRows.length > 0 && !this.validationIssues.length;
   }
 
   get previewStatusLabel(): string {
@@ -599,7 +599,7 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
     this.scrollToSelectedStage(firstVisibleStage.productModelStageId);
   }
 
-  filterStageFromPreviewBlocker(stageId: string | null): void {
+  focusStageFromIssue(stageId: string | null): void {
     if (!stageId || !this.stages.some(stage => stage.productModelStageId === stageId)) return;
     this.stageSearch = '';
     this.stageFilter = 'all';
@@ -612,9 +612,9 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
     this.selectDailyStageFilter(null);
   }
 
-  previewBlockerAriaLabel(blocker: DailyPreviewBlocker): string {
-    if (!blocker.productModelStageId || !blocker.stageName) return blocker.message;
-    return `عرض المرحلة ${blocker.stageName} المرتبطة بالعائق: ${blocker.message}`;
+  issueAriaLabel(issue: DailyOperationIssue): string {
+    if (!issue.productModelStageId || !issue.stageName) return issue.message;
+    return `عرض المرحلة ${issue.stageName} المرتبطة بالمشكلة: ${issue.message}`;
   }
 
   addReplacementWorker(): void {
@@ -684,7 +684,7 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
     if (!this.canEditDraft) return;
     this.hasUnsavedChanges = true;
     this.error = '';
-    this.validationMessages = [];
+    this.validationIssues = [];
     this.invalidatePreview();
   }
 
@@ -697,7 +697,7 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
   calculatePreview(): void {
     if (!this.canEditDraft) return;
     const validation = this.validateOperation();
-    this.validationMessages = validation;
+    this.validationIssues = validation;
     if (validation.length || this.previewing) {
       if (validation.length) this.previewStatus = 'error';
       return;
@@ -730,7 +730,7 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
   dailyProductionExcelWorkbook(): ExcelWorkbookDefinition | null {
     const preview = this.preview;
     const operations = this.operations;
-    if (!preview || this.previewStatus !== 'success' || !this.stageAllocationRows.length || this.validationMessages.length || !operations) return null;
+    if (!preview || this.previewStatus !== 'success' || !this.stageAllocationRows.length || this.validationIssues.length || !operations) return null;
 
     const line = this.productionLines.find(item => item.id === operations.productionLineId);
     const department = this.departments.find(item => item.id === line?.departmentId);
@@ -952,7 +952,7 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
       return;
     }
     const validation = this.validateOperation();
-    this.validationMessages = validation;
+    this.validationIssues = validation;
     if (validation.length) return;
 
     const existingDraft = this.currentDailyDraft;
@@ -1304,27 +1304,39 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
     };
   }
 
-  private validateOperation(): string[] {
-    const messages: string[] = [];
-    if (!this.operations) messages.push('حمّل تشغيل اليوم بعد مزامنة الحضور أولًا.');
-    if (!this.lineQuantity || this.lineQuantity <= 0) messages.push('أدخل كمية تشغيل الخط مرة واحدة بقيمة أكبر من صفر.');
+  private validateOperation(): DailyOperationIssue[] {
+    const issues: DailyOperationIssue[] = [];
+    const addGlobalIssue = (message: string) => issues.push({
+      message,
+      productModelStageId: null,
+      stageCode: null,
+      stageName: null
+    });
+    const addStageIssue = (stage: EditableDailyStage, message: string) => issues.push({
+      message,
+      productModelStageId: stage.productModelStageId,
+      stageCode: stage.stageCode,
+      stageName: stage.stageName
+    });
+    if (!this.operations) addGlobalIssue('حمّل تشغيل اليوم بعد مزامنة الحضور أولًا.');
+    if (!this.lineQuantity || this.lineQuantity <= 0) addGlobalIssue('أدخل كمية تشغيل الخط مرة واحدة بقيمة أكبر من صفر.');
 
     this.stages.forEach(stage => {
       const participants = stage.workers.filter(worker => worker.includedInProduction !== false && worker.isProductionReady);
-      if (!participants.length) messages.push(`${stage.stageCode}: لا يوجد عامل جاهز محتسب في تشغيل هذه المرحلة.`);
+      if (!participants.length) addStageIssue(stage, 'لا يوجد عامل جاهز محتسب في تشغيل هذه المرحلة.');
       if (stage.compensationMode === 'SharedPercentage' && participants.length) {
         const allocationError = this.stageAllocationError(stage);
-        if (allocationError) messages.push(`${stage.stageCode}: ${allocationError}.`);
+        if (allocationError) addStageIssue(stage, `${allocationError}.`);
       }
       if (stage.compensationMode === 'FixedAmount' && participants.some(worker => worker.fixedAmount === null || worker.fixedAmount < 0)) {
-        messages.push(`${stage.stageCode}: أدخل قيمة ثابتة صالحة لكل عامل.`);
+        addStageIssue(stage, 'أدخل قيمة ثابتة صالحة لكل عامل.');
       }
       participants.filter(worker => this.workerNeedsOverride(stage, worker)).forEach(worker => {
-        if (!this.canOverrideParticipants) messages.push(`${stage.stageCode}: العامل ${worker.workerCode} يحتاج تجاوزًا معتمدًا، ولا تملك صلاحية إدارته.`);
-        else if (!worker.manualOverrideReason.trim()) messages.push(`${stage.stageCode}: سبب التجاوز مطلوب للعامل ${worker.workerCode}.`);
+        if (!this.canOverrideParticipants) addStageIssue(stage, `العامل ${worker.workerCode} يحتاج تجاوزًا معتمدًا، ولا تملك صلاحية إدارته.`);
+        else if (!worker.manualOverrideReason.trim()) addStageIssue(stage, `سبب التجاوز مطلوب للعامل ${worker.workerCode}.`);
       });
     });
-    return [...new Set(messages)];
+    return [...new Map(issues.map(issue => [`${issue.productModelStageId ?? 'global'}\u0000${issue.message}`, issue])).values()];
   }
 
   private operationRequest(previewToken: string | null) {
@@ -1780,7 +1792,7 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
     }
   }
 
-  private buildPreviewBlockers(preview: DailyProductionPreview | null): DailyPreviewBlocker[] {
+  private buildPreviewBlockers(preview: DailyProductionPreview | null): DailyOperationIssue[] {
     if (!preview) return [];
     const stageBlockers = preview.stages.flatMap(stage => stage.warnings.map(message => ({
       message,
@@ -1923,7 +1935,7 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
     this.invalidatePreview(true, 'idle');
     this.error = '';
     this.successMessage = '';
-    this.validationMessages = [];
+    this.validationIssues = [];
     this.realtimeRefreshQueued = false;
     this.hasUnsavedChanges = false;
     this.clearRemoteUpdateNotice();

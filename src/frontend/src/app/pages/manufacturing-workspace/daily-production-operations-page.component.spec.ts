@@ -477,7 +477,171 @@ describe('DailyProductionOperationsPageComponent unified preview', () => {
     component.calculatePreview();
 
     expect(production.previewDailyOperations).not.toHaveBeenCalled();
-    expect(component.validationMessages.join(' ')).toContain('راجع قيم العمال');
+    expect(component.validationIssues.map(issue => issue.message).join(' ')).toContain('راجع قيم العمال');
+  });
+
+  it('keeps a no-ready-worker validation issue stage-aware, blocks preview, and focuses its stage', fakeAsync(() => {
+    const stage = component.stages[0];
+    stage.workers = [{ ...stage.workers[0], isProductionReady: false, includedInProduction: false }];
+    const scrollContainer = {
+      scrollTop: 0,
+      scrollTo: jasmine.createSpy('scrollTo'),
+      getBoundingClientRect: () => ({ top: 64 })
+    } as any;
+    spyOn(document, 'getElementById').and.returnValue({
+      closest: () => scrollContainer,
+      getBoundingClientRect: () => ({ top: 360 })
+    } as any);
+    spyOn(window, 'matchMedia').and.returnValue({ matches: true } as MediaQueryList);
+    spyOn(window, 'getComputedStyle').and.returnValue({ getPropertyValue: () => '32px' } as unknown as CSSStyleDeclaration);
+
+    component.calculatePreview();
+
+    expect(production.previewDailyOperations).not.toHaveBeenCalled();
+    expect(component.previewStatus).toBe('error');
+    const issue = component.validationIssues.find(candidate => candidate.message.includes('لا يوجد عامل جاهز'))!;
+    expect(issue).toEqual(jasmine.objectContaining({
+      productModelStageId: 'stage-1',
+      stageCode: 'S1',
+      stageName: 'مرحلة 1'
+    }));
+
+    component.focusStageFromIssue(issue.productModelStageId);
+    tick(32);
+
+    expect(component.selectedStageFilterId).toBe('stage-1');
+    expect(component.selectedStageId).toBe('stage-1');
+    expect(scrollContainer.scrollTo).toHaveBeenCalledWith({ top: 264, behavior: 'auto' });
+  }));
+
+  it('associates a missing override reason with Stage B and focuses that stage', fakeAsync(() => {
+    const firstStage = component.stages[0];
+    const secondStage = {
+      ...firstStage,
+      productModelStageId: 'stage-2',
+      subStageId: 'sub-stage-2',
+      stageCode: 'S2',
+      stageName: 'مرحلة 2',
+      stageOrder: 2,
+      workers: [{
+        ...firstStage.workers[0],
+        workerId: 'worker-2',
+        workerCode: '1505',
+        isAssignedWorker: false,
+        isDailyOverride: true,
+        manualOverrideReason: ''
+      }]
+    };
+    component.stages = [firstStage, secondStage];
+
+    component.calculatePreview();
+
+    const issue = component.validationIssues.find(candidate => candidate.message.includes('1505'))!;
+    expect(issue.productModelStageId).toBe('stage-2');
+    expect(issue.message).toBe('سبب التجاوز مطلوب للعامل 1505.');
+    component.focusStageFromIssue(issue.productModelStageId);
+    tick(32);
+
+    expect(component.selectedStageFilterId).toBe('stage-2');
+    expect(component.selectedStageId).toBe('stage-2');
+    expect(component.filteredStages).toEqual([secondStage]);
+  }));
+
+  it('switches directly between stage-aware validation blockers and scrolls to the latest stage', fakeAsync(() => {
+    const firstStage = { ...component.stages[0], workers: [] };
+    const secondStage = {
+      ...firstStage,
+      productModelStageId: 'stage-2',
+      subStageId: 'sub-stage-2',
+      stageCode: 'S2',
+      stageName: 'مرحلة 2',
+      stageOrder: 2
+    };
+    component.stages = [firstStage, secondStage];
+    const scrollContainer = {
+      scrollTop: 0,
+      scrollTo: jasmine.createSpy('scrollTo'),
+      getBoundingClientRect: () => ({ top: 64 })
+    } as any;
+    const stageElements: Record<string, any> = {
+      'daily-stage-row-stage-1': { closest: () => scrollContainer, getBoundingClientRect: () => ({ top: 360 }) },
+      'daily-stage-row-stage-2': { closest: () => scrollContainer, getBoundingClientRect: () => ({ top: 420 }) }
+    };
+    const getStageRow = spyOn(document, 'getElementById').and.callFake(id => stageElements[id] ?? null);
+    spyOn(window, 'matchMedia').and.returnValue({ matches: true } as MediaQueryList);
+    spyOn(window, 'getComputedStyle').and.returnValue({ getPropertyValue: () => '32px' } as unknown as CSSStyleDeclaration);
+
+    component.calculatePreview();
+    const [firstIssue, secondIssue] = component.validationIssues;
+
+    component.focusStageFromIssue(firstIssue.productModelStageId);
+    tick(32);
+    expect(component.selectedStageId).toBe('stage-1');
+
+    component.focusStageFromIssue(secondIssue.productModelStageId);
+    tick(32);
+    expect(component.selectedStageFilterId).toBe('stage-2');
+    expect(component.selectedStageId).toBe('stage-2');
+    expect(getStageRow).toHaveBeenCalledWith('daily-stage-row-stage-2');
+    expect(scrollContainer.scrollTo).toHaveBeenCalledWith({ top: 324, behavior: 'auto' });
+    expect(component.validationIssues).toHaveSize(2);
+  }));
+
+  it('keeps missing line quantity as a global non-filtering validation issue', () => {
+    component.lineQuantity = null;
+    component.selectedStageId = 'stage-1';
+
+    component.calculatePreview();
+
+    const issue = component.validationIssues.find(candidate => candidate.message.includes('كمية تشغيل الخط'))!;
+    expect(issue.productModelStageId).toBeNull();
+    expect(issue.stageCode).toBeNull();
+    expect(production.previewDailyOperations).not.toHaveBeenCalled();
+
+    component.focusStageFromIssue(issue.productModelStageId);
+    expect(component.selectedStageFilterId).toBe('');
+    expect(component.selectedStageId).toBe('stage-1');
+  });
+
+  it('preserves shared, fixed, and override validation rules while enriching stage identity', () => {
+    const sharedStage = {
+      ...component.stages[0],
+      workers: [{ ...component.stages[0].workers[0], percentage: 80, quantity: 400 }]
+    };
+    const fixedStage = {
+      ...component.stages[0],
+      productModelStageId: 'stage-fixed',
+      stageCode: 'FIX',
+      stageName: 'مرحلة ثابتة',
+      stageOrder: 2,
+      compensationMode: 'FixedAmount',
+      workers: [{ ...component.stages[0].workers[0], workerId: 'worker-fixed', fixedAmount: null }]
+    };
+    const overrideStage = {
+      ...component.stages[0],
+      productModelStageId: 'stage-override',
+      stageCode: 'OVR',
+      stageName: 'مرحلة تجاوز',
+      stageOrder: 3,
+      workers: [{
+        ...component.stages[0].workers[0],
+        workerId: 'worker-override',
+        workerCode: '2309',
+        isAssignedWorker: false,
+        isDailyOverride: true
+      }]
+    };
+    grantedPermissions.delete(PERMISSIONS.assignments.manage);
+    component.stages = [sharedStage, fixedStage, overrideStage] as any;
+
+    component.calculatePreview();
+
+    expect(production.previewDailyOperations).not.toHaveBeenCalled();
+    expect(component.validationIssues).toEqual(jasmine.arrayContaining([
+      jasmine.objectContaining({ productModelStageId: 'stage-1', message: 'مجموع النسب يجب أن يساوي 100٪.' }),
+      jasmine.objectContaining({ productModelStageId: 'stage-fixed', message: 'أدخل قيمة ثابتة صالحة لكل عامل.' }),
+      jasmine.objectContaining({ productModelStageId: 'stage-override', message: 'العامل 2309 يحتاج تجاوزًا معتمدًا، ولا تملك صلاحية إدارته.' })
+    ]));
   });
 
   it('builds stage and worker views from one id-based allocation projection', () => {
@@ -834,7 +998,7 @@ describe('DailyProductionOperationsPageComponent unified preview', () => {
     spyOn(window, 'matchMedia').and.returnValue({ matches: true } as MediaQueryList);
     spyOn(window, 'getComputedStyle').and.returnValue({ getPropertyValue: () => '32px' } as unknown as CSSStyleDeclaration);
 
-    component.filterStageFromPreviewBlocker(firstBlocker.productModelStageId);
+    component.focusStageFromIssue(firstBlocker.productModelStageId);
     tick(32);
     expect(component.selectedStageFilterId).toBe('stage-1');
     expect(component.selectedStageId).toBe('stage-1');
@@ -842,7 +1006,7 @@ describe('DailyProductionOperationsPageComponent unified preview', () => {
     expect(getStageRow).toHaveBeenCalledWith('daily-stage-row-stage-1');
     expect(scrollContainer.scrollTo).toHaveBeenCalledWith({ top: 264, behavior: 'auto' });
 
-    component.filterStageFromPreviewBlocker(secondBlocker.productModelStageId);
+    component.focusStageFromIssue(secondBlocker.productModelStageId);
     tick(32);
     expect(component.selectedStageFilterId).toBe('stage-2');
     expect(component.selectedStageId).toBe('stage-2');
@@ -857,7 +1021,7 @@ describe('DailyProductionOperationsPageComponent unified preview', () => {
     const firstStage = component.stages[0];
     const secondStage = { ...firstStage, productModelStageId: 'stage-2', stageCode: 'S2', stageName: 'مرحلة 2', stageOrder: 2, workers: [] };
     component.stages = [firstStage, secondStage];
-    component.filterStageFromPreviewBlocker('stage-2');
+    component.focusStageFromIssue('stage-2');
 
     component.showAllDailyStages();
 
@@ -870,7 +1034,7 @@ describe('DailyProductionOperationsPageComponent unified preview', () => {
     component.preview = { ...preview, warnings: ['تحذير عام لا يرتبط بمرحلة'] };
     const globalBlocker = component.previewBlockers.find(blocker => !blocker.productModelStageId)!;
 
-    component.filterStageFromPreviewBlocker(globalBlocker.productModelStageId);
+    component.focusStageFromIssue(globalBlocker.productModelStageId);
 
     expect(globalBlocker.message).toBe('تحذير عام لا يرتبط بمرحلة');
     expect(component.selectedStageFilterId).toBe('');
@@ -881,7 +1045,7 @@ describe('DailyProductionOperationsPageComponent unified preview', () => {
     const firstStage = component.stages[0];
     component.stages = [firstStage, { ...firstStage, productModelStageId: 'stage-2', stageCode: 'S2', stageName: 'مرحلة 2', workers: [] }];
     const getStageRow = spyOn(document, 'getElementById');
-    component.filterStageFromPreviewBlocker('stage-2');
+    component.focusStageFromIssue('stage-2');
 
     component.preview = preview;
     tick(32);
@@ -894,7 +1058,7 @@ describe('DailyProductionOperationsPageComponent unified preview', () => {
 
   it('does not leak blocker filter, selection, or scheduled scroll into a different context', fakeAsync(() => {
     const getStageRow = spyOn(document, 'getElementById');
-    component.filterStageFromPreviewBlocker('stage-1');
+    component.focusStageFromIssue('stage-1');
 
     component.selectProductModel('model-2');
     tick(32);
@@ -1636,6 +1800,80 @@ describe('DailyProductionOperationsPageComponent visual hierarchy', () => {
     expect(missingPresenceCell.textContent).toContain('0 دقيقة');
     expect(missingPresenceCell.textContent).toContain('إضافة يومية');
   });
+
+  it('renders stage validation issues as accessible buttons while global issues remain static and clearable', fakeAsync(() => {
+    const production = jasmine.createSpyObj('ProductionCostRecordingApiService', ['previewDailyOperations', 'loadDailyOperations', 'createDailyDraft', 'updateDailyDraft']);
+    const masterData = jasmine.createSpyObj('ManufacturingMasterDataApiService', ['factories', 'departments', 'allProductionLines', 'models']);
+    const attendance = jasmine.createSpyObj('AttendanceApiService', ['syncForProductionDate']);
+    masterData.factories.and.returnValue(of([]));
+    masterData.departments.and.returnValue(of([]));
+    masterData.allProductionLines.and.returnValue(of([]));
+    TestBed.configureTestingModule({
+      imports: [ManufacturingWorkspaceModule, HttpClientTestingModule, NoopAnimationsModule],
+      providers: [
+        { provide: ProductionCostRecordingApiService, useValue: production },
+        { provide: ManufacturingMasterDataApiService, useValue: masterData },
+        { provide: AttendanceApiService, useValue: attendance },
+        { provide: PermissionService, useValue: { hasPermission: () => true } },
+        { provide: FormSubmissionValidationService, useValue: { serverMessage: (_: unknown, fallback: string) => fallback } }
+      ]
+    });
+    const fixture = TestBed.createComponent(DailyProductionOperationsPageComponent);
+    const component = fixture.componentInstance;
+    const stage = {
+      productModelStageId: 'stage-a', subStageId: 'sub-a', mainStageName: 'التجميع', stageCode: 'ST-A', stageName: 'مرحلة أ',
+      stageOrder: 1, piecePrice: .5, standardSeconds: 30, compensationMode: 'SharedPercentage', staffingStatus: 'Staffed', attendanceStatus: 'Ready',
+      hasAbsentWorkers: false, hasNoSourceCheckInWorkers: false, isFinancialReviewPending: false, isReady: true, workers: []
+    } as any;
+    component.operations = {
+      factoryId: 'factory-1', factoryName: 'مصنع', productionLineId: 'line-1', productionLineName: 'خط',
+      productModelId: 'model-1', productModelCode: 'M1', productModelName: 'موديل', productionDate: '2026-07-17',
+      staffingContextVersion: 'context', totalStages: 2, readyStages: 0, stagesWithAbsentWorkers: 0,
+      stagesWithNoSourceCheckIn: 0, stagesWithoutStaffing: 2, stagesRequiringCostReview: 0, activeWorkers: [], stages: []
+    };
+    component.stages = [stage, { ...stage, productModelStageId: 'stage-b', subStageId: 'sub-b', stageCode: 'ST-B', stageName: 'مرحلة ب', stageOrder: 2 }];
+    component.selectedStageId = 'stage-a';
+    component.lineQuantity = null;
+    const windowScroll = spyOn(window, 'scrollTo');
+
+    component.calculatePreview();
+    fixture.detectChanges();
+
+    const validationPanel = fixture.nativeElement.querySelector('.daily-production-operations__validation') as HTMLElement;
+    const issueButtons = validationPanel.querySelectorAll('button.daily-production-operations__validation-issue') as NodeListOf<HTMLButtonElement>;
+    const globalIssue = validationPanel.querySelector('.daily-production-operations__validation-issue:not(button)') as HTMLElement;
+    expect(issueButtons).toHaveSize(2);
+    expect(issueButtons[0].type).toBe('button');
+    expect(issueButtons[0].getAttribute('aria-label')).toContain('مرحلة أ');
+    expect(issueButtons[0].textContent).toContain('ST-A');
+    expect(issueButtons[0].textContent).toContain('لا يوجد عامل جاهز');
+    expect(globalIssue.textContent).toContain('أدخل كمية تشغيل الخط');
+    expect(globalIssue.closest('button')).toBeNull();
+    expect(production.previewDailyOperations).not.toHaveBeenCalled();
+
+    issueButtons[0].click();
+    fixture.detectChanges();
+    tick(32);
+    expect(component.selectedStageFilterId).toBe('stage-a');
+    expect(component.selectedStageId).toBe('stage-a');
+    expect(issueButtons[0].classList).toContain('is-active');
+    expect(fixture.nativeElement.querySelectorAll('.daily-production-operations__stage')).toHaveSize(1);
+    expect(windowScroll).toHaveBeenCalled();
+
+    issueButtons[1].click();
+    fixture.detectChanges();
+    tick(32);
+    expect(component.selectedStageFilterId).toBe('stage-b');
+    expect(component.selectedStageId).toBe('stage-b');
+    expect(validationPanel.querySelectorAll('button.daily-production-operations__validation-issue')).toHaveSize(2);
+
+    const showAllButton = fixture.nativeElement.querySelector('.daily-production-operations__active-stage-filter button') as HTMLButtonElement;
+    showAllButton.click();
+    fixture.detectChanges();
+    expect(component.selectedStageFilterId).toBe('');
+    expect(component.selectedStageId).toBe('');
+    expect(fixture.nativeElement.querySelectorAll('.daily-production-operations__stage')).toHaveSize(2);
+  }));
 
   it('renders stage blockers as accessible buttons that switch the visible stage and exposes an explicit clear action', () => {
     const production = jasmine.createSpyObj('ProductionCostRecordingApiService', ['previewDailyOperations', 'loadDailyOperations', 'createDailyDraft', 'updateDailyDraft']);

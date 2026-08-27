@@ -253,7 +253,32 @@
           <button *ngIf="canCancelDailyOperationApproval" pButton type="button" class="p-button-warning" label="إلغاء اعتماد تشغيل اليوم" icon="pi pi-undo" [loading]="cancelling" [disabled]="cancelling" (click)="openDailyApprovalCancellationDialog()"></button>
         </div>
       </div>
-      <ul class="daily-production-operations__validation plp-inline-feedback plp-inline-feedback--error" *ngIf="validationMessages.length" role="alert"><li *ngFor="let message of validationMessages">{{ message }}</li></ul>
+      <ul class="daily-production-operations__validation daily-production-operations__preview-blocker-list plp-inline-feedback plp-inline-feedback--error" *ngIf="validationIssues.length" role="alert">
+        <li *ngFor="let issue of validationIssues">
+          <button
+            *ngIf="issue.productModelStageId; else globalValidationIssue"
+            type="button"
+            class="daily-production-operations__preview-blocker daily-production-operations__validation-issue"
+            [class.is-active]="issue.productModelStageId === selectedStageFilterId"
+            [attr.aria-label]="issueAriaLabel(issue)"
+            [attr.aria-pressed]="issue.productModelStageId === selectedStageFilterId"
+            (click)="focusStageFromIssue(issue.productModelStageId)"
+          >
+            <span class="daily-production-operations__preview-blocker-stage">
+              <i class="pi pi-filter" aria-hidden="true"></i>
+              <strong>{{ issue.stageName }}</strong>
+              <code dir="ltr">{{ issue.stageCode }}</code>
+            </span>
+            <span>{{ issue.message }}</span>
+          </button>
+          <ng-template #globalValidationIssue>
+            <p class="daily-production-operations__preview-blocker daily-production-operations__preview-blocker--global daily-production-operations__validation-issue">
+              <i class="pi pi-exclamation-circle" aria-hidden="true"></i>
+              <span>{{ issue.message }}</span>
+            </p>
+          </ng-template>
+        </li>
+      </ul>
       <section class="daily-production-operations__preview plp-structured-list plp-structured-list--spacious" *ngIf="preview as calculatedPreview">
         <div class="daily-production-operations__preview-summary plp-summary-stat-grid">
           <plp-statistic-card title="إجمالي المستحقات" [value]="(calculatedPreview.totalWorkerEntitlements | number:'1.2-2') || '—'" icon="pi pi-wallet"></plp-statistic-card>
@@ -276,9 +301,9 @@
                 type="button"
                 class="daily-production-operations__preview-blocker"
                 [class.is-active]="blocker.productModelStageId === selectedStageFilterId"
-                [attr.aria-label]="previewBlockerAriaLabel(blocker)"
+                [attr.aria-label]="issueAriaLabel(blocker)"
                 [attr.aria-pressed]="blocker.productModelStageId === selectedStageFilterId"
-                (click)="filterStageFromPreviewBlocker(blocker.productModelStageId)"
+                (click)="focusStageFromIssue(blocker.productModelStageId)"
               >
                 <span class="daily-production-operations__preview-blocker-stage">
                   <i class="pi pi-filter" aria-hidden="true"></i>
