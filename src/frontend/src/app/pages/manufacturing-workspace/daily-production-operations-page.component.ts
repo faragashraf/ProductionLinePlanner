@@ -69,6 +69,13 @@ interface StageWorkerProjection {
   isCalculated: boolean;
 }
 
+interface DailyPreviewBlocker {
+  message: string;
+  productModelStageId: string | null;
+  stageCode: string | null;
+  stageName: string | null;
+}
+
 interface StageAllocationProjection {
   stageId: string;
   stageCode: string;
@@ -158,6 +165,7 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
 
   private previewValue: DailyProductionPreview | null = null;
   private previewSource: UnifiedPreviewSource | null = null;
+  private previewBlockersValue: DailyPreviewBlocker[] = [];
 
   get preview(): DailyProductionPreview | null {
     return this.previewValue;
@@ -165,6 +173,8 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
 
   set preview(value: DailyProductionPreview | null) {
     this.previewValue = value;
+    this.previewBlockersValue = this.buildPreviewBlockers(value);
+    this.reconcileStageFilterWithPreview(value);
     this.rebuildAllocationProjection();
   }
 
@@ -200,6 +210,8 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
   private previewRevision = -1;
   private clientRequestId = generateUuidV4();
   private operationsRequestVersion = 0;
+  private blockerSelectedStageId = '';
+  private pendingStageScrollFrame: number | null = null;
   private stopRealtime?: () => void;
   private hasUnsavedChanges = false;
   private realtimeRefreshQueued = false;
@@ -230,6 +242,7 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
   }
 
   ngOnDestroy(): void {
+    this.cancelScheduledStageScroll();
     this.stopRealtime?.();
     this.destroy$.next();
     this.destroy$.complete();
@@ -306,6 +319,15 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
 
   get selectedStage(): EditableDailyStage | null {
     return this.stages.find(stage => stage.productModelStageId === this.selectedStageId) ?? null;
+  }
+
+  get activeStageFilter(): EditableDailyStage | null {
+    if (!this.selectedStageFilterId) return null;
+    return this.stages.find(stage => stage.productModelStageId === this.selectedStageFilterId) ?? null;
+  }
+
+  get previewBlockers(): DailyPreviewBlocker[] {
+    return this.previewBlockersValue;
   }
 
   get filteredStages(): EditableDailyStage[] {
@@ -539,11 +561,18 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
     this.replacementWorkerId = '';
   }
 
-  selectDailyStageFilter(stageId: string | null | undefined): void {
+  selectDailyStageFilter(stageId: string | null | undefined, source: 'filter' | 'blocker' = 'filter'): void {
+    const previousBlockerStageId = this.blockerSelectedStageId;
+    this.cancelScheduledStageScroll();
+    this.blockerSelectedStageId = '';
     const normalizedStageId = stageId?.trim() ?? '';
     this.selectedStageFilterId = normalizedStageId;
 
     if (!normalizedStageId) {
+      if (previousBlockerStageId && this.selectedStageId === previousBlockerStageId) {
+        this.selectedStageId = '';
+        this.expandedStageRows = {};
+      }
       if (this.selectedStageId && !this.filteredStages.some(stage => stage.productModelStageId === this.selectedStageId)) {
         this.selectedStageId = '';
         this.expandedStageRows = {};
@@ -562,11 +591,30 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
 
     this.error = '';
     this.selectedStageId = firstVisibleStage.productModelStageId;
+    this.blockerSelectedStageId = source === 'blocker' ? firstVisibleStage.productModelStageId : '';
     const expandableRow = this.stageAllocationRows.find(row => row.stageId === firstVisibleStage.productModelStageId);
     this.expandedStageRows = expandableRow?.workers.length
       ? { [firstVisibleStage.productModelStageId]: true }
       : {};
     this.scrollToSelectedStage(firstVisibleStage.productModelStageId);
+  }
+
+  filterStageFromPreviewBlocker(stageId: string | null): void {
+    if (!stageId || !this.stages.some(stage => stage.productModelStageId === stageId)) return;
+    this.stageSearch = '';
+    this.stageFilter = 'all';
+    this.selectDailyStageFilter(stageId, 'blocker');
+  }
+
+  showAllDailyStages(): void {
+    this.stageSearch = '';
+    this.stageFilter = 'all';
+    this.selectDailyStageFilter(null);
+  }
+
+  previewBlockerAriaLabel(blocker: DailyPreviewBlocker): string {
+    if (!blocker.productModelStageId || !blocker.stageName) return blocker.message;
+    return `عرض المرحلة ${blocker.stageName} المرتبطة بالعائق: ${blocker.message}`;
   }
 
   addReplacementWorker(): void {
@@ -1669,13 +1717,89 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
   }
 
   private scrollToSelectedStage(stageId: string): void {
-    setTimeout(() => {
-      document.getElementById(`daily-stage-row-${stageId}`)?.scrollIntoView({
-        behavior: 'auto',
-        block: 'nearest',
-        inline: 'nearest'
+    this.pendingStageScrollFrame = requestAnimationFrame(() => {
+      this.pendingStageScrollFrame = requestAnimationFrame(() => {
+        this.pendingStageScrollFrame = null;
+        if (this.selectedStageFilterId !== stageId || this.selectedStageId !== stageId) return;
+        const stageElement = document.getElementById(`daily-stage-row-${stageId}`);
+        if (!stageElement) return;
+
+        const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+        const behavior: ScrollBehavior = reducedMotion ? 'auto' : 'smooth';
+        const stageRect = stageElement.getBoundingClientRect();
+        const scrollContainer = stageElement.closest<HTMLElement>('.plp-app-shell__main');
+        const contentOffset = this.cssPixelToken(stageElement, '--plp-space-32', 32);
+
+        if (scrollContainer) {
+          const containerRect = scrollContainer.getBoundingClientRect();
+          const targetTop = scrollContainer.scrollTop + stageRect.top - containerRect.top - contentOffset;
+          scrollContainer.scrollTo({ top: Math.max(0, targetTop), behavior });
+          return;
+        }
+
+        const shell = stageElement.closest<HTMLElement>('.plp-app-shell');
+        const headerOffset = this.cssPixelToken(shell ?? stageElement, '--plp-app-shell-header-height', 64);
+        const targetTop = window.scrollY + stageRect.top - headerOffset - contentOffset;
+        window.scrollTo({ top: Math.max(0, targetTop), behavior });
       });
-    }, 200);
+    });
+  }
+
+  private cancelScheduledStageScroll(): void {
+    if (this.pendingStageScrollFrame === null) return;
+    cancelAnimationFrame(this.pendingStageScrollFrame);
+    this.pendingStageScrollFrame = null;
+  }
+
+  private cssPixelToken(element: Element, token: string, fallback: number, depth = 0): number {
+    const rawValue = getComputedStyle(element).getPropertyValue(token).trim();
+    const referencedToken = depth < 4 ? rawValue.match(/^var\((--[\w-]+)\)$/)?.[1] : undefined;
+    if (referencedToken) return this.cssPixelToken(element, referencedToken, fallback, depth + 1);
+
+    const value = Number.parseFloat(rawValue);
+    if (!Number.isFinite(value)) return fallback;
+    if (rawValue.endsWith('rem')) {
+      const rootFontSize = Number.parseFloat(getComputedStyle(document.documentElement).fontSize);
+      return Number.isFinite(rootFontSize) ? value * rootFontSize : fallback;
+    }
+    if (rawValue.endsWith('em')) {
+      const fontSize = Number.parseFloat(getComputedStyle(element).fontSize);
+      return Number.isFinite(fontSize) ? value * fontSize : fallback;
+    }
+    return value;
+  }
+
+  private reconcileStageFilterWithPreview(preview: DailyProductionPreview | null): void {
+    if (!preview || !this.selectedStageFilterId) return;
+    if (preview.stages.some(stage => stage.productModelStageId === this.selectedStageFilterId)) return;
+    const staleStageId = this.selectedStageFilterId;
+    this.selectDailyStageFilter(null);
+    if (this.selectedStageId === staleStageId) {
+      this.selectedStageId = '';
+      this.expandedStageRows = {};
+    }
+  }
+
+  private buildPreviewBlockers(preview: DailyProductionPreview | null): DailyPreviewBlocker[] {
+    if (!preview) return [];
+    const stageBlockers = preview.stages.flatMap(stage => stage.warnings.map(message => ({
+      message,
+      productModelStageId: stage.productModelStageId,
+      stageCode: stage.stageCode,
+      stageName: stage.stageName
+    })));
+    // The current API's top-level warnings aggregate stage warnings. Text is used only to suppress
+    // that duplicate display; stage association always comes from the parent stage identity above.
+    const stageWarningMessages = new Set(stageBlockers.map(blocker => blocker.message));
+    const globalBlockers = preview.warnings
+      .filter(message => !stageWarningMessages.has(message))
+      .map(message => ({
+        message,
+        productModelStageId: null,
+        stageCode: null,
+        stageName: null
+      }));
+    return [...stageBlockers, ...globalBlockers];
   }
 
   private toExcelDate(value: string | null | undefined): Date | null {
@@ -1784,12 +1908,14 @@ export class DailyProductionOperationsPageComponent implements OnInit, OnDestroy
   }
 
   private resetOperations(): void {
+    this.cancelScheduledStageScroll();
     ++this.operationsRequestVersion;
     this.operations = null;
     this.stages = [];
     this.modelStageMetadata = [];
     this.selectedStageId = '';
     this.selectedStageFilterId = '';
+    this.blockerSelectedStageId = '';
     this.lineQuantity = null;
     this.notes = '';
     this.replacementWorkerId = '';

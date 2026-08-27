@@ -114,10 +114,20 @@
       </p>
     </p-card>
 
-    <section class="daily-production-operations__workspace plp-bounded-workspace" data-workspace-layout="stage-master-detail" data-tablet-priority="workers">
+    <div class="daily-production-operations__active-stage-filter" *ngIf="activeStageFilter as filteredStage">
+      <span role="status">
+        <i class="pi pi-filter" aria-hidden="true"></i>
+        عرض المرحلة:
+        <strong>{{ filteredStage.stageName }}</strong>
+        <code dir="ltr">{{ filteredStage.stageCode }}</code>
+      </span>
+      <button pButton type="button" class="p-button-text" label="عرض كل المراحل" icon="pi pi-times" (click)="showAllDailyStages()"></button>
+    </div>
+
+    <section id="daily-production-stage-area" class="daily-production-operations__workspace plp-bounded-workspace" data-workspace-layout="stage-master-detail" data-tablet-priority="workers">
       <p-card class="daily-production-operations__stage-panel plp-workspace-detail-panel plp-bounded-workspace__panel" header="كل مراحل الموديل">
         <div class="daily-production-operations__stage-list plp-bounded-workspace__scroll-region plp-structured-list plp-structured-list--spacious plp-contained-scroll-list" aria-live="polite">
-          <button type="button" *ngFor="let stage of filteredStages; trackBy: trackById" [id]="'daily-stage-row-' + stage.productModelStageId" class="daily-production-operations__stage daily-production-operations__stage--compact plp-compact-entity plp-structured-card plp-structured-card--content-sized" [class.is-selected]="stage.productModelStageId === selectedStageId" [attr.aria-current]="stage.productModelStageId === selectedStageId ? 'true' : null" (click)="selectStage(stage.productModelStageId)">
+          <button type="button" *ngFor="let stage of filteredStages; trackBy: trackById" [id]="'daily-stage-row-' + stage.productModelStageId" [attr.data-stage-id]="stage.productModelStageId" class="daily-production-operations__stage daily-production-operations__stage--compact plp-compact-entity plp-structured-card plp-structured-card--content-sized" [class.is-selected]="stage.productModelStageId === selectedStageId" [attr.aria-current]="stage.productModelStageId === selectedStageId ? 'true' : null" (click)="selectStage(stage.productModelStageId)">
             <plp-responsive-entity-row [title]="stage.stageName" [code]="stage.stageCode" icon="pi pi-sitemap">
               <span plp-entity-metadata class="plp-entity-secondary-row">
                 <dl class="plp-compact-facts" aria-label="بيانات المرحلة">
@@ -250,6 +260,42 @@
           <plp-statistic-card title="حالة المعاينة" [value]="previewStatusLabel" icon="pi pi-check-circle"></plp-statistic-card>
           <plp-statistic-card title="تحذيرات تشغيلية" [value]="calculatedPreview.warnings.length ? calculatedPreview.warnings.length.toString() : 'لا يوجد'" icon="pi pi-exclamation-triangle"></plp-statistic-card>
         </div>
+
+        <section class="daily-production-operations__preview-blockers" *ngIf="previewBlockers.length" aria-labelledby="daily-preview-blockers-title">
+          <header>
+            <div>
+              <h3 id="daily-preview-blockers-title">عقبات وتحذيرات المعاينة</h3>
+              <p>اختر عائقًا مرتبطًا بمرحلة لعرض تلك المرحلة مباشرة.</p>
+            </div>
+            <span>{{ previewBlockers.length }}</span>
+          </header>
+          <ul class="daily-production-operations__preview-blocker-list">
+            <li *ngFor="let blocker of previewBlockers">
+              <button
+                *ngIf="blocker.productModelStageId; else globalPreviewBlocker"
+                type="button"
+                class="daily-production-operations__preview-blocker"
+                [class.is-active]="blocker.productModelStageId === selectedStageFilterId"
+                [attr.aria-label]="previewBlockerAriaLabel(blocker)"
+                [attr.aria-pressed]="blocker.productModelStageId === selectedStageFilterId"
+                (click)="filterStageFromPreviewBlocker(blocker.productModelStageId)"
+              >
+                <span class="daily-production-operations__preview-blocker-stage">
+                  <i class="pi pi-filter" aria-hidden="true"></i>
+                  <strong>{{ blocker.stageName }}</strong>
+                  <code dir="ltr">{{ blocker.stageCode }}</code>
+                </span>
+                <span>{{ blocker.message }}</span>
+              </button>
+              <ng-template #globalPreviewBlocker>
+                <p class="daily-production-operations__preview-blocker daily-production-operations__preview-blocker--global">
+                  <i class="pi pi-exclamation-triangle" aria-hidden="true"></i>
+                  <span>{{ blocker.message }}</span>
+                </p>
+              </ng-template>
+            </li>
+          </ul>
+        </section>
 
         <section class="daily-production-operations__preview-overview" aria-label="ملخص المعاينة الموحدة">
           <article *ngFor="let stage of stageAllocationRows; trackBy: trackById" class="daily-production-operations__preview-overview-row">
