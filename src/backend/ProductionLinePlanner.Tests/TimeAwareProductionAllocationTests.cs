@@ -71,6 +71,27 @@ public sealed class TimeAwareProductionAllocationTests
         Assert.Equal(100m, shares.Sum(share => share.Percentage));
     }
 
+    [Fact]
+    public void Percentage_quantity_rounding_uses_remainders_then_worker_identity_and_preserves_total()
+    {
+        var workers = Enumerable.Range(1, 3)
+            .Select(index => new Guid(index, 0, 0, new byte[8]))
+            .ToArray();
+
+        var quantities = TimeAwareProductionAllocation.AllocateQuantitiesByPercentage(
+            653m,
+            [
+                (workers[2], 33.3333m),
+                (workers[1], 33.3333m),
+                (workers[0], 33.3334m)
+            ]);
+
+        Assert.Equal(217.667m, quantities[workers[0]]);
+        Assert.Equal(217.667m, quantities[workers[1]]);
+        Assert.Equal(217.666m, quantities[workers[2]]);
+        Assert.Equal(653m, quantities.Values.Sum());
+    }
+
     private static WorkerContributionResult Contribution(int assignmentStart, int assignmentEnd, int attendanceStart, int attendanceEnd) =>
         Contribution(Guid.NewGuid(), assignmentStart, assignmentEnd, attendanceStart, attendanceEnd);
 

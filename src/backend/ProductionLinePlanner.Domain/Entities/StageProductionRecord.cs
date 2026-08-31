@@ -64,6 +64,29 @@ public class StageProductionRecord
         EnsureDraft(); ValidateQuantities(producedQuantity, acceptedQuantity, rejectedQuantity);
         ProductionDate = productionDate; ProducedQuantity = producedQuantity; AcceptedQuantity = acceptedQuantity; RejectedQuantity = rejectedQuantity; Notes = Normalize(notes); ConcurrencyToken = Guid.NewGuid();
     }
+    public void RefreshDraftStageConfiguration(
+        string stageCode,
+        string stageName,
+        string mainStageName,
+        decimal piecePrice,
+        decimal? standardSeconds,
+        CompensationMode compensationMode)
+    {
+        EnsureDraft();
+        if (string.IsNullOrWhiteSpace(stageCode)) throw new ArgumentException("Stage code is required.", nameof(stageCode));
+        if (string.IsNullOrWhiteSpace(stageName)) throw new ArgumentException("Stage name is required.", nameof(stageName));
+        if (string.IsNullOrWhiteSpace(mainStageName)) throw new ArgumentException("Main stage name is required.", nameof(mainStageName));
+        if (piecePrice < 0) throw new ArgumentOutOfRangeException(nameof(piecePrice), "Piece price must be greater than or equal to zero.");
+        if (standardSeconds.HasValue && standardSeconds.Value <= 0) throw new ArgumentOutOfRangeException(nameof(standardSeconds), "Standard seconds must be greater than zero.");
+
+        SnapshotStageCode = stageCode.Trim();
+        SnapshotStageName = stageName.Trim();
+        SnapshotMainStageName = mainStageName.Trim();
+        SnapshotPiecePrice = piecePrice;
+        SnapshotStandardSeconds = standardSeconds;
+        SnapshotCompensationMode = compensationMode;
+        ConcurrencyToken = Guid.NewGuid();
+    }
     public WorkerAllocationReplacementResult ReplaceAllocations(IEnumerable<StageProductionWorkerAllocation> allocations)
     {
         EnsureDraft();

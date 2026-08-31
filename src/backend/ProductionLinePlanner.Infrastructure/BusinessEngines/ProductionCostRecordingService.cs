@@ -338,12 +338,19 @@ public sealed class ProductionCostRecordingService(
         if (recordsByStage.Count != updatesByStage.Count || !recordsByStage.Keys.ToHashSet().SetEquals(updatesByStage.Keys))
             throw new ProductionConflictException("يجب أن يطابق التحديث هويات مراحل المسودة المحفوظة دون إضافة أو حذف أو استبدال.");
 
-        var currentActiveStageIds = order.ProductionLine?.DepartmentId is Guid departmentId
+        var currentActiveStages = order.ProductionLine?.DepartmentId is Guid departmentId
             ? (await CurrentActiveDailyStagesQuery(order.ProductModelId, order.ProductionLineId!.Value, departmentId)
                 .AsNoTracking()
-                .Select(stage => stage.Id)
-                .ToArrayAsync(ct)).ToHashSet()
-            : [];
+                .Select(stage => new DailyDraftStageConfiguration(
+                    stage.Id,
+                    stage.SubStage!.Code,
+                    stage.SubStage.Name,
+                    stage.SubStage.MainStage!.Name,
+                    stage.PiecePrice,
+                    stage.StandardSeconds,
+                    stage.CompensationMode))
+                .ToArrayAsync(ct)).ToDictionary(stage => stage.ProductModelStageId)
+            : new Dictionary<Guid, DailyDraftStageConfiguration>();
 
         foreach (var (productModelStageId, record) in recordsByStage)
         {
@@ -359,7 +366,7 @@ public sealed class ProductionCostRecordingService(
         {
             var token = db.Entry(record).Property(current => current.ConcurrencyToken);
             token.OriginalValue = updatesByStage[productModelStageId].ConcurrencyToken;
-            if (!currentActiveStageIds.Contains(productModelStageId))
+            if (!currentActiveStages.ContainsKey(productModelStageId))
             {
                 // Historical records remain in the atomic update contract. Marking
                 // the token as a no-op update makes EF include its original value in
@@ -375,7 +382,7 @@ public sealed class ProductionCostRecordingService(
         foreach (var (productModelStageId, record) in recordsByStage)
         {
             var update = updatesByStage[productModelStageId];
-            if (!currentActiveStageIds.Contains(productModelStageId))
+            if (!currentActiveStages.TryGetValue(productModelStageId, out var currentStage))
             {
                 if (record.Status == StageProductionRecordStatus.Cancelled)
                 {
@@ -386,17 +393,24 @@ public sealed class ProductionCostRecordingService(
                 continue;
             }
 
+            var recordBefore = RecordAudit(record);
+            if (record.Status == StageProductionRecordStatus.Cancelled)
+                record.ReopenDailyDraftAfterApprovalCancellation();
+            record.RefreshDraftStageConfiguration(
+                currentStage.StageCode,
+                currentStage.StageName,
+                currentStage.MainStageName,
+                currentStage.PiecePrice,
+                currentStage.StandardSeconds,
+                currentStage.CompensationMode);
+            record.UpdateDraft(request.ProductionDate, RoundQuantity(request.LineQuantity), RoundQuantity(request.LineQuantity), 0m, request.Notes);
             var allocations = await BuildPermissiveDailyDraftAllocationsAsync(
-                record.SnapshotCompensationMode,
-                record.SnapshotPiecePrice,
+                currentStage.CompensationMode,
+                currentStage.PiecePrice,
                 request.LineQuantity,
                 update.Workers,
                 record.WorkerAllocations,
                 ct);
-            var recordBefore = RecordAudit(record);
-            if (record.Status == StageProductionRecordStatus.Cancelled)
-                record.ReopenDailyDraftAfterApprovalCancellation();
-            record.UpdateDraft(request.ProductionDate, RoundQuantity(request.LineQuantity), RoundQuantity(request.LineQuantity), 0m, request.Notes);
             var allocationChanges = record.ReplaceAllocations(allocations);
             db.RemoveRange(allocationChanges.Removed);
             db.AddRange(allocationChanges.Added);
@@ -806,22 +820,29 @@ public sealed class ProductionCostRecordingService(
         var sharedQuantities = new Dictionary<Guid, decimal>();
         if (compensationMode == CompensationMode.SharedPercentage)
         {
-            foreach (var worker in workers)
+            var hasCompleteInputQuantities = workers.Count > 0 && workers.All(worker => worker.InputQuantity.HasValue);
+            var hasCompletePercentages = workers.Count > 0 &&
+                                         workers.All(worker => !worker.InputQuantity.HasValue && worker.Percentage > 0m) &&
+                                         workers.Sum(worker => worker.Percentage ?? 0m) == 100m;
+            if (hasCompletePercentages)
             {
-                sharedQuantities[worker.WorkerId] = worker.InputQuantity.HasValue
-                    ? RoundQuantity(worker.InputQuantity.Value)
-                    : worker.Percentage.HasValue
-                        ? RoundQuantity(lineQuantity * worker.Percentage.Value / 100m)
-                        : 0m;
+                sharedQuantities = TimeAwareProductionAllocation.AllocateQuantitiesByPercentage(
+                        RoundQuantity(lineQuantity),
+                        workers.Select(worker => (worker.WorkerId, worker.Percentage!.Value)))
+                    .ToDictionary(pair => pair.Key, pair => pair.Value);
             }
-
-            if (workers.Count > 0 &&
-                workers.All(worker => !worker.InputQuantity.HasValue && worker.Percentage > 0) &&
-                workers.Sum(worker => worker.Percentage ?? 0m) == 100m)
+            else
             {
-                var lastWorkerId = workers.Last().WorkerId;
-                sharedQuantities[lastWorkerId] = RoundQuantity(
-                    sharedQuantities[lastWorkerId] + RoundQuantity(lineQuantity) - sharedQuantities.Values.Sum());
+                foreach (var worker in workers)
+                {
+                    sharedQuantities[worker.WorkerId] = hasCompleteInputQuantities
+                        ? RoundQuantity(worker.InputQuantity!.Value)
+                        : worker.InputQuantity.HasValue
+                            ? RoundQuantity(worker.InputQuantity.Value)
+                            : worker.Percentage.HasValue
+                                ? RoundQuantity(lineQuantity * worker.Percentage.Value / 100m)
+                                : 0m;
+                }
             }
         }
 
@@ -1662,5 +1683,13 @@ public sealed class ProductionCostRecordingService(
             TimeZoneInfo.ConvertTimeToUtc(localStart.AddDays(1), cairoTimeZoneProvider.TimeZone));
     }
 
+    private sealed record DailyDraftStageConfiguration(
+        Guid ProductModelStageId,
+        string StageCode,
+        string StageName,
+        string MainStageName,
+        decimal PiecePrice,
+        decimal? StandardSeconds,
+        CompensationMode CompensationMode);
     private sealed record CalculatedAllocation(Guid WorkerId, decimal EquivalentQuantity, decimal CalculatedEarning);
 }

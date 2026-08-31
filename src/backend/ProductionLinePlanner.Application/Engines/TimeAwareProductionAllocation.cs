@@ -95,6 +95,35 @@ public static class TimeAwareProductionAllocation
             .ToArray();
     }
 
+    public static IReadOnlyDictionary<Guid, decimal> AllocateQuantitiesByPercentage(
+        decimal stageQuantity,
+        IEnumerable<(Guid WorkerId, decimal Percentage)> percentages)
+    {
+        var rows = percentages.OrderBy(row => row.WorkerId).ToArray();
+        if (rows.Length == 0)
+            return new Dictionary<Guid, decimal>();
+        if (rows.Select(row => row.WorkerId).Distinct().Count() != rows.Length ||
+            rows.Any(row => row.WorkerId == Guid.Empty || row.Percentage <= 0m) ||
+            rows.Sum(row => row.Percentage) != 100m)
+        {
+            throw new ArgumentException("Worker percentages must be unique, positive, and total exactly 100.", nameof(percentages));
+        }
+
+        var roundedQuantity = decimal.Round(stageQuantity, 3, MidpointRounding.AwayFromZero);
+        var targetUnits = decimal.ToInt32(roundedQuantity / QuantityStep);
+        var allocations = rows.Select(row =>
+        {
+            var rawUnits = roundedQuantity * row.Percentage / 100m / QuantityStep;
+            var floorUnits = decimal.ToInt32(decimal.Floor(rawUnits));
+            return new { row.WorkerId, FloorUnits = floorUnits, Remainder = rawUnits - floorUnits };
+        }).ToArray();
+        var units = allocations.ToDictionary(row => row.WorkerId, row => row.FloorUnits);
+        var remaining = targetUnits - units.Values.Sum();
+        foreach (var row in allocations.OrderByDescending(row => row.Remainder).ThenBy(row => row.WorkerId).Take(remaining))
+            units[row.WorkerId]++;
+        return units.ToDictionary(pair => pair.Key, pair => pair.Value * QuantityStep);
+    }
+
     private static Dictionary<Guid, decimal> AllocateUnits(
         decimal total,
         decimal step,

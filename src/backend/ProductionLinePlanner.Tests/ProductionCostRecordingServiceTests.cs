@@ -151,6 +151,25 @@ public sealed class ProductionCostRecordingServiceTests
     }
 
     [Fact]
+    public async Task Stage_configuration_snapshot_refresh_requires_draft_state_and_does_not_mutate_an_approved_record()
+    {
+        await using var fixture = await Fixture.CreateAsync("SharedPercentage", 0.50m, 17m);
+        var draft = await fixture.CreateDraftAsync(
+            10m, 10m, 0m, [fixture.Allocation(fixture.WorkerA.Id, 100m)]);
+        await fixture.Service.ApproveAsync(draft.Id, draft.ConcurrencyToken, fixture.ActorId, default);
+        var approved = await fixture.Db.StageProductionRecords.SingleAsync(record => record.Id == draft.Id);
+        var originalToken = approved.ConcurrencyToken;
+
+        Assert.Throws<InvalidOperationException>(() => approved.RefreshDraftStageConfiguration(
+            "NEW", "New stage", "New main stage", 0.75m, 29m, CompensationMode.FullRatePerWorker));
+
+        Assert.Equal(0.50m, approved.SnapshotPiecePrice);
+        Assert.Equal(17m, approved.SnapshotStandardSeconds);
+        Assert.Equal(CompensationMode.SharedPercentage, approved.SnapshotCompensationMode);
+        Assert.Equal(originalToken, approved.ConcurrencyToken);
+    }
+
+    [Fact]
     public async Task Calculation_preview_uses_only_current_request_participants_and_never_rewrites_an_approved_snapshot()
     {
         await using var fixture = await Fixture.CreateAsync("SharedPercentage", 0.50m, 17m);
@@ -354,6 +373,273 @@ public sealed class ProductionCostRecordingServiceTests
             fixture.Factory.Id, fixture.Line.Id, fixture.Model.Id, productionDate, default)).ExistingDraft;
         Assert.NotNull(reapproved);
         Assert.All(reapproved.Stages, stage => Assert.Equal("Approved", stage.Status));
+    }
+
+    [Fact]
+    public async Task Corrected_daily_draft_refreshes_shared_percentage_snapshot_to_full_rate_and_matches_preview()
+    {
+        await using var fixture = await Fixture.CreateAsync("SharedPercentage", 0.50m, 17m, useRealAudit: true);
+        var productionDate = fixture.Today.AddDays(2);
+        var (_, created) = await CreateDailyDraftAsync(fixture, productionDate, 653m);
+        var originalStage = Assert.Single(created.Stages);
+        Assert.Equal("SharedPercentage", originalStage.CompensationMode);
+
+        await fixture.Service.ApproveDailyOperationAsync(
+            created.ProductionOrderId,
+            ApprovalRequest(created),
+            fixture.ActorId,
+            default);
+        var approved = (await fixture.Service.LoadDailyOperationsAsync(
+            fixture.Factory.Id, fixture.Line.Id, fixture.Model.Id, productionDate, default)).ExistingDraft!;
+        var cancelled = await fixture.Service.CancelDailyOperationApprovalAsync(
+            approved.ProductionOrderId,
+            new DailyProductionApprovalCancellationRequest("تصحيح طريقة احتساب المرحلة", ApprovalRequest(approved).StageApprovals),
+            fixture.ActorId,
+            default);
+
+        fixture.Stage.Update(
+            fixture.SubStage.Id,
+            1,
+            0.50m,
+            17m,
+            CompensationMode.FullRatePerWorker,
+            true,
+            true,
+            null);
+        await fixture.Db.SaveChangesAsync();
+
+        var correctedOperations = await fixture.Service.LoadDailyOperationsAsync(
+            fixture.Factory.Id, fixture.Line.Id, fixture.Model.Id, productionDate, default);
+        var currentStage = Assert.Single(correctedOperations.Stages);
+        Assert.Equal("FullRatePerWorker", currentStage.CompensationMode);
+        var correctedRequest = DailyRequest(correctedOperations, 653m);
+        var preview = await fixture.Service.PreviewDailyOperationsAsync(correctedRequest, fixture.ActorId, default);
+        var previewStage = Assert.Single(preview.Stages);
+
+        var saved = await fixture.Service.UpdateDailyDraftAsync(
+            cancelled.ProductionOrderId,
+            UpdateRequest(correctedRequest, cancelled, preview.PreviewToken),
+            fixture.ActorId,
+            default);
+        var savedStage = Assert.Single(saved.Stages);
+        var reloaded = (await fixture.Service.LoadDailyOperationsAsync(
+            fixture.Factory.Id, fixture.Line.Id, fixture.Model.Id, productionDate, default)).ExistingDraft!;
+        var reloadedStage = Assert.Single(reloaded.Stages);
+
+        Assert.Equal("FullRatePerWorker", previewStage.CompensationMode);
+        Assert.Equal("FullRatePerWorker", savedStage.CompensationMode);
+        Assert.Equal(979.50m, previewStage.StageCost);
+        Assert.Equal(979.50m, savedStage.TotalWorkerEarnings);
+        Assert.Equal(previewStage.StageCost, savedStage.TotalWorkerEarnings);
+        Assert.Equal(previewStage.StageCost, reloadedStage.TotalWorkerEarnings);
+        Assert.True(savedStage.TotalWorkerEarnings > 0m);
+
+        var snapshotAudit = (await fixture.Db.AuditLogs
+                .Where(log => log.EntityType == "StageProductionRecord" && log.EntityId == savedStage.Id.ToString())
+                .ToArrayAsync())
+            .Single(log => log.EntityBeforeJson?.Contains("SnapshotCompensationMode") == true &&
+                           log.EntityAfterJson?.Contains("SnapshotCompensationMode") == true);
+        using var beforeAudit = JsonDocument.Parse(snapshotAudit.EntityBeforeJson!);
+        using var afterAudit = JsonDocument.Parse(snapshotAudit.EntityAfterJson!);
+        Assert.Equal((int)CompensationMode.SharedPercentage, beforeAudit.RootElement.GetProperty("SnapshotCompensationMode").GetInt32());
+        Assert.Equal((int)CompensationMode.FullRatePerWorker, afterAudit.RootElement.GetProperty("SnapshotCompensationMode").GetInt32());
+        Assert.Equal(0.50m, beforeAudit.RootElement.GetProperty("SnapshotPiecePrice").GetDecimal());
+        Assert.Equal(0.50m, afterAudit.RootElement.GetProperty("SnapshotPiecePrice").GetDecimal());
+    }
+
+    [Fact]
+    public async Task Corrected_daily_draft_refreshes_full_rate_snapshot_to_shared_percentage_and_matches_preview_allocations()
+    {
+        await using var fixture = await Fixture.CreateAsync("FullRatePerWorker", 0.50m, 17m);
+        var productionDate = fixture.Today.AddDays(2);
+        var (_, created) = await CreateDailyDraftAsync(fixture, productionDate, 653m);
+        Assert.Equal("FullRatePerWorker", Assert.Single(created.Stages).CompensationMode);
+        var cancelled = await ApproveAndCancelDailyDraftAsync(fixture, created, productionDate);
+
+        fixture.Stage.Update(
+            fixture.SubStage.Id, 1, 0.50m, 17m, CompensationMode.SharedPercentage, true, true, null);
+        await fixture.Db.SaveChangesAsync();
+        var operations = await fixture.Service.LoadDailyOperationsAsync(
+            fixture.Factory.Id, fixture.Line.Id, fixture.Model.Id, productionDate, default);
+        var request = DailyRequest(operations, 653m);
+        var preview = await fixture.Service.PreviewDailyOperationsAsync(request, fixture.ActorId, default);
+
+        var saved = await fixture.Service.UpdateDailyDraftAsync(
+            cancelled.ProductionOrderId,
+            UpdateRequest(request, cancelled, preview.PreviewToken),
+            fixture.ActorId,
+            default);
+        var previewStage = Assert.Single(preview.Stages);
+        var savedStage = Assert.Single(saved.Stages);
+
+        Assert.Equal("SharedPercentage", savedStage.CompensationMode);
+        Assert.Equal(previewStage.StageCost, savedStage.TotalWorkerEarnings);
+        Assert.Equal(
+            previewStage.Workers.OrderBy(worker => worker.WorkerId).Select(AllocationValues),
+            savedStage.Workers.OrderBy(worker => worker.WorkerId).Select(AllocationValues));
+    }
+
+    [Fact]
+    public async Task Corrected_daily_draft_refreshes_piece_price_and_matches_preview_total()
+    {
+        await using var fixture = await Fixture.CreateAsync("SharedPercentage", 0.50m, 17m, useRealAudit: true);
+        var productionDate = fixture.Today.AddDays(2);
+        var (_, created) = await CreateDailyDraftAsync(fixture, productionDate, 653m);
+
+        fixture.Stage.Update(
+            fixture.SubStage.Id, 1, 0.75m, 17m, CompensationMode.SharedPercentage, true, true, null);
+        await fixture.Db.SaveChangesAsync();
+        var operations = await fixture.Service.LoadDailyOperationsAsync(
+            fixture.Factory.Id, fixture.Line.Id, fixture.Model.Id, productionDate, default);
+        var request = DailyRequest(operations, 653m);
+        var preview = await fixture.Service.PreviewDailyOperationsAsync(request, fixture.ActorId, default);
+
+        var saved = await fixture.Service.UpdateDailyDraftAsync(
+            created.ProductionOrderId,
+            UpdateRequest(request, created, preview.PreviewToken),
+            fixture.ActorId,
+            default);
+        var previewStage = Assert.Single(preview.Stages);
+        var savedStage = Assert.Single(saved.Stages);
+
+        Assert.Equal(0.75m, savedStage.PiecePrice);
+        Assert.Equal(previewStage.StageCost, savedStage.TotalWorkerEarnings);
+
+        var snapshotAudit = (await fixture.Db.AuditLogs
+                .Where(log => log.EntityType == "StageProductionRecord" && log.EntityId == savedStage.Id.ToString())
+                .ToArrayAsync())
+            .Single(log => log.EntityBeforeJson?.Contains("SnapshotPiecePrice") == true &&
+                           log.EntityAfterJson?.Contains("SnapshotPiecePrice") == true);
+        using var beforeAudit = JsonDocument.Parse(snapshotAudit.EntityBeforeJson!);
+        using var afterAudit = JsonDocument.Parse(snapshotAudit.EntityAfterJson!);
+        Assert.Equal(0.50m, beforeAudit.RootElement.GetProperty("SnapshotPiecePrice").GetDecimal());
+        Assert.Equal(0.75m, afterAudit.RootElement.GetProperty("SnapshotPiecePrice").GetDecimal());
+    }
+
+    [Fact]
+    public async Task Corrected_daily_draft_refreshes_standard_seconds_and_current_stage_labels()
+    {
+        await using var fixture = await Fixture.CreateAsync("SharedPercentage", 0.50m, 17m);
+        var productionDate = fixture.Today.AddDays(2);
+        var (_, created) = await CreateDailyDraftAsync(fixture, productionDate);
+
+        fixture.Stage.Update(
+            fixture.SubStage.Id, 1, 0.50m, 29m, CompensationMode.SharedPercentage, true, true, null);
+        fixture.SubStage.Rename("Corrected Sew");
+        fixture.MainStage.Rename("Corrected Main Stage");
+        await fixture.Db.SaveChangesAsync();
+        var operations = await fixture.Service.LoadDailyOperationsAsync(
+            fixture.Factory.Id, fixture.Line.Id, fixture.Model.Id, productionDate, default);
+        var request = DailyRequest(operations, 500m);
+        var preview = await fixture.Service.PreviewDailyOperationsAsync(request, fixture.ActorId, default);
+
+        var saved = await fixture.Service.UpdateDailyDraftAsync(
+            created.ProductionOrderId,
+            UpdateRequest(request, created, preview.PreviewToken),
+            fixture.ActorId,
+            default);
+        var savedStage = Assert.Single(saved.Stages);
+
+        Assert.Equal(29m, savedStage.StandardSeconds);
+        Assert.Equal("SEW", savedStage.StageCode);
+        Assert.Equal("Corrected Sew", savedStage.StageName);
+        Assert.Equal("Corrected Main Stage", savedStage.MainStageName);
+    }
+
+    [Fact]
+    public async Task Daily_draft_save_does_not_refresh_inactive_historical_stage_configuration_or_financials()
+    {
+        await using var fixture = await Fixture.CreateAsync("SharedPercentage", 0.50m, 17m);
+        var productionDate = fixture.Today.AddDays(2);
+        var (request, created) = await CreateDailyDraftAsync(fixture, productionDate);
+        var historical = Assert.Single(created.Stages);
+
+        fixture.Stage.Update(
+            fixture.SubStage.Id, 1, 0.75m, 29m, CompensationMode.FullRatePerWorker, true, false, null);
+        await fixture.Db.SaveChangesAsync();
+
+        var saved = await fixture.Service.UpdateDailyDraftAsync(
+            created.ProductionOrderId,
+            UpdateRequest(request with { LineQuantity = 620m }, created, null),
+            fixture.ActorId,
+            default);
+        var savedStage = Assert.Single(saved.Stages);
+
+        Assert.Equal(historical.CompensationMode, savedStage.CompensationMode);
+        Assert.Equal(historical.PiecePrice, savedStage.PiecePrice);
+        Assert.Equal(historical.StandardSeconds, savedStage.StandardSeconds);
+        Assert.Equal(historical.TotalWorkerEarnings, savedStage.TotalWorkerEarnings);
+        Assert.Equal(historical.ConcurrencyToken, savedStage.ConcurrencyToken);
+        Assert.Equal(
+            historical.Workers.OrderBy(worker => worker.WorkerId).Select(AllocationValues),
+            savedStage.Workers.OrderBy(worker => worker.WorkerId).Select(AllocationValues));
+    }
+
+    [Fact]
+    public async Task Daily_draft_configuration_refresh_rejects_a_stale_stage_token_without_mutation()
+    {
+        await using var fixture = await Fixture.CreateAsync("SharedPercentage", 0.50m, 17m);
+        var productionDate = fixture.Today.AddDays(2);
+        var (_, created) = await CreateDailyDraftAsync(fixture, productionDate, 653m);
+        var staleStageToken = Assert.Single(created.Stages).ConcurrencyToken;
+        var cancelled = await ApproveAndCancelDailyDraftAsync(fixture, created, productionDate);
+
+        fixture.Stage.Update(
+            fixture.SubStage.Id, 1, 0.50m, 17m, CompensationMode.FullRatePerWorker, true, true, null);
+        await fixture.Db.SaveChangesAsync();
+        var operations = await fixture.Service.LoadDailyOperationsAsync(
+            fixture.Factory.Id, fixture.Line.Id, fixture.Model.Id, productionDate, default);
+        var request = DailyRequest(operations, 653m);
+        var preview = await fixture.Service.PreviewDailyOperationsAsync(request, fixture.ActorId, default);
+        var update = UpdateRequest(request, cancelled, preview.PreviewToken) with
+        {
+            Stages = UpdateRequest(request, cancelled, preview.PreviewToken).Stages
+                .Select(stage => stage with { ConcurrencyToken = staleStageToken })
+                .ToArray()
+        };
+
+        await Assert.ThrowsAsync<ProductionConflictException>(() => fixture.Service.UpdateDailyDraftAsync(
+            cancelled.ProductionOrderId, update, fixture.ActorId, default));
+
+        var persisted = (await fixture.Service.LoadDailyOperationsAsync(
+            fixture.Factory.Id, fixture.Line.Id, fixture.Model.Id, productionDate, default)).ExistingDraft!;
+        var persistedStage = Assert.Single(persisted.Stages);
+        Assert.Equal("Cancelled", persistedStage.Status);
+        Assert.Equal("SharedPercentage", persistedStage.CompensationMode);
+        Assert.Equal(Assert.Single(cancelled.Stages).ConcurrencyToken, persistedStage.ConcurrencyToken);
+    }
+
+    [Fact]
+    public async Task Reapproved_daily_report_uses_corrected_stage_configuration_and_cost()
+    {
+        await using var fixture = await Fixture.CreateAsync("SharedPercentage", 0.50m, 17m);
+        var productionDate = fixture.Today.AddDays(2);
+        var (_, created) = await CreateDailyDraftAsync(fixture, productionDate, 653m);
+        var cancelled = await ApproveAndCancelDailyDraftAsync(fixture, created, productionDate);
+
+        fixture.Stage.Update(
+            fixture.SubStage.Id, 1, 0.75m, 17m, CompensationMode.FullRatePerWorker, true, true, null);
+        await fixture.Db.SaveChangesAsync();
+        var operations = await fixture.Service.LoadDailyOperationsAsync(
+            fixture.Factory.Id, fixture.Line.Id, fixture.Model.Id, productionDate, default);
+        var request = DailyRequest(operations, 653m);
+        var preview = await fixture.Service.PreviewDailyOperationsAsync(request, fixture.ActorId, default);
+        var saved = await fixture.Service.UpdateDailyDraftAsync(
+            cancelled.ProductionOrderId,
+            UpdateRequest(request, cancelled, preview.PreviewToken),
+            fixture.ActorId,
+            default);
+        var savedStage = Assert.Single(saved.Stages);
+
+        await fixture.Service.ApproveDailyOperationAsync(
+            saved.ProductionOrderId, ApprovalRequest(saved), fixture.ActorId, default);
+        var reportStage = Assert.Single(await fixture.Service.DailyReportAsync(
+            productionDate, productionDate, saved.ProductionOrderId, null, null, default));
+
+        Assert.Equal("FullRatePerWorker", reportStage.CompensationMode);
+        Assert.Equal(0.75m, savedStage.PiecePrice);
+        Assert.Equal(Assert.Single(preview.Stages).StageCost, savedStage.TotalWorkerEarnings);
+        Assert.Equal(savedStage.TotalWorkerEarnings, reportStage.StageCost);
     }
 
     [Fact]
@@ -1299,7 +1585,8 @@ public sealed class ProductionCostRecordingServiceTests
 
     private static async Task<(DailyProductionOperationRequest Request, DailyProductionDraftDto Draft)> CreateDailyDraftAsync(
         Fixture fixture,
-        DateOnly productionDate)
+        DateOnly productionDate,
+        decimal lineQuantity = 500m)
     {
         var operations = await fixture.Service.LoadDailyOperationsAsync(
             fixture.Factory.Id,
@@ -1312,7 +1599,7 @@ public sealed class ProductionCostRecordingServiceTests
             fixture.Line.Id,
             fixture.Model.Id,
             productionDate,
-            500m,
+            lineQuantity,
             Guid.NewGuid(),
             "daily lifecycle test",
             null,
@@ -1320,7 +1607,11 @@ public sealed class ProductionCostRecordingServiceTests
                 stage.ProductModelStageId,
                 stage.Workers
                     .Where(worker => worker.IsProductionReady)
-                    .Select(worker => new WorkerAllocationRequest(worker.WorkerId, worker.SuggestedPercentage, null, null))
+                    .Select(worker => new WorkerAllocationRequest(
+                        worker.WorkerId,
+                        stage.CompensationMode == "SharedPercentage" ? worker.SuggestedPercentage : null,
+                        null,
+                        null))
                     .ToArray()))
                 .ToArray());
         var preview = await fixture.Service.PreviewDailyOperationsAsync(request, fixture.ActorId, default);
@@ -1330,6 +1621,53 @@ public sealed class ProductionCostRecordingServiceTests
             default);
         return (request, draft);
     }
+
+    private static DailyProductionOperationRequest DailyRequest(
+        DailyProductionOperationsDto operations,
+        decimal lineQuantity) =>
+        new(
+            operations.FactoryId,
+            operations.ProductionLineId,
+            operations.ProductModelId,
+            operations.ProductionDate,
+            lineQuantity,
+            Guid.NewGuid(),
+            "daily stage configuration correction",
+            null,
+            operations.Stages.Select(stage => new DailyProductionStageRequest(
+                stage.ProductModelStageId,
+                stage.Workers
+                    .Where(worker => worker.IsProductionReady)
+                    .Select(worker => new WorkerAllocationRequest(
+                        worker.WorkerId,
+                        stage.CompensationMode == "SharedPercentage" ? worker.SuggestedPercentage : null,
+                        null,
+                        null))
+                    .ToArray()))
+                .ToArray());
+
+    private static async Task<DailyProductionDraftDto> ApproveAndCancelDailyDraftAsync(
+        Fixture fixture,
+        DailyProductionDraftDto draft,
+        DateOnly productionDate)
+    {
+        await fixture.Service.ApproveDailyOperationAsync(
+            draft.ProductionOrderId,
+            ApprovalRequest(draft),
+            fixture.ActorId,
+            default);
+        var approved = (await fixture.Service.LoadDailyOperationsAsync(
+            fixture.Factory.Id, fixture.Line.Id, fixture.Model.Id, productionDate, default)).ExistingDraft!;
+        return await fixture.Service.CancelDailyOperationApprovalAsync(
+            approved.ProductionOrderId,
+            new DailyProductionApprovalCancellationRequest("تصحيح إعداد المرحلة", ApprovalRequest(approved).StageApprovals),
+            fixture.ActorId,
+            default);
+    }
+
+    private static (Guid WorkerId, decimal? Percentage, decimal? FixedAmount, decimal? InputQuantity, decimal EquivalentQuantity, decimal CalculatedEarning)
+        AllocationValues(ProductionWorkerAllocationDto worker) =>
+        (worker.WorkerId, worker.Percentage, worker.FixedAmount, worker.InputQuantity, worker.EquivalentQuantity, worker.CalculatedEarning);
 
     private static DailyProductionApprovalRequest ApprovalRequest(DailyProductionDraftDto draft) => new(
         draft.Stages.Select(stage => new DailyStageApprovalRequest(stage.Id, stage.ConcurrencyToken)).ToArray());
